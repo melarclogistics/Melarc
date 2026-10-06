@@ -1,5 +1,6 @@
 import type { DynamicModule, Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NextFunction, Request, Response } from 'express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { DestinationStream } from 'pino';
 
@@ -54,6 +55,13 @@ export async function createApp(options: CreateAppOptions): Promise<NestExpressA
   // No automatic body-hash ETag: the contract uses ETag only as an explicit record version.
   app.set('etag', false);
   app.use(createRequestMiddleware(logger));
+  // Nothing this API answers may be kept by a browser or a proxy: authentication and recovery answers carry the TOTP
+  // seed, an access token and session state (SECURITY_DESIGN: the application layer sends no-store, not only the edge).
+  // A rule of the platform, so that no operation can forget it, and set before anything answers, errors included.
+  app.use((_request: Request, response: Response, next: NextFunction) => {
+    response.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   // After the request middleware, so a body that cannot be parsed or is too large still answers with a request id.
   // A JSON body is UTF-8 or it is refused: the parser would decode UTF-7, UTF-16 and UTF-32 as well.
   app.use(requireUtf8Json(logger));

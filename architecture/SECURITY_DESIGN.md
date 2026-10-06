@@ -81,6 +81,8 @@ Seven inputs, and **all seven are evaluated server-side on every protected actio
 | **6 State**| The record is in scope and its state forbids the act| The transition's own code| Authorization and the state machine are one decision|
 | **7 Temporary authority**| An assignment that has expired or not yet begun| `403` `HUB_SCOPE_VIOLATION`| It is the hub axis with a time bound|
 
+**The table says what an actor is told, not the order the checks run in.** That is one order for every operation: [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1.
+
 **Identical means identical.** For a Vendor or a Rider the row-level security policy (§14.4) never returns the other party's row, so the handler finds nothing and answers exactly as it does for an identifier that matches nothing — the same code path, with no second query whose latency could differ. A test compares the two responses for status, code, body shape and timing class. **Only staff ever take the extra step** that makes the hub answer informative, and §14.4b says what it is.
 
 
@@ -181,16 +183,18 @@ The session credential is a cryptographically random opaque secret. The server s
 
 ### 13.2 Transport
 
-| Cookie| Attributes| Read by JavaScript| Purpose|
-|---|---|---|---|
-| `melarc_session`| `HttpOnly; Secure; SameSite=Lax; Path=/`| **No**| Opaque browser Session credential|
-| `melarc_csrf`| `Secure; SameSite=Lax; Path=/`| **Yes, deliberately**| Synchronizer token, echoed in `X-CSRF-Token`|
-| `melarc_vendor_device`| `HttpOnly; Secure; SameSite=Lax; Path=/`| **No**| Vendor registered-browser credential; **outlives the session**, which is what makes it a second factor|
+| Cookie| Attributes| Lifetime| Read by JavaScript| Purpose|
+|---|---|---|---|---|
+| `melarc_session`| `HttpOnly; Secure; SameSite=Lax; Path=/`| **Browser-session cookie**: no `Max-Age`, no `Expires`. The server-side absolute and idle timeouts (§13.3) decide validity| **No**| Opaque browser Session credential|
+| `melarc_csrf`| `Secure; SameSite=Lax; Path=/`| **Browser-session cookie**, as above| **Yes, deliberately**| Synchronizer token, echoed in `X-CSRF-Token`|
+| `melarc_vendor_device`| `HttpOnly; Secure; SameSite=Lax; Path=/`| **`Max-Age=34560000` (400 days), renewed at each vendor sign-in**| **No**| Vendor registered-browser credential; **outlives the session**, which is what makes it a second factor|
 
 | Surface| Mechanism| Storage|
 |---|---|---|
 | **Ops Portal**, **Vendor PWA**| The cookies above, set as **real repeated `Set-Cookie` field lines**| The browser|
 | **Melarc Rider**| Opaque secret as an HTTP **Bearer** credential, returned **exactly once** at sign-in| **Encrypted local storage under a non-exportable Android Keystore key only** (§15.2)|
+
+**Lifetimes are decided, and `Secure` stays mandatory everywhere** (Product decision, 6 October 2026). The server's record decides whether a session is valid, so the two browser-session cookies carry no `Max-Age` and no `Expires`: a cookie that outlived the browser would be a second place the session lives. The vendor device credential is long-lived on purpose, and **renewing it is not re-issuing it** (§13.8a). `Secure` is never relaxed for Local: **whether each browser engine stores a `Secure` cookie set on `http://127.0.0.1` is proved by the first identity slice's browser tests**, and is not assumed here.
 
 **The contract declared two of these three cookies through invented headers until 27 August**. `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie` are not HTTP headers, and **an implementation following the contract literally would have emitted two custom headers no browser stores** — the CSRF token and the vendor device credential would never have reached the client at all, and the vendor's second factor would have silently not existed. The contract now declares one real `Set-Cookie` header plus an `x-set-cookies` extension naming which cookies each response sets.
 
@@ -205,8 +209,8 @@ The session credential is a cryptographically random opaque secret. The server s
 | Tier| Absolute| Idle|
 |---|---|---|
 | Rider| 1440 min| **None, by rule**|
-| Standard — Vendor, Ops Staff| 720 min| 30 min|
-| Privileged — Senior Ops, Platform Admin| 480 min| 15 min|
+| Standard — Vendor, Ops Staff, Fleet Manager, Finance/Reconciliation| 720 min| 30 min|
+| Privileged — Senior Ops, Platform Admin, **and no other bundle**| 480 min| 15 min|
 
 Implementations **may coalesce** activity writes rather than updating a row per request; the externally observable timeout must remain accurate within the coalescing window.
 
@@ -264,9 +268,9 @@ Argon2id's memory and time parameters stay as §13.4 says: benchmarked at deploy
 
 **The vendor order.** (1) The browser: absent, unknown or bound to another account is `INVALID_CREDENTIALS`, **the secret is not examined and nothing is counted**. (2) An account that is not `ACTIVE` is `INVALID_CREDENTIALS`. (3) A locked account is `CREDENTIAL_LOCKED`. (4) A wrong secret is `INVALID_CREDENTIALS` and counts. The lock is shared by everyone using the credential, because it is one credential (§37.2); `MSC-DEC-431` fixes the rule.
 
-**MFA and the password share one count.** `mfa_max_attempts` limits a **challenge** to three wrong codes, after which it is `UNUSABLE`; **each wrong code also adds one to the identity's count**, so a thief who knows the password cannot guess codes across fresh challenges. Three wrong codes plus two wrong passwords lock the identity.
+**MFA and the password share one count.** `mfa_max_attempts` limits a **challenge** to three wrong codes, after which it is `UNUSABLE`; **each wrong code also adds one to the identity's count**, so a thief who knows the password cannot guess codes across fresh challenges. Three wrong codes plus two wrong passwords lock the identity. **A completion that finds no `ACTIVE` factor is not a wrong code**: it is answered `MFA_ENROLMENT_REQUIRED` and adds nothing to the count.
 
-**Rate limiting is separate and first.** A request refused with `RATE_LIMITED` is neither verified nor counted. The rate-limit buckets and their figures are unchanged. **A bucket's key is taken from what the request carries, never from whether the server could resolve it** — the normalised email for staff, the submitted account identifier with the device credential presented (or its absence) for a vendor, the submitted phone number for a rider's challenge request and sign-in — so a request naming an identifier that does not exist is limited exactly as one that does, and `RATE_LIMITED` is never a signal that an account exists.
+**Rate limiting is separate and first.** A request refused with `RATE_LIMITED` is neither verified nor counted. The rate-limit buckets and their figures are unchanged. **A bucket's key is taken from what the request carries, never from whether the server could resolve it** — the canonical work email for staff ([domain-model.md](../contracts/domain-model.md) §6.8), the submitted account identifier with the device credential presented (or its absence) for a vendor, the submitted phone number for a rider's challenge request and sign-in — so a request naming an identifier that does not exist is limited exactly as one that does, and `RATE_LIMITED` is never a signal that an account exists.
 
 **Concurrency.** A failure is applied by **one atomic conditional update** on the credential record — *add one to the count unless the credential is already locked*, returning whether this update set the lock — so concurrent failures each add one, **none can step over the threshold without setting the lock, a failure that completes after the lock is set neither counts nor moves `locked_until`, and `auth.lockout.applied` is written only by the update that returned *tipped*, which makes it one event per lock.** The comparison with `locked_until` and the new value use the **database clock**, never an application server's. A correct attempt that races a lock is serialised on the same record: either order is a correct outcome.
 
@@ -280,7 +284,7 @@ Argon2id's memory and time parameters stay as §13.4 says: benchmarked at deploy
 
 **TOTP authenticator app**, for Senior Ops and Platform Admin. Not SMS.
 
-The seed is **encrypted, not hashed** — verification requires recomputing codes — and is never persisted or logged in plaintext. **Key custody is Gate B's**; this prohibition binds regardless of that outcome. A code accepted once may not be accepted again inside its window.
+The seed is **encrypted, not hashed** — verification requires recomputing codes — and is never persisted or logged in plaintext. **Key custody is Gate B's**; this prohibition binds regardless of that outcome. **The code is six digits, computed on a 30-second step with SHA-1, and one step either side of the current one is accepted.** **A code is single use**: one already used is refused again inside its window. The contract's TOTP code fields carry `pattern: ^[0-9]{6}$` (Product decision, 6 October 2026).
 
 **SMS was rejected for this role specifically.** It remains right for operational OTPs to recipients outside Melarc, where the alternative is nothing. As the factor protecting the platform's most powerful accounts it depends on SIM security, on a provider being reachable, and on a per-message cost — and **`OQ-048`'s unresolved provider would otherwise have blocked privileged authentication entirely.**
 
@@ -340,7 +344,7 @@ Cookie-authenticated browser sessions carry a **synchronizer token**.
 
 **Until 27 August the third factor was decorative.** Gate A issued the device credential at setup and **no operation required it**, so vendor sign-in was in practice the shared secret alone — from any browser. That is exactly the outcome the credential was introduced to prevent, and it was described as a second factor in three documents while being enforced by none.
 
-**Ordinary sign-in proves the credential and never re-issues it.** A login that silently registers whatever browser presents itself registers the attacker's browser too. Registration happens only where it is the deliberate act: **initial setup** and **recovery**.
+**Ordinary sign-in proves the credential and never re-issues it** (it renews the cookie's lifetime, §13.2, which re-issues nothing). A login that silently registers whatever browser presents itself registers the attacker's browser too. Registration happens only where it is the deliberate act: **initial setup** and **recovery**.
 
 **Failure of any of the three is reported identically** — `INVALID_CREDENTIALS`, in content and in timing. Telling an attacker that the secret was right but the browser was not tells them which half they still need. **The one exception is a lock** (§13.4b): a request from a registered browser to a locked credential is told `CREDENTIAL_LOCKED`, because it has already reached the secret and could attack it; a request that has not is never told.
 
@@ -364,7 +368,7 @@ Non-bootstrap grants expire on the existing **30-minute** `recovery_link_ttl_min
 
 **The bootstrap secret is consumed at password establishment and never presented twice**. A short-lived `MFA_ENROLMENT` continuation grant carries the enrolment step, and it may safely expire because the identity it belongs to already has a password and a `PENDING` factor — a fresh grant re-enters the flow.
 
-**A bootstrap administrator cannot be stranded by an expired continuation** (`MSC-DEC-272`; unchanged under `MSC-DEC-440`, and applied to each of the two identities separately). If the `MFA_ENROLMENT` grant lapses before a code is proven, a **provisioning-only** mechanism — outside the business API, on the same controlled channel that carried the bootstrap secret — issues a fresh `MFA_REENROLMENT` authorisation. It grants **no session, no factor and no password**, does **not** resurrect the consumed `BOOTSTRAP_SETUP` secret, and **refuses to operate for an identity once that bootstrap identity is offboarded**. See [MIGRATION_AND_SEEDING.md](MIGRATION_AND_SEEDING.md) §3.3a.
+**A bootstrap administrator cannot be stranded by an expired continuation** (`MSC-DEC-272`; unchanged under `MSC-DEC-440`, and applied to each of the two identities separately). If the `MFA_ENROLMENT` grant lapses before a code is proven, a **provisioning-only** mechanism — outside the business API, on the same controlled channel that carried the bootstrap secret — issues a fresh `MFA_REENROLMENT` authorisation. It grants **no session, no factor and no password**, does **not** resurrect the consumed `BOOTSTRAP_SETUP` secret, and **refuses to operate for an identity once that bootstrap identity is offboarded, or once the other bootstrap administrator holds an `ACTIVE` credential and an `ACTIVE` factor**. See [MIGRATION_AND_SEEDING.md](MIGRATION_AND_SEEDING.md) §3.3a.
 
 **`MFA_ENROLMENT` is the only purpose that activates a factor.** Three purposes create a `PENDING` one; `BOOTSTRAP_SETUP` must never activate, because it is the single grant with no expiry and would otherwise remain a standing key to privileged access.
 
@@ -456,6 +460,8 @@ COMMIT;   -- every setting above is discarded here
 
 **Which session-held authority, though, is exactly the gap**, and §14.1a is where that is settled: the Session says what the actor may do *somewhere*, and the policy needs to know what this actor may do **here, in this operation**.
 
+**Accepted residual risk** (Product decision, 6 October 2026). `set_config` is available to any database role, so the role the API connects as must be able to set the security context itself, and **code that already runs as the API could set a false one**. Row-level security guards against a handler that forgets a filter; **it does not guard against compromised API code**, and this document does not claim it does. The risk is accepted, and four mitigations keep it small: **one transaction helper owns the connection** and is the only code that opens a transaction and sets the context; **nested or leaked transactions are refused**; **the raw pool is never handed to a handler**; and **the migration lint and the catalogue checks keep the database objects locked down** — no `BYPASSRLS`, no ownership, no policy alteration and no DDL for a runtime role (§14.6, §14.13).
+
 ### 14.1a The context is bound to the grant authorizing **this** operation
 
 `MSC-DEC-299`. **Scope belongs to the grant, not to the key** — `permissions.md` §7 and `MSC-DEC-221` have said so since 26 August. §14.1 above carried the *key* into the database and left the *grant* behind, deriving `hub_scope_mode` and `authorized_hub_ids` from `Session.authorized_hub_ids` alone. **That answers a question the policy did not ask.**
@@ -475,7 +481,7 @@ For every protected API operation, in this order:
 | 9| `BEGIN`, and set the validated context **transaction-locally** (§14.1)|
 | 10| Execute the RLS-protected statements|
 
-**Steps 4 and 5 are the whole correction.** Everything else was already here.
+**Steps 4 and 5 are the whole correction.** Everything else was already here. **This is the order in which the security context is built, not the order in which an operation refuses a request**: that order is [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1.
 
 #### The effective Hub set
 
@@ -642,6 +648,8 @@ WHEN 'RIDER' THEN EXISTS (
 
 **`ALL` is never inferred.** Not from an empty list, a missing context, a client request, a Vendor or Rider context, or a role or bundle **name**. `permissions.md` §5 makes Hub scope an attribute of the **grant**, and `Session.authorized_hub_ids` plus `Session.bundle_snapshot` are the only source. `SYSTEM` uses an explicit task capability, never a fabricated Staff `ALL`.
 
+**Seeds and backfills are a `SYSTEM` task** (Product decision, 6 October 2026). They write forced-RLS tables as the `SYSTEM` principal under an **explicit seed task capability**, as a worker writes under its task capability (§14.17b): **each table's policy has a `SYSTEM` branch for it** beside the `Outbox`-derived one in the templates above, and **the policies keep deciding on the request context only** — no accessor is tied to the migration login, and the migration role holds no `BYPASSRLS`. The seed helper and each table's branch arrive with the first slice that has a table ([MIGRATION_AND_SEEDING.md](MIGRATION_AND_SEEDING.md) §5.1).
+
 **No policy names a database role.** The context already carries authoritative scope, and a role name in a policy would create a second, weaker authority model beside `permissions.md` §5 — one a `GRANT` could change with no decision recorded.
 
 ### 14.4a Fail-closed, restated for principals
@@ -791,7 +799,7 @@ Both reverse-proxied to the backend. **No parent-domain authentication cookie.**
 
 **Transport:** TLS 1.3 preferred · TLS 1.2 for compatibility only · TLS 1.0/1.1 disabled · HTTPS everywhere · HSTS after domain and certificate validation.
 
-**Browser headers:** strict allowed `Origin` list · **no wildcard credentialed CORS** · CSP · `frame-ancestors 'none'` unless specifically approved · `X-Content-Type-Options: nosniff` · restrictive Referrer Policy · `no-store` on authentication, recovery and other sensitive responses · **exact `Origin` validation on browser-sensitive flows, pre-session endpoints included.**
+**Browser headers:** strict allowed `Origin` list · **no wildcard credentialed CORS** · CSP · `frame-ancestors 'none'` unless specifically approved · `X-Content-Type-Options: nosniff` · restrictive Referrer Policy · **`Cache-Control: no-store` on every API response**, sent by the API itself as a platform rule and not as a per-operation contract detail · **exact `Origin` validation on browser-sensitive flows, pre-session endpoints included.**
 
 **The login-CSRF threat model §13.12 deferred is answered by that last clause.** A session-fixation or login-CSRF attempt necessarily arrives at an endpoint where no session yet exists, which is precisely where a session-cookie-based defence has nothing to check.
 
@@ -859,7 +867,7 @@ PERSISTENT-TECHNICAL-TABLE: AuditIntegrityCheckpoint
 
 `MSC-DEC-285`. Six buckets, each keyed on the credential-oriented identity `MSC-DEC-224` already fixed: **Staff sign-in** (normalized Staff identity) · **privileged MFA** (challenge/principal) · **Vendor sign-in** (account **and** registered device) · **Rider challenge/sign-in** (rider **and** registered device) · **recovery** (recovery principal) · **authenticated API** (active Session).
 
-The keys live at [settings.md](../contracts/settings.md) §7.7 and **every one carries a launch value**. `OQ-077` — *"how many buckets the limits need is a design choice rather than a value"* — was answered on 27 August, and **`OQ-067`, the figures, on 5 September.** Production readiness distinguishes *the bucket architecture exists* from *the launch values have been supplied*, and **both statements are now true** — which is why they closed nine days apart rather than together. **Post-launch telemetry recalibrates the values through controlled configuration and may not change the bucket architecture or the credential keying.**
+The keys live at [settings.md](../contracts/settings.md) §7.7 and **every one carries a launch value**. `OQ-077` — *"how many buckets the limits need is a design choice rather than a value"* — was answered on 27 August, and **`OQ-067`, the figures, on 5 September.** Production readiness distinguishes *the bucket architecture exists* from *the launch values have been supplied*, and **both statements are now true** — which is why they closed nine days apart rather than together. **Post-launch telemetry recalibrates the values through controlled configuration and may not change the bucket architecture or the credential keying.** **The credential setup operations that belong to no other bucket join the recovery bucket**, keyed by the grant or token a request presents ([settings.md](../contracts/settings.md) §7.7), and **a per-address ceiling at the edge** — infrastructure, not a seventh bucket — bounds the cost of the keys an attacker chooses ([DEPLOYMENT_AND_ENVIRONMENTS.md](DEPLOYMENT_AND_ENVIRONMENTS.md) §12.2).
 
 ### 14.16 Idempotency identity is principal-scoped
 

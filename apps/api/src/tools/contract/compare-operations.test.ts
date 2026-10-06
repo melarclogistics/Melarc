@@ -83,6 +83,7 @@ describe('describing an operation', () => {
     expect(describeIn(CONTRACT, 'vendorSignIn').responses['200']?.setCookies).toEqual([
       'melarc_csrf',
       'melarc_session',
+      'melarc_vendor_device',
     ]);
   });
 
@@ -94,6 +95,18 @@ describe('describing an operation', () => {
     expect(noContent?.setCookies).toEqual(['melarc_csrf', 'melarc_session']);
     expect(noContent?.setCookiesFor).toBe('browserSession');
     expect(describeIn(CONTRACT, 'vendorSignIn').responses['200']?.setCookiesFor).toBeUndefined();
+  });
+
+  // Break caught: the type of principal a response sets its cookies for being left out of the description, so that a
+  // code description which gives a staff recovery the vendor's device credential reads as equal to the contract's.
+  it('captures the type of principal a response sets its cookies for', () => {
+    const recovery = describeIn(CONTRACT, 'completeCredentialRecovery').responses['204'];
+
+    expect(recovery?.setCookies).toEqual(['melarc_vendor_device']);
+    expect(recovery?.setCookiesWhen).toBe('VENDOR');
+    expect(recovery?.setCookiesFor).toBeUndefined();
+    expect(describeIn(CONTRACT, 'signOut').responses['204']?.setCookiesWhen).toBeUndefined();
+    expect(describeIn(CONTRACT, 'vendorSignIn').responses['200']?.setCookiesWhen).toBeUndefined();
   });
 
   // Break caught: the document-level default being lost, so an operation that inherits its security
@@ -562,14 +575,32 @@ describe('deliberate drift: headers and cookies', () => {
     const dropped = driftAfter('vendorSignIn', (copy) => {
       copy.set(cookies, ['melarc_session']);
     });
-    const added = driftAfter('vendorSignIn', (copy) => {
-      copy.push(cookies, 'melarc_vendor_device');
+    const added = driftAfter('staffSignIn', (copy) => {
+      copy.push(
+        ['paths', '/auth/staff/sign-in', 'post', 'responses', '200', 'x-set-cookies'],
+        'melarc_vendor_device',
+      );
     });
 
     expect(codes(dropped)).toEqual(['COOKIE_DRIFT']);
     expect(dropped[0]?.message).toContain('melarc_csrf');
     expect(codes(added)).toEqual(['COOKIE_DRIFT']);
     expect(added[0]?.message).toContain('melarc_vendor_device');
+  });
+
+  // Break caught: a vendor sign-in that stops renewing the device credential's lifetime (it is set again at every
+  // vendor sign-in, with a fresh Max-Age), which a browser that is signed in every day would never notice until the
+  // 400 days run out.
+  it('reports a vendor sign-in that no longer renews the device credential', () => {
+    const dropped = driftAfter('vendorSignIn', (copy) => {
+      copy.set(
+        ['paths', '/auth/vendor/sign-in', 'post', 'responses', '200', 'x-set-cookies'],
+        ['melarc_session', 'melarc_csrf'],
+      );
+    });
+
+    expect(codes(dropped)).toEqual(['COOKIE_DRIFT']);
+    expect(dropped[0]?.message).toContain('melarc_vendor_device');
   });
 
   // Break caught: a sign-out that sets (or expires) its cookies for every caller, or for the wrong credential. The
@@ -588,6 +619,39 @@ describe('deliberate drift: headers and cookies', () => {
     expect(everyone[0]?.message).toContain('browserSession');
     expect(codes(riders)).toEqual(['COOKIE_DRIFT']);
     expect(riders[0]?.message).toContain('riderSession');
+  });
+
+  // Break caught: a recovery that gives the vendor's device credential to every principal, or only to another one.
+  // The same cookie is named; whose answer is owed it is what differs, and a staff member's browser would be given a
+  // credential for a vendor account it has nothing to do with.
+  it('reports a recovery whose cookies are set for every principal, or for another one', () => {
+    const answer = ['paths', '/auth/recovery/complete', 'post', 'responses', '204'] as const;
+    const everyone = driftAfter('completeCredentialRecovery', (copy) => {
+      copy.remove([...answer, 'x-set-cookies-when']);
+    });
+    const staff = driftAfter('completeCredentialRecovery', (copy) => {
+      copy.set([...answer, 'x-set-cookies-when'], { principal_type: 'STAFF' });
+    });
+
+    expect(codes(everyone)).toEqual(['COOKIE_DRIFT']);
+    expect(everyone[0]?.at).toBe('POST /auth/recovery/complete > response 204');
+    expect(everyone[0]?.message).toContain('VENDOR');
+    expect(everyone[0]?.message).toContain('every principal');
+    expect(codes(staff)).toEqual(['COOKIE_DRIFT']);
+    expect(staff[0]?.message).toContain('STAFF');
+    expect(staff[0]?.message).toContain('VENDOR');
+  });
+
+  // Break caught: a code description that adds the condition the contract does not make, so that a response the
+  // contract owes to everyone is silently narrowed.
+  it('reports a condition the code adds that the contract does not state', () => {
+    const answer = ['paths', '/auth/vendor/setup/credential', 'post', 'responses', '200'] as const;
+    const added = driftAfter('completeVendorCredentialSetup', (copy) => {
+      copy.set([...answer, 'x-set-cookies-when'], { principal_type: 'VENDOR' });
+    });
+
+    expect(codes(added)).toEqual(['COOKIE_DRIFT']);
+    expect(added[0]?.message).toContain('every principal');
   });
 });
 

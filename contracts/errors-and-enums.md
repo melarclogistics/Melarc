@@ -50,8 +50,8 @@ Applicable to any operation. Each derives from an approved rule rather than from
 | `NOT_FOUND`| **The canonical not-found response, `404`**. Returned for a resource that does not exist and, **identically** — same status, code, body shape and timing class — for a record a **Vendor** or a **Rider** may not know exists: another vendor's order, request or file, or — **when the Rider looks it up** — a record not assigned to them (a Rider who *acts* on unassigned work is told `NOT_ASSIGNED_RIDER` or `NOT_CUSTODY_HOLDER`). **Never returned to staff for an existing record outside their hubs**, which is `HUB_SCOPE_VIOLATION`| §43.2, §19.2, §37.6|
 | `HUB_SCOPE_VIOLATION`| The actor holds the permission and the record **exists**, but it belongs to a hub outside the actor's authorised hubs. **Informative by Product decision for authenticated staff**; a record that does not exist is `NOT_FOUND`| §35.10, §37.3|
 | `STATE_CONFLICT`| The record is not in the state the command expected. **Deterministic rejection, never last-write-wins**| §36.1|
-| `IDEMPOTENCY_KEY_CONFLICT`| The key was seen before with a different payload. A replay of the *same* payload returns the original result and is not an error| §36.1, §35.3.9|
-| `VALIDATION_FAILED`| Request violates a documented format or range. `details` names the field. **A field whose documented range is a set the API itself returns — `role_bundle_id`, the assignable staff bundles — violates it by naming a member outside that set**| §39.1|
+| `IDEMPOTENCY_KEY_CONFLICT`| The key was seen before with a different payload. A replay of the *same* payload returns the original result and is not an error. **`409`, and declared on every operation that takes an `Idempotency-Key`**| §36.1, §35.3.9|
+| `VALIDATION_FAILED`| Request violates a documented format or range. `details` names the field. **Always `400`, whatever the operation, and never `422`.** **A field whose documented range is a set the API itself returns — `role_bundle_id`, the assignable staff bundles — violates it by naming a member outside that set**| §39.1|
 | `SETTING_MISSING`| A required hub setting has no approved value. **Fails visibly — the system never borrows another hub's value or a global default.** Applies to *pricing and configuration* paths only; it may **never** block an operational or custody decision| §33.3, §33.4|
 | `SETTING_INVALID`| A setting exists but fails validation. Fails safely and alerts administrators| §33.3|
 
@@ -59,7 +59,9 @@ Applicable to any operation. Each derives from an approved rule rather than from
 
 | Axis| Condition| Status and code|
 |---|---|---|
+| Rate limit| The bucket's ceiling for this request is exceeded| `429` `RATE_LIMITED`|
 | Authentication| No usable session| `401` `SESSION_INVALID` — `SESSION_SUPERSEDED` for a displaced vendor session only|
+| CSRF| A cookie-authenticated unsafe request carries no matching synchronizer token, or an `Origin` that is not allowed| `403` `CSRF_VALIDATION_FAILED`|
 | Surface and permission| The principal type is not served by the operation, or the bundle lacks the key| `403` `PERMISSION_DENIED`|
 | Tier| The key is held and the target or state needs a higher tier| `403` `INSUFFICIENT_AUTHORITY`|
 | Hub scope| Staff, key held, **existing** record outside the authorised hubs| `403` `HUB_SCOPE_VIOLATION`|
@@ -68,8 +70,18 @@ Applicable to any operation. Each derives from an approved rule rather than from
 | Vendor ownership| A Vendor reads or acts on another vendor's record| `404` `NOT_FOUND`, indistinguishable from a nonexistent record|
 | Rider assignment, lookup| A Rider looks up a record that is not theirs| `404` `NOT_FOUND`, indistinguishable from a nonexistent record|
 | Rider assignment, act| A Rider acts on work they hold a reference to and are not assigned, or no longer hold custody of| `NOT_ASSIGNED_RIDER` or `NOT_CUSTODY_HOLDER`|
-| State| The record is in scope and its state forbids the act| The transition's own code (`STATE_CONFLICT` or a domain code)|
-| Maker-checker| The approver is the creator| `SELF_APPROVAL_FORBIDDEN`|
+| Request validation| The request violates its schema or a documented range| `400` `VALIDATION_FAILED`|
+| Idempotency| The `Idempotency-Key` was seen before with a different payload| `409` `IDEMPOTENCY_KEY_CONFLICT`|
+| Version| The `If-Match` version is not the record's current one| `409` `STATE_CONFLICT`|
+| Second factor not enrolled| A Senior Ops or Platform Admin identity with the correct password and no `ACTIVE` MFA factor completes the second step of sign-in| `403` `MFA_ENROLMENT_REQUIRED`|
+| State| The record is in scope and its state forbids the act| The transition's own code: `409` `STATE_CONFLICT`, or `422` and a domain code|
+| Maker-checker| The approver is the creator| `422` `SELF_APPROVAL_FORBIDDEN`|
+
+**The rows follow one order for every operation** (Product decision, 6 October 2026): the first refusal wins, so a caller who may not use an operation learns nothing about its schema, and a replay of a command that already succeeded returns its original answer and not a state conflict. The order is owned by [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1 and is not restated here.
+
+**Statuses are one rule for every operation** (Product decision, 6 October 2026). `VALIDATION_FAILED` is **always `400`**, and an operation that declares it under `422` is corrected. `CSRF_VALIDATION_FAILED` is `403`. `IDEMPOTENCY_KEY_CONFLICT` is `409` and **is declared on every operation that takes an `Idempotency-Key`**. **A named code that states a business rule — every domain code in §5, `SELF_APPROVAL_FORBIDDEN`, and the sign-in, factor, grant, challenge and recovery codes — is `422`**; the codes the table above gives another status keep it, and `TRUST_DATA_UNAVAILABLE` is `503`. **`MFA_ENROLMENT_REQUIRED` is the one named code that is `403`**: the catalogue gave it no status, and `403` was chosen for it, so it does not fall under the `422` rule.
+
+**`SESSION_SUPERSEDED` is a contract-wide rule for vendor-session operations, not a per-operation declaration.** Any operation that authenticates a vendor session answers `401` `SESSION_SUPERSEDED`, instead of `SESSION_INVALID`, to a session that a colleague's newer sign-in displaced, and no operation lists it in its `x-error-codes`.
 
 **The table governs every operation addressed by an identifier, whether or not its `x-error-codes` yet lists the code.** `MSC-DEC-432` declared `NOT_FOUND`, and its `404`, on the operations it touched; the rest are owed the declaration by the slice that builds each, and until then **this table is the rule and the operation's list is not**: an implementation answers `404` `NOT_FOUND` for a nonexistent record — and, to a Vendor or a Rider looking up another party's record, for that record too — on every one of them.
 
@@ -204,7 +216,7 @@ Harvested from every transition table in [state-machines.md](state-machines.md) 
 | `EVIDENCE_REQUIRED`| **A handoff in either mode without the mandatory receipt or handoff photo** (§34.5) — `MSC-DEC-413` made evidence mandatory in both, and in the agent mode the photo stands in for the waybill.|
 | `TERMINAL_FOR_STATION_DROP`| An outcome update was attempted after `HANDED_OVER` on a Station Drop order, where handoff is terminal. **`recordHandoffOutcome` refuses it**|
 
-**One hundred and twenty live codes, derived from the contract's `Error` enum rather than restated here** — three added and one withdrawn on 2 October 2026: `NOT_FOUND`, `CREDENTIAL_LOCKED` and `CREDENTIAL_DELIVERY_FAILED` in; `OWNERSHIP_VIOLATION` out.
+**One hundred and twenty-one live codes at 6 October 2026, derived from the contract's `Error` enum rather than restated here** — three added and one withdrawn on 2 October 2026: `NOT_FOUND`, `CREDENTIAL_LOCKED` and `CREDENTIAL_DELIVERY_FAILED` in; `OWNERSHIP_VIOLATION` out.
 
 **`DEVICE_NOT_REGISTERED` was withdrawn by R1.2** — a synonym of `DEVICE_NOT_ENROLLED` that no operation ever returned. **Three more were added by R1** — `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE` and `CSRF_VALIDATION_FAILED`, none of which the catalogue could express. **Five were added by Gate A and one was relocated.** `MFA_ENROLMENT_REQUIRED` guarded bundle assignment, which `MSC-DEC-259` established it was never true of; it moved to §5.8 rather than being duplicated there, and the count above is derived rather than restated.
 
@@ -216,7 +228,7 @@ Added 24 August by `MSC-DEC-247`. **Two codes only** — the rest of the identit
 
 | Code| Raised when|
 |---|---|
-| `WORK_EMAIL_IN_USE`| A staff profile is created against a work email already held by another identity. Unique **and** the recovery channel ([domain-model.md](domain-model.md) §6.8, §37.2), so a collision is an identity fault rather than a format one|
+| `WORK_EMAIL_IN_USE`| A staff profile is created against a work email already held by another identity **that has not been rejected**, compared in the canonical form of [domain-model.md](domain-model.md) §6.8. Unique **and** the recovery channel ([domain-model.md](domain-model.md) §6.8, §37.2), so a collision is an identity fault rather than a format one|
 
 **`MFA_ENROLMENT_REQUIRED` moved to §5.8 on 26 August**. It was defined here to refuse a **privileged bundle assignment** without MFA — a rule that could not be satisfied, because a new employee cannot enrol a factor before authenticating. The code was never wrong; **the act it guarded was**. It now refuses a privileged **session**.
 
@@ -225,7 +237,7 @@ Added 24 August by `MSC-DEC-247`. **Two codes only** — the rest of the identit
 | Refusal| Code| Why not a new one|
 |---|---|---|
 | The creator tried to approve their own profile| `SELF_APPROVAL_FORBIDDEN`| The same-actor exclusion is **one uniform rule** — §11.6, `MSC-DEC-135`. `approveOnePackageException` already returns this code. A second name would put two vocabularies on one constraint|
-| A Senior Ops tried to approve a privileged bundle| `INSUFFICIENT_AUTHORITY`| The actor holds the key and not the standing. Exactly what this code means everywhere else|
+| A Senior Ops tried to approve or reject a profile carrying a privileged bundle| `INSUFFICIENT_AUTHORITY`| The actor holds the key and not the standing. Exactly what this code means everywhere else|
 | A rejection or suspension arrived without grounds| `REASON_REQUIRED`| §30.9's four grounds categories are reason metadata (§35.9.2), not a new mechanism|
 | The record was not in the expected state| `STATE_CONFLICT`| §36.1, unchanged|
 
@@ -264,7 +276,7 @@ Added 26 August by Gate A.
 |---|---|
 | `SESSION_INVALID`| **No usable authenticated session** — missing, malformed, unknown, expired or terminated. The generic `401` code, and the contract had none|
 | `SETUP_GRANT_INVALID`| A setup grant is unknown, expired, already consumed, superseded, or presented for a purpose or principal it was not issued for|
-| `MFA_ENROLMENT_REQUIRED`| A **privileged session** was requested for an identity with no `ACTIVE` MFA factor|
+| `MFA_ENROLMENT_REQUIRED`| A **privileged session** was requested for an identity with no `ACTIVE` MFA factor. **Answered at `completeStaffMfaSignIn`**, after `staffSignIn` has given the same `202` challenge as for an enrolled identity, with status `403`; **that attempt does not count toward the lockout**|
 | `MFA_PROOF_INVALID`| The submitted TOTP code is wrong, outside its window, or **already used within it**|
 | `DEVICE_PROOF_INVALID`| **The rider sign-in's device proof could not be accepted**: the signature over the challenge does not verify against the sole `ACTIVE` device's registered public key — **or** no device proof can be checked because the phone is unknown or the rider has no `ACTIVE` device **and the PIN was not proven**. One answer for all of them, so that the response reveals nothing about which. **It does not cover an expired or consumed challenge** — those are `CHALLENGE_EXPIRED` and `CHALLENGE_UNUSABLE` — and a failure here **never counts toward a lockout**|
 | `DEVICE_INTEGRITY_FAILED`| **At first enrolment or replacement, the required device-key attestation evidence was supplied and evaluated and failed policy** — the certificate chain, the trust root, revocation, the challenge, the application identity, the device's lock or boot state, or the binding of the attested key to the key being registered. **Distinct from `DEVICE_PROOF_INVALID`**, which is a failed signature over a challenge, and from `DEVICE_SECURITY_UNSUPPORTED`, which is a missing capability: one says *the key did not prove itself*, one says *the evidence would not vouch for the device*, one says *the device cannot offer the evidence*. **Never returned at sign-in, where no attestation is evaluated, and never for unavailable trust data, which is `TRUST_DATA_UNAVAILABLE`.** No integrity signal refuses an operation from a rider already holding custody.|
@@ -365,6 +377,7 @@ Canonical homes only. **Nothing here is redefined**; follow the link.
 | `SetupGrant.state`| `PENDING`, `CONSUMED`, `EXPIRED`, `SUPERSEDED`| `state-machines.md` §19|
 | `RegisteredDevice.status`| `ACTIVE`, `REPLACED`, `REVOKED`| `domain-model.md` §6.8. **`REPLACED` — superseded through the replacement workflow; `REVOKED` — explicitly invalidated by Melarc; both non-active, neither returns to `ACTIVE`**|
 | `Session.client_root_signal`| `NOT_DETECTED`, `DETECTED`, `UNKNOWN` — **three**| `domain-model.md` §6.8; the value arrives in the `riderSignIn` request body (`openapi.yaml` `RiderSignIn`). A recorded risk signal, **never an authentication control**|
+| `VendorCredential.delivery_channel`| `PHONE`, `EMAIL` — **two**, chosen at approval| `domain-model.md` §6.8|
 | `VendorOrganization.operational_status`| `CREATED_BY_OPS`, `PENDING_SENIOR_OPS_REVIEW`, `ACTIVE`, `REJECTED`, `SUSPENDED`, `TERMINATED` — **six**. **`SUSPENDED` and `TERMINATED` are reached by `suspendVendor`, `reactivateVendor` and `terminateVendor`** (`MSC-DEC-397`, `OQ-033` closed 21 September 2026); **the machine is still untabled** — `OQ-132`.| `domain-model.md` §6.16, `state-machines.md` §14|
 | `VendorAccountAllowance.state`| `DISABLED_PREPAYMENT_ONLY`, `ENABLED` — **two**, both directions Platform Admin, reason mandatory| `domain-model.md` §6.16, `state-machines.md` §14|
 | `VendorSuspensionHold.state`| `HELD`, `RESUMED`, `AUTHORIZED_EXCEPTION_DISPOSITION` — **three** (§36.12). **One row per held work item**, not per suspension| `domain-model.md` §6.17, `state-machines.md` §14|
@@ -384,7 +397,7 @@ Canonical homes only. **Nothing here is redefined**; follow the link.
 | `CommitmentChangeReason`| `CUSTOMER_DEFERRED`, `SENDER_SCHEDULED`, `CORRIDOR_SCHEDULE`, `MELARC_DELAY`| `MSC-DEC-307`. **Attribution is what makes the date history adjudicable** — the same revision means opposite things depending on cause|
 | `RecipientContactCheckpoint`| `PRE_DISPATCH`, `NEXT_STOP`, `DOORSTEP` — **three contact checkpoints, not three delivery trips**| `domain-model.md` §6.12|
 | `RecipientContactActorType`| `RIDER`, `OPS` — either may perform `PRE_DISPATCH`| `domain-model.md` §6.12|
-| Reason domains| `DELIVERY_FAILURE`, **`RECIPIENT_CONTACT`**, **`PICKUP_STOP_SKIP`**, **`HANDOFF_FAILURE`** — the fourth added at `MSC-DEC-417` for an outbound stop that fails at the counter, **seeded at five**: `STATION_CLOSED`, `CARRIER_REFUSED_PARCEL`, `AGENT_NOT_PRESENT`, `RECIPIENT_REJECTED_WAYBILL_PRICE`, `VEHICLE_NOT_TERMINATING_AT_DESTINATION`, **none consuming a delivery attempt**; a covered-mode third party's `FAILED` or `RETURNED` takes a `DELIVERY_FAILURE` reason instead. The third added at `MSC-DEC-412`, closing `OQ-141`, and **seeded at four**: `RUN_CUT_SHORT`, `VENDOR_REQUESTED_SKIP`, `LOCATION_INACCESSIBLE`, `STOP_RAISED_IN_ERROR`. **Not §21.5's four pickup-failure categories**, which are closed by specification and describe a different act — §5 gives `FAILED` and `SKIPPED` separate rows — **one catalogue, several domains**; a reason declares the checkpoints it is valid for, in **`valid_checkpoints`** — fielded at `MSC-DEC-407`, having been stated here and at `domain-model.md` §6.12 and carried by neither. **The `RECIPIENT_CONTACT` contents are seeded at five by `MSC-DEC-409`** — `NO_ANSWER`, `NUMBER_INCORRECT`, `RECIPIENT_DECLINED` and `CONTACT_NOT_POSSIBLE_MELARC` at all three checkpoints, **`RECIPIENT_NOT_AT_LOCATION` at `DOORSTEP` only** — **seeded defaults in a controlled catalogue, not a closed enum**| `domain-model.md` §3.9, §6.12|
+| Reason domains| `DELIVERY_FAILURE`, **`RECIPIENT_CONTACT`**, **`PICKUP_STOP_SKIP`**, **`HANDOFF_FAILURE`** — the fourth added at `MSC-DEC-417` for an outbound stop that fails at the counter, **seeded at five**: `STATION_CLOSED`, `CARRIER_REFUSED_PARCEL`, `AGENT_NOT_PRESENT`, `RECIPIENT_REJECTED_WAYBILL_PRICE`, `VEHICLE_NOT_TERMINATING_AT_DESTINATION`, **none consuming a delivery attempt**; a covered-mode third party's `FAILED` or `RETURNED` takes a `DELIVERY_FAILURE` reason instead. The third added at `MSC-DEC-412`, closing `OQ-141`, and **seeded at four**: `RUN_CUT_SHORT`, `VENDOR_REQUESTED_SKIP`, `LOCATION_INACCESSIBLE`, `STOP_RAISED_IN_ERROR`. **Not §21.5's four pickup-failure categories**, which are closed by specification and describe a different act — §5 gives `FAILED` and `SKIPPED` separate rows — **one catalogue, several domains**; a reason declares the checkpoints it is valid for, in **`valid_checkpoints`** — fielded at `MSC-DEC-407`, having been stated here and at `domain-model.md` §6.12 and carried by neither. **The `RECIPIENT_CONTACT` contents are seeded at five by `MSC-DEC-409`** — `NO_ANSWER`, `NUMBER_INCORRECT`, `RECIPIENT_DECLINED` and `CONTACT_NOT_POSSIBLE_MELARC` at all three checkpoints, **`RECIPIENT_NOT_AT_LOCATION` at `DOORSTEP` only** — **seeded defaults in a controlled catalogue, not a closed enum**. **Six identity domains are proposed, one per operation family** (`domain-model.md` §3.9): `SESSION_REVOCATION`, `STAFF_PROFILE_REJECTION`, `STAFF_MFA_RESET`, `CREDENTIAL_ADMINISTRATION`, `RIDER_DEVICE_REPLACEMENT` and `RIDER_DEVICE_REVOCATION` — **their seeded values are a Product Owner input that has not been supplied**| `domain-model.md` §3.9, §6.12|
 | `ReasonAttribution`| `CUSTOMER`, `MELARC`, `EXTERNAL`| `MSC-DEC-309`, `MSC-DEC-330`. Drives `consumes_delivery_attempt`|
 | `PickupIntent`| `OWN_PACKAGES`, `COLLECT_FOR_VENDOR`, `ADHOC_SENDER`| `MSC-DEC-335`. A known Vendor is not re-onboarded daily; a third-party collection needs a pickup point the Vendor's own address cannot supply|
 | `CashDispositionMethod`| `BANK_DEPOSIT`, `MERCHANT_MOMO_TRANSFER`, `FINANCE_HANDOVER`, `SAFE_CUSTODY`| `MSC-DEC-323`. Operational custody, **not** an accounting posting|

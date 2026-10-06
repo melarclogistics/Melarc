@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { credentialCheck } from './credentials.js';
-import { ContractValidator, type ResponseParts } from './contract-validator.js';
+import {
+  ContractValidator,
+  type ResponseContext,
+  type ResponseParts,
+} from './contract-validator.js';
 import type { JsonObject } from './json.js';
 
 const BROWSER = { type: 'apiKey', in: 'cookie', name: 'melarc_session' };
@@ -259,5 +263,220 @@ describe('cookies set only for a request that presented one credential', () => {
     expect(() => {
       new ContractValidator(contract).prepare('signOut');
     }).toThrow(/signOut|x-set-cookies-for/);
+  });
+});
+
+/**
+ * The cookies a response sets can also depend on whose answer it is, which neither the request nor the response
+ * says: `completeCredentialRecovery` has one 204 for a vendor (the browser is given a device credential) and for
+ * a staff member (no cookie at all). The contract says so with `x-set-cookies-when` beside `x-set-cookies`, and
+ * the application says whose answer it is.
+ */
+describe('cookies set only for one principal type (x-set-cookies-when)', () => {
+  const DEVICE = 'melarc_vendor_device=; Max-Age=34560000; Path=/; HttpOnly; Secure; SameSite=Lax';
+  const contractWith = (answer: JsonObject): JsonObject => ({
+    openapi: '3.1.0',
+    'x-cookies': {
+      melarc_vendor_device: {
+        attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000',
+        host_only: true,
+        read_by_javascript: false,
+      },
+      melarc_session: {
+        attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/',
+        host_only: true,
+        read_by_javascript: false,
+      },
+    },
+    components: { securitySchemes: { browserSession: BROWSER, riderSession: BEARER } },
+    paths: {
+      '/recovery/complete': {
+        post: {
+          operationId: 'completeRecovery',
+          responses: { '204': { description: 'Credential set', ...answer } },
+        },
+      },
+    },
+  });
+  const validator = new ContractValidator(
+    contractWith({
+      'x-set-cookies': ['melarc_vendor_device'],
+      'x-set-cookies-when': { principal_type: 'VENDOR' },
+      headers: { 'Set-Cookie': { schema: { type: 'string' } } },
+    }),
+  );
+
+  const cookiesOf = (
+    context: ResponseContext | undefined,
+    setCookie?: string[],
+    request?: { headers: Record<string, string | string[] | undefined> },
+    judge: ContractValidator = validator,
+  ) => {
+    const parts: ResponseParts = {
+      status: 204,
+      body: undefined,
+      headers: setCookie === undefined ? {} : { 'set-cookie': setCookie },
+    };
+    return judge
+      .validateResponse('completeRecovery', parts, request, context)
+      .filter((violation) => violation.in === 'response-cookie');
+  };
+
+  // Break caught: a vendor recovery that completes and leaves the vendor's browser without the device credential
+  // it was promised. The old one was revoked, so the browser could never sign in again.
+  it('owes the cookie to a vendor answer, and reports it when it is missing', () => {
+    expect(cookiesOf({ principalType: 'VENDOR' }, [DEVICE])).toEqual([]);
+    expect(cookiesOf({ principalType: 'VENDOR' })).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'required' },
+    ]);
+  });
+
+  // Break caught: the declaration applying to every principal, so that a staff recovery has to carry a vendor's
+  // browser credential, or is let off silently when it sets one.
+  it('owes a staff answer no cookie, and reports one that sets it', () => {
+    expect(cookiesOf({ principalType: 'STAFF' })).toEqual([]);
+    expect(cookiesOf({ principalType: 'STAFF' }, [DEVICE])).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'undeclared' },
+    ]);
+    expect(cookiesOf({ principalType: 'STAFF' }, ['tracker=1'])).toEqual([
+      { in: 'response-cookie', pointer: '*', rule: 'undeclared' },
+    ]);
+  });
+
+  // Break caught: the type the contract names being replaced by a fixed one in the code, so that a condition on any
+  // other type is read as the vendor's. The contract's own type is the one that decides.
+  it('owes the cookies to whichever type the contract names', () => {
+    const staffOnly = new ContractValidator(
+      contractWith({
+        'x-set-cookies': ['melarc_vendor_device'],
+        'x-set-cookies-when': { principal_type: 'STAFF' },
+        headers: { 'Set-Cookie': { schema: { type: 'string' } } },
+      }),
+    );
+
+    expect(cookiesOf({ principalType: 'STAFF' }, undefined, undefined, staffOnly)).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'required' },
+    ]);
+    expect(cookiesOf({ principalType: 'STAFF' }, [DEVICE], undefined, staffOnly)).toEqual([]);
+    expect(cookiesOf({ principalType: 'VENDOR' }, undefined, undefined, staffOnly)).toEqual([]);
+    expect(cookiesOf({ principalType: 'VENDOR' }, [DEVICE], undefined, staffOnly)).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'undeclared' },
+    ]);
+  });
+
+  // Break caught: the principal being compared loosely, so that a type that merely contains or resembles the
+  // named one is owed the cookie.
+  it.each(['RIDER', 'vendor', 'VENDOR ', 'VENDORS', ''])(
+    'owes the answer of %j no cookie either',
+    (principalType) => {
+      expect(cookiesOf({ principalType })).toEqual([]);
+      expect(cookiesOf({ principalType }, [DEVICE])).toHaveLength(1);
+    },
+  );
+
+  // Break caught: the cookie being checked by name only. The vendor's answer still carries the attributes the
+  // contract promises, the lifetime included.
+  it('holds the cookie a vendor answer sets to its attributes', () => {
+    expect(
+      cookiesOf({ principalType: 'VENDOR' }, [
+        'melarc_vendor_device=; Path=/; HttpOnly; Secure; SameSite=Lax',
+      ]),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'max-age' }]);
+    expect(
+      cookiesOf({ principalType: 'VENDOR' }, [
+        'melarc_vendor_device=; Max-Age=34560000; Path=/; Secure; SameSite=Lax',
+      ]),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'httponly' }]);
+  });
+
+  // Break caught: the condition being skipped silently when the application does not say whose answer it is,
+  // which would turn the rule off in exactly the code that uses it.
+  it('fails loudly when it is asked without the principal, or without a type in it', () => {
+    expect(() => cookiesOf(undefined, [DEVICE])).toThrow(/completeRecovery.*x-set-cookies-when/);
+    expect(() => cookiesOf({}, [DEVICE])).toThrow(/completeRecovery.*x-set-cookies-when/);
+  });
+
+  // Break caught: a condition on the principal being asked for the request as well. It is the application that
+  // knows whose answer this is, and a request carrying no credential at all (recovery) is a valid one.
+  it('needs no request to judge it', () => {
+    expect(cookiesOf({ principalType: 'VENDOR' }, [DEVICE], undefined)).toEqual([]);
+    expect(cookiesOf({ principalType: 'STAFF' }, undefined, { headers: {} })).toEqual([]);
+  });
+
+  // Break caught: the two conditions on one response being read as either one. Both must hold, so a browser that
+  // presented the credential still is owed nothing when the answer is another principal's.
+  describe('beside x-set-cookies-for', () => {
+    const both = new ContractValidator({
+      ...contractWith({
+        'x-set-cookies': ['melarc_vendor_device'],
+        'x-set-cookies-for': 'browserSession',
+        'x-set-cookies-when': { principal_type: 'VENDOR' },
+      }),
+    });
+    const BROWSER_REQUEST = { headers: { cookie: 'melarc_session=S' } };
+    const NOBODY = { headers: {} };
+
+    it('owes the cookies only when the credential was presented and the answer is that principal’s', () => {
+      expect(cookiesOf({ principalType: 'VENDOR' }, [DEVICE], BROWSER_REQUEST, both)).toEqual([]);
+      expect(cookiesOf({ principalType: 'VENDOR' }, undefined, BROWSER_REQUEST, both)).toEqual([
+        { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'required' },
+      ]);
+      expect(cookiesOf({ principalType: 'VENDOR' }, undefined, NOBODY, both)).toEqual([]);
+      expect(cookiesOf({ principalType: 'STAFF' }, undefined, BROWSER_REQUEST, both)).toEqual([]);
+      expect(cookiesOf({ principalType: 'STAFF' }, [DEVICE], BROWSER_REQUEST, both)).toEqual([
+        { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'undeclared' },
+      ]);
+    });
+
+    it('still needs the request for the credential half', () => {
+      expect(() => cookiesOf({ principalType: 'VENDOR' }, [DEVICE], undefined, both)).toThrow(
+        /completeRecovery.*x-set-cookies-for/,
+      );
+    });
+  });
+
+  // Break caught: a response that names no condition being changed by the new one. Sign-in sets its cookies whoever
+  // asks, and no principal need be given.
+  it('leaves a response with no condition alone, whatever the principal', () => {
+    const unconditional = new ContractValidator(
+      contractWith({ 'x-set-cookies': ['melarc_vendor_device'] }),
+    );
+
+    for (const context of [undefined, { principalType: 'STAFF' }, { principalType: 'VENDOR' }]) {
+      expect(cookiesOf(context, undefined, undefined, unconditional)).toEqual([
+        { in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'required' },
+      ]);
+    }
+  });
+
+  // Break caught: a condition that cannot be checked being read as "always" or "never". Preparing fails, so the
+  // application does not start unprotected.
+  it.each([
+    ['something that is not an object', 'VENDOR'],
+    ['a list', ['VENDOR']],
+    ['no principal type', {}],
+    ['a principal type that is not text', { principal_type: 5 }],
+    ['an empty principal type', { principal_type: '' }],
+    ['a condition it does not know', { principal_type: 'VENDOR', hub_id: 'x' }],
+  ])('refuses a contract whose condition is %s', (_label, condition) => {
+    const contract = contractWith({
+      'x-set-cookies': ['melarc_vendor_device'],
+      'x-set-cookies-when': condition,
+    });
+
+    expect(() => {
+      new ContractValidator(contract).prepare('completeRecovery');
+    }).toThrow(/x-set-cookies-when of response 204 of completeRecovery/);
+  });
+
+  it('refuses a condition with no cookies to apply it to', () => {
+    const contract = contractWith({
+      'x-set-cookies': [],
+      'x-set-cookies-when': { principal_type: 'VENDOR' },
+    });
+
+    expect(() => {
+      new ContractValidator(contract).prepare('completeRecovery');
+    }).toThrow(/x-set-cookies-when of response 204 of completeRecovery applies to no cookies/);
   });
 });

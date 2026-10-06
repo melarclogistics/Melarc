@@ -11,6 +11,7 @@ import { map, type Observable } from 'rxjs';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import { bodyBytesOf } from '../http/json-body.js';
+import { answerPrincipalOf } from './answer-context.js';
 import { CONTRACT_OPERATION_KEY } from './contract-operation.js';
 import { ContractValidationService } from './contract-validation.service.js';
 import type { ContractViolation } from './contract-validator.js';
@@ -98,11 +99,14 @@ export class ContractValidationInterceptor implements NestInterceptor {
             { in: 'status', pointer: String(response.statusCode), rule: 'sent-by-handler' },
           ]);
         }
+        const answeredFor = answerPrincipalOf(request);
         const problems = validator.validateResponse(
           operationId,
           { status: response.statusCode, body, headers: response.getHeaders() },
-          // What the caller presented decides which cookies the answer owes (x-set-cookies-for).
+          // What the caller presented decides which cookies the answer owes (x-set-cookies-for), and so does
+          // whose answer it is, which only the handler knows (x-set-cookies-when).
           request,
+          answeredFor === undefined ? undefined : { principalType: answeredFor },
         );
         if (problems.length > 0) throw new ContractViolationError(operationId, problems);
         return body;

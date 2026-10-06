@@ -411,7 +411,7 @@ Detection, not prevention. **No row here claims tamper-proof.**
 | `GBT-W5`| An unexpected `Origin` header| Attacker| Any browser-sensitive request| **Rejected, including on pre-session endpoints**| `EDGE` + `APP`|
 | `GBT-W6`| A cookie-authenticated unsafe request with no CSRF token| Attacker| Submit| **`CSRF_VALIDATION_FAILED`**| `APP`|
 | `GBT-W7`| A Rider Bearer request| Rider| Submit without a CSRF token| **Succeeds.** Bearer credentials are not attached automatically| `APP`|
-| `GBT-W8`| Authentication and recovery responses| —| Inspect cache headers| **`no-store`**| `EDGE` + `APP`|
+| `GBT-W8`| Every API response, authentication and recovery included| —| Inspect cache headers| **`Cache-Control: no-store`**, sent by the API itself as a platform rule| `EDGE` + `APP`|
 | `GBT-W9`| Any browser surface response| —| Inspect security headers| CSP · `frame-ancestors 'none'` · `nosniff` · restrictive Referrer Policy · HSTS| `EDGE`|
 | `GBT-W10`| A safe read operation| Any| Submit with a CSRF token| **Not required**| `APP`|
 

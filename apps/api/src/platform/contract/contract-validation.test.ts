@@ -13,11 +13,12 @@ import {
   Query,
   Redirect,
   Render,
+  Req,
   Res,
   Sse,
   type Type,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { Observable, of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +27,7 @@ import { TEST_CONFIG } from '../../test-support/test-config.js';
 import { appWith, startTestApp, type TestApp } from '../../test-support/test-app.js';
 import { buildOpenApiDocument } from '../openapi/build-openapi-document.js';
 import { TechnicalEndpoint } from '../routes/access-declaration.js';
+import { declareAnswerPrincipal } from './answer-context.js';
 import { ContractOperation } from './contract-operation.js';
 import type { ContractSource } from './contract-source.js';
 import { ContractValidationService } from './contract-validation.service.js';
@@ -803,6 +805,11 @@ const SESSION_CONTRACT = {
       host_only: true,
       read_by_javascript: true,
     },
+    melarc_vendor_device: {
+      attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000',
+      host_only: true,
+      read_by_javascript: false,
+    },
   },
   components: {
     securitySchemes: {
@@ -841,6 +848,20 @@ const SESSION_CONTRACT = {
             required: ['challenge'],
             properties: { challenge: { type: 'string' } },
           }),
+        },
+      },
+    },
+    '/recovery': {
+      post: {
+        operationId: 'completeRecovery',
+        responses: {
+          // One answer, two principals: a vendor's browser is given its device credential and a staff member's is not.
+          '204': {
+            description: 'Credential set',
+            'x-set-cookies': ['melarc_vendor_device'],
+            'x-set-cookies-when': { principal_type: 'VENDOR' },
+            headers: { 'Set-Cookie': { schema: { type: 'string' } } },
+          },
         },
       },
     },
@@ -903,6 +924,31 @@ class SessionController {
       sameSite: 'lax',
     });
     response.clearCookie('melarc_csrf', { path: '/', secure: true, sameSite: 'lax' });
+  }
+
+  /**
+   * Completes a recovery the way the identity slice will: the answer says whose it is (`as`), and the device cookie
+   * is set only when `cookie=set`, the way a handler that is right or wrong about the branch would.
+   */
+  @Post('recovery')
+  @HttpCode(204)
+  @ContractOperation('completeRecovery')
+  recover(
+    @Query('as') as: string | undefined,
+    @Query('cookie') cookie: string | undefined,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): void {
+    if (as !== undefined) declareAnswerPrincipal(request, as);
+    if (cookie === 'set') {
+      response.cookie('melarc_vendor_device', 'DEVICE-VALUE-CANARY', {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 34_560_000_000,
+      });
+    }
   }
 
   @Get('preferences')
@@ -999,6 +1045,70 @@ describe('headers and cookies, over real HTTP (audit F04)', () => {
 
       expect(response.status).toBe(500);
       expect(app.logs.text()).toContain('response-cookie melarc_session undeclared');
+    });
+  });
+
+  // Break caught (recovery): the cookies a response owes being decided without knowing whose answer it is. A
+  // vendor recovery must give the browser its device credential and a staff recovery must set none, and the
+  // handler, not the request, knows which it did.
+  describe('a recovery whose cookies depend on whose answer it is', () => {
+    const complete = (app: TestApp, query: string) =>
+      fetch(`${app.baseUrl}/api/v1/recovery?${query}`, { method: 'POST' });
+
+    it('lets a vendor recovery set the device credential, and a staff recovery set none', async () => {
+      const app = await startSession();
+
+      const vendor = await complete(app, 'as=VENDOR&cookie=set');
+      const staff = await complete(app, 'as=STAFF');
+
+      expect(vendor.status).toBe(204);
+      expect(vendor.headers.getSetCookie()).toHaveLength(1);
+      expect(staff.status).toBe(204);
+      expect(staff.headers.getSetCookie()).toEqual([]);
+    });
+
+    it('refuses a vendor recovery that leaves the browser without the credential', async () => {
+      const app = await startSession();
+
+      const response = await complete(app, 'as=VENDOR');
+
+      expect(response.status).toBe(500);
+      expect(app.logs.text()).toContain('response-cookie melarc_vendor_device required');
+    });
+
+    it('refuses a staff recovery that sets a vendor’s credential, never printing its value', async () => {
+      const app = await startSession();
+
+      const response = await complete(app, 'as=STAFF&cookie=set');
+
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain('CANARY');
+      const logged = app.logs.text();
+      expect(logged).toContain('response-cookie melarc_vendor_device undeclared');
+      expect(logged).not.toContain('CANARY');
+    });
+
+    // Break caught: a handler that does not say whose answer it is being let through, which would turn the rule off
+    // for exactly the handler that forgot.
+    it('refuses an answer that does not say whose it is, naming the condition', async () => {
+      const app = await startSession();
+
+      const response = await complete(app, 'cookie=set');
+
+      expect(response.status).toBe(500);
+      expect(app.logs.text()).toContain('x-set-cookies-when');
+    });
+
+    // Break caught: the principal one request declared being seen by the next, so that a vendor answer is judged
+    // as the staff answer before it.
+    it('judges each answer by its own principal', async () => {
+      const app = await startSession();
+
+      const first = await complete(app, 'as=STAFF');
+      const second = await complete(app, 'as=VENDOR&cookie=set');
+      const third = await complete(app, 'as=STAFF');
+
+      expect([first.status, second.status, third.status]).toEqual([204, 204, 204]);
     });
   });
 

@@ -1098,6 +1098,222 @@ describe('the cookies a response sets', () => {
   });
 });
 
+/**
+ * Cookie lifetimes (Product Owner decision of 6 October 2026, I15). The session and CSRF cookies are browser-session
+ * cookies: issued with no `Max-Age` and no `Expires`, so they end with the browser, and the server's own idle and
+ * absolute timeouts decide validity. `x-cookies` says so with `browser_session: true`. The vendor device credential
+ * is the opposite: it carries `Max-Age=34560000` (400 days) among its attributes, which the existing attribute check
+ * already holds it to.
+ */
+describe('the lifetime of the cookies a response sets', () => {
+  const SESSION = 'melarc_session=S; Path=/; HttpOnly; Secure; SameSite=Lax';
+  const CSRF = 'melarc_csrf=C; Path=/; Secure; SameSite=Lax';
+  const DEVICE = 'melarc_vendor_device=D; Max-Age=34560000; Path=/; HttpOnly; Secure; SameSite=Lax';
+  const xCookies = (): JsonObject => ({
+    melarc_session: {
+      attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/',
+      browser_session: true,
+      host_only: true,
+      read_by_javascript: false,
+    },
+    melarc_csrf: {
+      attributes: 'Secure; SameSite=Lax; Path=/',
+      browser_session: true,
+      host_only: true,
+      read_by_javascript: true,
+    },
+    melarc_vendor_device: {
+      attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000',
+      host_only: true,
+      read_by_javascript: false,
+    },
+  });
+  const build = (cookies: JsonObject, set: string[]) =>
+    new ContractValidator({
+      openapi: '3.1.0',
+      'x-cookies': cookies,
+      paths: {
+        '/c': {
+          get: {
+            operationId: 'c',
+            responses: {
+              '200': {
+                description: 'OK',
+                'x-set-cookies': set,
+                headers: { 'Set-Cookie': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+  const validator = build(xCookies(), ['melarc_session', 'melarc_csrf', 'melarc_vendor_device']);
+  const cookiesOf = (session: string, csrf = CSRF, device = DEVICE) =>
+    validator
+      .validateResponse(
+        'c',
+        response({ status: 200, headers: { 'set-cookie': [session, csrf, device] } }),
+      )
+      .filter((violation) => violation.in === 'response-cookie');
+
+  // Break caught: a session cookie issued with a lifetime. A persistent session cookie outlives the browser session
+  // on the user's disk, which is the weakness the browser-session rule exists to remove.
+  it('accepts the session and CSRF cookies issued with neither Max-Age nor Expires', () => {
+    expect(cookiesOf(SESSION)).toEqual([]);
+  });
+
+  it.each([
+    ['Max-Age=3600', 'max-age'],
+    ['Max-Age=1', 'max-age'],
+    ['Max-Age=34560000', 'max-age'],
+    ['Max-Age=abc', 'max-age'],
+    ['Max-Age=', 'max-age'],
+    ['Max-Age=3600.5', 'max-age'],
+    ['Max-Age=+60', 'max-age'],
+    ['Expires=Fri, 31 Dec 2999 23:59:59 GMT', 'expires'],
+    ['Expires=not a date', 'expires'],
+    ['Expires=', 'expires'],
+  ])('reports a session cookie issued with %s', (attribute, rule) => {
+    expect(
+      cookiesOf(`melarc_session=S; ${attribute}; Path=/; HttpOnly; Secure; SameSite=Lax`),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_session', rule }]);
+    expect(cookiesOf(SESSION, `melarc_csrf=C; ${attribute}; Path=/; Secure; SameSite=Lax`)).toEqual(
+      [{ in: 'response-cookie', pointer: 'melarc_csrf', rule }],
+    );
+  });
+
+  it('reports both when a session cookie carries both, each once, in order', () => {
+    expect(
+      cookiesOf(
+        'melarc_session=S; Max-Age=60; Expires=Fri, 31 Dec 2999 23:59:59 GMT; Path=/; HttpOnly; Secure; SameSite=Lax',
+      ),
+    ).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_session', rule: 'expires' },
+      { in: 'response-cookie', pointer: 'melarc_session', rule: 'max-age' },
+    ]);
+  });
+
+  // Break caught: the rule refusing the expiry that sign-out sets. A browser removes a cookie only when it is set
+  // again already expired, so an expiry is the one lifetime a session cookie may carry: `Max-Age=0` as the contract
+  // writes it, a negative one, or an `Expires` in the past, which is what Express writes when it clears one.
+  it.each([
+    'Max-Age=0',
+    'Max-Age=00',
+    'Max-Age=-1',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0',
+    'max-age=0',
+    'EXPIRES=Thu, 01 Jan 1970 00:00:00 GMT',
+  ])('accepts a session cookie that is being expired with %s', (attribute) => {
+    expect(
+      cookiesOf(`melarc_session=; ${attribute}; Path=/; HttpOnly; Secure; SameSite=Lax`),
+    ).toEqual([]);
+    expect(cookiesOf(SESSION, `melarc_csrf=; ${attribute}; Path=/; Secure; SameSite=Lax`)).toEqual(
+      [],
+    );
+  });
+
+  // Break caught: an expiry that carries a lifetime beside it being let through because part of it is an expiry. A
+  // browser that reads the later of the two would keep the cookie.
+  it('reports a session cookie whose Expires is in the past but whose Max-Age is not zero', () => {
+    expect(
+      cookiesOf(
+        'melarc_session=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=60; Path=/; HttpOnly; Secure; SameSite=Lax',
+      ),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_session', rule: 'max-age' }]);
+  });
+
+  // Break caught: the lifetime rule taking the place of the others, or leaving them off a cookie that has one.
+  it('still holds a session cookie with a lifetime rule broken to its other attributes', () => {
+    expect(
+      cookiesOf('melarc_session=S; Max-Age=60; Path=/api; HttpOnly; Secure; SameSite=Lax'),
+    ).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_session', rule: 'max-age' },
+      { in: 'response-cookie', pointer: 'melarc_session', rule: 'path' },
+    ]);
+  });
+
+  // Break caught: the device credential issued as a session cookie, so the registered browser forgets itself at
+  // the end of every browser session, or with the wrong lifetime. Its lifetime is an attribute like the others.
+  it('holds the vendor device credential to its Max-Age', () => {
+    expect(cookiesOf(SESSION, CSRF, DEVICE)).toEqual([]);
+    expect(
+      cookiesOf(SESSION, CSRF, 'melarc_vendor_device=D; Path=/; HttpOnly; Secure; SameSite=Lax'),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'max-age' }]);
+    expect(
+      cookiesOf(
+        SESSION,
+        CSRF,
+        'melarc_vendor_device=D; Max-Age=3600; Path=/; HttpOnly; Secure; SameSite=Lax',
+      ),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'max-age' }]);
+  });
+
+  // Break caught: the browser-session rule spreading to a cookie the contract did not mark. Only a cookie that says
+  // `browser_session: true` is held to it.
+  it('applies the rule only to a cookie the contract marks as a browser-session cookie', () => {
+    const unmarked = build(
+      {
+        melarc_session: {
+          attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/',
+          host_only: true,
+          read_by_javascript: false,
+        },
+      },
+      ['melarc_session'],
+    );
+
+    expect(
+      unmarked.validateResponse(
+        'c',
+        response({
+          status: 200,
+          headers: {
+            'set-cookie': ['melarc_session=S; Max-Age=60; Path=/; HttpOnly; Secure; SameSite=Lax'],
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  // Break caught: a contract that contradicts itself being read as one or the other. A cookie cannot be a
+  // browser-session cookie and have a lifetime, so the application refuses to start.
+  it.each(['Max-Age=3600', 'Expires=Fri, 31 Dec 2999 23:59:59 GMT'])(
+    'refuses a contract that gives a browser-session cookie %s',
+    (attribute) => {
+      expect(() => {
+        build(
+          {
+            a: {
+              attributes: `Secure; ${attribute}`,
+              browser_session: true,
+              host_only: true,
+              read_by_javascript: true,
+            },
+          },
+          ['a'],
+        ).prepare('c');
+      }).toThrow(/browser-session/);
+    },
+  );
+
+  it('refuses a browser_session that is not true or false', () => {
+    expect(() => {
+      build(
+        {
+          a: {
+            attributes: 'Secure',
+            browser_session: 'yes',
+            host_only: true,
+            read_by_javascript: true,
+          },
+        },
+        ['a'],
+      ).prepare('c');
+    }).toThrow(/browser_session/);
+  });
+});
+
 describe('a cookie a request must carry', () => {
   const validator = new ContractValidator({
     openapi: '3.1.0',

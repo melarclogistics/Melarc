@@ -124,6 +124,12 @@ function written(): JsonObject {
             principal_id: uuid(),
             state: { type: 'string', enum: ['ACTIVE', 'TERMINATED'] },
             authorized_hub_ids: { type: 'array', items: uuid() },
+            permissions: {
+              type: 'array',
+              uniqueItems: true,
+              readOnly: true,
+              items: { type: 'string', pattern: String.raw`^[a-z][a-z_]*(\.[a-z][a-z_]*)+$` },
+            },
             registered_device_id: { type: ['string', 'null'], format: 'uuid' },
             issued_at: dateTime(),
             expires_at: dateTime(),

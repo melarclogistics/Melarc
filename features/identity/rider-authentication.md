@@ -74,6 +74,8 @@ The contract defined **re-registration and no first registration**, so a rider c
 
 **The registering officer never learns the PIN.** That is what makes it a second factor rather than a shared secret between rider and hub.
 
+**A rider who has had a device revoked is not registered again here** (Product decision, 6 October 2026). `registerRiderDevice` is the first binding. For a rider who has had a device `REVOKED` it is refused with `STATE_CONFLICT`, a `409` the operation declares, and **only `reregisterRiderDevice` — with its verification note and the rider's `ETag` — re-binds**. Revocation is unverified on purpose; binding a handset again afterwards is the verified, in-person act of §4.3.
+
 ## 4.3 Private distribution, and what the device proves
 
 **The Rider app is built, signed and distributed privately and installed manually**; Google Play is not part of Version 1. **Nothing in this feature depends on Google Play installation, Play licensing or a Play recognition verdict**, and a request carries no field that would.
@@ -93,7 +95,7 @@ The contract defined **re-registration and no first registration**, so a rider c
 
 **The rule**. A rider has **at most one `ACTIVE` production device at a time**, and a rider who changes handset uses the controlled replacement workflow. **A physical production handset is intended for one rider at a time, and deliberately sharing a handset between riders is not permitted operationally.** Senior Ops verifies this **in person, during the enrolment or replacement ceremony** this feature already requires.
 
-**What the system enforces** is the **rider-to-registered-key binding**: one `ACTIVE` device for a rider, held structurally and not only by convention (`SECURITY_DESIGN.md` §15.2.1), so that `registerRiderDevice` refuses a second one (`AC-SLICE-000-76`) and a stale grant or a race can never produce two; a registered key that signs every sign-in; and a device status that can be revoked or replaced.
+**What the system enforces** is the **rider-to-registered-key binding**: one `ACTIVE` device for a rider, held structurally and not only by convention (`SECURITY_DESIGN.md` §15.2.1), so that `registerRiderDevice` refuses a second one (`AC-SLICE-000-76`), and refuses a rider whose device was revoked (`AC-SLICE-000-124`), while a stale grant or a race can never produce two; a registered key that signs every sign-in; and a device status that can be revoked or replaced.
 
 **What it does not enforce, and that is accepted rather than a defect.** Two separate enrolments on the same physical Android handset **cannot be reliably identified as the same handset** under Version 1: each generates its own key, and attestation proves what a key is and not which handset holds it. Version 1 **does not derive, store or enforce a physical-handset identifier** — an IMEI, a serial number, an Android ID, an advertising ID, a device fingerprint or ID attestation — to police sharing, and **adds no MDM or Managed Google Play for it**. **It is an operating rule checked by a person, and no implementation may quietly turn it into a technical control.**
 
@@ -134,6 +136,7 @@ It also bounds a stolen PIN. A PIN alone is useless without the handset, which i
 | PIN that is not exactly six decimal digits| Refused by the schema, at enrolment and at sign-in| `VALIDATION_FAILED`|
 | Rate limit exceeded| **Tight ceiling** — rider traffic is a bounded run of stops, so a low limit costs nothing legitimate. Refused first, never verified, never counted| `RATE_LIMITED`|
 | Phone collides with an ad-hoc sender| **Registration is refused**, not sign-in. The invariant is enforced when the identity is created (§30)| `VALIDATION_FAILED`|
+| `registerRiderDevice` for a rider who has had a device revoked| **Refused**; only `reregisterRiderDevice` re-binds (§4.2)| `STATE_CONFLICT`|
 | A rider's device is revoked, or the session is revoked, mid-session| **The `Session` record changes state in the same transaction as the act that caused it.** The next API call is refused. There is no cache, no blocklist and no interval in which the old token works. `revokeRiderDevice` and `revokeSession` do this in `SLICE-000`; the rider's own status change to `INACTIVE` or `SUSPENDED` belongs to rider administration (`SLICE-009`), which calls the same termination ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §15.3)| `SESSION_INVALID`|
 
 ### 5.4 What this feature must never do
@@ -188,7 +191,7 @@ It also bounds a stolen PIN. A PIN alone is useless without the handset, which i
 
 ## 10. Errors — *pointer*
 
-[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `CREDENTIAL_LOCKED`, `DEVICE_NOT_ENROLLED`, `DEVICE_PROOF_INVALID`, `DEVICE_INTEGRITY_FAILED`, `DEVICE_SECURITY_UNSUPPORTED`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `SETUP_GRANT_INVALID`, `SESSION_INVALID`, `RATE_LIMITED`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `NOT_FOUND`, `REASON_REQUIRED`, `VALIDATION_FAILED` and `STATE_CONFLICT`. **`DEVICE_SECURITY_UNSUPPORTED` and `DEVICE_INTEGRITY_FAILED` are returned at enrolment and replacement only, never at sign-in**. **`SESSION_SUPERSEDED` is the vendor displacement code and is never shown to a rider; `ATTEMPTS_EXHAUSTED` is a doorstep-handshake code; `OWNERSHIP_VIOLATION` was withdrawn** at Gate PD-3R1 — a Rider is told a record is not found and never that it belongs to someone else.
+[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `CREDENTIAL_LOCKED`, `DEVICE_NOT_ENROLLED`, `DEVICE_PROOF_INVALID`, `DEVICE_INTEGRITY_FAILED`, `DEVICE_SECURITY_UNSUPPORTED`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `SETUP_GRANT_INVALID`, `SESSION_INVALID`, `RATE_LIMITED`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `NOT_FOUND`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `VALIDATION_FAILED` and `STATE_CONFLICT`. **`DEVICE_SECURITY_UNSUPPORTED` and `DEVICE_INTEGRITY_FAILED` are returned at enrolment and replacement only, never at sign-in**. **`SESSION_SUPERSEDED` is the vendor displacement code and is never shown to a rider; `ATTEMPTS_EXHAUSTED` is a doorstep-handshake code; `OWNERSHIP_VIOLATION` was withdrawn** at Gate PD-3R1 — a Rider is told a record is not found and never that it belongs to someone else.
 
 ## 11. Audit events — *pointer*
 
@@ -206,7 +209,7 @@ It also bounds a stolen PIN. A PIN alone is useless without the handset, which i
 
 **The rider roster (Gate PD-3R1, `PDA-47`; confirmed by the Product Owner, `MSC-DEC-436`):** `listRiders` and `getRider` under `dispatch.read`, on the browser surface only — identity and readiness, **never a PIN, a hash, a key or an attestation**. `getRider` is where `reregisterRiderDevice` takes its `If-Match`; `revokeRiderDevice` takes none, deliberately, because revocation is unverified and low-friction.
 
-**Device lifecycle:** `registerRiderDevice` and `completeRiderDeviceEnrolment` (first binding), `reregisterRiderDevice` (replacement handset; takes a `RiderDeviceReregistration` — a `reason_code` and a mandatory `verification_note`), `revokeRiderDevice` (loss or theft; takes a `DeviceRevocation` — a mandatory `reason`).
+**Device lifecycle:** `registerRiderDevice` and `completeRiderDeviceEnrolment` (first binding), `reregisterRiderDevice` (replacement handset; takes a `RiderDeviceReregistration` — a `reason_code` and a mandatory `verification_note`), `revokeRiderDevice` (loss or theft; takes a `DeviceRevocation` — a mandatory `reason_code` of the rider-device-revocation domain, [domain-model.md](../../contracts/domain-model.md) §3.9).
 
 **Both registration operations return a scannable enrolment URI**, served `Cache-Control: no-store` and never logged or audited by value. The rider's handset consumes it at `completeRiderDeviceEnrolment`. **Senior Ops sees a QR code and never learns the PIN, the private key or the session credential.** **The URI also carries the single-use attestation challenge** the handset binds into its key, which lives and dies with the grant.
 
@@ -275,7 +278,7 @@ When Ops Staff or Senior Ops at the rider's hub calls revokeRiderDevice, or Seni
 Then the device is REVOKED, or the session is terminated with ADMIN_REVOKED, in the same transaction as the call,
 And the rider's next API call returns 401 SESSION_INVALID, with no interval in which the old token still works,
 And no cache or blocklist is consulted: the session record itself carries the decision,
-And a revocation made with no reason is refused with VALIDATION_FAILED and changes nothing,
+And a revocation made with an empty reason_code is refused with REASON_REQUIRED, and one with an unknown, retired or foreign-domain reason_code with REASON_NOT_ACTIVE, and nothing changes,
 And no later sign-in succeeds from the revoked handset.
 ```
 
@@ -774,6 +777,18 @@ And a Vendor session, and a Rider session although the Rider bundle holds dispat
 ```
 
 **Governs:** `MSC-DEC-432`, `MSC-DEC-436`, [permissions.md](../../contracts/permissions.md) §7 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `HUB_SCOPE_VIOLATION`, `PERMISSION_DENIED`
+
+### `AC-SLICE-000-124` — A rider who has had a device revoked is not registered again by registerRiderDevice
+
+```text
+Given a rider whose device was revoked by revokeRiderDevice and who holds no ACTIVE device,
+When Senior Ops calls registerRiderDevice for that rider,
+Then it is refused with STATE_CONFLICT, answered 409 and declared on the operation, and no grant is issued,
+And Senior Ops calling reregisterRiderDevice with a verification_note and the ETag read with getRider issues the enrolment grant,
+And a rider who never had a device is still registered by registerRiderDevice.
+```
+
+**Governs:** [rider-authentication.md](rider-authentication.md) §4.2 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `STATE_CONFLICT`
 
 ## 14. Open questions blocking this feature
 

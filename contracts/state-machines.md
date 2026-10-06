@@ -589,12 +589,14 @@ ACTIVE ──▶ TERMINATED
 
 | Transition| Actor| Guard| Effect| Error codes| Signature|
 |---|---|---|---|---|---|
-| `→ ACTIVE`| System| Credential verified; principal `ACTIVE`; **for Senior Ops and Platform Admin, a valid second factor**; for `RIDER` and `VENDOR`, the request comes from the registered device| Session issued with the bundle **snapshotted**, the authorized hub set resolved, and `expires_at` set from `session_lifetime_minutes`. **For `VENDOR` and `RIDER`, any existing live session is terminated first**| `INVALID_CREDENTIALS`, `MFA_REQUIRED`, `MFA_PROOF_INVALID`, `DEVICE_PROOF_INVALID`, `DEVICE_NOT_ENROLLED`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `CREDENTIAL_LOCKED`, `RATE_LIMITED`| **AMENDED · RE-SIGNED — `MSC-DEC-438`**|
+| `→ ACTIVE`| System| Credential verified; principal `ACTIVE`; **for Senior Ops and Platform Admin, a valid second factor**; for `RIDER` and `VENDOR`, the request comes from the registered device| Session issued with the bundle **snapshotted**, the authorized hub set resolved, and `expires_at` set from `session_lifetime_minutes`. **For `VENDOR` and `RIDER`, any existing live session is terminated first**| `INVALID_CREDENTIALS`, `MFA_REQUIRED`, `MFA_ENROLMENT_REQUIRED`, `MFA_PROOF_INVALID`, `DEVICE_PROOF_INVALID`, `DEVICE_NOT_ENROLLED`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `CREDENTIAL_LOCKED`, `RATE_LIMITED`| **AMENDED · RE-SIGNED — `MSC-DEC-438`**|
 | `ACTIVE → TERMINATED`| User, System or Admin| —| `terminated_at` and `termination_reason` recorded| —| —|
 | `ACTIVE → TERMINATED` **on authority change**| System| Any security-relevant authority change| Terminated **immediately** with the matching reason. The next login takes a fresh snapshot| —| —|
 | `ACTIVE → TERMINATED` **on idle**| System| `now − last_activity_at > session_idle_timeout_minutes`. **Browser sessions only**| `EXPIRED`. Rider sessions have no idle rule| —| —|
 
 **`MFA_REQUIRED` is a sign-in challenge, not an action refusal.** It is returned mid-sign-in to a role that must present a second factor, and never in response to a business operation — a session that exists is already privileged to whatever its bundle allows.
+
+**A privileged identity with no `ACTIVE` factor is answered the same way at the password step** (Product decision, 6 October 2026). The correct password of a Senior Ops or Platform Admin identity that holds no `ACTIVE` `MfaFactor` — its factor is `PENDING`, was revoked by a reset, or was never provisioned — is answered with the same `202` challenge as for an enrolled identity, so the password step says nothing about the factor. **`completeStaffMfaSignIn` then answers `403` `MFA_ENROLMENT_REQUIRED`**, issues no session and no cookie, and **that attempt does not count toward the lockout** ([staff-authentication.md](../features/identity/staff-authentication.md) §5.3, §5.5).
 
 **Termination reasons, and each is a different event.**
 
@@ -602,7 +604,7 @@ ACTIVE ──▶ TERMINATED
 |---|---|
 | `SIGNED_OUT`| The user signed out|
 | `OFFBOARDED`| The principal was offboarded (§30.10). **Distinct from `SUSPENDED`** — one is terminal and one is not, and an auditor reading a session record should not have to join to another table to tell|
-| `AUTHORITY_CHANGED`| The bundle changed. The snapshot no longer matches the grant|
+| `AUTHORITY_CHANGED`| The identity's assigned bundle changed — an approved bundle change, not an edit of a bundle's contents (§13.1). The snapshot no longer matches the grant|
 | `HUB_SCOPE_CHANGED`| The authorized hub set changed. Separate from `AUTHORITY_CHANGED` because §37.3 makes hub scope an independent axis from the bundle|
 | `DEVICE_REVOKED`| Melarc **explicitly revoked** the registered device binding — loss, theft or a security workflow.|
 | `DEVICE_REPLACED`| **Rider only.** The registered device was **superseded through the approved replacement workflow** — the old device became `REPLACED` when the new handset's enrolment completed. A device already `REVOKED` is not replaced, and its session already ended with `DEVICE_REVOKED`|
@@ -622,7 +624,7 @@ ACTIVE ──▶ TERMINATED
 
 **A privileged session is privileged for its whole life.** With elevation withdrawn, nothing re-challenges a Senior Ops user after sign-in.
 
-**Which is exactly why an authority change must end the session**. `bundle_snapshot` is deliberately a snapshot — resolving live would judge yesterday's action by today's authority — and the same property means a reduced bundle would otherwise leave the old permissions live for up to eight hours. **An administrator would remove access in the database while the user kept it.** Termination is what reconciles a historically honest snapshot with immediate revocation.
+**Which is exactly why an authority change must end the session**. `bundle_snapshot` is deliberately a snapshot — resolving live would judge yesterday's action by today's authority — and the same property means a reduced bundle would otherwise leave the old permissions live for up to eight hours. **An administrator would remove access in the database while the user kept it.** Termination is what reconciles a historically honest snapshot with immediate revocation. **That is an authority change to the identity** — a different bundle assigned (`AUTHORITY_CHANGED`), a hub scope change, a suspension. **Editing the contents of a bundle is not one** (Product decision, 6 October 2026): the edit applies to sessions created after it, live sessions keep the snapshot they were issued with, and a narrowing that must act at once is done with `revokeSession` ([permission-enforcement.md](../features/identity/permission-enforcement.md) §5.5).
 
 **The session credential is opaque, and the transport is now defined**. Browser surfaces receive it in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie; Melarc Rider receives the same class of secret as a Bearer credential in Android secure storage. Only `token_hash` is stored. **This was previously deferred to a Solution Architecture section that never defined it** — everything about the record was specified except what the client presents on the next request.
 
@@ -650,12 +652,14 @@ States: `PENDING_APPROVAL` · `ACTIVE` · `REJECTED` · `SUSPENDED` · `OFFBOARD
 
 | Transition| Actor| Guard| Effects| Failure code|
 |---|---|---|---|---|
-| `→ PENDING_APPROVAL`| **Ops Staff, Senior Ops or Platform Admin** at own hub (§30.8)| Work email unique and not yet verified. A bundle is named. **No credential and no MFA are supplied by the maker**| Profile created. **It grants nothing** — no session may be issued against it| `VALIDATION_FAILED`, `WORK_EMAIL_IN_USE`|
+| `→ PENDING_APPROVAL`| **Ops Staff, Senior Ops or Platform Admin** at own hub (§30.8)| Work email unique in its canonical form ([domain-model.md](domain-model.md) §6.8) and not yet verified. A bundle is named. **No credential and no MFA are supplied by the maker**| Profile created. **It grants nothing** — no session may be issued against it| `VALIDATION_FAILED`, `WORK_EMAIL_IN_USE`|
 | `PENDING_APPROVAL → ACTIVE`| **Senior Ops or Platform Admin** (§30.8)| **Approver ≠ creator** (§11.6, `MSC-DEC-135`). **Platform Admin required where the named bundle is privileged**| Bundle takes effect. A **`SetupGrant`** is issued to the verified work email. **Sign-in is not yet possible** — the identity is operationally `ACTIVE` and not authentication-ready| `SELF_APPROVAL_FORBIDDEN`, `INSUFFICIENT_AUTHORITY`|
-| `PENDING_APPROVAL → REJECTED`| **Senior Ops or Platform Admin**| Approver ≠ creator. **Reason mandatory**| Terminal. The record stays queryable (§36.1) and the work email is released| `SELF_APPROVAL_FORBIDDEN`, `REASON_REQUIRED`|
+| `PENDING_APPROVAL → REJECTED`| **Senior Ops or Platform Admin** — **a Platform Admin where the named bundle is privileged**| Approver ≠ creator. **Reason mandatory**: a `reason_code` of the staff-profile-rejection domain ([domain-model.md](domain-model.md) §3.9)| Terminal. The record stays queryable (§36.1) and **its work email is released** for a new profile| `SELF_APPROVAL_FORBIDDEN`, `INSUFFICIENT_AUTHORITY`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`|
 | `ACTIVE → SUSPENDED`| **Hub Senior Ops** for Ops Staff · **Platform Admin required** where the target holds a privileged bundle (§30.9)| Reason cites one of §30.9's **four grounds categories**| **Every session terminates** with `SUSPENDED` (§13). In-progress queue items become unavailable to them| `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`|
 | `SUSPENDED → ACTIVE`| **Hub Senior Ops** · **Platform Admin** where the target holds a privileged bundle| Reason mandatory| Sessions are **not** restored — the principal signs in afresh| `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`|
 | `ACTIVE → OFFBOARDED` · `SUSPENDED → OFFBOARDED`| **Hub Senior Ops** · **Platform Admin** where the target holds a privileged bundle| Reason mandatory| §30.10: access and credentials revoked **immediately**, every session terminated, all history preserved and never deleted, any motorcycle through §30.7's formal transfer| `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`|
+
+**Rejection takes the approval's tier, and the work email goes back to the pool** (Product decision, 6 October 2026). A profile whose named bundle is privileged is rejected, as it is approved, only by a Platform Admin other than the maker: a Senior Ops caller is `INSUFFICIENT_AUTHORITY` and an Ops Staff caller `PERMISSION_DENIED`. **A `REJECTED` profile releases its work email**: uniqueness holds among identities that are not `REJECTED`, so the address may be used on a new profile.
 
 **Both actor gaps were filled on 26 August by `MSC-DEC-253`**, and the tier comes from §30.9 rather than from §30.8. Suspension is the adjacent act: it already fixes who may remove a person's ability to work, and offboarding removes it permanently. Splitting the two across different authorities would let a Senior Ops suspend a rider indefinitely but not offboard them — a distinction with no operational meaning that invites suspension used as informal termination.
 
@@ -859,7 +863,7 @@ States: `PENDING` · `ACTIVE` · `REVOKED`. Terminal: `REVOKED`.
 | `→ PENDING` *(re-enrolment after reset)*| The staff member| A valid **`MFA_REENROLMENT`** grant is consumed at `beginMfaReenrolment`| Any unusable `PENDING` factor is superseded; a new `PENDING` factor and secret are created and an **`MFA_ENROLMENT`** continuation grant issued| `SETUP_GRANT_INVALID`|
 | `PENDING → ACTIVE`| The staff member| **A generated code is successfully proven** against a valid **`MFA_ENROLMENT`** grant — the *only* purpose that can activate. Any previously `ACTIVE` factor is revoked| The identity becomes authentication-ready **if every other requirement is met**. The continuation grant is consumed| `MFA_PROOF_INVALID`, `SETUP_GRANT_INVALID`|
 | `PENDING → REVOKED`| System or Platform Admin| Enrolment abandoned or superseded| Terminal. **No active or usable factor exists; the revoked factor record is retained as history**| —|
-| `ACTIVE → REVOKED`| **Platform Admin** holding `staff.mfa.reset`, or the system on re-enrolment| **Mandatory reason** where administrative| **Every session for the owner terminates** with `MFA_RESET`. A re-enrolment `SetupGrant` is issued. **Enhanced audit**| `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`|
+| `ACTIVE → REVOKED`| **Platform Admin** holding `staff.mfa.reset`, or the system on re-enrolment| **Mandatory reason** where administrative: a `reason_code` of the MFA-reset domain ([domain-model.md](domain-model.md) §3.9). **The actor is not the target, and the target is a privileged identity holding an `ACTIVE` factor**| **Every session for the owner terminates** with `MFA_RESET`. A re-enrolment `SetupGrant` is issued. **Enhanced audit**| `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `INSUFFICIENT_AUTHORITY`, `SELF_APPROVAL_FORBIDDEN`, `STATE_CONFLICT`|
 
 **Three creating purposes, one activating purpose.** The table listed `MFA_ENROLMENT` among the grants that *create* a `PENDING` factor and omitted `STAFF_CREDENTIAL_SETUP` entirely — so ordinary privileged onboarding, the commonest path in the product, had **no row**, and the continuation grant appeared to authorise both halves of its own issuance. Corrected by R1.1 to match the API lifecycle exactly:
 
@@ -881,6 +885,8 @@ States: `PENDING` · `ACTIVE` · `REVOKED`. Terminal: `REVOKED`.
 **Reset is not recovery, and the separation is the whole control**. Password recovery leaves the factor untouched. If it did not, an attacker holding a compromised work email would have turned *"password and MFA"* into *"control of the email account"* — and the email is the password-recovery channel. **There are no backup codes, bypass codes or support overrides**, because each would be a weaker secret that silently defeats the stronger one.
 
 **A Platform Admin cannot turn MFA off.** Reset revokes and re-issues; it does not produce an identity that can hold a privileged session without a factor.
+
+**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). A Platform Admin **cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`). A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. The consequence for a stranded bootstrap administrator is an open question ([credential-recovery.md](../features/identity/credential-recovery.md) §5.6).
 
 ## 19. `SetupGrant`
 
@@ -907,7 +913,7 @@ States: `PENDING` · `CONSUMED` · `EXPIRED` · `SUPERSEDED`. Terminal: `CONSUME
 | Purpose| Delivered by| Why|
 |---|---|---|
 | `STAFF_CREDENTIAL_SETUP`| The staff member's **verified work email** (§37.2)| Unverified means no channel, and therefore no onboarding|
-| `VENDOR_CREDENTIAL_SETUP`| The account's **registered setup channel**| Chosen at approval, never supplied in the request|
+| `VENDOR_CREDENTIAL_SETUP`| The credential's **`delivery_channel`** — `PHONE` or `EMAIL`, to the registered phone or email| **Chosen at approval** by the approver and stored on the `VendorCredential` ([domain-model.md](domain-model.md) §6.8), never supplied in the request. It is also the channel a vendor's recovery link goes by|
 | `MFA_REENROLMENT`| **Two authorised origins, two transports.** Ordinary administrative reset → the affected staff principal's **verified work email**. **Bootstrap resume under `MSC-DEC-272`** → the **controlled provisioning channel**| It is a privileged recovery authorising **beginning** re-enrolment only. **Transport differs; purpose does not** — the act authorised is identical, and a second purpose invented for a second delivery route would fragment the enum without adding a rule|
 | `BOOTSTRAP_SETUP`| The **controlled provisioning channel**| **The bootstrap `StaffIdentity` already exists after seed.** The provisioning channel is used because **first-administrator setup must not depend on ordinary user-controlled or verified application delivery** — there is no verified work email yet, and trusting one would let whoever provisioned the environment nominate where the highest-authority credential in the system is sent|
 | `MFA_ENROLMENT`| **Returned directly in the response** that created the `PENDING` factor| A continuation credential inside a live transaction, not a new setup invitation. Emailing it would create a second, mailbox-reachable path to activating a factor|

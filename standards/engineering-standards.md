@@ -113,7 +113,7 @@ Derived from §37.1, §42.2 and §45.7. Each is a defect regardless of any other
 - **No manual database edit is part of normal operation** (§45.7).
 - **Secrets, full credentials, raw OTPs and unnecessary personal data never enter audit logs** (§38.2).
 - **Nothing operational is hard-deleted.** Correction is forward-only; deactivation, not deletion.
-- **Delete, archive, anonymize and retention behaviour is explicit** and never left to framework cascade defaults (§42.6).
+- **Delete, archive, anonymize and retention behaviour is explicit** and never left to framework cascade defaults (§42.6). **The migration lint refuses `ON DELETE CASCADE`, `TRUNCATE` and a `DELETE` grant** unless a comment on that statement records the reason, `-- allow-delete: <reason>` ([MIGRATION_AND_SEEDING.md](../architecture/MIGRATION_AND_SEEDING.md) §5.1).
 - **Override authority follows the act, not the habit**. An override that **verifies** a fact by an alternative means sits at Ops; an override that **waives** a rule sits at Senior Ops or above. Placing a verification at Senior Ops delays field work for no control gained; placing a waiver at Ops removes a control. Ask which the act is before assigning the floor.
 - **An operational or custody decision is never blocked by missing commercial configuration**. A parcel's disposition cannot wait on a price nobody has entered. Where a commercial setting sits in an operational path, an unset value produces a **recorded** absence and the operation proceeds — never a halt. `SETTING_MISSING` is correct for pricing and configuration paths and wrong for operational ones; the trap is that both call the same resolver.
 

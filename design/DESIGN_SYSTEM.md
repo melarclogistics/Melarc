@@ -1,12 +1,20 @@
 # Melarc Design System
 
-> **Status:** DRAFT DESIGN BASELINE — grounded in the approved Melarc Brand Foundation; exact implementation values become active after Product Owner review  
-> **Version:** 1.1  
+> **Status:** ACTIVE DESIGN BASELINE — grounded in the approved Melarc Brand Foundation; approved by the Product Owner on 6 October 2026  
+> **Version:** 1.2  
 > **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4.6, §11, §13.1, §14, §22, §24–§26, §29, §36)  
 > **Repository path:** `design/DESIGN_SYSTEM.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`  
 > **Owns:** semantic design tokens, accessibility rules, typography scale, spacing, radius, elevation, focus treatment, responsive behavior, density, UI state presentation, token naming, and the initial UI-foundation implementation scope  
 > **Does not own:** product workflows, business rules, API behavior, domain state semantics, logo source artwork, or speculative component APIs
+
+---
+
+**Approval (Product Owner, 6 October 2026).** This document is approved and its values are active. Where the text still says
+"proposed" or "provisional" about a value (the inverse focus and link recipes, the interface crimson and ink, the palette,
+the spacing, breakpoints and focus ring), that approval settles it. What stays open is only what §36 shows as OPEN, NOT
+DECIDED, DEFERRED, NOT STARTED or NOT YET FINAL. A change to an approved value is a foundation change (§34) made here, in
+the same commit as the token file.
 
 ---
 
@@ -473,13 +481,9 @@ section meets its threshold, so a later token change cannot silently break one. 
 
 ## 5.1 Typeface
 
-Recommended product UI typeface:
+The product UI typeface is **Inter**, approved by the Product Owner on 6 October 2026 and self-hosted by the Ops Portal.
 
-**Inter**
-
-Status: **provisional until Product Owner explicitly accepts it as the product UI typeface**.
-
-Fallback stack:
+The stack below shows while a font file loads and for any character Inter does not cover:
 
 ```text
 Inter,
@@ -491,17 +495,18 @@ BlinkMacSystemFont,
 sans-serif
 ```
 
-Do not bundle proprietary font files without an explicit licensing decision.
+How it is shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.test.ts` and the browser tests):
 
-Until the Product Owner accepts a typeface, the foundation uses this stack and bundles no font file, so there is no
-licence, Content-Security-Policy or offline-test consequence to settle. When a typeface is accepted and self-hosted:
-
-- the files are committed with the app that serves them, never hot-linked from a CDN, with the licence text beside
-  them (Inter is distributed under the SIL Open Font License 1.1; confirm the exact files and version then);
-- the Content-Security-Policy allows fonts from the app's own origin only (`font-src 'self'`);
-- only the weights the type scale uses are shipped (400, 500 and 600), and `font-display: swap` over the fallback stack
-  keeps text readable while a file loads;
-- the browser tests still show that the page requests only its own files.
+- the files are committed under `src/assets/fonts/`, never hot-linked from a CDN. `fonts.json` there records the version,
+  where the files came from and the SHA-256 of each file, and the SIL Open Font License 1.1 text ships with the build at
+  `/licenses/Inter-OFL.txt`;
+- Inter is a variable font. The Latin and Latin Extended subsets are shipped, one file each, and the browser fetches a
+  subset only when the page holds a character of its `unicode-range`. They are declared for weights 400 to 600, the range
+  of the type scale (§5.2). Other scripts use the stack above until a requirement names them;
+- the files are never inlined into the stylesheet, because the Content-Security-Policy allows fonts from the app's own
+  origin only (`font-src 'self'`) and refuses a `data:` address;
+- `font-display: swap` keeps text readable over the stack while a file loads;
+- the browser tests show that the page loads Inter under that policy and requests only its own files.
 
 ---
 
@@ -790,11 +795,9 @@ unless workflow requirements justify wider composition.
 Melarc web interfaces target **WCAG 2.2 level AA** as a design baseline. It is a target, not a conformance claim.
 
 **Relationship to the surface documents.** [surfaces/ops-portal.md](../surfaces/ops-portal.md) §11 and
-[vendor-pwa.md](../surfaces/vendor-pwa.md) §9 set WCAG 2.1 level AA as the working target for the `SLICE-000` screens
-and leave the formal conformance level to a later Product Owner decision (master specification §40.6). Building to
-WCAG 2.2 AA satisfies that working target: 2.2 AA adds criteria to 2.1 AA and drops only 4.1.1 Parsing, which it marks
-obsolete. The documents therefore agree, and an implementation applies this section and never a weaker reading. Whether
-the surface documents' wording is raised to 2.2 is for the Product Owner at their next review.
+[vendor-pwa.md](../surfaces/vendor-pwa.md) §9 state the same working target, WCAG 2.2 level AA (aligned by the Product
+Owner on 6 October 2026), and leave the formal conformance level to a later Product Owner decision (master specification
+§40.6). An implementation applies this section and never a weaker reading.
 
 ### Required defaults
 
@@ -1048,11 +1051,11 @@ Permission-aware navigation is usability only.
 
 Backend authorization remains authoritative.
 
-Which entries a session may use depends on caller-capability discovery, which no contract provides yet: the `Session`
-resource carries no permissions and no operation returns what the caller may do
-([surfaces/ops-portal.md](../surfaces/ops-portal.md) §4). Until a later slice specifies the source, the navigation
-component takes a plain list and shows none. Never infer entries from a role name, and never fill the menu with
-placeholders.
+Which entries a session may use comes from the `permissions` list of the `Session` resource: the permission keys the
+session holds, from the snapshot taken when it was created (decided 6 October 2026; [contracts/openapi.yaml](../contracts/openapi.yaml)).
+An entry is shown when the session holds the key its screen needs. Never infer entries from a role name, and never fill
+the menu with placeholders. The navigation component takes a plain list and shows none until the identity slice supplies
+it from the session. The server stays authoritative: a hidden entry is a convenience, and a shown one is not a grant.
 
 ### Active navigation
 
@@ -1428,27 +1431,27 @@ Each pattern should eventually document:
 |---|---|
 | Crimson + Ink direction | **APPROVED** |
 | Balanced density model | **APPROVED** |
-| Semantic token architecture | **PROPOSED BASELINE** |
-| Primitive palette values | **PROPOSED BASELINE** |
-| Interface crimson `#B4232E` | **PROVISIONAL** |
-| Interface ink `#172033` | **PROVISIONAL** |
-| Inter | **RECOMMENDED / NOT YET FINAL**; the foundation builds on the fallback stack with no font file (decided 6 October 2026) |
-| 4px spacing base | **PROPOSED BASELINE** |
-| Responsive breakpoint set | **PROPOSED BASELINE** |
-| Blue focus ring `#2563A6` | **PROPOSED BASELINE** |
+| Semantic token architecture | **APPROVED** (Product Owner, 6 October 2026) |
+| Primitive palette values | **APPROVED** (6 October 2026) |
+| Interface crimson `#B4232E` | **APPROVED** as the active interface value (6 October 2026); the logo's own red stays a reference until the vector artwork is supplied (§4.1) |
+| Interface ink `#172033` | **APPROVED** as the active interface value (6 October 2026) |
+| Inter | **APPROVED** (6 October 2026), self-hosted as the variable Latin and Latin Extended files of §5.1 under the SIL Open Font License 1.1 |
+| 4px spacing base | **APPROVED** (6 October 2026) |
+| Responsive breakpoint set | **APPROVED** (6 October 2026) |
+| Blue focus ring `#2563A6` | **APPROVED** (6 October 2026) |
 | Dark mode | **DEFERRED** |
 | Tailwind | **NOT DECIDED** |
 | Radix | **NOT DECIDED** |
 | Shared web component package | **NOT YET REQUIRED** |
 | Shared brand asset package | **POSSIBLE LATER** |
-| Supported pairings and state recipes (§4.6) | **PROPOSED BASELINE** |
+| Supported pairings and state recipes (§4.6) | **APPROVED** (6 October 2026), including the danger outline recipe |
 | Inverse focus, inverse link and Ink-shell indicator values (§4.6) | **APPROVED** as proposed (Product Owner, 6 October 2026); first used by the authenticated Ops shell |
 | `border.control` | **DECIDED** 6 October 2026: darkened to `#7C879B` (`gray.550`), 3:1 on every light surface (§4.6); a provisional value like the rest |
-| WCAG 2.2 AA design baseline against the surfaces' 2.1 AA working target (§14) | **DECIDED** 6 October 2026: components are tested to 2.2 AA. Raising the working-target wording of `surfaces/ops-portal.md` §11 and `vendor-pwa.md` §9 from 2.1 to 2.2 AA is the Product Owner's edit to those approved documents; the formal conformance level stays **OPEN** (master §40.6) |
+| WCAG 2.2 AA design baseline (§14) | **DECIDED** 6 October 2026: components are tested to 2.2 AA, and `surfaces/ops-portal.md` §11 and `vendor-pwa.md` §9 now say 2.2 AA is the working target; the formal conformance level stays **OPEN** (master §40.6) |
 | Setup routes: neutral frame or a bare layout (§13.1) | **DECIDED** 6 October 2026: the neutral frame |
 | First implementation scope (COMPONENT_PATTERNS §42.2) | **CONFIRMED** 6 October 2026, built in three increments |
 | Browser coverage of the component acceptance (§14) | **DECIDED** 6 October 2026: Chromium, Firefox and WebKit in CI; Chromium locally unless the others are installed |
-| Source of the signed-in navigation entries (§22) | **OPEN**: no contract provides it yet |
+| Source of the signed-in navigation entries (§22) | **DECIDED** 6 October 2026: the `permissions` list of the `Session` resource |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |
 

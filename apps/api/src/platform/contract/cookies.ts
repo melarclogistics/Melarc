@@ -62,13 +62,19 @@ export interface ExpectedCookie {
   readonly hostOnly: boolean;
   /** Script on the page reads it, so it cannot be `HttpOnly`. */
   readonly readableByScript: boolean;
+  /**
+   * A browser-session cookie: issued with no `Max-Age` and no `Expires`, so it ends with the browser session. The only
+   * lifetime it may ever be sent with is an expiry (see `isExpiry`), which is how a browser is told to remove it.
+   */
+  readonly browserSession: boolean;
 }
 
 /**
  * Reads a cookie's definition from `x-cookies`: `attributes` is the `Set-Cookie` attribute text the contract
- * promises, and `host_only` and `read_by_javascript` are facts about the cookie. A cookie `x-cookies` does not
- * define, or whose definition contradicts itself, cannot be checked, and a validator that quietly skipped it
- * would run unprotected, so this throws.
+ * promises (a persistent cookie's `Max-Age` is one of them), and `host_only`, `read_by_javascript` and
+ * `browser_session` are facts about the cookie. A cookie `x-cookies` does not define, or whose definition
+ * contradicts itself, cannot be checked, and a validator that quietly skipped it would run unprotected, so this
+ * throws.
  */
 export function expectedCookie(name: string, definition: Json | undefined): ExpectedCookie {
   if (!isJsonObject(definition) || typeof definition.attributes !== 'string') {
@@ -93,12 +99,43 @@ export function expectedCookie(name: string, definition: Json | undefined): Expe
     );
   }
   if (definition.read_by_javascript === false) flags.add('httponly');
-  return { flags, values, hostOnly: definition.host_only === true, readableByScript };
+
+  if (definition.browser_session !== undefined && typeof definition.browser_session !== 'boolean') {
+    throw new Error(
+      `The contract's x-cookies gives ${name} a browser_session that is neither true nor false.`,
+    );
+  }
+  const browserSession = definition.browser_session === true;
+  if (browserSession && (values.has('max-age') || values.has('expires'))) {
+    throw new Error(
+      `The contract's x-cookies says ${name} is a browser-session cookie and also gives it a Max-Age or Expires, which cannot both hold.`,
+    );
+  }
+  return {
+    flags,
+    values,
+    hostOnly: definition.host_only === true,
+    readableByScript,
+    browserSession,
+  };
+}
+
+/**
+ * Whether a lifetime a cookie was sent with tells the browser to remove it, which is the one lifetime a
+ * browser-session cookie may carry. `Max-Age` is a whole number of seconds, and zero or less expires the cookie
+ * at once; `Expires` is a date, and one that has passed does the same. Anything else, including text that is no
+ * number or no date, is not an expiry.
+ */
+function isExpiry(attribute: 'max-age' | 'expires', value: string): boolean {
+  if (attribute === 'max-age') return /^-?\d+$/.test(value) && Number(value) <= 0;
+  const date = Date.parse(value);
+  return !Number.isNaN(date) && date <= Date.now();
 }
 
 /**
  * The attributes of a cookie that was set which the contract does not allow, named in the contract's own words
- * (`httponly`, `secure`, `samesite`, `path`, `domain`), sorted.
+ * (`httponly`, `secure`, `samesite`, `path`, `domain`, and for a browser-session cookie `max-age` and `expires`),
+ * sorted.
  */
 export function brokenAttributes(actual: SetCookie, expected: ExpectedCookie): string[] {
   const broken = new Set<string>();
@@ -110,5 +147,11 @@ export function brokenAttributes(actual: SetCookie, expected: ExpectedCookie): s
     if (!same) broken.add(key);
   }
   if (expected.hostOnly && actual.values.has('domain')) broken.add('domain');
+  if (expected.browserSession) {
+    for (const attribute of ['max-age', 'expires'] as const) {
+      const got = actual.values.get(attribute);
+      if (got !== undefined && !isExpiry(attribute, got)) broken.add(attribute);
+    }
+  }
   return [...broken].toSorted();
 }

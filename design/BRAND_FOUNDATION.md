@@ -280,7 +280,7 @@ The interface typography should feel:
 
 **Inter** is the recommended initial interface typeface.
 
-Status: **recommended, not yet formally approved as a permanent brand typeface**.
+Status: **recommended, not yet formally approved as a permanent brand typeface**. The Product Owner adopted Inter for the Ops Portal interface on 6 October 2026 ([DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) §5.1); whether it is the permanent brand typeface is not decided.
 
 Reasons:
 

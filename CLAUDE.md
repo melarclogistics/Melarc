@@ -31,9 +31,9 @@ The specifications and engineering foundation of the Melarc logistics platform: 
 | HTTP API: operations, schemas, security | [contracts/openapi.yaml](contracts/openapi.yaml) |
 | Workflow behavior and acceptance criteria | [features/](features/CLAUDE.md), indexed in [features/README.md](features/README.md) |
 | Screens and client behavior | [surfaces/overview.md](surfaces/overview.md): [Ops](surfaces/ops-portal.md), [Vendor](surfaces/vendor-pwa.md), [Rider](surfaces/rider-android.md), [Recipient](surfaces/recipient-channel.md), [service guidelines](surfaces/service-guidelines.md) |
-| Brand, design tokens, UI component patterns | [design/BRAND_FOUNDATION.md](design/BRAND_FOUNDATION.md) (active); [design/DESIGN_SYSTEM.md](design/DESIGN_SYSTEM.md) and [design/COMPONENT_PATTERNS.md](design/COMPONENT_PATTERNS.md) (drafts until Product Owner review) |
+| Brand, design tokens, UI component patterns | [design/BRAND_FOUNDATION.md](design/BRAND_FOUNDATION.md) (active); [design/DESIGN_SYSTEM.md](design/DESIGN_SYSTEM.md) and [design/COMPONENT_PATTERNS.md](design/COMPONENT_PATTERNS.md) (all three active; the last two approved 6 October 2026) |
 | Solution structure, modules, database | [architecture/SOLUTION_ARCHITECTURE.md](architecture/SOLUTION_ARCHITECTURE.md) |
-| Security design | [architecture/SECURITY_DESIGN.md](architecture/SECURITY_DESIGN.md), [security test matrix](standards/security-test-matrix.md) |
+| Security design; reporting a vulnerability | [architecture/SECURITY_DESIGN.md](architecture/SECURITY_DESIGN.md), [security test matrix](standards/security-test-matrix.md); [SECURITY.md](SECURITY.md) |
 | Environments, secrets, release path | [architecture/DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) |
 | Migrations and seeding | [architecture/MIGRATION_AND_SEEDING.md](architecture/MIGRATION_AND_SEEDING.md) |
 | Background jobs and events | [architecture/BACKGROUND_JOBS_AND_EVENTS.md](architecture/BACKGROUND_JOBS_AND_EVENTS.md) |

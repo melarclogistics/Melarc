@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.75.0-identity-reads-and-lockout
- *   SHA-256 1034cffb122d13f8775f1e9750591d483991f771b2b6912269ebca67bb358898 (of the contract, line endings normalized to LF)
+ *   SHA-256 a17a8cc68cec9fba3c248bb8b7a9ab0ce9c0acb0979e5f3f9bb9aa89b6f2a2ed (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1301,6 +1301,10 @@ export interface paths {
          *     Completing the challenge at `/auth/staff/sign-in/mfa` issues the session, already
          *     privileged for its lifetime.
          *
+         *     **A privileged identity whose password is correct but which has no `ACTIVE` MFA factor** receives
+         *     the same `202` challenge as an enrolled one, so this answer reveals nothing about the factor. The
+         *     refusal is `completeStaffMfaSignIn`'s: `MFA_ENROLMENT_REQUIRED`.
+         *
          *     **`INVALID_CREDENTIALS` is returned identically** for an unknown email, a wrong password
          *     and a suspended account, with matching timing. Distinguishing them confirms which
          *     addresses are real staff, and Melarc staff emails follow a predictable pattern (§37.7).
@@ -1340,6 +1344,8 @@ export interface paths {
          *     unattended browser, which an absolute lifetime cannot tell apart from a working user.
          *
          *     **A wrong code counts twice**: against the challenge (`mfa_max_attempts` 3, then `CHALLENGE_UNUSABLE`) and against the identity's failed-attempt count shared with the password, so a thief who knows the password cannot guess codes across fresh challenges. The caller holds a live challenge - the password was proved - so a locked identity is told `CREDENTIAL_LOCKED` here. A complete sign-in resets the count.
+         *
+         *     **An identity with no `ACTIVE` MFA factor** (privileged, password correct, no factor proven yet) is answered `MFA_ENROLMENT_REQUIRED` with `403` here, never at `staffSignIn`, which gave it the same `202` challenge as an enrolled identity. **That attempt does not count towards the lockout**: no factor was presented. No session is issued.
          */
         post: operations["completeStaffMfaSignIn"];
         delete?: never;
@@ -1400,7 +1406,7 @@ export interface paths {
          *     could not establish a result, and is valid. A signature that does not verify is refused
          *     whatever the signal says.
          *
-         *     **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (5) Otherwise a wrong PIN, or a status other than `ACTIVE`, is `INVALID_CREDENTIALS`, and only a wrong PIN counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path performs one hash verification, so timing does not say which stage ended the request.
+         *     **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a status other than `ACTIVE` is `INVALID_CREDENTIALS`: the PIN is not examined, nothing is counted and no lock is announced, because the factor has not been reached. (5) With a valid signature and an `ACTIVE` status, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (6) Otherwise a wrong PIN is `INVALID_CREDENTIALS` and counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path performs one hash verification, so timing does not say which stage ended the request.
          */
         post: operations["riderSignIn"];
         delete?: never;
@@ -1428,10 +1434,12 @@ export interface paths {
          *     by nothing, so a stolen shared secret alone signed in from any browser, which is precisely
          *     what the device credential exists to prevent.
          *
-         *     **This operation does not issue or rotate the device credential.** It proves one that
-         *     already exists. Rotation happens only where a browser is deliberately being registered -
-         *     initial setup and recovery - because a login that silently re-registers whatever browser
-         *     presents itself registers the attacker's browser too.
+         *     **This operation does not issue a new device credential or rotate one.** It proves one that
+         *     already exists, and **renews its lifetime**: the same credential is set again with a fresh
+         *     `Max-Age` (`x-cookies`), so a browser in regular use never reaches the end of its 400 days.
+         *     Rotation happens only where a browser is deliberately being registered - initial setup and
+         *     recovery - because a login that silently re-registers whatever browser presents itself
+         *     registers the attacker's browser too.
          *
          *     **A failure of any factor is reported identically.** `INVALID_CREDENTIALS` covers an
          *     unknown account, a wrong secret and an unregistered browser, in content and in timing.
@@ -1463,7 +1471,9 @@ export interface paths {
         };
         /**
          * The caller's current session
-         * @description Returns principal, authorized hub set and expiry. **Never the session credential.**
+         * @description Returns principal, authorized hub set, expiry and the permission keys the session holds
+         *     (`permissions`: from the session's snapshot, keys only, never role names). **Never the
+         *     session credential.**
          *
          *     **There is no elevation state**. This described a field the Session schema has
          *     never carried.
@@ -1571,7 +1581,10 @@ export interface paths {
          *     **Always returns 202**, whether or not the identifier exists, with matching timing. An
          *     enumerable recovery endpoint discloses which addresses are real staff (37.7).
          *
-         *     Issuing supersedes any PENDING request for that principal.
+         *     Issuing supersedes any PENDING request for that principal, **except inside the supersede
+         *     guard**: a request made less than `recovery_request_supersede_guard_seconds` (60, a starting
+         *     value) after the pending link was issued neither supersedes it nor issues another, and is
+         *     answered with the same `202` as any other, so nothing is revealed.
          *
          *     **A suspended principal's request proceeds like any other**; the suspension stands. **A message the delivery channel refuses changes nothing the caller can see**: the request is rolled back, the failure is logged and counted by the provider-failure alert, and `CREDENTIAL_DELIVERY_FAILED` is never returned here.
          */
@@ -2173,7 +2186,9 @@ export interface paths {
          *
          *     **A Platform Admin is required where the named bundle is privileged** - Senior Ops or
          *     Platform Admin - returning `INSUFFICIENT_AUTHORITY` (MSC-DEC-248, confirmed 26 August under
-         *     MSC-DEC-253).
+         *     MSC-DEC-253). **The same holds for rejection**: rejecting a profile that carries a privileged
+         *     bundle needs a Platform Admin other than the maker, and a lower tier is
+         *     `INSUFFICIENT_AUTHORITY` (`403`).
          *
          *     **Approval does NOT make sign-in possible**. It issues a SetupGrant to the
          *     verified work email; the employee establishes their own password, and a privileged identity
@@ -2181,7 +2196,7 @@ export interface paths {
          *     grants zero authenticated access.
          *
          *     Rejection is the same call with `approved: false` and a mandatory reason. It is terminal and
-         *     the record stays queryable (36.1).
+         *     the record stays queryable (36.1). **Its work email is released**: a new profile may use it.
          *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
@@ -3246,6 +3261,10 @@ export interface paths {
          *     **The holder cannot turn MFA off.** There is no state in which a privileged identity has no
          *     factor and can still authenticate - no backup codes, no bypass codes, no support override.
          *
+         *     **Refusals.** Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`; the other bootstrap
+         *     Platform Admin is a valid actor on a stranded one. A target whose factor is only `PENDING`
+         *     (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
          *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
@@ -3287,6 +3306,11 @@ export interface paths {
          *     **Guard: `StaffIdentity.credential IS NULL`.** A profile that has already established a
          *     password is not being onboarded again - `STATE_CONFLICT`. Use recoverStaffCredential for
          *     that case.
+         *
+         *     **A bootstrap identity is refused with `STATE_CONFLICT`** (`409`): a fresh 30-minute grant would
+         *     go to an address nobody verified, because the seeded Platform Admins never passed the approval
+         *     that makes a work email verified. A stranded bootstrap administrator is recovered by the other
+         *     Platform Admin with `resetStaffMfa`.
          *
          *     **Effect: the signed SetupGrant machine's own `-> PENDING` transition** ("System, or the
          *     authorising actor for an administrative reset" - state-machines.md 19), for the same
@@ -3386,7 +3410,9 @@ export interface paths {
          *
          *     **A rider has at most one `ACTIVE` device**. A rider who already has one is
          *     refused with `STATE_CONFLICT`, and a change of handset is `reregisterRiderDevice`, never a
-         *     second binding. **One rider per handset is an operating rule that Senior Ops checks in
+         *     second binding. **A rider who has had a device revoked is refused with `STATE_CONFLICT` too**
+         *     (`409`): only `reregisterRiderDevice`, which requires a verification note and the rider's ETag,
+         *     binds that rider again. **One rider per handset is an operating rule that Senior Ops checks in
          *     person**; the system enforces the rider-to-key binding and **cannot identify one handset
          *     across riders**, and no handset identifier is collected or enforced to police it.
          *
@@ -3969,7 +3995,7 @@ export interface paths {
          *     path parameter, the grant is rider-bound, and the new handset establishes its own key when
          *     it completes the enrolment.
          *
-         *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getRider` on this rider, which changes when the rider's status or device set changes. A mismatch is `STATE_CONFLICT`; the rider is found with `listRiders`. `registerRiderDevice` (first binding) takes no `If-Match`: it is refused with `STATE_CONFLICT` when an `ACTIVE` device exists, and `revokeRiderDevice` takes none either, because revocation is deliberately immediate and unverified.
+         *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getRider` on this rider, which changes when the rider's status or device set changes. A mismatch is `STATE_CONFLICT`; the rider is found with `listRiders`. `registerRiderDevice` (first binding) takes no `If-Match`: it is refused with `STATE_CONFLICT` when an `ACTIVE` device exists or one has been revoked, and `revokeRiderDevice` takes none either, because revocation is deliberately immediate and unverified.
          */
         post: operations["reregisterRiderDevice"];
         delete?: never;
@@ -5253,6 +5279,10 @@ export interface paths {
          *     **Approval issues exactly one `VENDOR_CREDENTIAL_SETUP` grant** to the account's
          *     registered recovery channel, resolved from the record and never from the request
          *     (state-machines.md 19.1). That grant is where vendor-authentication.md 5.1 begins.
+         *
+         *     **The approver chooses the delivery channel.** `delivery_channel` (`PHONE` or `EMAIL`) is required
+         *     on approval and is stored on the vendor credential. It is the channel that grant, and every later
+         *     credential-setup and recovery grant for the account, is delivered to; the vendor never supplies it.
          *
          *     **Delivery** (Gate PD-3R2, applying `PDA-54` to the one issuing operation that lacked it): the grant
          *     is handed to the delivery channel inside this operation, before it commits, and its raw token is
@@ -6590,6 +6620,15 @@ export interface components {
             approved: boolean;
             /** @description Mandatory when `approved` is false (29.2.5). Optional on approval. */
             reason?: string;
+            /**
+             * @description Chosen by the approver at approval, and **required when `approved` is true**: which of the
+             *     account's recovery channels (`recovery_phone`, `recovery_email`) the setup grant, and every
+             *     later credential-setup and recovery grant for the account, is delivered to. It is stored on
+             *     the vendor credential and never supplied by the vendor. A rejection issues no grant and
+             *     needs none.
+             * @enum {string}
+             */
+            delivery_channel?: "PHONE" | "EMAIL";
         };
         /**
          * @description **A reason and nothing else.** No amount - the limit is one platform-wide figure,
@@ -7558,7 +7597,13 @@ export interface components {
             note?: string;
         };
         StaffSignIn: {
-            /** Format: email */
+            /**
+             * Format: email
+             * @description The staff member's work email. Compared in its canonical form: trimmed, Unicode
+             *     NFKC-normalised and lower-cased as a whole address, with no dot or plus-tag folding. The
+             *     same form decides uniqueness and keys the rate limit. The address is stored and displayed
+             *     as entered.
+             */
             email: string;
             /**
              * @description Capped at 128 so a hash is never asked to chew an unbounded input. **No minimum is checked here**:
@@ -7613,9 +7658,20 @@ export interface components {
         MfaSignInComplete: {
             /** Format: uuid */
             challenge_id: string;
+            /**
+             * @description The TOTP code from the authenticator: 6 digits, 30-second step, one step accepted either
+             *     side, single use (a code already used is refused again inside its window). A value that
+             *     is not exactly 6 digits is `VALIDATION_FAILED`; a well-formed code that does not prove
+             *     the factor is `MFA_PROOF_INVALID`.
+             */
             code: string;
         };
         SessionRevoke: {
+            /**
+             * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+             *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             */
             reason_code: string;
             note?: string;
         };
@@ -7639,9 +7695,10 @@ export interface components {
          *     Never in a log and never in an audit event, in every case. Audit records that a session
          *     was issued, not its material - the same rule 20.4 applies to OTPs.
          *
-         *     **No bundle contents either.** The session snapshots the bundle server-side so authority
-         *     is evaluated against what was held at issue; publishing it would invite a client to
-         *     decide its own permissions from it. A client asks the server what it may do.
+         *     **Permission keys, never bundle contents or role names.** The session snapshots the bundle
+         *     server-side so authority is evaluated against what was held at issue. `permissions` lists
+         *     the keys of that snapshot and nothing else, as the source of navigation; a client never
+         *     decides its own permissions from it, because the server checks the key on every request.
          *
          *     There is no elevation field. MSC-DEC-228 makes MFA a sign-in gate for Senior Ops and
          *     Platform Admin, so a session that exists is already privileged to whatever its bundle allows.
@@ -7656,6 +7713,16 @@ export interface components {
             /** @enum {string} */
             state: "ACTIVE" | "TERMINATED";
             authorized_hub_ids?: string[];
+            /**
+             * @description The permission keys this session holds, **from its snapshot**: keys only (permissions.md),
+             *     **never role names** and never a bundle. Read-only, and fixed for the life of the session
+             *     because it is the snapshot. It is the source a client builds navigation from (the Ops menu),
+             *     and nothing more: the server stays authoritative and checks the key on every request, so
+             *     what a client shows or hides decides nothing. Returned on the caller's own session
+             *     (`getCurrentSession` and the sign-in responses); `listSessions` shows another principal's
+             *     sessions and returns none.
+             */
+            readonly permissions?: string[];
             /** Format: uuid */
             registered_device_id?: string | null;
             /** Format: date-time */
@@ -7687,8 +7754,14 @@ export interface components {
          *     is exactly what makes reporting a loss slow.
          */
         DeviceRevocation: {
-            /** @description Why the binding is being revoked - lost, stolen or otherwise compromised. Audited. Replacement is not a revocation reason; a handset replaced through reregisterRiderDevice leaves REPLACED, and the two stay distinguishable. */
-            reason: string;
+            /**
+             * @description Why the binding is being revoked - lost, stolen or otherwise compromised - as a code of the
+             *     reason catalogue (`ReasonDefinition`), validated against the catalogue's identity domain for
+             *     this operation: empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another
+             *     domain is `REASON_NOT_ACTIVE`. Audited. Replacement is not a revocation reason; a handset
+             *     replaced through reregisterRiderDevice leaves REPLACED, and the two stay distinguishable.
+             */
+            reason_code: string;
         };
         /**
          * @description **No `resolution` field, and that is deliberate.** Escalation is the terminal Ops
@@ -7768,6 +7841,8 @@ export interface components {
             /**
              * @description The account identifier or work email. **Not a destination.** The channel is resolved
              *     from the principal's registered contact; nothing here influences where the token goes.
+             *     A work email is read in its canonical form: trimmed, Unicode NFKC-normalised and
+             *     lower-cased as a whole address, with no dot or plus-tag folding.
              */
             identifier: string;
         };
@@ -7789,6 +7864,11 @@ export interface components {
          *     `recoverStaffCredential` and `recoverVendorCredential`, which each create a `RecoveryRequest`.
          */
         CredentialRecoveryInitiation: {
+            /**
+             * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+             *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             */
             reason_code: string;
             note?: string;
         };
@@ -7797,6 +7877,11 @@ export interface components {
          *     principal fields** appear.
          */
         RiderDeviceReregistration: {
+            /**
+             * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+             *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             */
             reason_code: string;
             /**
              * @description How Senior Ops verified the rider's identity in person. **Required**, because the rider's
@@ -7860,6 +7945,13 @@ export interface components {
             active_device_count: number;
             has_recovery_email: boolean;
             has_recovery_phone: boolean;
+            /**
+             * @description Which recovery channel the approver chose at approval, so where this account's setup and
+             *     recovery grants are delivered. Never the address itself. Null until the account's
+             *     organisation is approved.
+             * @enum {string|null}
+             */
+            readonly delivery_channel?: "PHONE" | "EMAIL" | null;
         };
         /**
          * @description The record `getVendorAccount` returns, with the `ETag` that `recoverVendorCredential` and
@@ -7901,6 +7993,11 @@ export interface components {
          *     issue a grant for an act the caller was never authorised to reissue.
          */
         SetupGrantReissue: {
+            /**
+             * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+             *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             */
             reason_code: string;
             note?: string;
         };
@@ -9117,7 +9214,12 @@ export interface components {
          *     `listAssignableStaffRoleBundles`**.
          */
         StaffIdentityCreate: {
-            /** Format: email */
+            /**
+             * Format: email
+             * @description Compared in its canonical form: trimmed, Unicode NFKC-normalised and lower-cased as a whole
+             *     address, with no dot or plus-tag folding. The same form decides uniqueness and keys the
+             *     rate limit. The address is stored and displayed as entered.
+             */
             work_email: string;
             full_name: string;
             /** @description E.164 */
@@ -9140,6 +9242,12 @@ export interface components {
          */
         StaffIdentityApproval: {
             approved: boolean;
+            /**
+             * @description Mandatory on rejection (`approved: false`). A code of the reason catalogue
+             *     (`ReasonDefinition`), validated against the catalogue's identity domain for this operation:
+             *     empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another domain is
+             *     `REASON_NOT_ACTIVE`.
+             */
             reason_code?: string;
             note?: string;
         };
@@ -9206,7 +9314,12 @@ export interface components {
         StaffIdentity: {
             /** Format: uuid */
             id: string;
-            /** Format: email */
+            /**
+             * Format: email
+             * @description As entered. Compared in its canonical form: trimmed, Unicode NFKC-normalised and
+             *     lower-cased as a whole address, with no dot or plus-tag folding. The same form decides
+             *     uniqueness and keys the rate limit. The address is stored and displayed as entered.
+             */
             work_email: string;
             full_name: string;
             phone?: string | null;
@@ -9701,6 +9814,12 @@ export interface components {
          */
         MfaEnrolment: {
             setup_token: string;
+            /**
+             * @description The TOTP code from the authenticator that proves the factor: 6 digits, 30-second step,
+             *     one step accepted either side, single use (a code already used is refused again inside
+             *     its window). A value that is not exactly 6 digits is `VALIDATION_FAILED`; a well-formed
+             *     code that does not prove the factor is `MFA_PROOF_INVALID`.
+             */
             totp_code: string;
         };
         /**
@@ -9715,6 +9834,11 @@ export interface components {
          *     which this operation leaves a privileged identity able to authenticate without a factor.
          */
         MfaReset: {
+            /**
+             * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+             *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             */
             reason_code: string;
             note?: string;
         };
@@ -10341,7 +10465,9 @@ export interface components {
         };
         /**
          * @description `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY` or `HUB_SCOPE_VIOLATION` - the three
-         *     refusals an authenticated caller may be told, each for a different gate.
+         *     refusals an authenticated caller may be told for who they are and where they act, each for a
+         *     different gate - or `CSRF_VALIDATION_FAILED`, the refusal of a cookie-authenticated unsafe
+         *     request whose CSRF token or Origin does not check out. All four are `403`.
          *     Deny by default (§37.1). **A record that exists but belongs to another vendor, or - when a
          *     rider looks it up - to work not assigned to that rider, is never a 403**: it is the `404`
          *     below, identical to a record that does not exist. A rider who acts on work they name and are
@@ -10369,7 +10495,11 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description `VALIDATION_FAILED`. `details` names the offending field. */
+        /**
+         * @description `VALIDATION_FAILED`. `details` names the offending field. **Always `400`, never `422`**: a
+         *     request that breaks a documented format or range is a `400`, and a named business rule
+         *     (`RuleViolation`) is a `422`.
+         */
         ValidationFailed: {
             headers: {
                 [name: string]: unknown;
@@ -10378,7 +10508,10 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description `STATE_CONFLICT` or `IDEMPOTENCY_KEY_CONFLICT`. */
+        /**
+         * @description `STATE_CONFLICT` or `IDEMPOTENCY_KEY_CONFLICT`. **Every operation that takes an
+         *     `Idempotency-Key` declares this response and `IDEMPOTENCY_KEY_CONFLICT`.**
+         */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -10389,7 +10522,8 @@ export interface components {
         };
         /**
          * @description A business rule refused the command. `code` carries the specific reason from
-         *     `contracts/errors-and-enums.md` §5.
+         *     `contracts/errors-and-enums.md` §5. **Never `VALIDATION_FAILED`**, which is always a `400`
+         *     (`ValidationFailed`).
          */
         RuleViolation: {
             headers: {
@@ -10486,6 +10620,8 @@ export interface components {
          *     `x-set-cookies` and checked against the same `x-cookies` attributes. `x-set-cookies-for` names
          *     a security scheme and limits the declaration to a request that presented that scheme's
          *     credential: any other request is owed none of those cookies and may not receive them.
+         *     `x-set-cookies-when` names a type of principal (`principal_type`) and limits it to an answer for
+         *     that type: an answer for another is owed none of them either.
          *
          *     **The previous representation invented `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie`
          *     to work around that limitation.** Those are not HTTP headers. An implementation reading the
@@ -10600,6 +10736,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getPickupRequest: {
@@ -10762,7 +10899,8 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             /**
              * @description `SELF_CANCEL_NOT_PERMITTED_AFTER_ASSIGNMENT` for a vendor after assignment, or
-             *     `PERMISSION_DENIED` for a chargeable cancellation without the permission.
+             *     `PERMISSION_DENIED` for a chargeable cancellation without the permission, or
+             *     `CSRF_VALIDATION_FAILED` for a cookie-authenticated request whose CSRF check fails.
              */
             403: {
                 headers: {
@@ -10840,6 +10978,7 @@ export interface operations {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -10978,6 +11117,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -11045,6 +11185,7 @@ export interface operations {
                     "application/json": components["schemas"]["Approval"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };
@@ -11196,6 +11337,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11272,7 +11414,10 @@ export interface operations {
                     "application/json": components["schemas"]["PickupStop"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -11495,7 +11640,9 @@ export interface operations {
                     "application/json": components["schemas"]["HubIntakePostCount"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             /** @description `BLIND_COUNT_VIOLATED` if the declared count was served or accepted before commit. */
             422: {
@@ -11571,6 +11718,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             /**
              * @description `SETTING_MISSING` when the hub has no approved base fee, or `MARGIN_NOT_CONFIGURED`
              *     when outside-Accra pricing is attempted with no configured margin. Per §33.4 the
@@ -11646,6 +11795,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11731,7 +11881,10 @@ export interface operations {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -11823,7 +11976,9 @@ export interface operations {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11860,6 +12015,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11892,6 +12048,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11924,6 +12081,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11959,6 +12117,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunCustodyHandover"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -12027,6 +12186,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunCustodyHandover"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -12123,7 +12283,9 @@ export interface operations {
                     "application/json": components["schemas"]["HubIntakePreCount"][];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -12182,6 +12344,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12211,6 +12375,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
         };
@@ -12269,6 +12434,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12331,6 +12498,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12411,6 +12579,7 @@ export interface operations {
                     "application/json": components["schemas"]["MfaChallenge"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12441,6 +12610,20 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
+            /**
+             * @description `MFA_ENROLMENT_REQUIRED`. The identity is privileged, its password was proved and it has
+             *     no `ACTIVE` MFA factor, so no privileged session can be issued. The attempt does not
+             *     count towards the lockout.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12467,6 +12650,7 @@ export interface operations {
                     "application/json": components["schemas"]["RiderSessionIssued"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12486,7 +12670,7 @@ export interface operations {
         responses: {
             /**
              * @description Session established; any earlier session terminated. **The device credential is
-             *     proved here, never re-issued**.
+             *     proved here and its lifetime renewed, never replaced**.
              */
             200: {
                 headers: {
@@ -12497,6 +12681,7 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12543,6 +12728,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listSessions: {
@@ -12599,6 +12785,7 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12629,6 +12816,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12649,7 +12837,8 @@ export interface operations {
             /**
              * @description Credential set; all sessions terminated. **On the vendor branch, obsolete device
              *     credentials are revoked and `melarc_vendor_device` is re-issued.** No Session cookie
-             *     is set for any principal type.
+             *     is set for any principal type. **A staff recovery sets no cookie at all**: the device
+             *     credential is the vendor branch's alone (`x-set-cookies-when`).
              */
             204: {
                 headers: {
@@ -12658,6 +12847,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12684,6 +12874,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12772,6 +12963,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12919,7 +13112,10 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRun"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12978,7 +13174,9 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRun"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -13015,6 +13213,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -13046,7 +13245,9 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRun"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             /**
              * @description Revalidation failed. **Nothing was committed** - the run remains DRAFT and every order
@@ -13090,6 +13291,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -13206,6 +13408,7 @@ export interface operations {
                     "application/json": components["schemas"]["StaffIdentity"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -13309,6 +13512,7 @@ export interface operations {
                     "application/json": components["schemas"]["BundleChange"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -13402,9 +13606,11 @@ export interface operations {
                     "application/json": components["schemas"]["EvidenceUploadTicket"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -13435,6 +13641,7 @@ export interface operations {
                     "application/json": components["schemas"]["Evidence"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -13821,6 +14028,7 @@ export interface operations {
                     "application/json": components["schemas"]["ThirdPartyHandoff"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -14078,6 +14286,7 @@ export interface operations {
                     "application/json": components["schemas"]["CourierProvider"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -14236,6 +14445,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApprovedAgent"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -14333,6 +14543,7 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryStop"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -14393,8 +14604,10 @@ export interface operations {
                     "application/json": components["schemas"]["CashHandover"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -14429,6 +14642,7 @@ export interface operations {
                     "application/json": components["schemas"]["CashHandover"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -14494,6 +14708,7 @@ export interface operations {
                     "application/json": components["schemas"]["CredentialSetupResult"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14520,6 +14735,7 @@ export interface operations {
                     "application/json": components["schemas"]["MfaEnrolmentResult"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14716,9 +14932,11 @@ export interface operations {
                     "application/json": components["schemas"]["DeviceEnrolmentGrant"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -14744,6 +14962,7 @@ export interface operations {
                     "application/json": components["schemas"]["RegisteredDevice"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
             503: components["responses"]["TrustDataUnavailable"];
@@ -14771,6 +14990,7 @@ export interface operations {
                     "application/json": components["schemas"]["RiderChallenge"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -14797,6 +15017,7 @@ export interface operations {
                     "application/json": components["schemas"]["RegisteredDevice"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14854,6 +15075,8 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14881,6 +15104,7 @@ export interface operations {
                     "application/json": components["schemas"]["RegisteredDevice"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -15352,6 +15576,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -15507,6 +15732,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     recordDoorstepContact: {
@@ -15569,6 +15795,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getStopPaymentDemand: {
@@ -15622,6 +15849,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };
@@ -15746,6 +15974,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getPaymentCollection: {
@@ -15886,6 +16115,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     cancelRedelivery: {
@@ -16004,6 +16234,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReturnRecord"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -16155,6 +16386,7 @@ export interface operations {
                     "application/json": components["schemas"]["FinancialAdjustmentResolution"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -16218,6 +16450,7 @@ export interface operations {
                     "application/json": components["schemas"]["FinancialAdjustmentResolution"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -16282,6 +16515,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     decideDeliveryLocationChange: {
@@ -16366,6 +16600,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     confirmManualPayment: {
@@ -16427,6 +16662,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -16512,8 +16748,10 @@ export interface operations {
                     "application/json": components["schemas"]["RoadExpense"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -16755,8 +16993,10 @@ export interface operations {
                     "application/json": components["schemas"]["CashDisposition"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -16814,6 +17054,7 @@ export interface operations {
                     "application/json": components["schemas"]["VendorOrganization"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -16851,6 +17092,7 @@ export interface operations {
                     "application/json": components["schemas"]["VendorOrganization"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -16962,6 +17204,7 @@ export interface operations {
                     "application/json": components["schemas"]["VendorOrganization"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -17207,9 +17450,11 @@ export interface operations {
                     "application/json": components["schemas"]["SecurityRiskHold"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -17336,8 +17581,10 @@ export interface operations {
                     "application/json": components["schemas"]["VendorPickupLocation"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -17372,6 +17619,7 @@ export interface operations {
                     "application/json": components["schemas"]["VendorPickupLocation"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -17582,6 +17830,7 @@ export interface operations {
                     "application/json": components["schemas"]["ParcelCustodyReturn"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -17676,6 +17925,7 @@ export interface operations {
                     "application/json": components["schemas"]["ParcelCustodyReturn"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -17799,6 +18049,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReasonDefinition"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
@@ -17836,6 +18087,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };
@@ -17865,6 +18117,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountingExport"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];

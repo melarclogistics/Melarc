@@ -55,6 +55,11 @@ export interface ResponseDescription {
    * (`x-set-cookies-for`), or undefined when every caller is.
    */
   readonly setCookiesFor: string | undefined;
+  /**
+   * The type of principal whose answer is owed those cookies (`x-set-cookies-when: { principal_type }`), or undefined
+   * when an answer for any principal is. Both conditions hold when both are stated.
+   */
+  readonly setCookiesWhen: string | undefined;
 }
 
 export interface SecurityDescription {
@@ -298,11 +303,16 @@ function describeResponse(
   }
   const cookies = response['x-set-cookies'];
   const cookiesFor = response['x-set-cookies-for'];
+  const cookiesWhen = response['x-set-cookies-when'];
   return {
     content: describeContent(model, response.content, where, collect),
     headers,
     setCookies: Array.isArray(cookies) ? sortedUnique(cookies as string[]) : [],
     setCookiesFor: typeof cookiesFor === 'string' ? cookiesFor : undefined,
+    setCookiesWhen:
+      isJsonObject(cookiesWhen) && typeof cookiesWhen.principal_type === 'string'
+        ? cookiesWhen.principal_type
+        : undefined,
   };
 }
 

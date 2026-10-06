@@ -1,0 +1,9 @@
+Copyright (c) 2026 Melarc Logistics. All rights reserved.
+
+This repository and everything in it (source code, specifications, designs and documentation) is proprietary. No
+licence is granted: no part of it may be used, copied, modified, merged, published, distributed, sublicensed or sold
+without the prior written permission of Melarc Logistics.
+
+Third-party components keep their own licences. The Inter typeface shipped by the Ops Portal is licensed under the
+SIL Open Font License 1.1 (apps/ops-web/public/licenses/Inter-OFL.txt), and the packages installed from npm keep the
+licences they declare.

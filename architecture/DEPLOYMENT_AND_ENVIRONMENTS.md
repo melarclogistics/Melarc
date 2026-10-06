@@ -54,7 +54,7 @@ The fourth of the six artifacts `MSC-DEC-205` created a home for, and the one §
 | Integration| Why a sandbox is non-negotiable|
 |---|---|
 | **SMS provider**| The OTP is the **ordinary mandated proof of delivery** (§19.6), and an outage is **recoverable rather than terminal**: where the recipient is present, an **authorised Ops-assisted verification fallback** completes the handover.|
-| **Transactional email provider**| Every staff setup grant, recovery link and MFA re-enrolment link, and every vendor setup grant **whose registered channel is email**, reaches its principal through it ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.9a); **a vendor whose registered channel is SMS is reached through the SMS provider instead**. A test that sent through the real provider would deliver a **live credential link to a real person**. In Local and Staging the **capture adapter** writes each message to a developer-visible sink and reaches nobody|
+| **Transactional email provider**| Every staff setup grant, recovery link and MFA re-enrolment link, and every vendor setup grant **whose `delivery_channel` is `EMAIL`**, reaches its principal through it ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.9a); **a vendor whose `delivery_channel` is `PHONE` is reached through the SMS provider instead**. A test that sent through the real provider would deliver a **live credential link to a real person**. In Local and Staging the **capture adapter** writes each message to a developer-visible sink and reaches nobody|
 | **Hubtel MoMo**| Payment confirmation gates dispatch. Testing against production moves real money|
 
 **No environment but production may hold production credentials.** A staging system holding a live SMS key will eventually send a live message to a real recipient during a test.
@@ -263,7 +263,9 @@ Each browser surface calls the API on **its own origin** through a reverse-proxi
 
 **TLS 1.3 preferred · TLS 1.2 for compatibility only · TLS 1.0 and 1.1 disabled · HTTPS everywhere · HSTS once the domain and certificates are validated.**
 
-**Headers on browser surfaces:** a strict allowed-`Origin` list · **no wildcard credentialed CORS** · CSP · `frame-ancestors 'none'` unless a specific need is approved · `X-Content-Type-Options: nosniff` · a restrictive Referrer Policy · `no-store` on authentication, recovery and other sensitive responses · **exact `Origin` validation on browser-sensitive flows, including pre-session endpoints** — which is where a login-CSRF or session-fixation attempt necessarily arrives, and the one place a session-cookie defence has nothing to check.
+**Headers on browser surfaces:** a strict allowed-`Origin` list · **no wildcard credentialed CORS** · CSP · `frame-ancestors 'none'` unless a specific need is approved · `X-Content-Type-Options: nosniff` · a restrictive Referrer Policy · **`Cache-Control: no-store` on every API response**, which the API sends itself as a platform rule ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §14.8) · **exact `Origin` validation on browser-sensitive flows, including pre-session endpoints** — which is where a login-CSRF or session-fixation attempt necessarily arrives, and the one place a session-cookie defence has nothing to check.
+
+**A per-address ceiling at the edge** (deployment note, Product decision of 6 October 2026). The credential setup and recovery bucket is keyed by the grant or token a request presents ([settings.md](../contracts/settings.md) §7.7), and a caller chooses that key freely: every made-up value is a fresh bucket. The edge therefore enforces a ceiling per source address, which **bounds the cost of attacker-chosen keys**. It is infrastructure and not a seventh bucket, and it identifies no credential. **Its value, and the operations it covers, are a deployment input that has not been supplied.**
 
 ### 12.3 Production security configuration fails startup
 

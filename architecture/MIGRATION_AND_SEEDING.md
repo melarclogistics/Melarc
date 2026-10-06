@@ -34,7 +34,7 @@ Most systems seed for convenience. Melarc has **two hard bootstrap dependencies*
 
 **Approved by the Product Owner on 26 August, closing `OQ-088`.** The constraints below stand, each for both identities; **two things changed since**: the identity count, which `MSC-DEC-440` supersedes (*exactly one* became *exactly two*), and the credential constraint, which `MSC-DEC-260` corrected.
 
-The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a Platform Admin bundle, outside the API, as part of environment provisioning (`MSC-DEC-440`, which supersedes `MSC-DEC-253`'s *exactly one*) — **each with its own unique work email, no permanent password, no MFA factor, and its own single-use bootstrap setup secret stored only as a hash**. **The pair is created in one transaction, so the staff table is never left holding one** *(derived: a failure between two inserts would leave one identity, and the empty-table guard would then refuse a re-run)*; the seed then refuses to run again, because the table is no longer empty. **Not stated, and recorded for the Backend Engineer: the two identities' hub reach.** `staff.identity.create` and `staff.identity.approve` are own-hub keys, so the seed must give each Platform Admin a hub membership or an explicit all-hub grant for the first profile to be created and approved; this document does not choose.
+The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a Platform Admin bundle, outside the API, as part of environment provisioning (`MSC-DEC-440`, which supersedes `MSC-DEC-253`'s *exactly one*) — **each with its own unique work email, no permanent password, no MFA factor, and its own single-use bootstrap setup secret stored only as a hash**. **The pair is created in one transaction, so the staff table is never left holding one** *(derived: a failure between two inserts would leave one identity, and the empty-table guard would then refuse a re-run)*; the seed then refuses to run again, because the table is no longer empty. **Hub reach — decided 6 October 2026: each of the two holds an explicit all-hub grant**, written by the seed, so both reach every hub. It is **never inferred from the Platform Admin bundle's name or from the absence of a hub** ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §14.2). `staff.identity.create` and `staff.identity.approve` are own-hub keys for every other holder, and the seeded grant is what lets one bootstrap administrator create the first profile, and the other approve it, at whichever hub it names.
 
 **Two custodians, not one person.** **Production requires two distinct designated human custodians**, one for each identity. The pair is **not** two identities that one person controls to satisfy maker-checker: such a pair defeats the control §30.8 exists for and is not the bootstrap this section describes. Who the custodians are is a deployment input, and **the repository cannot verify that two identities belong to two people**, so this is a rule on the deployment and not a mechanical one.
 
@@ -52,6 +52,8 @@ The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a P
 | **The seed sets no password and no MFA factor**| The seeded credential becoming a permanent admin password, and — the defect this replaces — a seed asserting `mfa_enrolled = true` for a factor that does not exist|
 
 **Every constraint above applies to each of the two identities and to the pair.** The reserved system actor is recorded as `created_by` and `approved_by` of **both**, and the seed emits `staff.identity.created` and `staff.identity.approved` as enhanced events for **each**.
+
+**The seed writes as `SYSTEM`**, under an explicit seed task capability, which is how it writes a table whose row-level security is forced (§5.1).
 
 **The fourth constraint is the one that would be dropped.** Writing a real-looking actor into `created_by` is the path of least resistance — it satisfies the non-null constraint and nothing complains. **It also makes every later audit of "was the same-actor rule ever bypassed?" return a false negative**, because the seeded record looks exactly like a compliant one. A reserved actor id makes the bootstrap **visible forever**, which is the point.
 
@@ -83,26 +85,27 @@ The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a P
 | Operation| What it needs| Available to the stranded bootstrap admin?|
 |---|---|---|
 | `completeStaffCredentialSetup`| the **`BOOTSTRAP_SETUP`** secret| **No** — single-use, consumed at step 1|
-| `beginMfaReenrolment`| an **`MFA_REENROLMENT`** grant, issued only by `resetStaffMfa`| **No** — `resetStaffMfa` is **Platform Admin only**, and a stranded bootstrap administrator cannot authenticate to use it. **Whether the other bootstrap administrator can use it for them, once authentication-ready, is not settled** (below, `PDA-70`); before then nobody can|
+| `beginMfaReenrolment`| an **`MFA_REENROLMENT`** grant, issued only by `resetStaffMfa`| **Not by the stranded administrator** — `resetStaffMfa` is **Platform Admin only**, and a stranded bootstrap administrator cannot authenticate to use it. **The other bootstrap administrator is a valid actor for it** once authentication-ready (below); before then nobody can|
 
 **The result was a permanently unusable environment, reached by thirty minutes passing** — in the one lifecycle whose entire purpose is to make an empty environment usable. Every mechanical check passed over it, because each operation existed and each grant resolved; what did not exist was a path between them.
 
-**`MSC-DEC-272` closes it with a provisioning-only mechanism.** Not an Ops Portal endpoint — a management or deployment action, on the same controlled channel that delivered the bootstrap secret. **Under `MSC-DEC-440` there are two bootstrap identities and either can be stranded, so the mechanism is unchanged and its six conditions are evaluated for each identity on its own.**
+**`MSC-DEC-272` closes it with a provisioning-only mechanism.** Not an Ops Portal endpoint — a management or deployment action, on the same controlled channel that delivered the bootstrap secret. **Under `MSC-DEC-440` there are two bootstrap identities and either can be stranded, so the mechanism is unchanged except for the seventh condition below, and its conditions are evaluated for each identity on its own.**
 
-**It runs only when all six conditions hold:**
+**It runs only when all seven conditions hold:**
 
 1. the target is **one of the two seeded bootstrap** Platform Admins;
 2. that identity is **not offboarded**;
 3. a **permanent password is already established**;
 4. **no `ACTIVE` `MfaFactor` exists**;
 5. **no privileged session can currently be issued**;
-6. bootstrap authentication setup remains **incomplete**.
+6. bootstrap authentication setup remains **incomplete**;
+7. **the other bootstrap Platform Admin does not yet hold an `ACTIVE` credential and an `ACTIVE` `MfaFactor`** (decided 6 October 2026). Once it does, the ordinary `resetStaffMfa` is the way and this mechanism refuses, so it is never a standing way in.
 
 **What it does:** revokes or supersedes stale `PENDING` factor state and grants, issues a fresh short-lived **`MFA_REENROLMENT`** authorisation, delivers it through the **controlled provisioning channel**, and writes an **enhanced** audit record under the reserved system actor.
 
-**That transport is the exception, and it is the only one.** `MFA_REENROLMENT` normally reaches the affected privileged principal by **verified work email**; here there may be no second Platform Admin able to initiate an ordinary reset — the other bootstrap administrator may not have completed setup — so the same channel that carried the bootstrap secret carries the re-enrolment authorisation. **Whether the other bootstrap administrator can, once authentication-ready, reset a stranded one through the ordinary `resetStaffMfa` is not settled** — the ordinary authorisation goes to the target's verified work email, and a bootstrap identity's address was seeded and never accepted by an approval — **and whether this mechanism should then refuse is the same open question**; both are recorded for the Backend Engineer. `MSC-DEC-440` leaves the mechanism unchanged, and it stays unchanged until that is decided. **The purpose is unchanged** — begin MFA re-enrolment — because purpose describes what a credential may authorise, not how it travels.
+**That transport is the exception, and it is the only one.** `MFA_REENROLMENT` normally reaches the affected privileged principal by **verified work email**; here there may be no second Platform Admin able to initiate an ordinary reset — the other bootstrap administrator may not have completed setup — so the same channel that carried the bootstrap secret carries the re-enrolment authorisation. **Once the other bootstrap administrator is authentication-ready they reset a stranded one through the ordinary `resetStaffMfa`, and this mechanism then refuses** (decided 6 October 2026). That grant goes to the target's work email, which for a bootstrap identity was seeded and never accepted by an approval; the decision names the route and does not address that. **A gap between two decisions is recorded in §7 and not closed here**: `resetStaffMfa` refuses a target whose factor is only `PENDING` ([state-machines.md](../contracts/state-machines.md) §18), which is exactly a stranded identity's state, so once the other administrator is ready neither route reaches it. **The purpose is unchanged** — begin MFA re-enrolment — because purpose describes what a credential may authorise, not how it travels.
 
-**One further route is not decided here: `reissueStaffCredentialSetup` aimed at the other bootstrap identity.** Once one administrator is authentication-ready they hold `staff.identity.approve`, and that operation's guard is a null credential — which the other identity has until step 1. It would issue a 30-minute `STAFF_CREDENTIAL_SETUP` grant to an address nobody accepted, beside the unconsumed `BOOTSTRAP_SETUP` secret. **Whether bootstrap identities are excluded from it, and what becomes of the unconsumed secret, is the Backend Engineer's.**
+**`reissueStaffCredentialSetup` refuses a bootstrap identity** (`STATE_CONFLICT`; decided 6 October 2026). Once one administrator is authentication-ready they hold `staff.identity.approve`, and that operation's guard is a null credential — which the other identity has until step 1 — so it would issue a fresh 30-minute `STAFF_CREDENTIAL_SETUP` grant to an address nobody verified, beside the unconsumed `BOOTSTRAP_SETUP` secret. **It does not.** The unconsumed secret stays the only way in for an administrator who has not yet set a password.
 
 **What it does not do — and this is why it is not an MFA bypass:**
 
@@ -113,7 +116,7 @@ The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a P
 
 The administrator then walks the ordinary path — `beginMfaReenrolment` → provisioning → `MFA_ENROLMENT` → **proven** code → `ACTIVE` factor → normal privileged sign-in.
 
-**It stops working at the latest when it is no longer needed.** Once **that** bootstrap identity is offboarded — which requires **two** proven non-bootstrap Platform Admins (§3.4) — the mechanism refuses **for it**, because `resetStaffMfa` then has authorities to run under and the ordinary path exists; **whether it should stop earlier, once the other bootstrap administrator is authentication-ready, is the open question above.** **A recovery mechanism that outlives its emergency is an attack surface.**
+**It stops working as soon as it is no longer needed.** It refuses **for an identity** once the other bootstrap administrator holds an `ACTIVE` credential and an `ACTIVE` factor (the seventh condition), because `resetStaffMfa` then has an authority to run under; and in any case once **that** bootstrap identity is offboarded, which requires **two** proven non-bootstrap Platform Admins (§3.4). **A recovery mechanism that outlives its emergency is an attack surface.**
 
 **The ordering now runs one way.** Nothing is asserted before the thing it asserts exists, and `mfa_enrolled` is derived from the factor rather than written by the seed.
 
@@ -154,6 +157,8 @@ Beyond the bootstrap, an environment is non-functional without these. Each trace
 
 **Settings without values cannot be seeded with invented defaults.** Consult [settings.md](../contracts/settings.md) §7 and §9 for current unresolved inputs. The configured rate-limit values are already specified; production deployment still supplies its required external inputs.
 
+**Identity reasons are a seed with no values yet** (Product decision, 6 October 2026). The identity operations validate their `reason_code` against the reason catalogue, in six new identity domains ([domain-model.md](../contracts/domain-model.md) §3.9). **Which reasons each domain is seeded with, and their wording, is a Product Owner input that has not been supplied, and no code is invented here.** Until it is, those operations refuse every `reason_code` with `REASON_NOT_ACTIVE`, so the demonstration rows that use them cannot be walked from an environment seeded without it.
+
 ### 4a. The demonstration rider — a non-production fixture
 
 **`SLICE-000`'s demonstration starts from a rider who already exists, and nothing in the product can create one.** Its script has a rider registered in person, signing in twice, replacing a handset and being revoked. `RiderIdentity` has no creating operation: rider onboarding is `OQ-089`, in `SLICE-009`, and `registerRiderDevice` takes an existing rider's id in its path. [DEPLOYMENT_AND_ENVIRONMENTS.md](DEPLOYMENT_AND_ENVIRONMENTS.md) §3 already says Local holds *seeded fixtures* and that **Staging must be able to run the §45.1 demonstration end to end**, so the rider is a fixture and this is where fixtures are stated.
@@ -174,7 +179,7 @@ The fixture creates `RiderIdentity` records — **at least two**, because the ex
 
 **`SLICE-000`'s vendor rows start from an approved vendor account, and the operations that make one belong to `SLICE-008`.** `createVendorOrganization` creates an organisation, its shared portal account, its credential and its allowance in one act, and `decideVendorOrganization` is the review a *different* person must perform before the account is `ACTIVE`. That is vendor onboarding, and the foundation slice should not carry it. The same environment boundary as §4a applies.
 
-The fixture leaves **one** vendor where an approval leaves it, **less the setup grant**: the `VendorOrganization` — **its `responsible_hub_id` the seeded hub**, so that hub's Senior Ops is the officer who re-issues the grant, the act being own-hub — and its `VendorAccount` `ACTIVE`; its `VendorCredential` carrying a registered recovery channel and a **null secret**; the **`account_identifier`** the account was created with, generated as for any account ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.7a), which the capture adapter shows beside the grant; and the allowance in the state creation gives it, `DISABLED_PREPAYMENT_ONLY` — **approval does not enable it**. **Five constraints, each closing a specific way a convenience becomes a back door:**
+The fixture leaves **one** vendor where an approval leaves it, **less the setup grant**: the `VendorOrganization` — **its `responsible_hub_id` the seeded hub**, so that hub's Senior Ops is the officer who re-issues the grant, the act being own-hub — and its `VendorAccount` `ACTIVE`; its `VendorCredential` carrying a registered recovery channel, the **`delivery_channel`** an approval chooses (`PHONE` or `EMAIL`, [domain-model.md](../contracts/domain-model.md) §6.8) and a **null secret**; the **`account_identifier`** the account was created with, generated as for any account ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.7a), which the capture adapter shows beside the grant; and the allowance in the state creation gives it, `DISABLED_PREPAYMENT_ONLY` — **approval does not enable it**. **Five constraints, each closing a specific way a convenience becomes a back door:**
 
 | Constraint| The failure it prevents|
 |---|---|
@@ -215,6 +220,10 @@ GRANT SELECT, INSERT, UPDATE ON <t> TO melarc_api_runtime;   -- never ALL, never
 **`FORCE` is the line that gets left out**, and leaving it out is invisible: the table reports RLS enabled, the policies exist and are correct, and any connection made as the owner is subject to none of them. The role separation above is the first control and `FORCE` is the second, so that losing one does not lose both.
 
 **A migration that adds a persistent table fails review unless [data-scope-registry.md](../contracts/data-scope-registry.md) classifies it**. This is the enforcement point for that rule, because a table's scope class is decided when the table is created or it is decided never — and an unclassified table has no policy, which means it reads and writes correctly for every actor right up until the day a second hub or a second vendor exists.
+
+**Deletes are explicit** (Product decision, 6 October 2026). The migration lint refuses `ON DELETE CASCADE`, `TRUNCATE` and a `DELETE` grant **unless a comment on that statement records the reason**, written `-- allow-delete: <reason>`. A grant is never `ALL` and never `DELETE` by default, as the block above says; this is the mechanical check that keeps it so ([engineering-standards.md](../standards/engineering-standards.md) §7).
+
+**Seeds and backfills write as `SYSTEM`** (Product decision, 6 October 2026). A seed or a backfill writes a forced-RLS table as the `SYSTEM` principal under an **explicit seed task capability** ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §14.4, §14.17b), never as the migration login and never by bypassing row-level security. **Each table's policy has a `SYSTEM` branch for that capability**, and **the policies keep deciding on the request context alone**: no accessor is tied to the migration login, and the migration role holds no `BYPASSRLS`. The seed helper and each table's branch arrive with the first slice that has a table.
 
 **`melarc_api_runtime` never receives `DELETE` on an audit table** ([data-scope-registry.md](../contracts/data-scope-registry.md) §4.5), which is where §42.6's append-only requirement stops being a convention.
 
@@ -285,8 +294,10 @@ GRANT SELECT, INSERT, UPDATE ON <t> TO melarc_api_runtime;   -- never ALL, never
 |---|---|
 | ~~Approval of the §3 bootstrap~~| **Approved 26 August**, `MSC-DEC-253`|
 | ~~Whether the bootstrap identity must be retired, and when~~| **`OQ-096`, closed by `MSC-DEC-255`**; for the pair, `MSC-DEC-440` — each identity is retired only after two non-bootstrap successors, and none is deleted|
-| The stranded-continuation mechanism once the other bootstrap administrator is authentication-ready, and `reissueStaffCredentialSetup` aimed at a bootstrap identity (§3.3a)| **`PDA-70`** — Backend Engineer|
-| The two bootstrap identities' hub reach (§3.2)| **`PDA-70`** — Backend Engineer|
+| ~~The stranded-continuation mechanism once the other bootstrap administrator is authentication-ready, and `reissueStaffCredentialSetup` aimed at a bootstrap identity (§3.3a)~~| **Decided 6 October 2026** — `reissueStaffCredentialSetup` refuses a bootstrap identity, the resume command stops once the other holds an `ACTIVE` credential and factor, and the other administrator uses `resetStaffMfa`|
+| **Open:** a stranded bootstrap administrator whose factor is only `PENDING` once the other administrator is ready — `resetStaffMfa` refuses that target and the resume command has stopped (§3.3a)| **Product Owner**|
+| ~~The two bootstrap identities' hub reach (§3.2)~~| **Decided 6 October 2026** — an explicit all-hub grant on each|
+| The seeded reasons of the six identity reason domains, and their wording (§4)| **Product Owner** — not supplied|
 | ~~An inventory of existing Melarc data~~| **CLOSED 5 September 2026, `MSC-DEC-375`** — Version 1 is greenfield; the inventory described a database that does not exist|
 | Migration tooling| Backend Engineer|
 | ~~Database role separation and RLS enablement~~| **Settled 27 August**, `MSC-DEC-276` — §5.1|

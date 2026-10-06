@@ -96,7 +96,7 @@ elsewhere.*
    factors.
 3. **Hub Senior Ops decides** (`decideVendorOrganization`). Approval moves the record to
    **`ACTIVE`** and issues **exactly one** `VENDOR_CREDENTIAL_SETUP` grant to the registered
-   recovery channel, which is where [vendor-authentication.md](../identity/vendor-authentication.md)
+   recovery channel the approver chose in the same call (`delivery_channel`: `PHONE` or `EMAIL`, stored on the `VendorCredential`), which is where [vendor-authentication.md](../identity/vendor-authentication.md)
    §12 already places it. The vendor sets its own secret; **no administrator ever learns it**.
 4. Rejection is the same call with `approved: false` and a **mandatory reason**. The record
    reaches **`REJECTED`**, no grant is issued, and the record stays queryable.
@@ -250,10 +250,10 @@ And the record stays in PENDING_SENIOR_OPS_REVIEW.
 
 ```text
 Given a VendorOrganization in PENDING_SENIOR_OPS_REVIEW created by actor A,
-When hub Senior Ops actor B calls decideVendorOrganization with approved true,
+When hub Senior Ops actor B calls decideVendorOrganization with approved true and a delivery_channel,
 Then operational_status reads ACTIVE,
 And exactly one SetupGrant of purpose VENDOR_CREDENTIAL_SETUP is issued,
-And it is delivered to the account's registered recovery channel and not to the request,
+And it is delivered to the credential's delivery_channel, which actor B chose in that call, and not to an address in the request,
 And vendor.organization.approved is emitted carrying both actors.
 ```
 **Governs:** §18.2, §29.2.2, state-machines.md §19.1 · **Surface:** API · **Test level:** integration

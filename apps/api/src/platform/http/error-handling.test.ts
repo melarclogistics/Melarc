@@ -323,6 +323,38 @@ describe('a failure after the answer has been sent', () => {
   });
 });
 
+describe('caching', () => {
+  // Break caught: an API answer that a browser or a proxy may keep. Authentication and recovery answers carry the
+  // TOTP seed, an access token and session state, and the security design requires them not to be cached; the rule is
+  // the platform's, so a new operation cannot forget it. It covers errors and unmatched paths too.
+  it.each([
+    ['a success', '/api/v1/fixture/orders/1'],
+    ['a server fault', '/api/v1/fixture/throw-secret'],
+    ['a path no route answers inside the prefix', '/api/v1/no-such-thing'],
+    ['a path no route answers outside the prefix', '/no-such-thing'],
+    ['a liveness probe', '/livez'],
+  ])('is forbidden on %s', async (_label, path) => {
+    const { baseUrl } = await start();
+    const response = await fetch(`${baseUrl}${path}`);
+    await response.text();
+
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('is forbidden on a body that cannot be read', async () => {
+    const { baseUrl } = await start();
+    const response = await fetch(`${baseUrl}/api/v1/fixture/body/x`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"broken": ',
+    });
+    await response.text();
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+});
+
 describe('error codes the platform emits', () => {
   // Break caught: the platform emitting a code the contract does not define, or the contract withdrawing
   // one the platform relies on. The contract's Error.code enumeration is closed on purpose.

@@ -64,6 +64,15 @@ export interface ResponseParts {
   readonly headers: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * What the application knows about an answer that neither its request nor its response says. A response whose
+ * cookies depend on it (`x-set-cookies-when`) cannot be judged without it.
+ */
+export interface ResponseContext {
+  /** Whose answer it is: the type of the principal the operation acted for (`STAFF`, `VENDOR`, ...). */
+  readonly principalType?: string;
+}
+
 const CONTRACT_ID = 'urn:melarc:contract';
 
 /** The hyphenated text form of a UUID, in either case, and nothing around it. */
@@ -107,6 +116,11 @@ interface PreparedResponse {
    * request is owed none, and one that gets some has an undeclared cookie.
    */
   readonly cookiesFor: { readonly scheme: string; readonly presented: CredentialCheck } | undefined;
+  /**
+   * `x-set-cookies-when`: the cookies apply only to an answer for this type of principal. An answer for any other
+   * is owed none, and one that sets some has an undeclared cookie. Both this and `cookiesFor` must hold.
+   */
+  readonly cookiesWhen: { readonly principalType: string } | undefined;
 }
 
 interface Prepared {
@@ -332,13 +346,15 @@ export class ContractValidator {
 
   /**
    * Checks the response an operation gave. `request` is the request it answers: it is needed only by a response
-   * whose cookies depend on how the caller authenticated (`x-set-cookies-for`), and such a response cannot be
-   * judged without it, so asking without it fails rather than skipping the rule.
+   * whose cookies depend on how the caller authenticated (`x-set-cookies-for`), and `context` only by one whose
+   * cookies depend on whose answer it is (`x-set-cookies-when`). Such a response cannot be judged without them,
+   * so asking without them fails rather than skipping the rule.
    */
   validateResponse(
     operationId: string,
     response: ResponseParts,
     request?: Pick<RequestParts, 'headers'>,
+    context?: ResponseContext,
   ): ContractViolation[] {
     const prepared = this.preparedFor(operationId);
     // The exact status first, then its range (`2XX`, `4XX`), then the catch-all.
@@ -375,7 +391,7 @@ export class ContractValidator {
     }
     violations.push(
       ...this.cookieViolations(
-        this.cookiesOwed(operationId, declared, request),
+        this.cookiesOwed(operationId, declared, request, context),
         response.headers['set-cookie'],
       ),
     );
@@ -399,21 +415,33 @@ export class ContractValidator {
 
   /**
    * The cookies this answer owes: all the ones the response declares, unless it declares them for one credential
-   * and the request did not present that one, and then none. A request that presented both credentials is judged
-   * as one that presented the declared one, because a cookie it still holds is the one to deal with.
+   * and the request did not present that one, or for one type of principal and the answer is another's, and then
+   * none. A request that presented both credentials is judged as one that presented the declared one, because a
+   * cookie it still holds is the one to deal with. Where a response declares both conditions, both must hold.
    */
   private cookiesOwed(
     operationId: string,
     declared: PreparedResponse,
     request: Pick<RequestParts, 'headers'> | undefined,
+    context: ResponseContext | undefined,
   ): ReadonlyMap<string, ExpectedCookie> {
-    if (declared.cookiesFor === undefined) return declared.cookies;
-    if (request === undefined) {
-      throw new Error(
-        `The cookies ${operationId} sets depend on the credential the request presented (x-set-cookies-for ${declared.cookiesFor.scheme}), so its response cannot be validated without the request.`,
-      );
+    if (declared.cookiesFor !== undefined) {
+      if (request === undefined) {
+        throw new Error(
+          `The cookies ${operationId} sets depend on the credential the request presented (x-set-cookies-for ${declared.cookiesFor.scheme}), so its response cannot be validated without the request.`,
+        );
+      }
+      if (!declared.cookiesFor.presented(request.headers)) return new Map();
     }
-    return declared.cookiesFor.presented(request.headers) ? declared.cookies : new Map();
+    if (declared.cookiesWhen !== undefined) {
+      if (context?.principalType === undefined) {
+        throw new Error(
+          `The cookies ${operationId} sets depend on whose answer it is (x-set-cookies-when principal_type ${declared.cookiesWhen.principalType}), so its response cannot be validated without the type of principal the application answered for.`,
+        );
+      }
+      if (context.principalType !== declared.cookiesWhen.principalType) return new Map();
+    }
+    return declared.cookies;
   }
 
   /**
@@ -492,6 +520,39 @@ export class ContractValidator {
         },
       );
     }
+  }
+
+  /**
+   * The type of principal a response's cookies are set for (`x-set-cookies-when: { principal_type: VENDOR }`). It is
+   * the only condition there is, and a condition that names anything else, or no type, or has no cookies to apply
+   * to, cannot be checked, so preparing fails.
+   */
+  private cookiesWhen(
+    operationId: string,
+    status: string,
+    response: JsonObject,
+    cookieCount: number,
+  ): PreparedResponse['cookiesWhen'] {
+    const condition = response['x-set-cookies-when'];
+    if (condition === undefined) return undefined;
+    const where = `x-set-cookies-when of response ${status} of ${operationId}`;
+    if (!isJsonObject(condition)) {
+      throw new Error(`The contract's ${where} must be an object naming a principal_type.`);
+    }
+    const unknown = Object.keys(condition).filter((key) => key !== 'principal_type');
+    if (unknown.length > 0) {
+      throw new Error(
+        `The contract's ${where} names ${unknown.join(', ')}, which this validator cannot judge: only principal_type is a condition.`,
+      );
+    }
+    const type = condition.principal_type;
+    if (typeof type !== 'string' || type === '') {
+      throw new Error(`The contract's ${where} must name a principal_type as non-empty text.`);
+    }
+    if (cookieCount === 0) {
+      throw new Error(`The contract's ${where} applies to no cookies: x-set-cookies lists none.`);
+    }
+    return { principalType: type };
   }
 
   private resolve(value: Json | undefined, what: string): JsonObject {
@@ -627,6 +688,7 @@ export class ContractValidator {
         headerValues,
         cookies,
         cookiesFor: this.cookiesFor(operationId, status, response, cookies.size),
+        cookiesWhen: this.cookiesWhen(operationId, status, response, cookies.size),
       });
     }
 

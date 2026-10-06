@@ -43,6 +43,7 @@ CREATE POLICY notes_scope ON rls_fixture.notes
     END
   );
 
+-- allow-delete: the pooled-context tests prove that row-level security governs DELETE as well as reads and writes
 GRANT SELECT, INSERT, UPDATE, DELETE ON rls_fixture.notes TO melarc_api_runtime;
 `;
 

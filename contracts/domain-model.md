@@ -157,7 +157,7 @@ A reason therefore drives validation. Selecting *damaged in transit* may make a 
 | Field| Type| Null| Notes|
 |---|---|---|---|
 | `code`| text| no| Stable; never reused after deactivation|
-| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE`** — the third added at `MSC-DEC-412`, closing `OQ-141`, and the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter|
+| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE`** — the third added at `MSC-DEC-412`, closing `OQ-141`, and the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter. **Six identity domains follow, one per operation family** (below)|
 | `valid_checkpoints`| enum set| **yes**| **The recipient-contact checkpoints this reason may be selected at** — any of `PRE_DISPATCH` · `NEXT_STOP` · `DOORSTEP`. **Mandatory and non-empty where `domain = RECIPIENT_CONTACT`; null for every other domain**, which has no checkpoints. Added at `MSC-DEC-407`, closing `OQ-138`'s engineering half: §6.12's `RecipientContactAttempt` invariant already said *"the catalogue carries the mapping"* and [errors-and-enums.md](errors-and-enums.md) §6 that *"a reason declares the checkpoints it is valid for"* — **and this table carried no such field**, so `REASON_NOT_VALID_FOR_CHECKPOINT` had nothing to read|
 | `label`| text| no| Snapshotted onto records at selection (§3.7)|
 | `requires_note`| bool| no||
@@ -212,6 +212,21 @@ Any workflow that hardcodes "this reason needs a photo" contradicts §35.9.2. Th
 | `VEHICLE_NOT_TERMINATING_AT_DESTINATION`| **Re-dispatch to a vehicle whose last stop is the recipient's town** — this one only transits it| `CUSTOMER`| no|
 
 **`consumes_delivery_attempt` is `false` for all five** — an outbound counter is not a doorstep, and no attempt is recorded. `valid_checkpoints` is null. **The Vendor is not notified at the counter**; it hears through the Return flow if Ops decides one.
+
+**The identity operations take a `reason_code` from this catalogue** (Product decision, 6 October 2026). Every identity operation that records why — `revokeSession`, the rejection call of `approveStaffIdentity`, `resetStaffMfa`, `reissueStaffCredentialSetup`, `reissueVendorCredentialSetup`, `recoverStaffCredential`, `recoverVendorCredential`, `reregisterRiderDevice` and `revokeRiderDevice` — validates it exactly as any other reason is validated: **an empty one is `REASON_REQUIRED`, and one that is unknown, retired or from another domain is `REASON_NOT_ACTIVE`**. `DeviceRevocation.reason`, a free-text string until now, becomes a `reason_code` like the others. `valid_checkpoints` is null for these domains, and `consumes_delivery_attempt` is `false` and inert, as for the other non-delivery domains.
+
+**Six domains, one per operation family, named after the act as the four above are. The names are proposed here and are not yet approved:**
+
+| `domain`| Taken by|
+|---|---|
+| `SESSION_REVOCATION`| `revokeSession`|
+| `STAFF_PROFILE_REJECTION`| `approveStaffIdentity` with `approved: false`|
+| `STAFF_MFA_RESET`| `resetStaffMfa`|
+| `CREDENTIAL_ADMINISTRATION`| `reissueStaffCredentialSetup`, `reissueVendorCredentialSetup`, `recoverStaffCredential`, `recoverVendorCredential`|
+| `RIDER_DEVICE_REPLACEMENT`| `reregisterRiderDevice`|
+| `RIDER_DEVICE_REVOCATION`| `revokeRiderDevice`|
+
+**Unresolved Product Owner input: the seeded reasons of these six domains, and their wording, have not been supplied, and none is invented here** — nor the other fields a catalogue row needs (`label`, the `requires_*` flags, `attribution`). Until they exist, each of these operations refuses every `reason_code` it is given with `REASON_NOT_ACTIVE`, so none can succeed in an environment seeded without them ([MIGRATION_AND_SEEDING.md](../architecture/MIGRATION_AND_SEEDING.md) §4).
 
 **Two reason models coexist, and conflating them is `CONFLICT-025`.** §35.9.1 makes reason *options* runtime-configurable, but §21.5 fixes the pickup-failure **category** at exactly four values — `VENDOR_UNAVAILABLE`, `ACCESS_DENIED`, `PARCEL_NOT_READY`, `REFUSED_COLLECTION` — which are product policy, closed to configuration. §21.6 attaches a hard rule to one of them: refused collection is escalation-only, never reschedulable. A configurable category could be renamed or deleted, and that rule would point at nothing.
 
@@ -585,7 +600,7 @@ Governed by §11.2, §37.2, §37.3, §37.5, §30.3, §30.4, §34.12. §6.9 named
 | Field| Type| Null| Notes|
 |---|---|---|---|
 | `id`| uuid| no||
-| `work_email`| text| no| **Unique and verified.** Also the recovery channel (§37.2)|
+| `work_email`| text| no| **Unique and verified**, unique in the canonical form below, and **released when the profile is `REJECTED`**. Also the recovery channel (§37.2)|
 | `full_name`| text| no||
 | `phone`| text| yes| E.164 per §3.4|
 | `status`| enum| no| `PENDING_APPROVAL` · `ACTIVE` · `REJECTED` · `SUSPENDED` · `OFFBOARDED` (**§30.8**, §30.3, §30.9, §30.10). Machine at [state-machines.md](state-machines.md) §13.3|
@@ -605,6 +620,8 @@ Governed by §11.2, §37.2, §37.3, §37.5, §30.3, §30.4, §34.12. §6.9 named
 - **`approved_by` is non-null exactly when `status` is not `PENDING_APPROVAL`, and never equals `created_by` — except on the two seeded bootstrap records, where both hold the reserved system actor** (`MIGRATION_AND_SEEDING.md` §3.2, `MSC-DEC-440`). §30.8: "the creator cannot approve their own profile creation." Holding both actors on the record is what makes that exclusion **checkable after the fact** rather than only at the moment of the call — an approval that bypassed it is otherwise indistinguishable from one that did not.
 - **A `PENDING_APPROVAL` identity grants nothing.** No session may be issued against it ([state-machines.md](state-machines.md) §13), and its `role_bundle_id` confers no permission until approval. The field is populated at creation because §30.8 has the checker approve the person **and** their authority in one act.
 - `OFFBOARDED` is terminal. §30.10 offboarding does not delete — history must survive (§35.1.5).
+- **A work email has one canonical form** (Product decision, 6 October 2026): the address is **trimmed, normalised to Unicode NFKC and lower-cased as a whole**. It is **stored and displayed as entered**, and **no dot or plus-tag folding is applied**. The canonical form decides uniqueness (`WORK_EMAIL_IN_USE`) and is the key of the staff sign-in rate limit ([settings.md](settings.md) §7.7).
+- **A `REJECTED` profile releases its work email.** Uniqueness holds among identities that are not `REJECTED`, so a new profile may use the address ([state-machines.md](state-machines.md) §13.3).
 - Cross-hub access requires an explicit grant and **is audited** (§37.3).
 
 #### `MfaFactor`
@@ -705,6 +722,7 @@ Added 26 August by `MSC-DEC-259`, `MSC-DEC-260` and `MSC-DEC-265`. **The record 
 
 **Invariants.**
 
+- **Registration after a revocation is replacement, not first registration.** `registerRiderDevice` refuses a rider who has had a device revoked (`STATE_CONFLICT`), and **only `reregisterRiderDevice` — with its verification note and the rider's `ETag` — re-binds** ([rider-authentication.md](../features/identity/rider-authentication.md) §4.2).
 - **One registered device.** A second registration replaces the first and is an authorised act, not a self-service one — recovery is Senior Ops (§37.2). **Loss and theft are settled by `MSC-DEC-235`**: reporting revokes the binding immediately, **before any identity verification** (`staff.device.revoke`, Ops Staff), and re-registration requires the rider to attend a hub in person (`staff.device.reregister`, Senior Ops). Verifying before revoking would leave a stolen handset live for as long as the check took.
 - **Authentication proves possession of the device, not knowledge of its name**. Sign-in is a challenge-response against the registered **public key**; **the record is identified by `RegisteredDevice.id`, and nothing a client sends selects it** — a rider has at most one `ACTIVE` device, so the server resolves it.
 - **A rider is authentication-ready when `status = ACTIVE`, a `pin` is established, and an `ACTIVE` `RegisteredDevice` carries a public key.** All three — and the PIN is established by the rider, never supplied by the registering officer. **Every `ACTIVE` rider device was accepted through Android Key Attestation at enrolment or replacement**: the only way a rider device becomes `ACTIVE` is `completeRiderDeviceEnrolment`, which verifies the evidence before it writes anything, so **sign-in does not re-check it and no flag records it**.
@@ -720,6 +738,7 @@ Added 26 August by `MSC-DEC-259`, `MSC-DEC-260` and `MSC-DEC-265`. **The record 
 | `VendorAccount.account_identifier`| text| no| **Unique, immutable, never reused, case-insensitive, server-generated and human-typeable; not a secret.** What the vendor types at sign-in beside the shared secret (`vendorSignIn`). Generated when the account is created, shown to Ops by `getVendorAccount` and told to the vendor in the setup message. **Before this row existed the sign-in operation required an identifier that no document defined and no operation returned** (Gate PD-3R1). Its form is engineering's (`SECURITY_DESIGN.md` §13.7a)|
 | `VendorAccount.status`| enum| no| `ACTIVE` · `SUSPENDED` (§37.3, §29.6)|
 | `VendorCredential.recovery_phone` / `recovery_email`| text| yes| **At least one required.** The recovery channel (§37.2)|
+| `VendorCredential.delivery_channel`| enum| yes| `PHONE` · `EMAIL`. **Chosen at approval by the approver** (`decideVendorOrganization`) and stored here, **null until then**. It is the channel a credential setup grant and a recovery link are delivered by ([state-machines.md](state-machines.md) §19.1). **Open:** whether the additional-browser grant (`VENDOR_DEVICE_ENROLMENT`), which names *the registered recovery channel*, uses it too when both addresses are registered|
 | `VendorCredential.secret`| embedded| **yes**| Hashed with Argon2id. **Null until the vendor establishes it** through a `SetupGrant` — **the administrator never learns it**. Shared among the vendor's staff by design. **It also carries `failed_attempt_count` and `locked_until`**, shared by everyone using the credential. The secret is held to 12 to 128 characters with no composition rule.|
 
 **Invariants, and the risk §37.5 makes explicit.**
@@ -782,7 +801,7 @@ Gate PD-3R1, `PDA-47`. §7 makes every mutation optimistically concurrent; **a v
 
 - **The channel is resolved from the principal's registered contact, never from the request.** A recovery request carries no destination. This is the single most exploitable mistake available in this area — accepting a supplied address lets anyone redirect a colleague's recovery.
 - **Single use.** Consuming a request sets `CONSUMED`; a second attempt fails. A reused token is a signal, not a retry.
-- **Issuing a new request supersedes any `PENDING` one** for that principal, with `SUPERSEDED`.
+- **Issuing a new request supersedes any `PENDING` one** for that principal, with `SUPERSEDED` — **except that a self-service request made less than `recovery_request_supersede_guard_seconds` after the pending one was issued neither supersedes it nor issues another** ([credential-recovery.md](../features/identity/credential-recovery.md) §5.5).
 - **`initiated_by` is what makes one entity serve both self-service and administrative recovery** (R1.3). Null when the principal asked; the acting Platform Admin when `recoverStaffCredential` or `recoverVendorCredential` created it. The token still goes to the **registered channel** either way — an administrator initiates recovery and never receives its credential.
 
 **`principal_type` discriminates the target, and no new field was needed for it.** `STAFF` replaces a password; `VENDOR` replaces a shared secret **and** rotates the browser device credential. The model already carried the discriminator R1.3 needed.
@@ -813,7 +832,7 @@ Gate PD-3R1, `PDA-47`. §7 makes every mutation optimistically concurrent; **a v
 |---|---|---|
 | (none) → `ACTIVE`| `completeRiderDeviceEnrolment`, after the attestation evidence is verified| The device is registered, the grant consumed and the PIN set together or not at all|
 | `ACTIVE` → `REPLACED`| The same operation completing a `RIDER_DEVICE_REREGISTRATION` grant| The device was **superseded through the approved replacement workflow**. A live session on it ends with `DEVICE_REPLACED`. Audited by `auth.device.replaced`, which names the old and the new device|
-| `ACTIVE` → `REVOKED`| `revokeRiderDevice` (and, for a vendor browser, `revokeVendorDevice`)| Melarc **explicitly invalidated** the device — loss, theft or a security workflow. A live session on it ends with `DEVICE_REVOKED`. Audited by `auth.device.revoked`|
+| `ACTIVE` → `REVOKED`| `revokeRiderDevice` (and, for a vendor browser, `revokeVendorDevice`)| Melarc **explicitly invalidated** the device — loss, theft or a security workflow. A live session on it ends with `DEVICE_REVOKED`. Audited by `auth.device.revoked`. **A rider device's revocation takes a `reason_code` of the rider-device-revocation domain (§3.9).**|
 | `REVOKED` → `REPLACED`| **never**| A device already revoked when its replacement completes **stays `REVOKED`**: it was revoked and not replaced, and rewriting it would erase the reason|
 
 **Neither `REPLACED` nor `REVOKED` can authenticate, and neither returns to `ACTIVE`.** A device is never restored; **a new device is a new enrolment.** Both keep their reason distinguishable, which is the point of two states.
@@ -871,7 +890,7 @@ Three rules from §35.12 constrain the vendor entities above and are easy to col
 | `id`| uuid| no| What `StaffIdentity.role_bundle_id` references and `createStaffIdentity` takes. §11.1: authorization tests the **permission**, never this id|
 | `name`| string| no| The display name the maker of a staff profile sees|
 | `audience`| enum| no| `STAFF` · `RIDER` · `VENDOR`. **Vendor and Rider each carry one fixed, non-configurable bundle** (`permissions.md` §8), and neither is ever assignable to a human staff identity|
-| `privileged`| boolean| no| True for the Senior Ops and Platform Admin bundles: their holders sign in with a second factor, and a profile that holds one needs a Platform Admin approver|
+| `privileged`| boolean| no| True for the Senior Ops and Platform Admin bundles **and for no other**: their holders sign in with a second factor, and a profile that holds one needs a Platform Admin approver. **Fleet Manager and Finance/Reconciliation are `false`** — standard session tier (720 minutes absolute, 30 idle, [settings.md](settings.md) §7.5) and no mandatory second factor|
 
 **Which bundles are offered for assignment is derived, not stored**: a bundle whose `audience` is `STAFF`. Only confirmed bundles are ever seeded — a `PROPOSED` bundle governs nothing (`permissions.md` §8) and is not in the table — so `audience` is the whole predicate, and a technical identity's capability set is not a `RoleBundle` at all. `listAssignableStaffRoleBundles` returns `id`, `name` and `requires_platform_admin_approval` — the last is `privileged` read through the approval policy, and grants nothing — and **never a bundle's permissions or its holders**.
 
@@ -2317,6 +2336,7 @@ Nothing in the operational domain is hard-deleted. §36.1 requires failed, cance
 
 - **Correction is forward-only.** An adjustment links to the original; issued history is never rewritten (§5.2.5).
 - **Deactivation, not deletion,** for users, settings, reasons and providers — §34.7 requires historical records to stay interpretable afterwards, which §3.7's snapshot rule delivers.
+- **The database refuses an implicit delete.** The migration lint refuses `ON DELETE CASCADE`, `TRUNCATE` and a `DELETE` grant unless a comment on that statement records the reason (`-- allow-delete: <reason>`) — [MIGRATION_AND_SEEDING.md](../architecture/MIGRATION_AND_SEEDING.md) §5.1.
 - **Retention is per category**, configurable, with legal-hold exemption from automatic deletion (§38.7, `MSC-DEC-150–153`). Periods are `OQ-028` and this document does not supply them.
 
 ---

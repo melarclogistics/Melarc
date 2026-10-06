@@ -418,6 +418,179 @@ function operationCountProblems(
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// (g) The status each cross-cutting code is answered with (errors-and-enums.md section 4; the Product Owner's
+// decision of 6 October 2026). `VALIDATION_FAILED` is always a 400, and a business rule is a 422, so no operation
+// may carry the first through the second's response. `CSRF_VALIDATION_FAILED` is a 403 and every operation that
+// lists it has a 403 that carries it. `IDEMPOTENCY_KEY_CONFLICT` is a 409 and is declared, with its 409, on every
+// operation that takes an `Idempotency-Key`. A shared response is only ever filed under its own status.
+
+const SHARED_RESPONSE_STATUS: Readonly<Record<string, string>> = {
+  ValidationFailed: '400',
+  Forbidden: '403',
+  Conflict: '409',
+  RuleViolation: '422',
+};
+
+/** What an operation declares for a status, with a reference followed, or undefined. */
+function answerOf(
+  contract: JsonObject,
+  operation: JsonObject,
+  status: string,
+): JsonObject | undefined {
+  const responses = isJsonObject(operation.responses) ? operation.responses : {};
+  const answer = responses[status];
+  const resolved =
+    isJsonObject(answer) && typeof answer.$ref === 'string'
+      ? resolveReference(contract, answer.$ref)
+      : answer;
+  return isJsonObject(resolved) ? resolved : undefined;
+}
+
+function takesIdempotencyKey(contract: JsonObject, path: string, operation: JsonObject): boolean {
+  const item = isJsonObject(contract.paths) ? contract.paths[path] : undefined;
+  const lists = [isJsonObject(item) ? item.parameters : undefined, operation.parameters];
+  return lists.some(
+    (list) =>
+      Array.isArray(list) &&
+      (list as readonly Json[]).some((entry) => {
+        const parameter =
+          isJsonObject(entry) && typeof entry.$ref === 'string'
+            ? resolveReference(contract, entry.$ref)
+            : entry;
+        return (
+          isJsonObject(parameter) &&
+          parameter.in === 'header' &&
+          typeof parameter.name === 'string' &&
+          parameter.name.toLowerCase() === 'idempotency-key'
+        );
+      }),
+  );
+}
+
+function statusProblems(contract: JsonObject): string[] {
+  const problems: string[] = [];
+  const description = (answer: JsonObject | undefined): string =>
+    typeof answer?.description === 'string' ? answer.description : '';
+
+  for (const operation of operationsOf(contract)) {
+    const codes = stringsOf(operation.operation['x-error-codes']);
+    const where = at(operation);
+    const responses = isJsonObject(operation.operation.responses)
+      ? operation.operation.responses
+      : {};
+
+    if (takesIdempotencyKey(contract, operation.path, operation.operation)) {
+      if (!codes.includes('IDEMPOTENCY_KEY_CONFLICT')) {
+        problems.push(
+          `${where} takes an Idempotency-Key and does not declare IDEMPOTENCY_KEY_CONFLICT`,
+        );
+      }
+      if (answerOf(contract, operation.operation, '409') === undefined) {
+        problems.push(`${where} takes an Idempotency-Key and declares no 409 to carry it`);
+      }
+    }
+
+    const raw400 = responses['400'];
+    const validation400 =
+      isJsonObject(raw400) && raw400.$ref === '#/components/responses/ValidationFailed';
+    if (codes.includes('VALIDATION_FAILED') && !validation400) {
+      problems.push(
+        `${where} declares VALIDATION_FAILED and has no 400 ValidationFailed to carry it`,
+      );
+    }
+    if (validation400 && !codes.includes('VALIDATION_FAILED')) {
+      problems.push(`${where} answers 400 ValidationFailed and does not declare VALIDATION_FAILED`);
+    }
+    const raw422 = responses['422'];
+    if (
+      isJsonObject(raw422) &&
+      raw422.$ref === undefined &&
+      description(raw422).includes('VALIDATION_FAILED')
+    ) {
+      problems.push(`${where} carries VALIDATION_FAILED under a 422`);
+    }
+
+    if (codes.includes('CSRF_VALIDATION_FAILED')) {
+      const forbidden = answerOf(contract, operation.operation, '403');
+      if (forbidden === undefined) {
+        problems.push(`${where} declares CSRF_VALIDATION_FAILED and has no 403 to carry it`);
+      } else if (!description(forbidden).includes('CSRF_VALIDATION_FAILED')) {
+        problems.push(`${where} declares CSRF_VALIDATION_FAILED and its 403 does not carry it`);
+      }
+    }
+
+    for (const [status, answer] of Object.entries(responses)) {
+      if (!isJsonObject(answer) || typeof answer.$ref !== 'string') continue;
+      const shared = /^#\/components\/responses\/(\w+)$/.exec(answer.$ref)?.[1];
+      const owner = shared === undefined ? undefined : SHARED_RESPONSE_STATUS[shared];
+      if (owner !== undefined && owner !== status) {
+        problems.push(
+          `${where} files the ${String(shared)} response under ${status}, which is ${owner}`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// (h) The cookies a response sets for one type of principal (`x-set-cookies-when`): the type is one the Session can
+// have, the response names cookies to apply it to, and the lifetime a cookie carries agrees with how `x-cookies`
+// classes it (a browser-session cookie has none, and a persistent one says what it is).
+
+function cookieConditionProblems(contract: JsonObject): string[] {
+  const problems: string[] = [];
+  const schemas =
+    isJsonObject(contract.components) && isJsonObject(contract.components.schemas)
+      ? contract.components.schemas
+      : {};
+  const session = isJsonObject(schemas.Session) ? schemas.Session : {};
+  const properties = isJsonObject(session.properties) ? session.properties : {};
+  const principal = isJsonObject(properties.principal_type) ? properties.principal_type : {};
+  const types = stringsOf(principal.enum);
+  if (types.length === 0) throw new Error('Session.principal_type has no enum.');
+
+  for (const operation of operationsOf(contract)) {
+    const responses = isJsonObject(operation.operation.responses)
+      ? operation.operation.responses
+      : {};
+    for (const [status, answer] of Object.entries(responses)) {
+      if (!isJsonObject(answer) || answer['x-set-cookies-when'] === undefined) continue;
+      const where = `${at(operation)} response ${status}`;
+      const condition = answer['x-set-cookies-when'];
+      const type = isJsonObject(condition) ? condition.principal_type : undefined;
+      if (typeof type !== 'string' || !types.includes(type)) {
+        problems.push(
+          `${where} sets its cookies for the principal type ${typeof type === 'string' ? type : JSON.stringify(condition)}, which Session does not define`,
+        );
+      }
+      if (stringsOf(answer['x-set-cookies']).length === 0) {
+        problems.push(`${where} states x-set-cookies-when and no cookie to apply it to`);
+      }
+    }
+  }
+
+  const cookies = isJsonObject(contract['x-cookies']) ? contract['x-cookies'] : {};
+  for (const [name, definition] of Object.entries(cookies)) {
+    if (!isJsonObject(definition)) continue;
+    const attributes = typeof definition.attributes === 'string' ? definition.attributes : '';
+    const lifetime = /(^|;)\s*(max-age|expires)\s*=/i.test(attributes);
+    if (definition.browser_session === true && lifetime) {
+      problems.push(`${name} is a browser-session cookie and its attributes give it a lifetime`);
+    }
+    if (definition.browser_session !== true && !lifetime) {
+      problems.push(
+        `${name} is not a browser-session cookie and its attributes give it no lifetime`,
+      );
+    }
+    if (!/(^|;)\s*secure\s*(;|$)/i.test(attributes)) {
+      problems.push(`${name} is not Secure`);
+    }
+  }
+  return problems;
+}
+
+// ---------------------------------------------------------------------------------------------------------
 
 describe('the contract against itself and the documents that own its facts', () => {
   it('reads as many operations as there are, so no check below can pass for having read none', () => {
@@ -475,6 +648,19 @@ describe('the contract against itself and the documents that own its facts', () 
   // saying so: a critical write with no class, or a class for an operation that is gone.
   it('has as many operations as the performance catalogue pins, the same ones, and a scope within them', () => {
     expect(operationCountProblems(CONTRACT, PERFORMANCE, IMPLEMENTED_OPERATIONS)).toEqual([]);
+  });
+
+  // Break caught: an operation that a client cannot tell the refusal of from, because the status its code is
+  // answered with is missing or is another's: VALIDATION_FAILED reachable only through a 422, a failed CSRF check
+  // with no 403 to carry it, or a replayed key with a different payload and no 409.
+  it('answers every cross-cutting code with its own status, on every operation that can return it', () => {
+    expect(statusProblems(CONTRACT)).toEqual([]);
+  });
+
+  // Break caught: a response that says a cookie is owed to a type of principal nothing has, so that no answer ever
+  // is, or a cookie whose lifetime contradicts how the contract classes it.
+  it('sets cookies only for principal types the Session has, and gives each cookie the lifetime it is classed with', () => {
+    expect(cookieConditionProblems(CONTRACT)).toEqual([]);
   });
 });
 
@@ -876,5 +1062,165 @@ describe('(f) the number of operations: each way to break it is found', () => {
     expect(operationCountProblems(CONTRACT, PERFORMANCE, ['listPickupRequestz'])).toEqual([
       'The implemented scope lists listPickupRequestz, which the contract does not have',
     ]);
+  });
+});
+
+describe('(g) statuses: each way to break it is found', () => {
+  const answers = (id: string) => {
+    const found = operationsOf(CONTRACT).find((entry) => entry.operation.operationId === id);
+    if (found === undefined) throw new Error(`No operation ${id}`);
+    return ['paths', found.path, found.method.toLowerCase()] as const;
+  };
+
+  it('finds an operation that takes an Idempotency-Key and lacks its code or its 409', () => {
+    const noCode = changed((copy) => {
+      copy.update<string[]>([...answers('registerRiderDevice'), 'x-error-codes'], (codes) =>
+        codes.filter((code) => code !== 'IDEMPOTENCY_KEY_CONFLICT'),
+      );
+    });
+    const noAnswer = changed((copy) => {
+      copy.remove([...answers('registerRiderDevice'), 'responses', '409']);
+    });
+
+    expect(statusProblems(noCode)).toEqual([
+      'POST /ops/riders/{riderId}/device/register takes an Idempotency-Key and does not declare IDEMPOTENCY_KEY_CONFLICT',
+    ]);
+    expect(statusProblems(noAnswer)).toEqual([
+      'POST /ops/riders/{riderId}/device/register takes an Idempotency-Key and declares no 409 to carry it',
+    ]);
+  });
+
+  it('finds an operation that takes the key through its path item, by a name written in lower case', () => {
+    const onThePath = changed((copy) => {
+      copy.set(['paths', '/ghosts'], {
+        parameters: [{ name: 'idempotency-key', in: 'header', schema: { type: 'string' } }],
+        post: { operationId: 'makeGhost', 'x-error-codes': [], responses: {} },
+      });
+    });
+
+    expect(statusProblems(onThePath)).toEqual([
+      'POST /ghosts takes an Idempotency-Key and does not declare IDEMPOTENCY_KEY_CONFLICT',
+      'POST /ghosts takes an Idempotency-Key and declares no 409 to carry it',
+    ]);
+  });
+
+  it('finds VALIDATION_FAILED with no 400, a 400 that is not declared, and the code under a 422', () => {
+    const no400 = changed((copy) => {
+      copy.remove([...answers('requestRiderSignInChallenge'), 'responses', '400']);
+    });
+    const undeclared = changed((copy) => {
+      copy.update<string[]>([...answers('requestRiderSignInChallenge'), 'x-error-codes'], (codes) =>
+        codes.filter((code) => code !== 'VALIDATION_FAILED'),
+      );
+    });
+    const under422 = changed((copy) => {
+      copy.set([...answers('requestRiderSignInChallenge'), 'responses', '422'], {
+        description: '`VALIDATION_FAILED` for a phone that is not E.164',
+      });
+    });
+    const filed = changed((copy) => {
+      copy.set([...answers('requestRiderSignInChallenge'), 'responses', '422'], {
+        $ref: '#/components/responses/ValidationFailed',
+      });
+    });
+
+    expect(statusProblems(no400)).toEqual([
+      'POST /auth/rider/sign-in/challenge declares VALIDATION_FAILED and has no 400 ValidationFailed to carry it',
+    ]);
+    expect(statusProblems(undeclared)).toEqual([
+      'POST /auth/rider/sign-in/challenge answers 400 ValidationFailed and does not declare VALIDATION_FAILED',
+    ]);
+    expect(statusProblems(under422)).toEqual([
+      'POST /auth/rider/sign-in/challenge carries VALIDATION_FAILED under a 422',
+    ]);
+    expect(statusProblems(filed)).toEqual([
+      'POST /auth/rider/sign-in/challenge files the ValidationFailed response under 422, which is 400',
+    ]);
+  });
+
+  it('finds CSRF_VALIDATION_FAILED with no 403, and a 403 that does not carry it', () => {
+    const none = changed((copy) => {
+      copy.remove([...answers('signOut'), 'responses', '403']);
+    });
+    const silent = changed((copy) => {
+      copy.set(['components', 'responses', 'Forbidden', 'description'], '`PERMISSION_DENIED`.');
+    });
+
+    expect(statusProblems(none)).toEqual([
+      'DELETE /auth/session declares CSRF_VALIDATION_FAILED and has no 403 to carry it',
+    ]);
+    const quiet = statusProblems(silent);
+    expect(quiet.length).toBeGreaterThan(50);
+    expect(quiet.every((problem) => problem.endsWith('and its 403 does not carry it'))).toBe(true);
+  });
+
+  it('keeps the shared 422 from naming VALIDATION_FAILED, except to say it is not one', () => {
+    const description = (
+      ((CONTRACT.components as JsonObject).responses as JsonObject).RuleViolation as JsonObject
+    ).description as string;
+
+    expect(description).toContain('Never `VALIDATION_FAILED`');
+  });
+});
+
+describe('(h) cookie conditions and lifetimes: each way to break it is found', () => {
+  const RECOVERY = [
+    'paths',
+    '/auth/recovery/complete',
+    'post',
+    'responses',
+    '204',
+    'x-set-cookies-when',
+  ] as const;
+
+  it('finds a condition on a type of principal that Session does not have, or on no cookie', () => {
+    const ghost = changed((copy) => {
+      copy.set(RECOVERY, { principal_type: 'VENDER' });
+    });
+    const bare = changed((copy) => {
+      copy.set(RECOVERY, 'VENDOR');
+    });
+    const none = changed((copy) => {
+      copy.set(
+        ['paths', '/auth/recovery/complete', 'post', 'responses', '204', 'x-set-cookies'],
+        [],
+      );
+    });
+
+    expect(cookieConditionProblems(ghost)).toEqual([
+      'POST /auth/recovery/complete response 204 sets its cookies for the principal type VENDER, which Session does not define',
+    ]);
+    expect(cookieConditionProblems(bare)).toEqual([
+      'POST /auth/recovery/complete response 204 sets its cookies for the principal type "VENDOR", which Session does not define',
+    ]);
+    expect(cookieConditionProblems(none)).toEqual([
+      'POST /auth/recovery/complete response 204 states x-set-cookies-when and no cookie to apply it to',
+    ]);
+  });
+
+  it('finds a cookie whose lifetime contradicts how it is classed, and one that is not Secure', () => {
+    const persistent = changed((copy) => {
+      copy.set(
+        ['x-cookies', 'melarc_session', 'attributes'],
+        'HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+    });
+    const forgotten = changed((copy) => {
+      copy.set(
+        ['x-cookies', 'melarc_vendor_device', 'attributes'],
+        'HttpOnly; Secure; SameSite=Lax; Path=/',
+      );
+    });
+    const open = changed((copy) => {
+      copy.set(['x-cookies', 'melarc_csrf', 'attributes'], 'SameSite=Lax; Path=/');
+    });
+
+    expect(cookieConditionProblems(persistent)).toEqual([
+      'melarc_session is a browser-session cookie and its attributes give it a lifetime',
+    ]);
+    expect(cookieConditionProblems(forgotten)).toEqual([
+      'melarc_vendor_device is not a browser-session cookie and its attributes give it no lifetime',
+    ]);
+    expect(cookieConditionProblems(open)).toEqual(['melarc_csrf is not Secure']);
   });
 });

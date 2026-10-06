@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 
@@ -28,6 +28,32 @@ const STRICT_POLICY = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
+
+/**
+ * Sends STRICT_POLICY with every response of the page and returns the violations the browser reports, which the caller
+ * reads after the page has run.
+ */
+async function enforceStrictPolicy(page: Page): Promise<string[]> {
+  await page.route('**/*', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      headers: { ...response.headers(), 'content-security-policy': STRICT_POLICY },
+    });
+  });
+  const violations: string[] = [];
+  await page.exposeFunction('reportViolation', (detail: string) => {
+    violations.push(detail);
+  });
+  await page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', (event) => {
+      void (
+        window as unknown as { reportViolation: (detail: string) => Promise<void> }
+      ).reportViolation(`${event.violatedDirective} ${event.blockedURI}`);
+    });
+  });
+  return violations;
+}
 
 test.describe('the application shell in a browser', () => {
   // Break caught: a production build that does not start, logs errors, or reaches for anything other
@@ -133,24 +159,7 @@ test.describe('the application shell in a browser', () => {
 
   // Break caught: a policy with 'unsafe-inline' or 'unsafe-eval' being needed to run the shell.
   test('runs under a strict Content-Security-Policy', async ({ page }) => {
-    await page.route('**/*', async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({
-        response,
-        headers: { ...response.headers(), 'content-security-policy': STRICT_POLICY },
-      });
-    });
-    const violations: string[] = [];
-    await page.exposeFunction('reportViolation', (detail: string) => {
-      violations.push(detail);
-    });
-    await page.addInitScript(() => {
-      document.addEventListener('securitypolicyviolation', (event) => {
-        void (
-          window as unknown as { reportViolation: (detail: string) => Promise<void> }
-        ).reportViolation(`${event.violatedDirective} ${event.blockedURI}`);
-      });
-    });
+    const violations = await enforceStrictPolicy(page);
     const seen = watchPage(page);
 
     const response = await page.goto('/no-such-page');
@@ -160,6 +169,30 @@ test.describe('the application shell in a browser', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     await page.getByRole('link', { name: 'Go to the start page' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+
+    expect(violations).toEqual([]);
+    expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught: the typeface being declared but never loading under the policy of this file (font-src 'self'), so that
+  // every user silently gets the fallback stack. Inter's Latin subset is the one the page's text needs.
+  test('loads Inter from its own files under the strict policy', async ({ page, baseURL }) => {
+    const violations = await enforceStrictPolicy(page);
+    const seen = watchPage(page);
+
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+
+    const loaded = await page.evaluate(async () => {
+      await document.fonts.ready;
+      return [...document.fonts]
+        .filter((face) => face.status === 'loaded')
+        .map((face) => face.family.replaceAll(/["']/g, ''));
+    });
+    expect(loaded).toContain('Inter');
+    const fontFiles = seen.requests.filter((url) => new URL(url).pathname.endsWith('.woff2'));
+    expect(fontFiles.length).toBeGreaterThan(0);
+    for (const url of fontFiles) expect(new URL(url).origin, url).toBe(baseURL);
 
     expect(violations).toEqual([]);
     expect(seen.problems).toEqual([]);

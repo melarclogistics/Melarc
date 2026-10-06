@@ -255,6 +255,77 @@ ALTER TABLE melarc.orders OWNER TO melarc_owner, ENABLE ROW LEVEL SECURITY, FORC
   });
 });
 
+describe('lintMigrationSql: statements that remove data', () => {
+  // Break caught (Product Owner decision, 6 October 2026): a cascade, a truncation or a DELETE grant that nobody chose.
+  // Delete behaviour is explicit and never a framework default, and operational data is never hard-deleted by accident.
+  // Each of these is refused unless a comment on the statement records why.
+  it.each([
+    [
+      'an inline ON DELETE CASCADE',
+      'ALTER TABLE melarc.child ADD COLUMN parent uuid REFERENCES melarc.parent (id) ON DELETE CASCADE;',
+    ],
+    [
+      'an added ON DELETE CASCADE',
+      'ALTER TABLE melarc.child ADD CONSTRAINT fk FOREIGN KEY (parent) REFERENCES melarc.parent (id) ON  DELETE\n  CASCADE;',
+    ],
+    ['a TRUNCATE', 'TRUNCATE melarc.orders;'],
+    [
+      'a TRUNCATE of several tables',
+      'TRUNCATE TABLE melarc.orders, melarc.lines RESTART IDENTITY;',
+    ],
+    ['a DELETE grant', 'GRANT SELECT, DELETE ON melarc.orders TO melarc_api_runtime;'],
+    ['a grant of everything', 'GRANT ALL PRIVILEGES ON melarc.orders TO melarc_api_runtime;'],
+    ['a grant of everything, short', 'GRANT ALL ON TABLE melarc.orders TO melarc_api_runtime;'],
+    ['a TRUNCATE grant', 'GRANT TRUNCATE ON melarc.orders TO melarc_api_runtime;'],
+    [
+      'a DELETE grant on every table of a schema',
+      'GRANT DELETE ON ALL TABLES IN SCHEMA melarc TO melarc_api_runtime;',
+    ],
+  ])('refuses %s with no recorded reason', (_label, statement) => {
+    const problems = lintMigrationSql(statement);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('allow-delete');
+  });
+
+  it.each([
+    [
+      'a line comment before it',
+      '-- allow-delete: purge job, 90-day retention (OPS-RETENTION)\nTRUNCATE melarc.orders;',
+    ],
+    [
+      'a block comment inside it',
+      'GRANT DELETE /* allow-delete: draft cleanup */ ON melarc.drafts TO melarc_api_runtime;',
+    ],
+    [
+      'a comment after it in the same statement',
+      'ALTER TABLE melarc.child ADD CONSTRAINT fk FOREIGN KEY (parent) REFERENCES melarc.parent (id) ON DELETE CASCADE -- allow-delete: children have no life of their own\n;',
+    ],
+  ])('accepts it when %s records the reason', (_label, statement) => {
+    expect(lintMigrationSql(statement)).toEqual([]);
+  });
+
+  // Break caught: the marker with no reason, which records nothing, or a reason that belongs to the previous statement.
+  it('does not accept the marker without a reason, or a reason given for another statement', () => {
+    expect(lintMigrationSql('-- allow-delete:\nTRUNCATE melarc.orders;')).toHaveLength(1);
+    expect(
+      lintMigrationSql('-- allow-delete: purge\nSELECT 1;\nTRUNCATE melarc.orders;'),
+    ).toHaveLength(1);
+  });
+
+  // Break caught: the rule refusing what it must allow, which is every grant and constraint that does not remove data.
+  it.each([
+    'GRANT SELECT, INSERT, UPDATE ON melarc.orders TO melarc_api_runtime;',
+    'GRANT USAGE ON SCHEMA melarc TO melarc_api_runtime;',
+    'GRANT EXECUTE ON FUNCTION melarc.principal_type() TO melarc_api_runtime;',
+    'ALTER TABLE melarc.child ADD COLUMN parent uuid REFERENCES melarc.parent (id) ON DELETE RESTRICT;',
+    'ALTER TABLE melarc.child ADD CONSTRAINT fk FOREIGN KEY (parent) REFERENCES melarc.parent (id);',
+    "INSERT INTO melarc.notes VALUES ('ON DELETE CASCADE and TRUNCATE are only words here');",
+  ])('allows %s', (statement) => {
+    expect(lintMigrationSql(statement)).toEqual([]);
+  });
+});
+
 describe('the committed migrations', () => {
   const folder = fileURLToPath(new URL('../../../migrations', import.meta.url));
   const files = readdirSync(folder).filter((name) => name.endsWith('.sql'));

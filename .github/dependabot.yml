@@ -1,0 +1,25 @@
+# Weekly dependency updates, each as a pull request that CI must pass before anyone merges it (Product Owner decision,
+# 6 October 2026). Nothing is merged automatically. The pins that are held on purpose (TypeScript, Node.js, pnpm) are
+# explained in the runbook; an update to one of them is a decision, not a routine merge.
+version: 2
+updates:
+  # The workspace: every package is covered by the one lockfile at the root.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+
+  # The workflows and the composite action under .github/actions. The `services:` image of a workflow job is not read
+  # by Dependabot: the PostgreSQL tag in ci.yml is kept equal to the one below by hand.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+
+  # The local PostgreSQL service, whose image is pinned by tag and digest.
+  - package-ecosystem: docker-compose
+    directory: /infrastructure/postgres
+    schedule:
+      interval: weekly

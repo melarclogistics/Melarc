@@ -58,6 +58,8 @@ The rider path is not a channel at all — it is a **human verification step**. 
 
 **MFA loss is therefore a separate event with a different authority.** `resetStaffMfa`, held by `staff.mfa.reset`, **Platform Admin only**, mandatory reason, enhanced-audited: the old factor is revoked, every target session terminates with `MFA_RESET`, and a re-enrolment grant is issued to the target's own verified email — **never returned to the acting administrator**, who must not be able to complete someone else's enrolment.
 
+**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). **A Platform Admin cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`): another Platform Admin acts, which is why the product keeps two. A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. The `reason_code` is a code of the MFA-reset domain ([domain-model.md](../../contracts/domain-model.md) §3.9): `REASON_REQUIRED` when empty, `REASON_NOT_ACTIVE` when unknown, retired or from another domain.
+
 **There are no backup codes, bypass codes or support overrides.** Each would be a weaker secret that silently defeats the stronger one, which is the failure this section exists to prevent.
 
 ## 5. Behaviour
@@ -66,7 +68,7 @@ The rider path is not a channel at all — it is a **human verification step**. 
 
 **Staff — self-service to a verified channel.** The staff member requests recovery; a time-bounded link goes to the **verified work email only**. Never to an address supplied in the request — that would let anyone redirect a colleague's recovery.
 
-**Vendor — self-service to a registered channel.** Same shape, to the registered phone or email. **Never to a channel supplied in the request.**
+**Vendor — self-service to a registered channel.** Same shape, to the credential's `delivery_channel`: the registered phone or the registered email, whichever the approver chose at approval ([domain-model.md](../../contracts/domain-model.md) §6.8). **Never to a channel supplied in the request.**
 
 **Vendor recovery is also the controlled way to register a new browser.** Completing it revokes obsolete device credentials and issues a fresh `melarc_vendor_device` to the browser that completed recovery — which, since ordinary sign-in requires that credential and never issues one, makes recovery and initial setup **the only two routes a browser becomes registered**. That is deliberate: the alternative is a login that registers whoever asks.
 
@@ -98,6 +100,10 @@ The rider path is not a channel at all — it is a **human verification step**. 
 | New credential shorter than 12 or longer than 128 characters| Refused by the schema; the message names the field and **never the value**| `VALIDATION_FAILED`|
 | Ops-initiated recovery with a stale `If-Match`, or against an identity that holds no credential| Refused| `STATE_CONFLICT`|
 | Ops-initiated recovery with an empty `reason_code`| Refused| `REASON_REQUIRED`|
+| Ops-initiated recovery with an unknown, retired or foreign-domain `reason_code`| Refused| `REASON_NOT_ACTIVE`|
+| A second self-service request inside `recovery_request_supersede_guard_seconds` of the pending link| **Nothing happens and nothing is revealed**: the pending link stands and no other is issued (§5.5)| — *(`202`)*|
+| `resetStaffMfa` on oneself; on a target whose factor is only `PENDING`; on a non-privileged identity| Refused (§4.1)| `SELF_APPROVAL_FORBIDDEN`; `STATE_CONFLICT` for the other two|
+| `reissueStaffCredentialSetup` naming a bootstrap identity| Refused (§5.6)| `STATE_CONFLICT`|
 | A principal locked by failed sign-ins completes recovery| **The lock is cleared**: the failed-attempt count is zero and `locked_until` is empty| —|
 
 **Why a destination is rejected and not ignored.** An earlier version of this table, `AC-SLICE-000-20` and the `SLICE-000` script said it was *ignored entirely*; the contract has always said *rejected outright* and its request body is `additionalProperties: false`. A request that carries a destination is a request someone is attempting to redirect, and an API that accepts it silently teaches the attacker which field to try next.
@@ -111,6 +117,16 @@ The rider path is not a channel at all — it is a **human verification step**. 
 - **Never let recovery lift a suspension.** They are different states with different authorities; a suspended principal who recovers a credential is still suspended.
 - **Never log, display or return the new credential** to the staff member performing a recovery. Recovery re-establishes a path to set a credential; it never reveals one.
 - **Never let a role without a second factor reach these operations.** `MSC-DEC-228` gates that at sign-in rather than at the action, so by the time a Senior Ops or Platform Admin session exists the factor has already been presented.
+
+### 5.5 A second request inside the guard window
+
+A self-service request made **less than `recovery_request_supersede_guard_seconds` after the pending link was issued** (60 at launch, [settings.md](../../contracts/settings.md) §7.5) **neither supersedes that link nor issues another** (Product decision, 6 October 2026). Nothing is sent and nothing is stored, and the answer is **the same `202`**, in content and timing, as for any request, so it reveals neither the guard nor that a link is pending. A request made after the window supersedes the pending link as before ([domain-model.md](../../contracts/domain-model.md) §6.8, `RecoveryRequest`). The guard counts toward `rate_limit_recovery` like any request. **It is stated for the self-service request, whose answer is the `202`**: `recoverStaffCredential` and `recoverVendorCredential` return the `RecoveryRequest` they create, and the decision does not extend the guard to them.
+
+### 5.6 A stranded bootstrap administrator
+
+An identity that is one of the two seeded bootstrap Platform Admins, holds a password and a `PENDING` factor, and whose continuation grant has lapsed is **stranded** ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.3a). Three rules (Product decision, 6 October 2026). **`reissueStaffCredentialSetup` refuses a bootstrap identity** (`STATE_CONFLICT`), because a fresh 30-minute grant would go to an address nobody verified. **The other Platform Admin uses `resetStaffMfa`.** **The provisioning-channel resume command stops working once the other bootstrap administrator holds an `ACTIVE` credential and an `ACTIVE` factor**, so it is never a standing way in.
+
+**Unresolved Product Owner input.** `resetStaffMfa` refuses a target whose factor is only `PENDING` (§4.1), and that is exactly a stranded identity's state; so once the other administrator is ready, neither route reaches a stranded one. Which rule gives way — the `PENDING` refusal, or the resume command's stop — is not decided ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §7). The same state, reached by an ordinary privileged identity, has no route either.
 
 ## 6. Entities — *pointer*
 
@@ -134,11 +150,11 @@ The rider path is not a channel at all — it is a **human verification step**. 
 
 ## 9. Settings — *pointer*
 
-[settings.md](../../contracts/settings.md) §7.5 — **the lockout keys do not apply to recovery**: a recovery token is single-use, high-entropy and rate-limited (`rate_limit_recovery`), a failed token locks nothing, and completing recovery **clears** a lock on the credential it repairs ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4b). **`recovery_link_ttl_minutes` = 30 sets the recovery-link lifetime**.
+[settings.md](../../contracts/settings.md) §7.5 — **the lockout keys do not apply to recovery**: a recovery token is single-use, high-entropy and rate-limited (`rate_limit_recovery`), a failed token locks nothing, and completing recovery **clears** a lock on the credential it repairs ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4b). **`recovery_link_ttl_minutes` = 30 sets the recovery-link lifetime**. **`recovery_request_supersede_guard_seconds` = 60 sets the window of §5.5.**
 
 ## 10. Errors — *pointer*
 
-[errors-and-enums.md](../../contracts/errors-and-enums.md) — `RECOVERY_TOKEN_INVALID`, `VALIDATION_FAILED`, `RATE_LIMITED`, `PERMISSION_DENIED`, `STATE_CONFLICT`, `REASON_REQUIRED`, `NOT_FOUND`, `HUB_SCOPE_VIOLATION`, `CREDENTIAL_DELIVERY_FAILED`, `SETUP_GRANT_INVALID`. **`CODE_EXPIRED` was listed here and is a doorstep-handshake code**; the contract's expired, consumed or malformed link is `RECOVERY_TOKEN_INVALID`, one answer for all three. **`INSUFFICIENT_AUTHORITY` was listed here and does not apply**: it means *the key is held and the tier is too low*, and every recovery key is held by exactly one tier.
+[errors-and-enums.md](../../contracts/errors-and-enums.md) — `RECOVERY_TOKEN_INVALID`, `VALIDATION_FAILED`, `RATE_LIMITED`, `PERMISSION_DENIED`, `STATE_CONFLICT`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `SELF_APPROVAL_FORBIDDEN`, `NOT_FOUND`, `HUB_SCOPE_VIOLATION`, `CREDENTIAL_DELIVERY_FAILED`, `SETUP_GRANT_INVALID`. **`CODE_EXPIRED` was listed here and is a doorstep-handshake code**; the contract's expired, consumed or malformed link is `RECOVERY_TOKEN_INVALID`, one answer for all three. **`INSUFFICIENT_AUTHORITY` was listed here and does not apply**: it means *the key is held and the tier is too low*, and every recovery key is held by exactly one tier.
 
 ## 11. Audit events — *pointer*
 
@@ -166,7 +182,7 @@ Given a staff member or a vendor account requesting recovery,
 When the request includes an alternative email address or phone number,
 Then the request is rejected outright with VALIDATION_FAILED, because the request has no destination field,
 And nothing is sent and no RecoveryRequest is created,
-And when the request carries only the identifier, the link is sent to the verified work email on the staff record, or to the registered phone or email of the vendor account, and to no other address.
+And when the request carries only the identifier, the link is sent to the verified work email on the staff record, or to the registered phone or email of the vendor account that its `delivery_channel` names, and to no other address.
 ```
 
 **Governs:** §37.2 · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** API · **Code:** `VALIDATION_FAILED`
@@ -324,6 +340,59 @@ And a rider outside the actor's hubs is refused with HUB_SCOPE_VIOLATION and one
 ```
 
 **Governs:** §37.2, §30.4, `MSC-DEC-235`, `MSC-DEC-432` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`, `REASON_REQUIRED`, `STATE_CONFLICT`, `HUB_SCOPE_VIOLATION`
+
+### `AC-SLICE-000-119` — MFA reset refuses a self-reset, a PENDING-only target and a non-privileged identity
+
+```text
+Given two Platform Admins A and B, a Senior Ops user, an Ops Staff user and a privileged identity whose only factor is PENDING,
+When A calls resetStaffMfa naming A, and then naming the Ops Staff user and the PENDING-only identity,
+Then naming A is refused with SELF_APPROVAL_FORBIDDEN and nothing changes,
+And naming the Ops Staff user, who has no MFA, and the identity whose factor is only PENDING are each refused with STATE_CONFLICT and nothing changes,
+And B calling resetStaffMfa naming A, whose factor is ACTIVE, succeeds,
+And when A and B are the two bootstrap Platform Admins, each is a valid actor for the other,
+And an empty reason_code is refused with REASON_REQUIRED and a retired, unknown or foreign-domain one with REASON_NOT_ACTIVE.
+```
+
+**Governs:** [state-machines.md](../../contracts/state-machines.md) §18 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `SELF_APPROVAL_FORBIDDEN`, `STATE_CONFLICT`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`
+
+### `AC-SLICE-000-120` — A bootstrap identity cannot be re-issued a setup grant, and the resume command is not a standing way in
+
+```text
+Given the two bootstrap Platform Admins, A stranded with a password, a PENDING factor and a lapsed MFA_ENROLMENT grant, and B holding an ACTIVE credential and an ACTIVE factor,
+When B calls reissueStaffCredentialSetup naming A, and again naming a bootstrap identity that has not yet set a password,
+Then each is refused with STATE_CONFLICT and no grant is issued,
+And the provisioning-only resume command run for A refuses while B holds an ACTIVE credential and an ACTIVE factor,
+And the same command issues the fresh MFA_REENROLMENT authorisation while B does not,
+And no API operation and no screen can invoke the command.
+```
+
+**Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.3a · **Surface:** Melarc Ops, backend · **Test level:** integration · **Code:** `STATE_CONFLICT`
+
+### `AC-SLICE-000-121` — A recovery request inside the guard window changes nothing and reveals nothing
+
+```text
+Given a staff member or a vendor account with a pending recovery link issued less than recovery_request_supersede_guard_seconds ago,
+When requestCredentialRecovery is called for it again,
+Then the answer is 202, identical in content and timing to a request for an identifier that matches nothing,
+And the pending link is not superseded and still completes recovery, and no second link is issued or sent,
+And once the guard window has passed a further request supersedes the pending link and issues a new one,
+And the setting recovery_request_supersede_guard_seconds defaults to 60.
+```
+
+**Governs:** [settings.md](../../contracts/settings.md) §7.5, §5.5 above · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** integration
+
+### `AC-SLICE-000-125` — The credential setup operations share the recovery bucket
+
+```text
+Given the credential setup and recovery bucket, rate_limit_recovery, at 10 a minute,
+When completeStaffCredentialSetup, completeMfaEnrolment, beginMfaReenrolment, completeVendorCredentialSetup, completeAdditionalDeviceEnrolment, completeRiderDeviceEnrolment and completeCredentialRecovery are each called more than ten times in a minute with the grant or token they take, a made-up one included,
+Then the excess requests are refused with RATE_LIMITED from that bucket, keyed by the grant or token each request presents whether or not it matches a record,
+And a request presenting a different grant or token has a key of its own,
+And requestAdditionalDeviceGrant counts in the same bucket, under a key that is an open input (settings.md §9),
+And no seventh bucket exists.
+```
+
+**Governs:** [settings.md](../../contracts/settings.md) §7.7 · **Surface:** Melarc Ops, Melarc Vendor, Melarc Rider · **Test level:** API · **Code:** `RATE_LIMITED`
 
 ## 14. Open questions blocking this feature
 

@@ -461,15 +461,11 @@ Each finding was reproduced on its own before it was changed, and each repair is
 | B-02 manifest verification | **Repaired** | `ci-revision.ts` validates the manifest strictly (schema, fields, canonical paths, git object names, hashes, non-empty files and roots, consistency with the contract) and `verify` states what it proves and what it does not |
 | B-03 WSL2 setup | **Repaired; WSL2 not run** | [DEVELOPMENT.md](../../DEVELOPMENT.md) names the two supported WSL2 setups and says what is unverified; `pnpm run infra:check` is the non-destructive check; the password and Playwright statements are corrected |
 | B-04 review archives | **Repaired** | `pnpm run package:source` (see B0.9). The earlier archive carried populated settings files: whether to replace those local passwords is the owner's decision, see below |
-| B-05 CI and setup evidence | **Partly closed: item 1 done, items 2 to 9 open** (8 and 9 are the UI evidence added on 6 October) | the hosted run of `7509f51` is green (see B0.8's notes); the list below says what is still owed |
-| D-01 to D-07 design documents | **Reconciled, with open decisions** | layout families, supported colour pairings and recipes, the accessibility baseline and its test matrix, the nine states and the error-copy boundary, the existing-code map and bounded first scope, asset, token and font ownership, formatting boundaries. `scripts/design-contrast.test.ts` holds the colour tables to their hex values |
+| B-05 CI and setup evidence | **Partly closed: items 1 and 9 done, items 2 to 8 open** (8 is the UI evidence added on 6 October; it gates the first identity flow) | the hosted run of `7509f51` is green (see B0.8's notes); the list below says what is still owed |
+| D-01 to D-07 design documents | **Reconciled and approved by the Product Owner on 6 October 2026** | layout families, supported colour pairings and recipes, the accessibility baseline and its test matrix, the nine states and the error-copy boundary, the existing-code map and bounded first scope, asset, token and font ownership, formatting boundaries. `scripts/design-contrast.test.ts` holds the colour tables to their hex values |
 
-**Decisions this pass leaves to the Product Owner.** Whether the setup routes use the neutral frame or a bare layout
-(DESIGN_SYSTEM §13.1); whether to darken `border.control`, which passes on white by 0.06 (§4.6); the proposed inverse
-focus, inverse link and Ink-shell indicator values; the proposed bounded first implementation (COMPONENT_PATTERNS
-§42.2); the typeface, still Inter as a recommendation; the source of the signed-in navigation entries, for which no
-contract exists; whether the surface documents' accessibility wording moves from 2.1 to 2.2 AA (§14 states how the two
-agree meanwhile); and whether the local passwords in the earlier review archive are to be replaced
+**Decisions this pass left to the Product Owner** were all taken on 6 October 2026 (see "Product Owner decisions"
+below), except one: whether the local passwords in the earlier review archive are to be replaced
 ([DEVELOPMENT.md](../../DEVELOPMENT.md) section 9 says how).
 
 ### Re-audit before acceptance (6 October 2026, second pass)
@@ -498,25 +494,24 @@ consecutive forced `pnpm test` runs passed in 142 to 158 seconds with no worker-
 failures, while it ran). Check machine load before touching a timeout.
 
 **Left for decisions and for the first slice** (none changes what bootstrap delivers):
-the contract's open response schemas where it promises a field never appears (`HubIntakePreCount`, `Session`); no HTTP
-status for `CSRF_VALIDATION_FAILED`; `IDEMPOTENCY_KEY_CONFLICT` absent from the operations' responses; the role-posture
+the contract's open response schemas where it promises a field never appears (`HubIntakePreCount`); the role-posture
 check not covering schema modification (SECURITY_DESIGN §14.6) and the context check not pairing a surface with a
 principal type (§14.1b, which names no pairing); no statement or idle-in-transaction timeouts; the browser client not
 pinned to `location.origin`; no injectable API clock; the UI
-foundation (COMPONENT_PATTERNS §42.2) is on no roadmap line; SLICE-000 lists Vendor and Rider screens for which no
-client exists. (The retry policy's reliance on an error `status` and the possible start-up race on `SIGTERM`, both listed
+foundation (COMPONENT_PATTERNS §42.2) is on no roadmap line. (The retry policy's reliance on an error `status` and the possible start-up race on `SIGTERM`, both listed
 here when this pass was written, were repaired in the third pass below.)
 
 ### UI foundation (6 October 2026)
 
 Built to [COMPONENT_PATTERNS §42.2](../../design/COMPONENT_PATTERNS.md) after the Product Owner settled the setup layout (the
-neutral frame), the typeface (the fallback stack, no font file), the control border (`#7C879B`), the inverse tokens
+neutral frame), the typeface (the fallback stack at the time; Inter is self-hosted since), the control border (`#7C879B`), the inverse tokens
 (approved as proposed), the scope (§42.2 in three increments), the accessibility target (tested to WCAG 2.2 AA) and the
 browser coverage (Chromium, Firefox and WebKit in CI); each is recorded in DESIGN_SYSTEM §36. What exists, and where it
 differs from the plan, is COMPONENT_PATTERNS §42.3: the token file `apps/ops-web/src/styles/tokens.css`, Button, Link,
 Alert, Field, Input, LoadingIndicator, PageHeader, the restyled neutral frame, the error and not-found screens on the new
 components (copy unchanged), and a development-only showcase that the production build provably lacks. No navigation entry
-or permission-driven menu was built: caller-capability discovery is still an identity-contract dependency.
+or permission-driven menu was built: the source of the entries (the `Session` resource's permission keys) was decided
+later the same day, and the identity slice supplies it.
 
 It is held by `scripts/design-tokens.test.ts` (the token file equals the document and defines nothing else but three
 recorded tokens, the pairings the components use meet their thresholds, no colour written outside the file whether hex,
@@ -585,119 +580,127 @@ below.
 
 **Left, with the reason.** Validation work on a hostile body is dominated by Ajv, which collects every error; capping what
 is reported (already done) and bounding the contract's arrays (the contract's, not this repository's, to change) are the
-remedies. Response checks, `no-store` and cookie attributes are off in production by design and wait for the decision
-below. Ajv runs with `strict: false`, so a mistyped keyword in the contract is silent: a strict compile of the contract
+remedies. Response checks and cookie attributes are off in production by design; `no-store` is now sent on every response
+(decision 3 below). Ajv runs with `strict: false`, so a mistyped keyword in the contract is silent: a strict compile of the contract
 needs its extension keywords registered, which no test does yet. A route loader cannot reach the API client (the router
 is built before the providers). `Form` and `SecretInput` wait for the identity slice. `TechnicalEndpoint` is not limited
 to the two probes at run time, only by a test. Log lines from a logged user object can collide with `level`, `msg` and
 `request_id`. Node's own 400 and 431 answers are not logged. An `ApiException` cannot yet set a header (`Retry-After`).
 
-### Open decisions for the Product Owner
+### Product Owner decisions (6 October 2026)
 
-None of these was decided by the work above, and none changes what bootstrap delivers. Each is a decision the first slices
-cannot avoid, so it is listed here with what the review found and, where there is one, the recommendation.
+The Product Owner approved the two design documents and then answered every open question the third pass had listed. Each
+decision is written into the document that owns it; this section says where, so that nothing is restated. None of them
+changed what bootstrap delivers.
 
 **Platform**
 
-1. **How a migration or seed writes to a table with forced row-level security.** The owner and the migration role are
-   subject to the policies of a table that forces them, and a superuser is not available in a deployment, so a seed or a
-   backfill (the two bootstrap administrators, the default zone, role bundles, settings) has no sanctioned way in.
-   Recommended: a provisioning accessor that is true only for the migration session (compare `session_user` with the
-   migration role, which a `SET ROLE` or `set_config` cannot forge), `OR melarc.provisioning()` in the policy template, a
-   lint that every policy carries it, and a database test. Needed before SLICE-000's first table. `MIGRATION_AND_SEEDING.md`
-   §3.2 says what the seed must not do and not how it writes.
-2. **The security context can be set by the runtime role itself.** The role has to be able to set it, so `set_config(...,
-   false)` or `SET melarc.principal_type` on a pooled connection is possible for code that already runs as the API: row-level
-   security protects against a handler that forgets a filter, not against code that chooses to lie. Accept this and
-   record it in SECURITY_DESIGN §14.1, or bind the context (for example with a MAC the policies check).
-3. **`Cache-Control: no-store`.** The contract declares it on four responses and a test forbids declaring it elsewhere, while
-   GBT-W8 and SECURITY_DESIGN §794 require it on authentication and recovery responses, including the ones that carry the
-   TOTP seed and the access token. Apply it to every API response at the platform, or declare it on those operations.
-4. **The HTTP status vocabulary.** `CSRF_VALIDATION_FAILED` and about fifteen identity codes have no status in
-   `errors-and-enums.md` §4; `VALIDATION_FAILED` is 400 on some operations and 422 on others; some declared codes have no
-   matching response (`registerRiderDevice` and `STATE_CONFLICT`).
-5. **`ON DELETE CASCADE`, DELETE grants and `TRUNCATE`.** The standards say delete behaviour is explicit and never a
-   framework default; whether a cascade is an acceptable explicit choice, and whether the runtime role may DELETE at all,
-   is not said. The migration lint does not look at either.
-6. **A time-bounded audit exception needs pnpm 11.16 or later** (`audit.ignore`); the pin is 11.1.3. Bump the pin, or keep
-   failing the audit on every advisory.
-7. **Public-repository hygiene:** a licence, `SECURITY.md` with a contact, automatic dependency updates, secret scanning and
-   push protection, `CODEOWNERS` for the files that hold the guards (a pull request can edit `scripts/` and the workflow
-   that check it), and a ruleset that requires code-owner review and SHA-pinned actions.
-8. **The PostgreSQL image is now pinned by digest** (`postgres:18.6-bookworm@sha256:afc7e2d4…`), so a rebuilt tag cannot change
-   what CI and local development run. The cost is that a security update to the image is a deliberate edit of three lines.
-   Revert it, or add an automatic update, if that is not wanted.
-9. **The design documents are still marked draft.** The decisions that were taken (neutral frame, typeface, control border,
-   inverse tokens, scope, WCAG 2.2 AA, three engines) are recorded in DESIGN_SYSTEM §36; whether the documents become
-   active is yours.
-10. **Whether owed items 8 and 9 below gate bootstrap acceptance**, or only the first identity flow, as DESIGN_SYSTEM §14 says.
+| # | Decision | Recorded in |
+|---|---|---|
+| 1 | A seed or a backfill writes a forced-RLS table as the `SYSTEM` principal under an explicit seed task capability; each table's policy has a `SYSTEM` branch for it, and no accessor is tied to the migration login | [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.2 and §5.1, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.4. The helper and each table's branch arrive with the first slice that has a table |
+| 2 | The API's database role can set the security context itself: accepted as a residual risk, with four mitigations | [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.1 |
+| 3 | `Cache-Control: no-store` on every API response, as a platform rule | `create-app.ts` and its tests; [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.8 |
+| 4 | `CSRF_VALIDATION_FAILED` is 403; `IDEMPOTENCY_KEY_CONFLICT` is 409 and declared on every operation that takes a key; `VALIDATION_FAILED` is always 400 and a named business-rule code 422 | [errors-and-enums.md](../../contracts/errors-and-enums.md) §4; the contract was corrected |
+| 5 | The migration lint refuses `ON DELETE CASCADE`, `TRUNCATE` and a `DELETE` grant unless a comment on the statement gives the reason (`-- allow-delete: <reason>`) | `migration-lint.ts` and its tests; [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §5.1 |
+| 6 | pnpm is not bumped now (11.1.3 stays); bump when an advisory needs a time-bounded exception | the pin |
+| 7 | Public-repository hygiene: `LICENSE` (all rights reserved), `SECURITY.md` (melarclogistics@gmail.com), `.github/dependabot.yml` (weekly: npm, GitHub Actions, the PostgreSQL image). `CODEOWNERS` is skipped for now | the files. Secret scanning, push protection and the ruleset are GitHub settings (owed item 3) |
+| 8 | The PostgreSQL image stays pinned by digest | `compose.yaml`, `ci.yml`; Dependabot proposes updates |
+| 9 | Both design documents are approved and active. Inter is the typeface, self-hosted; WCAG 2.2 AA is the working target in the two surface documents (the one sentence the Product Owner authorised) | [DESIGN_SYSTEM.md](../../design/DESIGN_SYSTEM.md) §5.1, §14 and §36; `apps/ops-web/src/assets/fonts/`; `ops-portal.md` §11, `vendor-pwa.md` §9 |
+| 10 | Owed items 8 and 9 below gate the first identity flow, not bootstrap acceptance. Item 9 is done | the list below |
 
-**Contract and specification** (found by the review of SLICE-000's readiness; none of these files was edited)
+**Contract and specification** (items 11 to 17 of the third pass, and the questions beneath item 16)
 
-11. A privileged identity with no active factor has no consistent sign-in outcome: `AC-SLICE-000-32` says a challenge,
-    `MFA_ENROLMENT_REQUIRED` says another, and no operation declares the code.
-12. `completeCredentialRecovery` declares the vendor device cookie for every answer, so a staff recovery (a 204 with no
-    cookie) would fail the runtime validator. The contract needs a principal-conditioned declaration.
-13. What the two bootstrap administrators can reach is unresolved (every hub, or the seeded hub): rows 1, 2 and 12 of
-    SLICE-000's walkthrough depend on it, and `staff.identity.create` and `.approve` are "own hub" keys.
-14. `riderSignIn` checks a locked rider before a rider that is not active in the contract and the other way round in
-    SECURITY_DESIGN, the feature document and `AC-SLICE-000-109`.
-15. `SESSION_SUPERSEDED` is declared by no operation, though `AC-SLICE-000-14` needs every vendor session operation to
-    return it. Seven operations declare `RATE_LIMITED` and belong to none of the six buckets, and the rider's rate-limit key
-    differs between documents.
-16. Undefined for the identity slice: the source of every `reason_code`; the state preconditions of `resetStaffMfa`, the
-    recovery operations, `revokeSession` and the rider device operations; the order in which refusals are evaluated; whether
-    `registerRiderDevice` may bind a new handset after a revocation; TOTP parameters; cookie lifetimes; email
-    normalisation; the vendor delivery channel when both exist; whether a bundle edit ends live sessions; who may reject a
-    privileged profile.
-17. The contract states 120 live error codes in prose and lists 121 in its tables and in the enum.
+| # | Decision | Recorded in |
+|---|---|---|
+| 11 | A privileged identity with no `ACTIVE` factor gets the same `202` challenge, then `403` `MFA_ENROLMENT_REQUIRED` at `completeStaffMfaSignIn`, which counts toward no lock | [state-machines.md](../../contracts/state-machines.md) §13, [staff-authentication.md](../../features/identity/staff-authentication.md), `AC-SLICE-000-32` and `-123` |
+| 12 | `completeCredentialRecovery` declares the vendor device cookie only for the vendor branch (`x-set-cookies-when`); the runtime validator honours it, and the recovery slice's handler must call `declareAnswerPrincipal` (`answer-context.ts`) or the response check fails | the contract, `contract-validator.ts`, `credentials.test.ts` |
+| 13 | Each bootstrap Platform Admin holds an explicit all-hub grant; `reissueStaffCredentialSetup` refuses a bootstrap identity; the provisioning resume command stops once the other holds an `ACTIVE` credential and factor | [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.2 and §3.3a |
+| 14 | `riderSignIn` checks status before the lock | the contract text |
+| 15 | `SESSION_SUPERSEDED` is a contract-wide rule for vendor sessions; the seven operations that belonged to no bucket join the credential setup and recovery bucket, and a per-address ceiling at the edge bounds attacker-chosen keys | [errors-and-enums.md](../../contracts/errors-and-enums.md) §4, [settings.md](../../contracts/settings.md) §7.7, [DEPLOYMENT_AND_ENVIRONMENTS.md](../../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.2 |
+| 16 | `reason_code` comes from the reason catalogue in six new identity domains; only Senior Ops and Platform Admin are privileged; the vendor `delivery_channel` is chosen at approval; a revoked rider is re-bound only by `reregisterRiderDevice`; `resetStaffMfa` refuses self-reset, a `PENDING`-only target and a non-privileged one; a rejected profile releases its email and a privileged one is rejected by a Platform Admin; a bundle edit applies at the next sign-in; the recovery supersede guard is 60 seconds; the `Session` carries its permission keys; TOTP is 6 digits, 30 s, SHA-1, one step either side, single use; session and CSRF cookies end with the browser and the vendor device cookie lasts 400 days; one audit event per cross-hub read; the email canonical form is trim, NFKC, lower-case; one refusal order of twelve steps | [domain-model.md](../../contracts/domain-model.md), [settings.md](../../contracts/settings.md) §7.5, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13, [audit.md](../../contracts/audit.md) §5.4, [permission-enforcement.md](../../features/identity/permission-enforcement.md) §5.1, and acceptance criteria `AC-SLICE-000-119` to `-131` |
+| 17 | The live-code count is stated as 121 | [errors-and-enums.md](../../contracts/errors-and-enums.md) §5.5 |
 
-The 14 questions the reviewer put to the Product Owner are in this list. SLICE-000's definition of ready is not
-satisfied until items 11 to 16 have answers.
+`SLICE-000` builds the API for all 37 operations and the Ops Portal screens; the Vendor and Rider rows of its walkthrough
+are verified at API level until those clients exist ([SLICE-000.md](../slices/SLICE-000.md)). It now has 125 criteria.
+
+**Still open, and the Product Owner's to settle.** None of these was invented; each is recorded where it belongs.
+
+1. **The seeded reasons and their wording** for the six identity reason domains, and approval of their proposed names
+   (`SESSION_REVOCATION`, `STAFF_PROFILE_REJECTION`, `STAFF_MFA_RESET`, `CREDENTIAL_ADMINISTRATION`,
+   `RIDER_DEVICE_REPLACEMENT`, `RIDER_DEVICE_REVOCATION`). Until they exist every identity operation that takes a
+   `reason_code` answers `REASON_NOT_ACTIVE`, so the demonstration rows that use one cannot be walked.
+2. **A stranded bootstrap administrator whose factor is only `PENDING`.** Two decisions meet here: `resetStaffMfa` refuses
+   such a target, and the resume command stops once the other administrator is ready. Neither route reaches it (the same
+   holds for an ordinary privileged identity). Either the `PENDING` refusal or the resume command's stop must give way.
+3. **The rider rate-limit key.** `settings.md` and `SECURITY_DESIGN.md` §14.12 say rider and registered device;
+   `SECURITY_DESIGN.md` §13.4b and `rider-authentication.md` say the submitted phone number. Also unset: the key of
+   `requestAdditionalDeviceGrant` (it presents no grant) and the value of the edge ceiling.
+4. **Smaller points** recorded in the owning documents: the audit cause for the no-factor refusal; whether HQ roles and
+   cross-vendor reads emit the cross-hub audit event; which channel `VENDOR_DEVICE_ENROLMENT` uses when both exist;
+   whether the supersede guard covers administrator-initiated recovery; which slices build the Vendor PWA and Rider app
+   screens; and that "bundle edit" was read as a change of a bundle's contents (assigning another bundle still ends
+   sessions with `AUTHORITY_CHANGED`).
+5. **Points the contract work raised.** (a) The request fields for a work email still carry `format: email`, which
+   refuses a padded or non-ASCII address before any trim or NFKC step could run, so the canonical form cannot be applied
+   to the raw input as decided; the schema or the rule must give way. (b) The contract does not say what
+   `decideVendorOrganization` does when the chosen `delivery_channel` is one the account holds no address for. (c)
+   `vendorSignIn` now renews the `melarc_vendor_device` cookie (the same credential with a fresh `Max-Age`), which
+   reverses the old "never re-issued" wording; the decision asked for the renewal. (d) `SELF_APPROVAL_FORBIDDEN` has no
+   documented status and stays under 422, while `MFA_ENROLMENT_REQUIRED` is the one named code at 403, as the decision
+   about it said. (e) Sign-in operations keep a 422 response that no declared code uses any more. (f) `listSessions`
+   does not carry `permissions`: only the caller's own session does.
 
 ### Acceptance record (6 October 2026)
 
 What the bootstrap is, on the evidence one Windows machine can give. Every step ran forced past Turbo's cache
 (`TURBO_FORCE`) on one tree, after the repairs above: Node 24.21.0, pnpm 11.1.3, Windows 11, PostgreSQL 18.6 in Docker
 Desktop, Chromium, Firefox and WebKit through Playwright 1.63.0 (`MELARC_BROWSERS=chromium,firefox,webkit`, as CI sets
-it).
+it). The counts are those of the run after the Product Owner's decisions of 6 October were applied. That run's
+`test:db` failed once, and for a true reason: the new delete rule of the migration lint refused the database tests' own
+fixture, which grants DELETE with no recorded reason. The fixture now records one, and `test:db` passed when run again
+(170 passed). The clean copy below ran all thirteen steps on the final files.
 
 | Step | Observed |
 |---|---|
 | frozen install, `format:check`, `lint`, `typecheck` (root and four workspaces) | exit 0 |
 | `api-client:check`, `build`, `contract:check`, `db:check` | exit 0; `contract:check` compared 0 operations, because none is implemented |
-| `pnpm test` | root 1181 (1179 passed, 2 skipped: the symlink test of `package-source` and the POSIX-mode test of `setup-env`), Ops 216, api-client 250, API 1401 passed and 5 skipped (the real `SIGTERM` tests Windows cannot run), harness 191 passed and 1 skipped |
+| `pnpm test` | root 1181 (1179 passed, 2 skipped: the symlink test of `package-source` and the POSIX-mode test of `setup-env`), Ops 220, api-client 250, API 1554 passed and 5 skipped (the real `SIGTERM` tests Windows cannot run), harness 191 passed and 1 skipped |
 | `test:db` | 170 passed, 1 skipped (a real `SIGTERM`) |
-| `test:browser` | 71 passed, 1 skipped (WebKit cannot emulate forced colours), over three engines |
+| `test:browser` | 74 passed, 1 skipped (WebKit cannot emulate forced colours), over three engines |
 | `test:e2e` | 16 passed |
 | `pnpm audit --audit-level high` | exit 0; one moderate advisory, as before |
 
 The gate leaves the tree as it found it (`git status` is the same before and after).
 
-**From a clean copy.** The same thirteen steps, forced, ran on a copy of the working tree: 422 files, tracked and untracked,
+**From a clean copy.** The same thirteen steps, forced, ran on a copy of the working tree: 433 files, tracked and untracked,
 nothing ignored (no `node_modules`, build output or `tmp/`), made into a Git repository of its own, with the two
-git-ignored settings files copied in and nothing generated or rotated. Every step exited 0 with the same counts as above.
-That shows that nothing machine-local is needed (the git-ignored `tmp/`, a cache, a built `dist`); it is the same
+git-ignored settings files copied in and nothing generated or rotated. Every step exited 0 with the same counts as above,
+with one exception that is not a test result: the first `pnpm test` there stopped on Vitest's worker-start timeout in
+the Ops Portal (12 of 23 files ran and none failed an assertion) while a stray process of the session's own was using
+one core, and the same step run again on the same copy passed with the counts above (Ops 220 in 23 files, API 1554). No timeout
+was changed. That shows that nothing machine-local is needed (the git-ignored `tmp/`, a cache, a built `dist`); it is the same
 machine and operating system, so it is not the Linux or WSL2 proof, and it ran on files that were not yet committed.
 
 | Task | The plan's exit criterion | Evidence | Held |
 |---|---|---|---|
 | B0.1 | clean install, deterministic root commands, no domain implementation | frozen install; the pin, dependency-policy and repository-shape tests; `IMPLEMENTED_OPERATIONS` is empty and the route inventory holds only the two probes | proven here, and by the hosted runs of `7509f51` and `36f7b22` |
 | B0.2 | boots, refuses bad configuration, shuts down cleanly, no fake endpoints | configuration, process, shutdown and route-inventory tests; every unmatched request answers in the contract envelope | proven here; the five real-`SIGTERM` tests ran only on hosted Linux, whose logs nobody has read (owed item 1) |
-| B0.3 | production build and smoke tests pass, nothing fabricated | build; 71 browser tests on three engines; no navigation, user menu or session data | proven here; the three-engine run on the Linux runner is not yet seen |
+| B0.3 | production build and smoke tests pass, nothing fabricated | build; 74 browser tests on three engines; no navigation, user menu or session data | proven here; the three-engine run on the Linux runner is not yet seen |
 | B0.4 | fresh migrations, a non-owner runtime, proven transactions, safe teardown | `test:db`: migrations from empty and repeated, the history check, the catalogue invariants, the runtime role's refusals, pooled context, the transaction runner, the reset tools' refusals | proven here against a real server |
 | B0.5 | deterministic generation, freshness, Ops imports generated types, a separate browser transport | `api-client:check`, 250 client tests, `unwrap` and `ApiError`, the no-duplicate-wire-types test | proven |
 | B0.6 | deliberate mismatches fail the conformance checks | the comparator tests, now including a real contract operation, the runtime validator tests, the 52 mutants | proven for the machinery; there is no live product operation to compare |
 | B0.7 | a real browser, API and database journey, safe teardown | `test:e2e` 16, the harness's 191 | proven here |
-| B0.8 | failures propagate, artifacts match the tested revision, CI works from clean | the workflow's guard tests; hosted runs of `7509f51` and `36f7b22`, all jobs green | **partly**: the failure rehearsal, the branch rule and a downloaded-build check are the owner's (owed items 2 to 4) |
+| B0.8 | failures propagate, artifacts match the tested revision, CI works from clean | the workflow's guard tests; hosted runs of `7509f51`, `36f7b22` and `4683bf5`, all jobs green | **partly**: the failure rehearsal, the branch rule and a downloaded-build check are the owner's (owed items 2 to 4) |
 | B0.9 | a clean checkout installs, starts, migrates, runs, tests and stops | the clean-clone proof of B0.9 and the one below | proven on Windows; WSL2, Linux, `infra:up` from nothing and `down --volumes` are the owner's (owed items 5 and 6) |
 | B0.10 | the foundations are ready for product slices | everything above | **ready in code; not accepted**, see below |
 
 **Where this leaves the bootstrap.** The code, the tests and the guards are complete and green on this machine, and the
 review above left no known defect in them. The bootstrap is not accepted by this runbook's own terms: evidence only the
-Product Owner can produce is owed (items 1 to 9 below, item 1 again for this commit), and `SLICE-000` is not ready to
-begin while the specification and contract findings in the decisions above (11 to 16) have no answer, because an
-implementation would have to invent one. Nothing here has been run on GitHub for this commit.
+Product Owner can produce is owed (items 2 to 8 below, and item 1 again for the final commit). The specification and
+contract findings that blocked `SLICE-000` (decisions 11 to 16) are answered; what stays with the Product Owner is the
+list under "Still open" above (the identity reason seeds, the stranded bootstrap administrator, the rider rate-limit
+key and the smaller points), each to be settled before the behaviour it touches is implemented, because an
+implementation would have to invent it. Nothing here has been run on GitHub for this commit.
 
 ### Evidence still owed (audit B-05)
 
@@ -707,7 +710,9 @@ bootstrap is not accepted without them. Record each result with its date and the
 1. **A hosted CI run of the intended commit. Done 6 October 2026.** The bootstrap and the audit repairs are commit
    `7509f51` on `main`. In [its Actions run](https://github.com/melarclogistics/Melarc/actions/runs/37412013040),
    `Static checks`, `Unit, component and process tests`, `Database tests`, `Build, contract and browser tests`,
-   `Dependency audit` and `CI result` all succeeded, and it was the first run of the Linux-only parts. GitHub shows a
+   `Dependency audit` and `CI result` all succeeded, and it was the first run of the Linux-only parts. The run of the
+   third-pass commit `4683bf5`, [37472521664](https://github.com/melarclogistics/Melarc/actions/runs/37472521664), also
+   succeeded, with only the two designed skips. GitHub shows a
    job's log only to a signed-in user, so read the two test jobs' logs once and confirm that the POSIX-only tests ran
    and that nothing else was skipped. Repeat this item for whichever commit is finally accepted, if it is not
    `7509f51`.
@@ -730,14 +735,16 @@ bootstrap is not accepted without them. Record each result with its date and the
 7. **The latest suites on the final commit:** `pnpm test`, `pnpm run test:db`, `pnpm run test:browser` and
    `pnpm run test:e2e`, with the tests that Windows skips accounted for by a Linux, WSL2 or CI run: five API process
    tests, one under `test:db`, one harness test and the symlink test in `package-source.test.ts`.
-8. **The recorded passes the design system requires before the first identity flow is accepted** (DESIGN_SYSTEM §14):
+8. **The recorded passes the design system requires before the first identity flow is accepted** (DESIGN_SYSTEM §14).
+   They gate that flow and not bootstrap acceptance (decided 6 October 2026):
    one keyboard-only pass and one screen-reader pass (a desktop screen reader with its usual browser, for example NVDA
    with Firefox or Chrome) of the showcase and the shell, with the versions used and what was done; a pass in Windows
    high-contrast mode; and Safari and Edge as products, and the previous major release of each browser, checked by hand.
-9. **The surface-document wording, the Product Owner's edit.** `surfaces/ops-portal.md` §11 and `surfaces/vendor-pwa.md`
-   §9 say "WCAG 2.1 level AA is the working target; it is not a conformance claim". The decision is that components are
-   tested to 2.2 AA (2.2 adds criteria to 2.1 AA and drops only 4.1.1), so the sentence becomes "WCAG 2.2 level AA is the
-   working target; it is not a conformance claim". The approved documents were not edited.
+9. **The surface-document wording. Done 6 October 2026.** `surfaces/ops-portal.md` §11 and `surfaces/vendor-pwa.md` §9
+   now say "WCAG 2.2 level AA is the working target; it is not a conformance claim", the one edit the Product Owner
+   authorised. Two statements of `ops-portal.md` are stale and were left alone, because the document is approved: §11
+   says the bootstrap browser smoke test runs Chromium only (it runs on three engines), and §4 says signed-in navigation
+   depends on a capability discovery that is not specified (the `Session` resource now carries permission keys).
 
 ### Validation scope
 

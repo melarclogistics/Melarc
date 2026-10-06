@@ -292,8 +292,11 @@ Added 26 September 2026 at `MSC-DEC-417`. **§38.5 category 7 names *“provider
 | `auth.session.authority_revoked`| A session was terminated because the principal's authority changed, carrying the reason. **Enhanced**|
 | `auth.mfa.reenrolment_begun`| A revoked factor was re-provisioned: a new `PENDING` `MfaFactor` exists and a continuation grant was issued. **Enhanced.** **Distinct from `auth.mfa.enrolled`, which records a *proven* factor** — an investigator must be able to tell an authenticator that was handed out from one that was demonstrated|
 | `auth.csrf.rejected`| A cookie-authenticated unsafe request failed synchronizer-token or `Origin` validation. Records route, principal and which check failed — **never the token or its hash**|
+| `auth.hub_boundary.crossed`| **A Platform Admin read a record outside the admin's own hub** (§37.3, Product decision of 6 October 2026). **One event per read**, recording the actor, the hub of the record and a reference to the record (`object_type`, `object_id`) — **never the record's contents**. **Enhanced** (§6 category 4); a read changes nothing, so `before_after` stays empty. **A read inside the admin's own hub is not audited**|
 
 **`auth.session.failed` is the one to get right.** The *response* to a failed sign-in must not distinguish an unknown account from a wrong password from a suspended one (§37.7), but the *audit record* must, or nobody can tell a typo from an attack. **The asymmetry is the point**: undifferentiated outward, precise inward.
+
+**One refusal has no cause in that closed set yet.** `MFA_ENROLMENT_REQUIRED` at `completeStaffMfaSignIn` (Product decision, 6 October 2026) is a refusal at the `MFA_CODE` factor with no wrong code behind it, and it counts toward no lockout. Which cause it records is not decided, and none is invented here.
 
 **`auth.session.superseded` is vendor-only**. Its purpose is to let a shared vendor credential distinguish colleague displacement from ordinary expiry — a fact this catalogue, as the canonical home for event shape, must state itself rather than leave to a feature spec's citation. A rider replacing their own session on their own registered device has no colleague to distinguish from; rider session replacement instead emits `auth.session.terminated` with reason `REPLACED_BY_NEW_SESSION`. [rider-authentication.md](../features/identity/rider-authentication.md) §11 records the rider side of this and cited a table that, until this revision, still read *vendor or rider*.
 
@@ -483,7 +486,7 @@ Category 8 includes the Auditor's own exports: §38.7 confirms that "every expor
 
 **An enhanced-audit action fails closed**. Where a category above requires synchronous primary audit, an action whose `AuditEvent` cannot be **durably written does not happen** — the transaction does not commit. **The alternative is the failure this table exists to prevent**: a privileged override that succeeded with no record is indistinguishable, afterwards, from one that never occurred, and §35.1.6 makes `before_after` mandatory on exactly those acts. This is an operational block, not a logging fault, and it alerts as one.
 
-Category 4 is the one with no obvious trigger in the slice above. It fires whenever a Platform Admin or authorized HQ role reads across vendor or hub scope (§37.3) — a *read* that emits an event, which is unusual enough to state explicitly.
+Category 4 is the one with no obvious trigger in the slice above, and **a Platform Admin's read of a record outside the admin's own hub is it** (§37.3): a *read* that emits an event, which is unusual enough to state explicitly. **One `auth.hub_boundary.crossed` per such read**, recorded with the actor, the hub and a reference to the record and **no record contents**; reads inside the admin's own hub are not audited (Product decision, 6 October 2026). That decision covers a Platform Admin and the hub axis: whether an authorised HQ role's cross-hub read, or a cross-vendor read, emits one is not decided.
 
 ## 7. Authentication and access coverage
 

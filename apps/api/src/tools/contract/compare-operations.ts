@@ -242,6 +242,17 @@ function compareResponse(
       actual: actual.setCookiesFor ?? null,
     });
   }
+  if (expected.setCookiesWhen !== actual.setCookiesWhen) {
+    const whose = (type: string | undefined) =>
+      type === undefined ? 'every principal' : `an answer for a ${type}`;
+    out.push({
+      code: 'COOKIE_DRIFT',
+      at,
+      message: `Whose answer is owed this response's cookies differs: the contract says ${whose(expected.setCookiesWhen)} and the code says ${whose(actual.setCookiesWhen)}.`,
+      expected: expected.setCookiesWhen ?? null,
+      actual: actual.setCookiesWhen ?? null,
+    });
+  }
 }
 
 function compareSecurity(

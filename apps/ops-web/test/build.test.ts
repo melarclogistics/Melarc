@@ -79,14 +79,15 @@ afterAll(async () => {
 
 describe('the production build', () => {
   let output = new Map<string, string>();
+  let outputDirectory = '';
 
   beforeAll(async () => {
-    const outDir = await freshDirectory();
-    await buildApp(outDir, {
+    outputDirectory = await freshDirectory();
+    await buildApp(outputDirectory, {
       MELARC_TEST_SERVER_SECRET: SERVER_ONLY_SECRET,
       OPS_API_PROXY_TARGET: API_TARGET,
     });
-    output = await readOutput(outDir);
+    output = await readOutput(outputDirectory);
   });
 
   // Break caught: a page the browser cannot start from. The shell needs its root element, a language
@@ -117,6 +118,30 @@ describe('the production build', () => {
     expect(html).not.toMatch(/\sstyle\s*=/i);
     expect(html).not.toMatch(/\son[a-z]+\s*=/i);
     expect(html).not.toMatch(/https?:\/\//);
+  });
+
+  // Break caught: the typeface left out of the build, inlined as a data: URI (which `font-src 'self'` refuses), changed
+  // on its way into the build, or shipped without its licence (DESIGN_SYSTEM section 5.1).
+  it('ships Inter as its own files, unchanged, with its licence, and inlines nothing', async () => {
+    const styles = [...output]
+      .filter(([name]) => name.endsWith('.css'))
+      .map(([, content]) => content)
+      .join('\n');
+
+    for (const subset of ['latin', 'latin-ext']) {
+      const source = `inter-${subset}-wght-normal`;
+      const shipped = [...output.keys()].filter((name) =>
+        new RegExp(`^assets/${source}-[\\w-]+\\.woff2$`).test(name),
+      );
+      expect(shipped, source).toHaveLength(1);
+      const [name = ''] = shipped;
+      const original = await readFile(resolve(APP_ROOT, `src/assets/fonts/${source}.woff2`));
+      const built = await readFile(join(outputDirectory, name));
+      expect(built.equals(original), name).toBe(true);
+      expect(styles, name).toContain(`/${name}`);
+    }
+    expect(styles).not.toMatch(/url\(\s*['"]?data:/i);
+    expect(output.get('licenses/Inter-OFL.txt')).toContain('SIL OPEN FONT LICENSE Version 1.1');
   });
 
   // Break caught: the development showcase shipping to users, in its route, its code, its styles or its synthetic text.

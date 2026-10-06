@@ -5,7 +5,8 @@
  * Every table a migration creates must, in the same migration, be owned by `melarc_owner` and have
  * row-level security both enabled and forced (SECURITY_DESIGN.md sections 14.2 and 14.17a;
  * MIGRATION_AND_SEEDING.md section 5.1). No migration may switch that protection off again, hand a table to
- * another owner, name a role in a policy, or open anything to PUBLIC.
+ * another owner, name a role in a policy, or open anything to PUBLIC. A cascade, a TRUNCATE or a DELETE grant is
+ * refused unless a comment on the statement gives the reason (`-- allow-delete: <reason>`).
  *
  * This is a text check, not a parser: it splits the SQL into statements (comments, strings, quoted names and
  * dollar-quoted bodies are read as such, so neither a `--` inside a string nor a `;` inside a body confuses it) and
@@ -40,16 +41,44 @@ const ALTER_POLICY = new RegExp(
   String.raw`^alter\s+policy\s+(${IDENTIFIER})\s+on\s+${QUALIFIED_NAME}([\s\S]*?)(?=\busing\b|\bwith\s+check\b|$)`,
   'i',
 );
+/**
+ * Statements that remove data. Delete behaviour is explicit and never a framework default, and operational data is
+ * never hard-deleted by accident (Product Owner, 6 October 2026): each needs a comment on the statement that records why.
+ */
+const CASCADE = /\bon\s+delete\s+cascade\b/i;
+const TRUNCATE = /^truncate\b/i;
+const GRANT_PRIVILEGES = /^grant\s+(.*?)\s+on\s/i;
+const REMOVING_PRIVILEGE = /\b(?:delete|truncate|all)\b/i;
+const DELETE_REASON = /allow-delete:[ \t]*\S/i;
+
+function removesData(statement: string): string | undefined {
+  if (CASCADE.test(statement)) return 'ON DELETE CASCADE';
+  if (TRUNCATE.test(statement)) return 'TRUNCATE';
+  const privileges = GRANT_PRIVILEGES.exec(statement)?.[1];
+  if (privileges !== undefined && REMOVING_PRIVILEGE.test(privileges)) {
+    return 'a grant of DELETE, TRUNCATE or ALL';
+  }
+  return undefined;
+}
+
 const GRANT_TO_PUBLIC = /^grant\b[\s\S]*\bto\s+(?:[^;]*,\s*)?public\b/i;
 const DEFAULT_PRIVILEGES = /^alter\s+default\s+privileges\b/i;
 const STORED_CONTEXT_SETTING = /^alter\s+(?:database|role|user)\b[\s\S]*\bset\s+["']?melarc\./i;
 
+interface Statement {
+  /** The statement with its comments removed and its white space collapsed. */
+  readonly text: string;
+  /** The comments inside it, and those before it that follow the previous statement. */
+  readonly comments: string;
+}
+
 /**
- * The statements of the SQL, comments removed. A comment is not read inside a string, a quoted name or a
+ * The statements of the SQL, comments removed and kept apart. A comment is not read inside a string, a quoted name or a
  * dollar-quoted body, and a `;` does not end a statement there either.
  */
-function statementsOf(sql: string): string[] {
-  const statements: string[] = [];
+function statementsOf(sql: string): Statement[] {
+  const statements: Statement[] = [];
+  let comments = '';
   let current = '';
   let at = 0;
   const end = sql.length;
@@ -59,9 +88,12 @@ function statementsOf(sql: string): string[] {
     const next = sql.charAt(at + 1);
 
     if (char === '-' && next === '-') {
+      const start = at;
       while (at < end && sql.charAt(at) !== '\n') at += 1;
+      comments += `${sql.slice(start, at)}\n`;
       current += ' ';
     } else if (char === '/' && next === '*') {
+      const start = at;
       let depth = 1;
       at += 2;
       while (at < end && depth > 0) {
@@ -73,6 +105,7 @@ function statementsOf(sql: string): string[] {
           at += 2;
         } else at += 1;
       }
+      comments += `${sql.slice(start, at)}\n`;
       current += ' ';
     } else if (char === "'") {
       // An E'...' string reads a backslash as an escape; any other string does not.
@@ -110,16 +143,19 @@ function statementsOf(sql: string): string[] {
         at = stop;
       }
     } else if (char === ';') {
-      statements.push(current);
+      statements.push({ text: current, comments });
       current = '';
+      comments = '';
       at += 1;
     } else {
       current += char;
       at += 1;
     }
   }
-  statements.push(current);
-  return statements.map((statement) => statement.replaceAll(/\s+/g, ' ').trim()).filter(Boolean);
+  statements.push({ text: current, comments });
+  return statements
+    .map((statement) => ({ ...statement, text: statement.text.replaceAll(/\s+/g, ' ').trim() }))
+    .filter((statement) => statement.text !== '');
 }
 
 /** Splits at the commas that are not inside parentheses or quotes: the actions of one ALTER TABLE. */
@@ -168,7 +204,15 @@ export function lintMigrationSql(sql: string): string[] {
   /** The owner each table is left with: the last `OWNER TO` of the migration decides. */
   const owners = new Map<string, string>();
 
-  for (const statement of statements) {
+  for (const { text: statement, comments } of statements) {
+    // The text of an ordinary string is data, not a statement; a dollar-quoted body is kept, because it can run.
+    const removes = removesData(statement.replaceAll(/'(?:[^']|'')*'/g, "''"));
+    if (removes !== undefined && !DELETE_REASON.test(comments)) {
+      problems.push(
+        `${removes} has no recorded reason: add a comment "-- allow-delete: <reason>" on the statement`,
+      );
+    }
+
     const creates = CREATED_TABLE.exec(statement);
     if (creates?.[1] !== undefined) created.add(normaliseTable(creates[1]));
 
@@ -224,7 +268,10 @@ export function lintMigrationSql(sql: string): string[] {
   }
 
   // Said once for the whole text, so that it is found inside a `DO` body or a string as well.
-  for (const match of statements.join(';\n').matchAll(PROTECTION_REMOVED)) {
+  for (const match of statements
+    .map((statement) => statement.text)
+    .join(';\n')
+    .matchAll(PROTECTION_REMOVED)) {
     problems.push(`migration runs ${(match[1] ?? '').replaceAll(/\s+/g, ' ').toUpperCase()}`);
   }
 

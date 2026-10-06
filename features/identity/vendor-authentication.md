@@ -46,7 +46,7 @@ This is a deliberate Version 1 simplification with a cost the specification stat
 
 ## 4.1 The registered browser holds a credential nobody types
 
-**The sign-in form does not ask for a device identifier**. The registered browser proves itself with a **server-generated high-entropy device credential**, stored hashed server-side and delivered in a long-lived `HttpOnly` cookie bound to the `VendorAccount`.
+**The sign-in form does not ask for a device identifier**. The registered browser proves itself with a **server-generated high-entropy device credential**, stored hashed server-side and delivered in a long-lived `HttpOnly` cookie bound to the `VendorAccount` (`Max-Age=34560000`, 400 days, renewed at each vendor sign-in — [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2).
 
 Vendor sign-in is therefore **shared secret + registered browser**. The shared secret is the human-known half; the device credential is what a stolen shared secret alone cannot defeat.
 
@@ -56,7 +56,7 @@ Vendor sign-in is therefore **shared secret + registered browser**. The shared s
 
 Vendor sign-in required an account identifier, a shared secret and a device identifier — and **no process established any of them.**
 
-When an approved `VendorAccount` is ready for access, a one-time `VENDOR_CREDENTIAL_SETUP` grant is issued to its **registered recovery channel**. The vendor uses it to set the shared secret, register the current browser, consume the grant and become authentication-ready.
+When an approved `VendorAccount` is ready for access, a one-time `VENDOR_CREDENTIAL_SETUP` grant is issued to its **registered recovery channel** — the credential's `delivery_channel`, the phone or the email the approver chose at approval ([domain-model.md](../../contracts/domain-model.md) §6.8). The vendor uses it to set the shared secret, register the current browser, consume the grant and become authentication-ready.
 
 **The administrator never learns the vendor's permanent shared secret.** Vendor organisation approval and business administration remain `SLICE-008`; Gate A defines only the boundary at which an approved account becomes able to authenticate.
 
@@ -73,7 +73,7 @@ Sign-in asks for an **account identifier**, and until Gate PD-3R1 nothing produc
    **Until 27 August the third factor was decorative.** The credential was issued at setup and **required by no operation**, so a stolen shared secret alone signed in from any browser — the exact outcome the device credential exists to prevent. The contract now declares it as a `vendorDevice` security scheme, so an implementation cannot omit it and pass a check.
 2. **The server verifies the credential and that the account is `ACTIVE`.**
 3. **Any existing live session is terminated** with `SUPERSEDED_BY_NEW_LOGIN` (state-machines §13).
-4. **A session is issued** as an `HttpOnly` `melarc_session` cookie — a **real `Set-Cookie` field line**, alongside `melarc_csrf`. **The device credential is proved here, never re-issued**: a login that silently registers whatever browser presents itself registers an attacker's browser too. Registration happens only at **setup** and **recovery**. The contract declared two of those three through invented `X-Set-…` headers until R1.1; **a literal implementation would have shipped a vendor second factor that never reached the browser**. The session is scoped to *own records only* — the ownership axis, not a hub axis (§37.3). A **readable** `melarc_csrf` cookie is set alongside it, and every unsafe request must echo it in `X-CSRF-Token`. **That cookie is deliberately not `HttpOnly`** — the page must read it to echo it, and it is useless to an attacker who cannot read the session cookie.
+4. **A session is issued** as an `HttpOnly` `melarc_session` cookie — a **real `Set-Cookie` field line**, alongside `melarc_csrf`. **The device credential is proved here, never re-issued**: a login that silently registers whatever browser presents itself registers an attacker's browser too. Registration happens only at **setup** and **recovery**. **Renewing is not re-issuing**: a vendor sign-in from a registered browser re-sends the credential it presented with a fresh `Max-Age`, so a browser in daily use never lapses, and the value is neither rotated nor registered anywhere new. The contract declared two of those three through invented `X-Set-…` headers until R1.1; **a literal implementation would have shipped a vendor second factor that never reached the browser**. The session is scoped to *own records only* — the ownership axis, not a hub axis (§37.3). A **readable** `melarc_csrf` cookie is set alongside it, and every unsafe request must echo it in `X-CSRF-Token`. **That cookie is deliberately not `HttpOnly`** — the page must read it to echo it, and it is useless to an attacker who cannot read the session cookie.
 5. **No second factor.** §11.2 confines MFA to Senior Ops and Platform Admin.
 
 ### 5.2 The attribution limit, and why it is a product rule rather than a technical one
@@ -174,7 +174,7 @@ Every record a vendor creates — a booking, a payer-arrangement edit, a handsha
 
 ## 10. Errors — *pointer*
 
-[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `CREDENTIAL_LOCKED`, `SESSION_SUPERSEDED`, `RATE_LIMITED`, `NOT_FOUND`, `VALIDATION_FAILED`, `SETUP_GRANT_INVALID`, `RECOVERY_TOKEN_INVALID`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `STATE_CONFLICT`, `REASON_REQUIRED`, `CREDENTIAL_DELIVERY_FAILED` and `CSRF_VALIDATION_FAILED`. **`ATTEMPTS_EXHAUSTED` is a handshake code and is not returned by sign-in**, and **`OWNERSHIP_VIOLATION` was withdrawn** at Gate PD-3R1: nothing returns it, because a Vendor is told that another vendor's record is not found and never that it belongs to someone else.
+[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `CREDENTIAL_LOCKED`, `SESSION_SUPERSEDED`, `RATE_LIMITED`, `NOT_FOUND`, `VALIDATION_FAILED`, `SETUP_GRANT_INVALID`, `RECOVERY_TOKEN_INVALID`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `STATE_CONFLICT`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `CREDENTIAL_DELIVERY_FAILED` and `CSRF_VALIDATION_FAILED`. **`SESSION_SUPERSEDED` is a contract-wide rule, not a per-operation declaration**: every operation that authenticates a vendor session answers it to a displaced session, and none lists it ([errors-and-enums.md](../../contracts/errors-and-enums.md) §4). **`ATTEMPTS_EXHAUSTED` is a handshake code and is not returned by sign-in**, and **`OWNERSHIP_VIOLATION` was withdrawn** at Gate PD-3R1: nothing returns it, because a Vendor is told that another vendor's record is not found and never that it belongs to someone else.
 
 ## 11. Audit events — *pointer*
 
@@ -194,7 +194,7 @@ Every record a vendor creates — a booking, a payer-arrangement edit, a handsha
 
 **Credential lifecycle:** `completeVendorCredentialSetup` (first secret), `requestCredentialRecovery` and `completeCredentialRecovery` (self-service), **`recoverVendorCredential`** (Platform Admin, exceptional — split out of the former `performOpsRecovery` in R1), and **`reissueVendorCredentialSetup`** (MED-10 audit remediation).
 
-**`reissueVendorCredentialSetup` is establishment repeated, not recovery.** Vendor organisation approval issues exactly one `VENDOR_CREDENTIAL_SETUP` grant, at the ordinary 30-minute lifetime; an account that never acted on it before it lapsed has no shared secret for `recoverVendorCredential` to repair. Senior Ops or Platform Admin re-issues it under `vendor.organization.approve` — the approval authority exercised again — to the account's registered setup channel, guarded on the secret still being `NULL` so an account that has already established one is refused with `STATE_CONFLICT` and pointed at recovery instead.
+**`reissueVendorCredentialSetup` is establishment repeated, not recovery.** Vendor organisation approval issues exactly one `VENDOR_CREDENTIAL_SETUP` grant, at the ordinary 30-minute lifetime; an account that never acted on it before it lapsed has no shared secret for `recoverVendorCredential` to repair. Senior Ops or Platform Admin re-issues it under `vendor.organization.approve` — the approval authority exercised again — to the credential's `delivery_channel`, guarded on the secret still being `NULL` so an account that has already established one is refused with `STATE_CONFLICT` and pointed at recovery instead.
 
 **Recovery rotates the shared secret *and* the browser device credential together**, and R1.1 made the contract actually do it. Completing recovery replaces the secret, terminates sessions with `CREDENTIAL_CHANGED`, **revokes obsolete device credentials and issues a fresh `melarc_vendor_device`** to the browser completing recovery.
 
@@ -298,7 +298,7 @@ And a request from an unregistered browser is refused without revealing whether 
 
 ```text
 Given a VendorAccount approved and ready for access,
-When the setup grant is issued to the registered recovery channel,
+When the setup grant is issued to the credential's delivery_channel,
 Then no Melarc staff operation returns the vendor's secret at any point,
 And the secret is set by the vendor through completeVendorCredentialSetup,
 And it is stored only as an Argon2id hash.
@@ -392,7 +392,7 @@ And a stale ETag is refused with STATE_CONFLICT.
 ```text
 Given an ACTIVE vendor account whose VENDOR_CREDENTIAL_SETUP grant expired with the secret still null,
 When Senior Ops at the account's hub calls reissueVendorCredentialSetup with a reason_code and the ETag read with getVendorAccount,
-Then a fresh grant and the account_identifier are delivered to the registered setup channel and an earlier pending grant is superseded,
+Then a fresh grant and the account_identifier are delivered to the credential's delivery_channel and an earlier pending grant is superseded,
 And an account that already holds a secret is refused with STATE_CONFLICT,
 And an Ops Staff user, who does not hold vendor.organization.approve, is refused with PERMISSION_DENIED,
 And an existing account outside the actor's hubs is refused with HUB_SCOPE_VIOLATION and one that does not exist with NOT_FOUND, the scope being decided before the version is compared,

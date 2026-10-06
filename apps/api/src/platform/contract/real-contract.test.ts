@@ -183,7 +183,8 @@ describe('sign-out: browser cookies are expired, a bearer sign-out sets none (au
 
     expect(staff).toEqual(['melarc_csrf', 'melarc_session']);
     expect(mfa).toEqual([]);
-    expect(Object.keys(operation.responses as JsonObject)).toEqual(['204', '401']);
+    // The 403 is the one a failed CSRF check answers with: every operation that lists CSRF_VALIDATION_FAILED has it.
+    expect(Object.keys(operation.responses as JsonObject)).toEqual(['204', '401', '403']);
     expect(operation.security).toBeUndefined();
     expect(operation['x-error-codes']).toEqual(['CSRF_VALIDATION_FAILED', 'SESSION_INVALID']);
   });

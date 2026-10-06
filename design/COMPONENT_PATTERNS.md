@@ -1,12 +1,20 @@
 # Melarc Component Patterns
 
-> **Status:** DRAFT IMPLEMENTATION BASELINE — document only patterns that exist or are immediately being implemented  
-> **Version:** 1.1  
+> **Status:** ACTIVE IMPLEMENTATION BASELINE — approved by the Product Owner on 6 October 2026; document only patterns that exist or are immediately being implemented  
+> **Version:** 1.2  
 > **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4, §9, §12, §24, §33, §36, §40, §42)  
 > **Repository path:** `design/COMPONENT_PATTERNS.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`, `design/DESIGN_SYSTEM.md`  
 > **Owns:** implemented or immediately planned UI component patterns, their anatomy, variants, states, accessibility expectations, density behavior, and usage rules  
 > **Does not own:** product workflows, business rules, API contracts, domain-state semantics, logo artwork, or speculative future component APIs
+
+---
+
+**Approval (Product Owner, 6 October 2026).** This document is approved. A pattern that is built and tested (§42.3) is
+ACTIVE: Button, Link, Field, Input, Alert, LoadingIndicator, PageHeader, the neutral frame, the error state and the
+not-found state. A pattern that is not built keeps its status: PasswordInput and the authenticated Ops shell stay PROPOSED
+for the identity slice, and the deferred patterns stay deferred. The variants and sizes that are not built (§42.2) are
+vocabulary, not a build list.
 
 ---
 
@@ -91,7 +99,7 @@ Every reusable component must:
 
 ## 4. Button
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 4.1 Purpose
@@ -239,7 +247,7 @@ Do not:
 
 ## 5. Link
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 5.1 Purpose
@@ -290,7 +298,7 @@ Do not:
 
 ## 6. Field pattern
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 6.1 Purpose
@@ -364,7 +372,7 @@ Field pattern must support:
 
 ## 7. Input
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 7.1 Purpose
@@ -488,7 +496,7 @@ Do not:
 
 ## 9. Alert
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 9.1 Purpose
@@ -547,7 +555,7 @@ Do not use Alert as permanent decorative page chrome.
 
 ## 10. Loading Indicator
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 10.1 Purpose
@@ -590,7 +598,7 @@ rather than only an unlabeled spinner.
 
 ## 11. PageHeader
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 11.1 Purpose
@@ -630,7 +638,7 @@ Operational content below it may be compact.
 
 ## 12. Application Frame
 
-> **Status:** the neutral frame exists (`apps/ops-web/src/app/AppFrame.tsx`) and is retained; the authenticated Ops shell is PROPOSED and DEFERRED to the identity slice  
+> **Status:** the neutral frame is ACTIVE (`apps/ops-web/src/app/AppFrame.tsx`); the authenticated Ops shell is PROPOSED and DEFERRED to the identity slice  
 > **Initial implementation priority:** the neutral frame is Required (it exists); the authenticated Ops shell is not part of the UI foundation gate
 
 ### 12.1 Purpose
@@ -708,7 +716,7 @@ Development-only showcase data must be obviously non-production.
 
 ## 13. Error Page
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 13.1 Purpose
@@ -754,7 +762,7 @@ Do not expose:
 
 ## 14. Not Found
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE  
 > **Initial implementation priority:** Required
 
 ### 14.1 Purpose
@@ -1342,18 +1350,18 @@ Do not use this file to override a product contract.
 
 | Pattern | Status | Initial foundation |
 |---|---|---|
-| Button | PROPOSED | Yes |
-| Link | PROPOSED | Yes |
-| Field | PROPOSED | Yes |
-| Input | PROPOSED | Yes |
+| Button | ACTIVE | Yes |
+| Link | ACTIVE | Yes |
+| Field | ACTIVE | Yes |
+| Input | ACTIVE | Yes |
 | PasswordInput | PROPOSED | Identity implementation |
-| Alert | PROPOSED | Yes |
-| LoadingIndicator | PROPOSED | Yes |
-| PageHeader | PROPOSED | Yes |
-| NeutralFrame (`AppFrame`) | EXISTS, retained | Yes |
+| Alert | ACTIVE | Yes |
+| LoadingIndicator | ACTIVE | Yes |
+| PageHeader | ACTIVE | Yes |
+| NeutralFrame (`AppFrame`) | ACTIVE | Yes |
 | AuthenticatedOpsShell | PROPOSED | Identity slice |
-| ErrorState | PROPOSED, existing code to adapt | Yes |
-| NotFoundState | PROPOSED, existing code to adapt | Yes |
+| ErrorState | ACTIVE | Yes |
+| NotFoundState | ACTIVE | Yes |
 | ForbiddenState | Deferred | No |
 | EmptyState | Deferred | No |
 | Skeleton | Deferred | No |
@@ -1368,21 +1376,10 @@ Do not use this file to override a product contract.
 
 ## 41. Next implementation step
 
-After Product Owner review of:
-
-- `design/BRAND_FOUNDATION.md`;
-- `design/DESIGN_SYSTEM.md`;
-- `design/COMPONENT_PATTERNS.md`;
-
-the next design task is the **small UI Foundation implementation gate**.
-
-That gate should:
-
-1. encode approved tokens;
-2. implement only the initial required patterns;
-3. create a development-only visual showcase;
-4. validate accessibility and responsive behavior;
-5. avoid real product-feature implementation except where needed to prove the shell/foundation.
+Done. The Product Owner approved `BRAND_FOUNDATION.md`, `DESIGN_SYSTEM.md` and this document (6 October 2026), the small UI
+foundation gate was built to them (§42.3), and the tokens, the initial patterns and a development-only showcase exist and
+are tested. The next UI work is the identity slice's screens, which add a variant, a size or a pattern only when they first
+use it (§30, §37).
 
 Do not build the full component catalogue upfront.
 

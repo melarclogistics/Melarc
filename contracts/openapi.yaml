@@ -166,10 +166,20 @@ tags:
 # The three cookies this API sets. `x-set-cookies` on a response names members of this map,
 # which is what makes the declaration checkable rather than prose.
 # The declaration covers a cookie's EXPIRY as well as its issuance: a response that clears a
-# cookie sets it again with Max-Age=0 and the attributes below, so the browser removes the
-# cookie it holds (sign-out is the case). `x-set-cookies-for: <securityScheme>` limits the
-# declaration to a request that presented that scheme's credential, so a Rider bearer
-# sign-out is owed no cookie while a browser one is owed two.
+# browser-session cookie sets it again with Max-Age=0 and the attributes below, so the browser
+# removes the cookie it holds (sign-out is the case). `x-set-cookies-for: <securityScheme>` limits
+# the declaration to a request that presented that scheme's credential, so a Rider bearer
+# sign-out is owed no cookie while a browser one is owed two. `x-set-cookies-when:
+# { principal_type: <type> }` limits it to an answer for that type of principal: one operation can
+# answer for two types with one status, and `completeCredentialRecovery` gives a vendor's browser
+# its device credential and a staff member's none. Where a response states both, both must hold.
+# LIFETIME (Product Owner decision, 6 October 2026). `melarc_session` and `melarc_csrf` are
+# BROWSER-SESSION cookies (`browser_session: true`): issued with no Max-Age and no Expires, so the
+# browser drops them when it ends its session, and the server's own idle and absolute timeouts
+# alone decide whether a session is still valid. The one lifetime either is ever sent with is an
+# expiry (Max-Age=0). `melarc_vendor_device` is persistent: Max-Age=34560000 (400 days), set again
+# with a fresh Max-Age at each vendor sign-in (`vendorSignIn`) and never cleared. `Secure` stays
+# mandatory on all three.
 # Every cookie below is HOST-ONLY: no Domain attribute is set, so it is returned only to the
 # exact host that issued it. ops.<melarc-domain> and vendor.<melarc-domain> are
 # therefore separate cookie jars, and each browser surface calls the API on a same-origin
@@ -182,16 +192,18 @@ x-cookies:
   melarc_session:
     purpose: Opaque browser Session credential
     attributes: HttpOnly; Secure; SameSite=Lax; Path=/
+    browser_session: true
     host_only: true
     read_by_javascript: false
   melarc_csrf:
     purpose: CSRF synchronizer token
     attributes: Secure; SameSite=Lax; Path=/
+    browser_session: true
     host_only: true
     read_by_javascript: true
   melarc_vendor_device:
     purpose: Vendor registered-browser device credential
-    attributes: HttpOnly; Secure; SameSite=Lax; Path=/
+    attributes: HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000
     host_only: true
     read_by_javascript: false
 
@@ -211,7 +223,7 @@ paths:
       x-permission: pickup.request.create
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
-      x-error-codes: [CORRIDOR_DAY_NOT_PERMITTED, CSRF_VALIDATION_FAILED, PERMISSION_DENIED, PICKUP_MINIMUM_NOT_MET, SENDER_SUSPENDED, SERVICE_DATE_NOT_PERMITTED, SESSION_INVALID, VALIDATION_FAILED, VALUE_DECLARATION_REQUIRED, ZONE_NOT_SERVICED_ON_DATE]
+      x-error-codes: [CORRIDOR_DAY_NOT_PERMITTED, CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, PICKUP_MINIMUM_NOT_MET, SENDER_SUSPENDED, SERVICE_DATE_NOT_PERMITTED, SESSION_INVALID, VALIDATION_FAILED, VALUE_DECLARATION_REQUIRED, ZONE_NOT_SERVICED_ON_DATE]
       tags: [pickup-requests]
       summary: Create a pickup request
       description: |
@@ -261,6 +273,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
     get:
       operationId: listPickupRequests
       # SAFE READ. No CSRF: a synchronizer token defends state change, and a read
@@ -434,7 +447,8 @@ paths:
         '403':
           description: |
             `SELF_CANCEL_NOT_PERMITTED_AFTER_ASSIGNMENT` for a vendor after assignment, or
-            `PERMISSION_DENIED` for a chargeable cancellation without the permission.
+            `PERMISSION_DENIED` for a chargeable cancellation without the permission, or
+            `CSRF_VALIDATION_FAILED` for a cookie-authenticated request whose CSRF check fails.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -492,6 +506,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PickupRequest' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -587,6 +602,7 @@ paths:
               schema: { $ref: '#/components/schemas/PickupRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /pickup-requests/{id}/cancellation-charge/waiver:
@@ -652,6 +668,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -776,6 +793,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CollectionRecord' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -818,7 +836,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PickupStop' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   # THE SIGNED TRANSITION NOTHING COULD PERFORM (MSC-DEC-412, closing OQ-141). state-machines.md
@@ -1064,7 +1085,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422':
           description: |
@@ -1081,7 +1104,7 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }
-      x-error-codes: [ACCOUNT_OVERDUE, ALLOWANCE_DISABLED, CARRIER_COST_REQUIRED, COMMITMENT_SOURCE_UNRESOLVED, CREDIT_LIMIT_EXCEEDED, CSRF_VALIDATION_FAILED, MARGIN_NOT_CONFIGURED, ORDER_UNPRICED, PERMISSION_DENIED, SESSION_INVALID, SETTING_MISSING, SIZE_CLASS_REQUIRED, STATE_CONFLICT, VALUE_DECLARATION_REQUIRED]
+      x-error-codes: [ACCOUNT_OVERDUE, ALLOWANCE_DISABLED, CARRIER_COST_REQUIRED, COMMITMENT_SOURCE_UNRESOLVED, CREDIT_LIMIT_EXCEEDED, CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, MARGIN_NOT_CONFIGURED, ORDER_UNPRICED, PERMISSION_DENIED, SESSION_INVALID, SETTING_MISSING, SIZE_CLASS_REQUIRED, STATE_CONFLICT, VALUE_DECLARATION_REQUIRED]
       tags: [orders]
       summary: Itemize one order from an intake
       description: |
@@ -1140,6 +1163,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Order' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422':
           description: |
             `SETTING_MISSING` when the hub has no approved base fee, or `MARGIN_NOT_CONFIGURED`
@@ -1182,6 +1207,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/HubIntakePostCount' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1190,7 +1216,7 @@ paths:
     post:
       operationId: createPickupManifest
       x-permission: pickup.manifest.create
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [pickup-manifests]
       summary: Create a manifest from confirmed, unmanifested requests
       description: |
@@ -1214,7 +1240,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PickupManifest' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
     get:
       operationId: listPickupManifests
@@ -1321,7 +1350,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PickupManifest' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1355,6 +1386,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PickupManifest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1380,6 +1412,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PickupManifest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1413,6 +1446,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PickupManifest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1447,6 +1481,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RunCustodyHandover' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1457,7 +1492,7 @@ paths:
     post:
       operationId: acceptRunCustodyHandover
       x-permission: fleet.custody.accept
-      x-error-codes: [CSRF_VALIDATION_FAILED, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [pickup-manifests]
       summary: Take custody of a started run's parcels
       description: |
@@ -1487,6 +1522,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RunCustodyHandover' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1616,7 +1652,9 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/HubIntakePreCount' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1625,7 +1663,7 @@ paths:
     post:
       operationId: initiateHandshake
       x-permission: pickup.collection.confirm
-      x-error-codes: [CSRF_VALIDATION_FAILED, MANIFEST_NOT_STARTED, NOT_ASSIGNED_RIDER, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, MANIFEST_NOT_STARTED, NOT_ASSIGNED_RIDER, SESSION_INVALID, STATE_CONFLICT]
       tags: [handshake]
       summary: Generate and display the collection handshake code
       description: |
@@ -1646,6 +1684,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Handshake' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /pickup-stops/{id}/handshake/verify:
@@ -1677,6 +1717,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Handshake' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -1685,7 +1726,7 @@ paths:
     post:
       operationId: requestSmsHandshakeFallback
       x-permission: pickup.collection.confirm
-      x-error-codes: [CSRF_VALIDATION_FAILED, NOT_ASSIGNED_RIDER, NO_REGISTERED_NUMBER, SESSION_INVALID, SMS_FALLBACK_LIMIT_REACHED, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, NOT_ASSIGNED_RIDER, NO_REGISTERED_NUMBER, SESSION_INVALID, SMS_FALLBACK_LIMIT_REACHED, STATE_CONFLICT]
       tags: [handshake]
       summary: Fallback 1 — send the code to the vendor's registered number
       description: |
@@ -1715,6 +1756,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Handshake' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /pickup-stops/{id}/handshake/ops-override:
@@ -1722,7 +1765,7 @@ paths:
     post:
       operationId: authoriseHandshakeOverride
       x-permission: pickup.handshake.override
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
       tags: [handshake]
       summary: Fallback 2 — Ops authorises the handshake as a recorded exception
       description: |
@@ -1748,6 +1791,7 @@ paths:
               schema: { $ref: '#/components/schemas/Handshake' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /hub-intakes/{id}/discrepancy:
@@ -1821,6 +1865,10 @@ paths:
         Completing the challenge at `/auth/staff/sign-in/mfa` issues the session, already
         privileged for its lifetime.
 
+        **A privileged identity whose password is correct but which has no `ACTIVE` MFA factor** receives
+        the same `202` challenge as an enrolled one, so this answer reveals nothing about the factor. The
+        refusal is `completeStaffMfaSignIn`'s: `MFA_ENROLMENT_REQUIRED`.
+
         **`INVALID_CREDENTIALS` is returned identically** for an unknown email, a wrong password
         and a suspended account, with matching timing. Distinguishing them confirms which
         addresses are real staff, and Melarc staff emails follow a predictable pattern (§37.7).
@@ -1855,6 +1903,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MfaChallenge' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -1865,7 +1914,7 @@ paths:
       # Second factor for a privileged sign-in. Still anonymous - no session exists until the factor is accepted.
       security: []
       x-permission: none
-      x-error-codes: [CHALLENGE_EXPIRED, CHALLENGE_UNUSABLE, CREDENTIAL_LOCKED, INVALID_CREDENTIALS, MFA_PROOF_INVALID, RATE_LIMITED]
+      x-error-codes: [CHALLENGE_EXPIRED, CHALLENGE_UNUSABLE, CREDENTIAL_LOCKED, INVALID_CREDENTIALS, MFA_ENROLMENT_REQUIRED, MFA_PROOF_INVALID, RATE_LIMITED, VALIDATION_FAILED]
       tags: [auth]
       summary: Present the second factor and receive the session
       description: |
@@ -1881,6 +1930,8 @@ paths:
         unattended browser, which an absolute lifetime cannot tell apart from a working user.
 
         **A wrong code counts twice**: against the challenge (`mfa_max_attempts` 3, then `CHALLENGE_UNUSABLE`) and against the identity's failed-attempt count shared with the password, so a thief who knows the password cannot guess codes across fresh challenges. The caller holds a live challenge - the password was proved - so a locked identity is told `CREDENTIAL_LOCKED` here. A complete sign-in resets the count.
+
+        **An identity with no `ACTIVE` MFA factor** (privileged, password correct, no factor proven yet) is answered `MFA_ENROLMENT_REQUIRED` with `403` here, never at `staffSignIn`, which gave it the same `202` challenge as an enrolled identity. **That attempt does not count towards the lockout**: no factor was presented. No session is issued.
       requestBody:
         required: true
         content:
@@ -1898,6 +1949,15 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403':
+          description: |
+            `MFA_ENROLMENT_REQUIRED`. The identity is privileged, its password was proved and it has
+            no `ACTIVE` MFA factor, so no privileged session can be issued. The attempt does not
+            count towards the lockout.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -1965,7 +2025,7 @@ paths:
         could not establish a result, and is valid. A signature that does not verify is refused
         whatever the signal says.
 
-        **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (5) Otherwise a wrong PIN, or a status other than `ACTIVE`, is `INVALID_CREDENTIALS`, and only a wrong PIN counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path performs one hash verification, so timing does not say which stage ended the request.
+        **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a status other than `ACTIVE` is `INVALID_CREDENTIALS`: the PIN is not examined, nothing is counted and no lock is announced, because the factor has not been reached. (5) With a valid signature and an `ACTIVE` status, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (6) Otherwise a wrong PIN is `INVALID_CREDENTIALS` and counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path performs one hash verification, so timing does not say which stage ended the request.
       requestBody:
         required: true
         content:
@@ -1977,6 +2037,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RiderSessionIssued' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -2000,10 +2061,12 @@ paths:
         by nothing, so a stolen shared secret alone signed in from any browser, which is precisely
         what the device credential exists to prevent.
 
-        **This operation does not issue or rotate the device credential.** It proves one that
-        already exists. Rotation happens only where a browser is deliberately being registered -
-        initial setup and recovery - because a login that silently re-registers whatever browser
-        presents itself registers the attacker's browser too.
+        **This operation does not issue a new device credential or rotate one.** It proves one that
+        already exists, and **renews its lifetime**: the same credential is set again with a fresh
+        `Max-Age` (`x-cookies`), so a browser in regular use never reaches the end of its 400 days.
+        Rotation happens only where a browser is deliberately being registered - initial setup and
+        recovery - because a login that silently re-registers whatever browser presents itself
+        registers the attacker's browser too.
 
         **A failure of any factor is reported identically.** `INVALID_CREDENTIALS` covers an
         unknown account, a wrong secret and an unregistered browser, in content and in timing.
@@ -2027,14 +2090,15 @@ paths:
         '200':
           description: |
             Session established; any earlier session terminated. **The device credential is
-            proved here, never re-issued**.
-          x-set-cookies: [melarc_session, melarc_csrf]
+            proved here and its lifetime renewed, never replaced**.
+          x-set-cookies: [melarc_session, melarc_csrf, melarc_vendor_device]
           headers:
             Set-Cookie:
               $ref: '#/components/headers/SetCookie'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -2051,7 +2115,9 @@ paths:
       tags: [auth]
       summary: The caller's current session
       description: |
-        Returns principal, authorized hub set and expiry. **Never the session credential.**
+        Returns principal, authorized hub set, expiry and the permission keys the session holds
+        (`permissions`: from the session's snapshot, keys only, never role names). **Never the
+        session credential.**
 
         **There is no elevation state**. This described a field the Session schema has
         never carried.
@@ -2092,6 +2158,7 @@ paths:
             Set-Cookie:
               $ref: '#/components/headers/SetCookie'
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /auth/sessions:
     get:
@@ -2136,7 +2203,7 @@ paths:
     post:
       operationId: revokeSession
       x-permission: staff.session.revoke
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [auth]
       summary: Administratively revoke a session
       description: |
@@ -2159,6 +2226,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2188,7 +2256,10 @@ paths:
         **Always returns 202**, whether or not the identifier exists, with matching timing. An
         enumerable recovery endpoint discloses which addresses are real staff (37.7).
 
-        Issuing supersedes any PENDING request for that principal.
+        Issuing supersedes any PENDING request for that principal, **except inside the supersede
+        guard**: a request made less than `recovery_request_supersede_guard_seconds` (60, a starting
+        value) after the pending link was issued neither supersedes it nor issues another, and is
+        answered with the same `202` as any other, so nothing is revealed.
 
         **A suspended principal's request proceeds like any other**; the suspension stands. **A message the delivery channel refuses changes nothing the caller can see**: the request is rolled back, the failure is logged and counted by the provider-failure alert, and `CREDENTIAL_DELIVERY_FAILED` is never returned here.
       requestBody:
@@ -2202,6 +2273,7 @@ paths:
             Accepted. Identical for known and unknown identifiers. **Where the principal exists a
             `RecoveryRequest` is created** and its token sent to the registered channel; where it
             does not, nothing is created and the response is the same (37.7).
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -2258,11 +2330,14 @@ paths:
           description: |
             Credential set; all sessions terminated. **On the vendor branch, obsolete device
             credentials are revoked and `melarc_vendor_device` is re-issued.** No Session cookie
-            is set for any principal type.
+            is set for any principal type. **A staff recovery sets no cookie at all**: the device
+            credential is the vendor branch's alone (`x-set-cookies-when`).
           x-set-cookies: [melarc_vendor_device]
+          x-set-cookies-when: { principal_type: VENDOR }
           headers:
             Set-Cookie:
               $ref: '#/components/headers/SetCookie'
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -2275,7 +2350,7 @@ paths:
     post:
       operationId: revokeRiderDevice
       x-permission: staff.device.revoke
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [auth]
       summary: Revoke a rider's device binding on report of loss or theft
       description: |
@@ -2311,6 +2386,7 @@ paths:
             schema: { $ref: '#/components/schemas/DeviceRevocation' }
       responses:
         '204': { description: 'Binding revoked; any live session on the device terminated with DEVICE_REVOKED' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2348,7 +2424,7 @@ paths:
     post:
       operationId: recordConfirmationAttempt
       x-permission: dispatch.recipient_confirmation.work
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
       tags: [dispatch]
       summary: Record the PRE_DISPATCH recipient-contact checkpoint
       description: |
@@ -2407,6 +2483,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RecipientConfirmation' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /orders/{id}/confirmation/escalate:
@@ -2462,7 +2540,7 @@ paths:
     post:
       operationId: createDeliveryRun
       x-permission: dispatch.run.create
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [delivery-runs]
       summary: Open a draft delivery run
       description: |
@@ -2494,7 +2572,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRun' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
     get:
       operationId: listDeliveryRuns
@@ -2582,7 +2663,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRun' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -2614,6 +2697,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRun' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -2662,7 +2746,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRun' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422':
           description: |
@@ -2702,6 +2788,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRun' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
@@ -2763,7 +2850,7 @@ paths:
     post:
       operationId: createStaffIdentity
       x-permission: staff.identity.create
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED, WORK_EMAIL_IN_USE]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED, WORK_EMAIL_IN_USE]
       tags: [staff-identities]
       summary: Create a staff profile, awaiting independent approval
       description: |
@@ -2804,6 +2891,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StaffIdentity' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -2892,7 +2980,7 @@ paths:
     post:
       operationId: approveStaffIdentity
       x-permission: staff.identity.approve
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SELF_APPROVAL_FORBIDDEN, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SELF_APPROVAL_FORBIDDEN, SESSION_INVALID, STATE_CONFLICT]
       tags: [staff-identities]
       summary: Approve or reject a pending staff profile
       description: |
@@ -2909,7 +2997,9 @@ paths:
 
         **A Platform Admin is required where the named bundle is privileged** - Senior Ops or
         Platform Admin - returning `INSUFFICIENT_AUTHORITY` (MSC-DEC-248, confirmed 26 August under
-        MSC-DEC-253).
+        MSC-DEC-253). **The same holds for rejection**: rejecting a profile that carries a privileged
+        bundle needs a Platform Admin other than the maker, and a lower tier is
+        `INSUFFICIENT_AUTHORITY` (`403`).
 
         **Approval does NOT make sign-in possible**. It issues a SetupGrant to the
         verified work email; the employee establishes their own password, and a privileged identity
@@ -2917,7 +3007,7 @@ paths:
         grants zero authenticated access.
 
         Rejection is the same call with `approved: false` and a mandatory reason. It is terminal and
-        the record stays queryable (36.1).
+        the record stays queryable (36.1). **Its work email is released**: a new profile may use it.
 
         **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
 
@@ -2974,6 +3064,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BundleChange' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3076,9 +3167,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EvidenceUploadTicket' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /evidence/{id}/complete:
@@ -3124,6 +3217,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Evidence' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3199,7 +3293,7 @@ paths:
             cookie here, which is why this host is safe for the native app and unsafe for
             Ops or Vendor.
       x-permission: delivery.stop.execute
-      x-error-codes: [CSRF_VALIDATION_FAILED, MANIFEST_NOT_STARTED, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, MANIFEST_NOT_STARTED, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT]
       tags: [delivery-stops]
       summary: Mark arrival at a delivery stop
       description: |
@@ -3523,6 +3617,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ThirdPartyHandoff' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3772,6 +3867,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CourierProvider' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -3916,6 +4012,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovedAgent' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -3959,7 +4056,7 @@ paths:
     post:
       operationId: failDeliveryStop
       x-permission: delivery.stop.close
-      x-error-codes: [DOORSTEP_WAIT_NOT_ELAPSED, CSRF_VALIDATION_FAILED, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [DOORSTEP_WAIT_NOT_ELAPSED, CSRF_VALIDATION_FAILED, NOT_ASSIGNED_RIDER, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT]
       tags: [delivery-stops]
       summary: Record a failed doorstep attempt, or an outbound stop that failed at the counter
       description: |
@@ -4011,6 +4108,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryStop' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -4020,7 +4118,7 @@ paths:
     post:
       operationId: openCashHandover
       x-permission: payment.cash.handover
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [cash-handovers]
       summary: Rider declares a cash total at the responsible hub
       description: |
@@ -4063,8 +4161,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CashHandover' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /cash-handovers/{id}/confirm:
@@ -4104,6 +4204,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CashHandover' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -4185,6 +4286,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CredentialSetupResult' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -4194,7 +4296,7 @@ paths:
       # PRE-AUTHENTICATION. The privileged identity cannot hold a session until this succeeds.
       security: []
       x-permission: none
-      x-error-codes: [MFA_PROOF_INVALID, RATE_LIMITED, SETUP_GRANT_INVALID]
+      x-error-codes: [MFA_PROOF_INVALID, RATE_LIMITED, SETUP_GRANT_INVALID, VALIDATION_FAILED]
       tags: [auth]
       summary: Prove a TOTP code and activate the MFA factor
       description: |
@@ -4227,6 +4329,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MfaEnrolmentResult' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -4235,7 +4338,7 @@ paths:
     post:
       operationId: resetStaffMfa
       x-permission: staff.mfa.reset
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SELF_APPROVAL_FORBIDDEN, SESSION_INVALID, STATE_CONFLICT]
       tags: [auth]
       summary: Platform Admin resets another privileged identity's MFA factor
       description: |
@@ -4253,6 +4356,10 @@ paths:
 
         **The holder cannot turn MFA off.** There is no state in which a privileged identity has no
         factor and can still authenticate - no backup codes, no bypass codes, no support override.
+
+        **Refusals.** Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`; the other bootstrap
+        Platform Admin is a valid actor on a stranded one. A target whose factor is only `PENDING`
+        (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
 
         **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
 
@@ -4280,7 +4387,7 @@ paths:
     post:
       operationId: reissueStaffCredentialSetup
       x-permission: staff.identity.approve
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, INSUFFICIENT_AUTHORITY, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
       tags: [auth]
       summary: Re-issue an expired or lost initial STAFF_CREDENTIAL_SETUP grant
       description: |
@@ -4300,6 +4407,11 @@ paths:
         **Guard: `StaffIdentity.credential IS NULL`.** A profile that has already established a
         password is not being onboarded again - `STATE_CONFLICT`. Use recoverStaffCredential for
         that case.
+
+        **A bootstrap identity is refused with `STATE_CONFLICT`** (`409`): a fresh 30-minute grant would
+        go to an address nobody verified, because the seeded Platform Admins never passed the approval
+        that makes a work email verified. A stranded bootstrap administrator is recovered by the other
+        Platform Admin with `resetStaffMfa`.
 
         **Effect: the signed SetupGrant machine's own `-> PENDING` transition** ("System, or the
         authorising actor for an administrative reset" - state-machines.md 19), for the same
@@ -4421,7 +4533,7 @@ paths:
     post:
       operationId: registerRiderDevice
       x-permission: staff.device.register
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, IDEMPOTENCY_KEY_CONFLICT, NOT_FOUND, PERMISSION_DENIED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [auth]
       summary: Senior Ops initiates in-person first device binding for a rider
       description: |
@@ -4432,7 +4544,9 @@ paths:
 
         **A rider has at most one `ACTIVE` device**. A rider who already has one is
         refused with `STATE_CONFLICT`, and a change of handset is `reregisterRiderDevice`, never a
-        second binding. **One rider per handset is an operating rule that Senior Ops checks in
+        second binding. **A rider who has had a device revoked is refused with `STATE_CONFLICT` too**
+        (`409`): only `reregisterRiderDevice`, which requires a verification note and the rider's ETag,
+        binds that rider again. **One rider per handset is an operating rule that Senior Ops checks in
         person**; the system enforces the rider-to-key binding and **cannot identify one handset
         across riders**, and no handset identifier is collected or enforced to police it.
 
@@ -4459,9 +4573,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceEnrolmentGrant' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /auth/rider/device/enrol:
@@ -4539,6 +4655,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RegisteredDevice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/TrustDataUnavailable' }
@@ -4585,6 +4702,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RiderChallenge' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /auth/vendor/setup/credential:
@@ -4624,6 +4742,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RegisteredDevice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -4637,7 +4756,7 @@ paths:
         - browserSession: []
           csrfToken: []
       x-permission: self
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, RATE_LIMITED, SESSION_INVALID]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, RATE_LIMITED, SESSION_INVALID]
       tags: [auth]
       summary: Request a grant to register an additional browser
       description: |
@@ -4670,6 +4789,8 @@ paths:
             **No grant material is returned here** - a response that carried it would make the
             registered channel decorative.
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -4711,6 +4832,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RegisteredDevice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -4842,7 +4964,7 @@ paths:
     post:
       operationId: recoverStaffCredential
       x-permission: staff.credential.recover
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [auth]
       summary: Platform Admin performs exceptional staff credential recovery
       description: |
@@ -4988,7 +5110,7 @@ paths:
     post:
       operationId: recoverVendorCredential
       x-permission: vendor.credential.recover
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [auth]
       summary: Platform Admin performs exceptional vendor credential recovery
       description: |
@@ -5044,7 +5166,7 @@ paths:
     post:
       operationId: reissueVendorCredentialSetup
       x-permission: vendor.organization.approve
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
       tags: [auth]
       summary: Re-issue an expired or lost initial VENDOR_CREDENTIAL_SETUP grant
       description: |
@@ -5104,7 +5226,7 @@ paths:
     post:
       operationId: reregisterRiderDevice
       x-permission: staff.device.reregister
-      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, HUB_SCOPE_VIOLATION, NOT_FOUND, PERMISSION_DENIED, REASON_NOT_ACTIVE, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [auth]
       summary: Senior Ops initiates in-person replacement device binding
       description: |
@@ -5136,7 +5258,7 @@ paths:
         path parameter, the grant is rider-bound, and the new handset establishes its own key when
         it completes the enrolment.
 
-        **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getRider` on this rider, which changes when the rider's status or device set changes. A mismatch is `STATE_CONFLICT`; the rider is found with `listRiders`. `registerRiderDevice` (first binding) takes no `If-Match`: it is refused with `STATE_CONFLICT` when an `ACTIVE` device exists, and `revokeRiderDevice` takes none either, because revocation is deliberately immediate and unverified.
+        **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getRider` on this rider, which changes when the rider's status or device set changes. A mismatch is `STATE_CONFLICT`; the rider is found with `listRiders`. `registerRiderDevice` (first binding) takes no `If-Match`: it is refused with `STATE_CONFLICT` when an `ACTIVE` device exists or one has been revoked, and `revokeRiderDevice` takes none either, because revocation is deliberately immediate and unverified.
       parameters: [ { $ref: '#/components/parameters/IfMatch' } ]
       requestBody:
         required: true
@@ -5274,6 +5396,7 @@ paths:
               schema: { $ref: '#/components/schemas/PickupRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /pickup-requests/{id}/handling-assessment:
@@ -5349,7 +5472,7 @@ paths:
     post:
       operationId: recordNextStopContact
       x-permission: delivery.stop.execute
-      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [delivery]
       summary: Record the NEXT_STOP recipient-contact checkpoint
       description: |
@@ -5382,13 +5505,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /delivery-stops/{id}/doorstep-contact:
     parameters: [ { $ref: '#/components/parameters/Id' } ]
     post:
       operationId: recordDoorstepContact
       x-permission: delivery.stop.execute
-      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, REASON_NOT_VALID_FOR_CHECKPOINT, REASON_REQUIRED, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [delivery]
       summary: Record the DOORSTEP checkpoint, and start the controlled wait on failure
       description: |
@@ -5422,6 +5546,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /delivery-stops/{id}/payment-demand:
     parameters: [ { $ref: '#/components/parameters/Id' } ]
@@ -5512,6 +5637,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/OperationalPaymentDemand' }
                   next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -5628,6 +5754,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /payment-collections/{id}:
     parameters: [ { $ref: '#/components/parameters/Id' } ]
@@ -5785,6 +5912,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
     get:
       operationId: listRedeliveries
       security:
@@ -5933,6 +6061,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReturnRecord' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -6058,6 +6187,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FinancialAdjustmentResolution' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -6097,6 +6227,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FinancialAdjustmentResolution' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -6131,6 +6262,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /orders/{id}/delivery-location-change:
     parameters: [ { $ref: '#/components/parameters/Id' } ]
@@ -6161,6 +6293,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
     put:
       operationId: decideDeliveryLocationChange
       x-permission: dispatch.recipient_confirmation.work
@@ -6246,6 +6379,7 @@ paths:
               schema: { $ref: '#/components/schemas/ManualPaymentConfirmation' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /road-expenses:
@@ -6279,8 +6413,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RoadExpense' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
     get:
       operationId: listRoadExpenses
@@ -6548,15 +6684,17 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CashDisposition' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /vendor-organizations:
     post:
       operationId: createVendorOrganization
       x-permission: vendor.organization.create
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [vendors]
       summary: Create a vendor record and its shared portal account, awaiting approval
       description: |
@@ -6593,6 +6731,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorOrganization' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -6603,7 +6742,7 @@ paths:
     post:
       operationId: decideVendorOrganization
       x-permission: vendor.organization.approve
-      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, PERMISSION_DENIED, REASON_REQUIRED, SELF_APPROVAL_FORBIDDEN, SESSION_INVALID, STATE_CONFLICT]
+      x-error-codes: [CREDENTIAL_DELIVERY_FAILED, CSRF_VALIDATION_FAILED, PERMISSION_DENIED, REASON_REQUIRED, SELF_APPROVAL_FORBIDDEN, SESSION_INVALID, STATE_CONFLICT, VALIDATION_FAILED]
       tags: [vendors]
       summary: Approve or reject operational activation
       description: |
@@ -6619,6 +6758,10 @@ paths:
         **Approval issues exactly one `VENDOR_CREDENTIAL_SETUP` grant** to the account's
         registered recovery channel, resolved from the record and never from the request
         (state-machines.md 19.1). That grant is where vendor-authentication.md 5.1 begins.
+
+        **The approver chooses the delivery channel.** `delivery_channel` (`PHONE` or `EMAIL`) is required
+        on approval and is stored on the vendor credential. It is the channel that grant, and every later
+        credential-setup and recovery grant for the account, is delivered to; the vendor never supplies it.
 
         **Delivery** (Gate PD-3R2, applying `PDA-54` to the one issuing operation that lacked it): the grant
         is handed to the delivery channel inside this operation, before it commits, and its raw token is
@@ -6647,6 +6790,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorOrganization' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -6778,6 +6922,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorOrganization' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -7028,9 +7173,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SecurityRiskHold' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /security-holds/{id}/clear:
@@ -7076,7 +7223,7 @@ paths:
     post:
       operationId: createVendorPickupLocation
       x-permission: vendor.pickup_location.manage
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, IDEMPOTENCY_KEY_CONFLICT, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [vendors]
       summary: Save a pickup location for a vendor
       description: |
@@ -7106,8 +7253,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorPickupLocation' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
 
   /vendor-pickup-locations/{id}:
@@ -7140,6 +7289,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorPickupLocation' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -7408,6 +7558,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ParcelCustodyReturn' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -7506,6 +7657,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ParcelCustodyReturn' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -7639,6 +7791,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReasonDefinition' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/RuleViolation' }
@@ -7727,6 +7880,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AccountingExport' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/RuleViolation' }
@@ -7787,6 +7941,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/AccountingExport' }
                   next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -7971,6 +8126,8 @@ components:
         `x-set-cookies` and checked against the same `x-cookies` attributes. `x-set-cookies-for` names
         a security scheme and limits the declaration to a request that presented that scheme's
         credential: any other request is owed none of those cookies and may not receive them.
+        `x-set-cookies-when` names a type of principal (`principal_type`) and limits it to an answer for
+        that type: an answer for another is owed none of them either.
 
         **The previous representation invented `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie`
         to work around that limitation.** Those are not HTTP headers. An implementation reading the
@@ -8095,7 +8252,9 @@ components:
     Forbidden:
       description: |
         `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY` or `HUB_SCOPE_VIOLATION` - the three
-        refusals an authenticated caller may be told, each for a different gate.
+        refusals an authenticated caller may be told for who they are and where they act, each for a
+        different gate - or `CSRF_VALIDATION_FAILED`, the refusal of a cookie-authenticated unsafe
+        request whose CSRF token or Origin does not check out. All four are `403`.
         Deny by default (§37.1). **A record that exists but belongs to another vendor, or - when a
         rider looks it up - to work not assigned to that rider, is never a 403**: it is the `404`
         below, identical to a record that does not exist. A rider who acts on work they name and are
@@ -8113,19 +8272,25 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     ValidationFailed:
-      description: '`VALIDATION_FAILED`. `details` names the offending field.'
+      description: |
+        `VALIDATION_FAILED`. `details` names the offending field. **Always `400`, never `422`**: a
+        request that breaks a documented format or range is a `400`, and a named business rule
+        (`RuleViolation`) is a `422`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Conflict:
-      description: '`STATE_CONFLICT` or `IDEMPOTENCY_KEY_CONFLICT`.'
+      description: |
+        `STATE_CONFLICT` or `IDEMPOTENCY_KEY_CONFLICT`. **Every operation that takes an
+        `Idempotency-Key` declares this response and `IDEMPOTENCY_KEY_CONFLICT`.**
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RuleViolation:
       description: |
         A business rule refused the command. `code` carries the specific reason from
-        `contracts/errors-and-enums.md` §5.
+        `contracts/errors-and-enums.md` §5. **Never `VALIDATION_FAILED`**, which is always a `400`
+        (`ValidationFailed`).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -8513,6 +8678,20 @@ components:
         reason:
           type: string
           description: Mandatory when `approved` is false (29.2.5). Optional on approval.
+        delivery_channel:
+          type: string
+          enum: [PHONE, EMAIL]
+          description: |
+            Chosen by the approver at approval, and **required when `approved` is true**: which of the
+            account's recovery channels (`recovery_phone`, `recovery_email`) the setup grant, and every
+            later credential-setup and recovery grant for the account, is delivered to. It is stored on
+            the vendor credential and never supplied by the vendor. A rejection issues no grant and
+            needs none.
+      if:
+        properties: { approved: { const: true } }
+        required: [approved]
+      then:
+        required: [delivery_channel]
       description: |
         One schema for both halves of 18.2's "approves or rejects", the same shape
         `StaffIdentityApproval` uses. A separate rejection operation would need a separate
@@ -9722,7 +9901,14 @@ components:
       required: [email, password]
       additionalProperties: false
       properties:
-        email: { type: string, format: email }
+        email:
+          type: string
+          format: email
+          description: |
+            The staff member's work email. Compared in its canonical form: trimmed, Unicode
+            NFKC-normalised and lower-cased as a whole address, with no dot or plus-tag folding. The
+            same form decides uniqueness and keys the rate limit. The address is stored and displayed
+            as entered.
         password:
           type: string
           maxLength: 128
@@ -9789,14 +9975,26 @@ components:
       additionalProperties: false
       properties:
         challenge_id: { type: string, format: uuid }
-        code: { type: string }
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: |
+            The TOTP code from the authenticator: 6 digits, 30-second step, one step accepted either
+            side, single use (a code already used is refused again inside its window). A value that
+            is not exactly 6 digits is `VALIDATION_FAILED`; a well-formed code that does not prove
+            the factor is `MFA_PROOF_INVALID`.
 
     SessionRevoke:
       type: object
       required: [reason_code]
       additionalProperties: false
       properties:
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+            identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+            retired or in another domain is `REASON_NOT_ACTIVE`.
         note: { type: string }
 
     Session:
@@ -9814,6 +10012,21 @@ components:
         authorized_hub_ids:
           type: array
           items: { type: string, format: uuid }
+        permissions:
+          type: array
+          uniqueItems: true
+          readOnly: true
+          items:
+            type: string
+            pattern: '^[a-z][a-z_]*(\.[a-z][a-z_]*)+$'
+          description: |
+            The permission keys this session holds, **from its snapshot**: keys only (permissions.md),
+            **never role names** and never a bundle. Read-only, and fixed for the life of the session
+            because it is the snapshot. It is the source a client builds navigation from (the Ops menu),
+            and nothing more: the server stays authoritative and checks the key on every request, so
+            what a client shows or hides decides nothing. Returned on the caller's own session
+            (`getCurrentSession` and the sign-in responses); `listSessions` shows another principal's
+            sessions and returns none.
         registered_device_id: { type: [string, 'null'], format: uuid }
         issued_at: { type: string, format: date-time }
         expires_at:
@@ -9851,22 +10064,27 @@ components:
         Never in a log and never in an audit event, in every case. Audit records that a session
         was issued, not its material - the same rule 20.4 applies to OTPs.
 
-        **No bundle contents either.** The session snapshots the bundle server-side so authority
-        is evaluated against what was held at issue; publishing it would invite a client to
-        decide its own permissions from it. A client asks the server what it may do.
+        **Permission keys, never bundle contents or role names.** The session snapshots the bundle
+        server-side so authority is evaluated against what was held at issue. `permissions` lists
+        the keys of that snapshot and nothing else, as the source of navigation; a client never
+        decides its own permissions from it, because the server checks the key on every request.
 
         There is no elevation field. MSC-DEC-228 makes MFA a sign-in gate for Senior Ops and
         Platform Admin, so a session that exists is already privileged to whatever its bundle allows.
 
     DeviceRevocation:
       type: object
-      required: [reason]
+      required: [reason_code]
       additionalProperties: false
       properties:
-        reason:
+        reason_code:
           type: string
-          minLength: 1
-          description: Why the binding is being revoked - lost, stolen or otherwise compromised. Audited. Replacement is not a revocation reason; a handset replaced through reregisterRiderDevice leaves REPLACED, and the two stay distinguishable.
+          description: |
+            Why the binding is being revoked - lost, stolen or otherwise compromised - as a code of the
+            reason catalogue (`ReasonDefinition`), validated against the catalogue's identity domain for
+            this operation: empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another
+            domain is `REASON_NOT_ACTIVE`. Audited. Replacement is not a revocation reason; a handset
+            replaced through reregisterRiderDevice leaves REPLACED, and the two stay distinguishable.
       description: |
         **No device identifier and no replacement device appear on this schema, and that is the
         guard.** The rider is the subject; the binding to revoke is whichever one is current.
@@ -9968,6 +10186,8 @@ components:
           description: |
             The account identifier or work email. **Not a destination.** The channel is resolved
             from the principal's registered contact; nothing here influences where the token goes.
+            A work email is read in its canonical form: trimmed, Unicode NFKC-normalised and
+            lower-cased as a whole address, with no dot or plus-tag folding.
       description: |
         **No destination field exists on this schema, and that is the guard.** A recovery request
         that could name its own delivery address is a redirect waiting to happen. RIDER is absent
@@ -9995,7 +10215,12 @@ components:
       required: [reason_code]
       additionalProperties: false
       properties:
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+            identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+            retired or in another domain is `REASON_NOT_ACTIVE`.
         note: { type: string }
       description: |
         Replaces the polymorphic `OpsRecovery` (Gate PD-3R1, `PDA-62`). **No `principal_type`, no
@@ -10008,7 +10233,12 @@ components:
       required: [reason_code, verification_note]
       additionalProperties: false
       properties:
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+            identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+            retired or in another domain is `REASON_NOT_ACTIVE`.
         verification_note:
           type: string
           minLength: 1
@@ -10064,6 +10294,14 @@ components:
         active_device_count: { type: integer, minimum: 0 }
         has_recovery_email: { type: boolean }
         has_recovery_phone: { type: boolean }
+        delivery_channel:
+          type: [string, 'null']
+          enum: [PHONE, EMAIL, null]
+          readOnly: true
+          description: |
+            Which recovery channel the approver chose at approval, so where this account's setup and
+            recovery grants are delivered. Never the address itself. Null until the account's
+            organisation is approved.
       description: |
         Entity at domain-model.md 6.8 (`VendorAccount` and `VendorCredential`). **Authentication
         status only.** The recovery channel is shown as *whether* one exists and never as an address,
@@ -10111,7 +10349,12 @@ components:
       required: [reason_code]
       additionalProperties: false
       properties:
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+            identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+            retired or in another domain is `REASON_NOT_ACTIVE`.
         note: { type: string }
       description: |
         MED-10 audit remediation. **No `purpose` or `principal_type` field** — both are fixed by
@@ -11691,7 +11934,13 @@ components:
       required: [work_email, full_name, role_bundle_id]
       additionalProperties: false
       properties:
-        work_email: { type: string, format: email }
+        work_email:
+          type: string
+          format: email
+          description: |
+            Compared in its canonical form: trimmed, Unicode NFKC-normalised and lower-cased as a whole
+            address, with no dot or plus-tag folding. The same form decides uniqueness and keys the
+            rate limit. The address is stored and displayed as entered.
         full_name: { type: string }
         phone: { type: string, description: E.164 }
         role_bundle_id: { type: string, format: uuid, description: 'An id returned by listAssignableStaffRoleBundles. One that names no bundle currently valid for human staff is VALIDATION_FAILED.' }
@@ -11715,7 +11964,13 @@ components:
       additionalProperties: false
       properties:
         approved: { type: boolean }
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            Mandatory on rejection (`approved: false`). A code of the reason catalogue
+            (`ReasonDefinition`), validated against the catalogue's identity domain for this operation:
+            empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another domain is
+            `REASON_NOT_ACTIVE`.
         note: { type: string }
       description: |
         `approved: false` rejects, and `reason_code` becomes mandatory - `REASON_REQUIRED`.
@@ -11781,7 +12036,13 @@ components:
       required: [id, work_email, full_name, status, role_bundle_id, mfa_enrolled, created_by]
       properties:
         id: { type: string, format: uuid }
-        work_email: { type: string, format: email }
+        work_email:
+          type: string
+          format: email
+          description: |
+            As entered. Compared in its canonical form: trimmed, Unicode NFKC-normalised and
+            lower-cased as a whole address, with no dot or plus-tag folding. The same form decides
+            uniqueness and keys the rate limit. The address is stored and displayed as entered.
         full_name: { type: string }
         phone: { type: [string, 'null'] }
         status:
@@ -12388,7 +12649,14 @@ components:
       additionalProperties: false
       properties:
         setup_token: { type: string }
-        totp_code: { type: string }
+        totp_code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: |
+            The TOTP code from the authenticator that proves the factor: 6 digits, 30-second step,
+            one step accepted either side, single use (a code already used is refused again inside
+            its window). A value that is not exactly 6 digits is `VALIDATION_FAILED`; a well-formed
+            code that does not prove the factor is `MFA_PROOF_INVALID`.
       description: |
         **The code is proof, not configuration.** A factor provisioned but never proven stays
         PENDING and is not MFA.
@@ -12407,7 +12675,12 @@ components:
       required: [reason_code]
       additionalProperties: false
       properties:
-        reason_code: { type: string }
+        reason_code:
+          type: string
+          description: |
+            A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
+            identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
+            retired or in another domain is `REASON_NOT_ACTIVE`.
         note: { type: string }
       description: |
         **No disable flag and no factor field.** Reset revokes and re-issues; there is no shape in

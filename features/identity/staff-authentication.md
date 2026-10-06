@@ -49,7 +49,7 @@ This exists as its own feature because **the second factor is a gate on obtainin
 - The staff record exists, is **active**, and has an assigned permission bundle (§30.3).
 - **The identity is authentication-ready**: a credential has been established by the employee through a `SetupGrant`, and — for Senior Ops or Platform Admin — an **`ACTIVE` `MfaFactor`** exists.
 - **Being approved is not being able to sign in.** An `ACTIVE` identity that has not completed setup grants **zero authenticated access**, and no session may be issued against it. **Reaching that state has been possible since 24 August and was not before** — no operation created a staff identity and none granted a bundle, so this precondition named a state the product could not produce. It is reached through §30.8's maker-checker: `createStaffIdentity` then `approveStaffIdentity` by a different actor ([state-machines.md](../../contracts/state-machines.md) §13.3, `MSC-DEC-247`). A `PENDING_APPROVAL` record **fails this precondition** and no session is issued against it.
-- The staff member has a **verified work email** — it is also the recovery channel (§37.2). **Version 1 has no separate email-verification lifecycle or state, by decision**: the address is accurate because the authorised create-and-approve process established it — the maker entered it and the independent approver passed it at §30.8 approval — and every setup grant, recovery link and re-enrolment link goes to it and nowhere else. **No verification state of any name exists and no criterion tests one**, and a failed delivery is a delivery and recovery outcome, not an identity state. This feature specifies no further verification.
+- The staff member has a **verified work email** — it is also the recovery channel (§37.2). **Version 1 has no separate email-verification lifecycle or state, by decision**: the address is accurate because the authorised create-and-approve process established it — the maker entered it and the independent approver passed it at §30.8 approval — and every setup grant, recovery link and re-enrolment link goes to it and nowhere else. **No verification state of any name exists and no criterion tests one**, and a failed delivery is a delivery and recovery outcome, not an identity state. This feature specifies no further verification. **The address is compared in its canonical form** ([domain-model.md](../../contracts/domain-model.md) §6.8).
 - For Senior Ops and Platform Admin, an **`ACTIVE` `MfaFactor`** exists — a **record that was proven**, not the `mfa_enrolled` boolean, which is now derived from it and is never accepted as evidence.
 
 ## 5. Behaviour
@@ -59,9 +59,9 @@ This exists as its own feature because **the second factor is a gate on obtainin
 1. **Staff submits email and password.** The server verifies against the stored credential.
 2. **A session is established**, carrying the staff identity, the assigned bundle **snapshotted at issue**, and the authorized hub set (§37.3).
 3. **For Ops Staff, work begins.** No further step.
-4. **For Senior Ops and Platform Admin, no session is issued yet.** The response is **`202 Accepted` with an `MfaChallenge`** — a different status code from the Ops Staff `200`, and **no cookie of any kind is set**. It grants nothing and is not a partial session. One `200` returning either shape could not distinguish a session correctly withheld from one wrongly issued; two codes make **"no privileged Session before proven MFA"** a property a test asserts against the contract. It lives for `authentication_challenge_ttl_minutes` (**5**, `MSC-DEC-268`), survives up to `mfa_max_attempts` wrong codes and then becomes permanently unusable — `CHALLENGE_EXPIRED` and `CHALLENGE_UNUSABLE` are separate codes because they tell the user different things: **start again, versus this one is finished.**
+4. **For Senior Ops and Platform Admin, no session is issued yet.** The response is **`202 Accepted` with an `MfaChallenge`** — a different status code from the Ops Staff `200`, and **no cookie of any kind is set**. It grants nothing and is not a partial session. One `200` returning either shape could not distinguish a session correctly withheld from one wrongly issued; two codes make **"no privileged Session before proven MFA"** a property a test asserts against the contract. It lives for `authentication_challenge_ttl_minutes` (**5**, `MSC-DEC-268`), survives up to `mfa_max_attempts` wrong codes and then becomes permanently unusable — `CHALLENGE_EXPIRED` and `CHALLENGE_UNUSABLE` are separate codes because they tell the user different things: **start again, versus this one is finished.** **The same `202` is the answer when the identity holds no `ACTIVE` factor**: the password step says nothing about the factor, and the second step ends in `MFA_ENROLMENT_REQUIRED` (§5.3).
 5. **Presenting a valid factor issues the session**, already privileged to whatever the bundle allows.
-6. **The session arrives as an `HttpOnly` `melarc_session` cookie**, with a readable `melarc_csrf` cookie alongside it; unsafe requests echo it in `X-CSRF-Token` or fail with `CSRF_VALIDATION_FAILED`. **Senior Ops and Platform Admin are `Privileged`-tier for session lifetime and idle timeout** — 480 and 15 minutes, not the standard figures.
+6. **The session arrives as an `HttpOnly` `melarc_session` cookie**, with a readable `melarc_csrf` cookie alongside it; unsafe requests echo it in `X-CSRF-Token` or fail with `CSRF_VALIDATION_FAILED`. **Senior Ops and Platform Admin, and no other bundle, are `Privileged`-tier for session lifetime and idle timeout** — 480 and 15 minutes, not the standard figures. **Fleet Manager and Finance/Reconciliation are standard tier**: 720 minutes absolute, 30 idle and no mandatory second factor ([settings.md](../../contracts/settings.md) §7.5). **Both cookies are browser-session cookies**, with no `Max-Age` and no `Expires`: the server's absolute and idle timeouts decide whether a session is valid ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2).
 
 ### 5.2 The reading behind this, and the one it replaced
 
@@ -80,14 +80,15 @@ This exists as its own feature because **the second factor is a gate on obtainin
 | Wrong password| Refused. Counts toward the lockout (§5.5)| `INVALID_CREDENTIALS`|
 | Fifth consecutive wrong password| The credential is locked for `signin_lockout_minutes`. **Nobody is told**: sign-in during the lock is answered exactly as a wrong password, the correct password included — it is not verified and does not extend the lock| `INVALID_CREDENTIALS`|
 | Unknown, `PENDING_APPROVAL`, `REJECTED`, `SUSPENDED` or `OFFBOARDED` identity, or one with no credential yet| Refused. **Indistinguishable from a wrong password** on the sign-in surface, in content and in timing. Counts nothing and locks nothing| `INVALID_CREDENTIALS`|
-| Senior Ops or Platform Admin with the correct password| **Not a refusal.** `202` with an `MfaChallenge`, no session and no cookie. The catalogue calls this outcome `MFA_REQUIRED`; it is a sign-in challenge and is never returned from a business operation| `MFA_REQUIRED` *(the challenge)*|
+| Senior Ops or Platform Admin with the correct password| **Not a refusal**, **whether or not the identity holds an `ACTIVE` factor.** `202` with an `MfaChallenge`, no session and no cookie. The catalogue calls this outcome `MFA_REQUIRED`; it is a sign-in challenge and is never returned from a business operation| `MFA_REQUIRED` *(the challenge)*|
+| Senior Ops or Platform Admin with the correct password and **no `ACTIVE` factor**, at the second step| **`403`.** No session and no cookie; the identity cannot hold a session until a factor is proven. **The attempt is not a wrong code and does not count toward the lockout** (§5.5)| `MFA_ENROLMENT_REQUIRED`|
 | Wrong MFA code| Refused. Counts once against the challenge (`mfa_max_attempts`) **and** once toward the identity's lockout count| `MFA_PROOF_INVALID`|
 | A further code on a challenge that already holds three wrong ones, or a challenge already consumed, superseded or unknown| **This challenge is finished.** It accepts nothing further, the correct code included| `CHALLENGE_UNUSABLE`|
 | Challenge older than `authentication_challenge_ttl_minutes`| **Start again**| `CHALLENGE_EXPIRED`|
 | Lock reached while the caller holds a live challenge| The password was proved, so the caller is told| `CREDENTIAL_LOCKED`|
 | A challenge id presented to a business operation| It is not a session, so there is no session| `SESSION_INVALID`|
 | Key not held, or the key's surface does not serve the operation| Refused before any record is considered| `PERMISSION_DENIED`|
-| Key held, tier too low (a privileged bundle approved by Senior Ops)| Refused| `INSUFFICIENT_AUTHORITY`|
+| Key held, tier too low (a privileged bundle approved **or rejected** by Senior Ops)| Refused| `INSUFFICIENT_AUTHORITY`|
 | An existing record outside the actor's hubs (§37.3)| Refused, and the staff member **is told** why — authenticated staff may know a record exists elsewhere| `HUB_SCOPE_VIOLATION`|
 | No such record| Refused| `NOT_FOUND`|
 | Rate limit exceeded| Refused first, before any factor is verified or counted — sign-in has its own bucket (`rate_limit_staff_signin`, keyed on the email the request carries, whether or not it matches a staff identity), and an authenticated staff session's API ceiling is **moderate** so that a busy hub's intake is not throttled| `RATE_LIMITED`|
@@ -112,7 +113,7 @@ This exists as its own feature because **the second factor is a gate on obtainin
 - **The order.** The schema; then the identity is resolved (an unknown, ineligible or credential-less one gets a dummy hash verification and `INVALID_CREDENTIALS`); then, if the credential is locked, the answer is `INVALID_CREDENTIALS` **after one dummy hash verification whose result is discarded**, so a locked answer is no faster than a wrong one; then the password. **A failure counts only once the request has reached the password**, which for staff has no earlier gate.
 - **The lock.** The fifth consecutive failure sets `locked_until` fifteen minutes ahead. A request inside the lock is neither verified nor counted and does not extend it. At the first attempt after it the count is zero. The count also resets on a complete sign-in and when a credential is set or recovered — `completeStaffCredentialSetup` and `completeCredentialRecovery`.
 - **Silent at the password, announced at the second factor.** A caller who has proved nothing cannot be told a lock exists: that would let anyone learn which addresses are real staff by locking one. A Senior Ops or Platform Admin who holds a live MFA challenge **has** proved the password, so is told `CREDENTIAL_LOCKED`.
-- **One count for the password and the code.** `mfa_max_attempts` limits a **challenge** to three wrong codes; each wrong code also adds one to the identity's count, so a thief who knows the password cannot guess codes across fresh challenges.
+- **One count for the password and the code.** `mfa_max_attempts` limits a **challenge** to three wrong codes; each wrong code also adds one to the identity's count, so a thief who knows the password cannot guess codes across fresh challenges. **A completion that finds no `ACTIVE` factor is not a wrong code**: it answers `MFA_ENROLMENT_REQUIRED` and adds nothing to either count.
 - **A lock ends no session, changes no status and blocks no recovery.** There is no administrator unlock: recovery completion clears it, and otherwise it ends by itself. The count and the lock are **not part of the identity's version**, so a failed sign-in never moves an approver's `ETag`.
 
 ### 5.6 Reads and versions — how an approver finds the record and its version
@@ -120,6 +121,10 @@ This exists as its own feature because **the second factor is a gate on obtainin
 The maker learns the new identity's id from the creation response. **A different person, the approver, finds it with `listStaffIdentities` and reads `getStaffIdentity`**; each staff-targeted mutation takes its `If-Match` from that read, and a stale version is `STATE_CONFLICT`. Both reads are gated by `staff.read`, which **Ops Staff do not hold** — so the maker, who may be Ops Staff, cannot read the record back, and that is deliberate. `proposeBundleChange` takes its `ETag` from the same read, and `SLICE-009` builds it.
 
 **The maker chooses the bundle from a read, not from a list the screen carries**. `listAssignableStaffRoleBundles` returns to any holder of `permission.assignable_bundle.read` (`MSC-DEC-443` — Ops Staff, Senior Ops and Platform Admin, the bundles that hold `staff.identity.create`), at any hub, only the staff bundles currently valid for assignment to human staff — each with its identifier, its display name and whether a Platform Admin must approve the assignment, **never its permissions or its holders**. The key is global configuration with no hub scope, it does not itself permit creation, assignment or approval, and `createStaffIdentity` stays gated by `staff.identity.create`. **Choosing a privileged bundle grants nothing**: the profile is created `PENDING_APPROVAL` and a Platform Admin must approve a privileged target. `createStaffIdentity` validates the id itself, and one that names no assignable bundle is `VALIDATION_FAILED` — **validation inside the signed §13.3 `→ PENDING_APPROVAL` row**, which already requires a bundle to be named and already carries that code, and which the Product Owner confirmed this does not amend.
+
+### 5.7 Rejecting a pending profile
+
+Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) — the same call, the same version check and the same maker-checker rule (Product decision, 6 October 2026). **A reason is mandatory**: a `reason_code` of the staff-profile-rejection domain ([domain-model.md](../../contracts/domain-model.md) §3.9), `REASON_REQUIRED` when empty and `REASON_NOT_ACTIVE` when it is unknown, retired or from another domain. **The rejecting approver is not the maker** (`SELF_APPROVAL_FORBIDDEN`), and **a profile that carries a privileged bundle is rejected only by a Platform Admin other than the maker**: a Senior Ops caller is `INSUFFICIENT_AUTHORITY` and an Ops Staff caller `PERMISSION_DENIED`. Rejection is terminal and **releases the work email**, so a new profile may use the address (`AC-SLICE-000-122`).
 
 ## 6. Entities — *pointer*
 
@@ -153,7 +158,7 @@ The maker learns the new identity's id from the creation response. **A different
 
 ## 10. Errors — *pointer*
 
-[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `MFA_PROOF_INVALID`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `CREDENTIAL_LOCKED`, `RATE_LIMITED`, `SESSION_INVALID`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `NOT_FOUND`, `SELF_APPROVAL_FORBIDDEN`, `STATE_CONFLICT`, `VALIDATION_FAILED`, `REASON_REQUIRED`, `SETUP_GRANT_INVALID`, `MFA_ENROLMENT_REQUIRED`, `CREDENTIAL_DELIVERY_FAILED` and `CSRF_VALIDATION_FAILED`. **`MFA_REQUIRED` names the sign-in challenge and is never returned from a business operation.** **`ATTEMPTS_EXHAUSTED` and `CODE_EXPIRED` are handshake codes** — this section said `ATTEMPTS_EXHAUSTED` *now serves both the handshake and sign-in*, which the catalogue and the contract deny. **`DEVICE_NOT_REGISTERED` was listed here and was withdrawn on 27 August** as a dead synonym of `DEVICE_NOT_ENROLLED` — and it had no business on a **staff** feature in the first place, which returns no device code at all.
+[errors-and-enums.md](../../contracts/errors-and-enums.md) — `INVALID_CREDENTIALS`, `MFA_PROOF_INVALID`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `CREDENTIAL_LOCKED`, `RATE_LIMITED`, `SESSION_INVALID`, `PERMISSION_DENIED`, `INSUFFICIENT_AUTHORITY`, `HUB_SCOPE_VIOLATION`, `NOT_FOUND`, `SELF_APPROVAL_FORBIDDEN`, `STATE_CONFLICT`, `VALIDATION_FAILED`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `WORK_EMAIL_IN_USE`, `SETUP_GRANT_INVALID`, `MFA_ENROLMENT_REQUIRED`, `CREDENTIAL_DELIVERY_FAILED` and `CSRF_VALIDATION_FAILED`. **`MFA_REQUIRED` names the sign-in challenge and is never returned from a business operation.** **`ATTEMPTS_EXHAUSTED` and `CODE_EXPIRED` are handshake codes** — this section said `ATTEMPTS_EXHAUSTED` *now serves both the handshake and sign-in*, which the catalogue and the contract deny. **`DEVICE_NOT_REGISTERED` was listed here and was withdrawn on 27 August** as a dead synonym of `DEVICE_NOT_ENROLLED` — and it had no business on a **staff** feature in the first place, which returns no device code at all.
 
 ## 11. Audit events — *pointer*
 
@@ -165,7 +170,7 @@ The maker learns the new identity's id from the creation response. **A different
 
 ## 12. API operations — *pointer*
 
-[openapi.yaml](../../contracts/openapi.yaml) — `staffSignIn`, `completeStaffMfaSignIn`, `getCurrentSession`, `signOut`, `revokeSession`. **The `Session` schema carries no token and no bundle contents**: a client asks the server what it may do rather than deciding from a list it was handed.
+[openapi.yaml](../../contracts/openapi.yaml) — `staffSignIn`, `completeStaffMfaSignIn`, `getCurrentSession`, `signOut`, `revokeSession`. **The `Session` schema carries no token and no bundle contents.** It carries one read-only `permissions` list — the permission keys the session holds, from its snapshot, **keys only** — and the Ops menu is built from that list, never from a role name. The server stays authoritative: a key in the list is what the client may offer, and every request is still decided on the server.
 
 **Establishment and re-enrolment:** `completeStaffCredentialSetup`, `completeMfaEnrolment`, `resetStaffMfa`, **`beginMfaReenrolment`** (R1), **`recoverStaffCredential`** (R1, split out of the former `performOpsRecovery`) and **`reissueStaffCredentialSetup`** (MED-10 audit remediation).
 
@@ -173,7 +178,7 @@ The maker learns the new identity's id from the creation response. **A different
 
 **Reads (Gate PD-3R1, `PDA-47`):** `listStaffIdentities` and `getStaffIdentity` (`staff.read`) and `listSessions` — the reads every staff-targeted mutation takes its `If-Match` from and the revocation screen needs. `approveStaffIdentity`, `resetStaffMfa`, `reissueStaffCredentialSetup` and `recoverStaffCredential` each name `getStaffIdentity` as the source of their `ETag`; `proposeBundleChange` does too and belongs to `SLICE-009` with `approveBundleChange`, which this slice does not build.
 
-**`reissueStaffCredentialSetup` closes the gap the other five leave open.** `approveStaffIdentity` issues exactly one `STAFF_CREDENTIAL_SETUP` grant, at the ordinary 30-minute lifetime; nothing before this operation could reach an `ACTIVE` identity whose grant expired before the employee acted on it, because `recoverStaffCredential` repairs a credential that already exists and this one does not. Senior Ops or Platform Admin re-issues it — the same `staff.identity.approve` authority exercised again, not a new permission — superseding any stale `PENDING` grant and delivering the fresh one to the same verified work email.
+**`reissueStaffCredentialSetup` closes the gap the other five leave open.** `approveStaffIdentity` issues exactly one `STAFF_CREDENTIAL_SETUP` grant, at the ordinary 30-minute lifetime; nothing before this operation could reach an `ACTIVE` identity whose grant expired before the employee acted on it, because `recoverStaffCredential` repairs a credential that already exists and this one does not. Senior Ops or Platform Admin re-issues it — the same `staff.identity.approve` authority exercised again, not a new permission — superseding any stale `PENDING` grant and delivering the fresh one to the same verified work email. **It refuses a bootstrap identity** (`STATE_CONFLICT`) however its credential stands: a fresh grant would go to an address nobody verified, and the bootstrap secret is the only way in for an administrator who has not yet set a password ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.3a).
 
 **`MFA_ENROLMENT` is the only grant purpose that activates a factor**, whatever created the pending one. The contract accepted `BOOTSTRAP_SETUP` at `completeMfaEnrolment` until R1.2 — which would have left the **one grant with no expiry** able to install a factor at any later date.
 
@@ -238,9 +243,10 @@ And no response distinguishes which of them occurred.
 
 ```text
 Given a Senior Ops user whose bundle has had a permission removed by configuration,
-When the user attempts the action that permission gated,
+When the user signs in again, in a session created after the edit, and attempts the action that permission gated,
 Then it is refused,
 And the refusal required no code change to take effect,
+And a session created before the edit keeps the snapshot it was issued with, so the same action still succeeds there until that session ends or is ended with revokeSession,
 And no code path anywhere tests the string SENIOR_OPS.
 ```
 
@@ -279,8 +285,9 @@ Given a Senior Ops identity that is ACTIVE with its bundle assigned,
 And whose password has been established through a setup grant,
 And which has no ACTIVE MfaFactor,
 When the correct email and password are submitted,
-Then an MFA challenge is returned,
-And no Session is created,
+Then the same 202 MFA challenge is returned as for an identity with an ACTIVE factor,
+And no Session is created and no cookie is set,
+And completing that challenge ends in MFA_ENROLMENT_REQUIRED (AC-SLICE-000-123),
 And presenting no factor leaves the identity with zero authenticated access.
 ```
 
@@ -373,7 +380,7 @@ Given an Ops Staff identity and the staff sign-in limit of 10 a minute,
 When more than ten sign-in requests for it arrive within the minute,
 Then the excess requests are refused with RATE_LIMITED, and a correct password among them is not examined,
 And a refused request adds nothing to the failed-attempt count, so only the fifth wrong password that was verified sets a lock,
-And the limit is keyed on the normalised email the request carries, whether or not it matches a staff identity, and not on the network address, so RATE_LIMITED never tells a caller that an address is real.
+And the limit is keyed on the canonical form of the email the request carries ([domain-model.md](../../contracts/domain-model.md) §6.8), whether or not it matches a staff identity, and not on the network address, so RATE_LIMITED never tells a caller that an address is real.
 ```
 
 **Governs:** `MSC-DEC-224`, `MSC-DEC-371`, `MSC-DEC-431` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `RATE_LIMITED`
@@ -396,9 +403,9 @@ And a second signOut on the same credential is refused with 401 SESSION_INVALID 
 ```text
 Given a signed-in principal of each type,
 When getCurrentSession is called,
-Then the response names the principal, the authorised hub set and the expiry,
-And it contains no session token, no token hash, no CSRF value and no bundle contents,
-And the Session schema has no property that could hold any of them.
+Then the response names the principal, the authorised hub set, the expiry and, in a read-only permissions list, the permission keys the session holds from its snapshot,
+And it contains no session token, no token hash, no CSRF value and nothing of a bundle beyond those keys,
+And the Session schema has no property that could hold a token, a hash or a CSRF value, and its permissions list carries keys only.
 ```
 
 **Governs:** `MSC-DEC-261`, §37.2 · **Surface:** Melarc Ops, Melarc Vendor, Melarc Rider · **Test level:** contract
@@ -525,12 +532,13 @@ And none of these operations issues a session.
 ### `AC-SLICE-000-93` — An expired continuation grant is recovered by a provisioning mechanism no API operation or screen can invoke
 
 ```text
-Given either bootstrap Platform Admin, who set a password and whose MFA_ENROLMENT continuation grant expired with the factor still PENDING, whatever state the other is in,
+Given either bootstrap Platform Admin, who set a password and whose MFA_ENROLMENT continuation grant expired with the factor still PENDING, while the other bootstrap Platform Admin does not yet hold an ACTIVE credential and an ACTIVE factor,
 When the provisioning-only resume command is run,
 Then a fresh MFA_REENROLMENT authorisation is delivered through the controlled provisioning channel and an enhanced audit record is written under the reserved system actor,
 And beginMfaReenrolment consumes it, supersedes the unusable PENDING factor and issues a new continuation grant,
 And no session is granted, the password is neither reset nor revealed and BOOTSTRAP_SETUP is not resurrected,
-And no API operation and no Ops Portal screen can invoke the command.
+And no API operation and no Ops Portal screen can invoke the command,
+And once the other bootstrap Platform Admin holds an ACTIVE credential and an ACTIVE factor the command refuses for this one (AC-SLICE-000-120).
 ```
 
 **Governs:** `MSC-DEC-272`, `MSC-DEC-440`, [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) · **Surface:** backend · **Test level:** integration
@@ -592,7 +600,7 @@ And createStaffIdentity naming a Rider or Vendor bundle, which is not on the lis
 ```text
 Given an empty staff table and a provisioning run that names two distinct work emails,
 When the seed runs and is then run a second time,
-Then exactly two StaffIdentity records exist, each ACTIVE with a Platform Admin bundle, its own work email and its own single-use BOOTSTRAP_SETUP secret held only as a hash, and neither holds a password or an MFA factor,
+Then exactly two StaffIdentity records exist, each ACTIVE with a Platform Admin bundle, an explicit all-hub grant that is not inferred from the bundle's name, its own work email and its own single-use BOOTSTRAP_SETUP secret held only as a hash, and neither holds a password or an MFA factor,
 And each records the reserved system actor as created_by and approved_by and writes staff.identity.created and staff.identity.approved as enhanced records,
 And the second run creates nothing,
 And once both administrators have completed the steps of AC-SLICE-000-92 and signed in, one creates a staff profile and is refused with SELF_APPROVAL_FORBIDDEN when they try to approve it with the version they read with getStaffIdentity,
@@ -601,6 +609,73 @@ And, in a separate environment that starts with an empty staff table, a run that
 ```
 
 **Governs:** `MSC-DEC-440`, `MSC-DEC-443`, [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3 · **Surface:** backend · **Test level:** integration · **Code:** `SELF_APPROVAL_FORBIDDEN`
+
+### `AC-SLICE-000-122` — A pending profile is rejected by a different approver, at the tier its bundle needs, and its email is released
+
+```text
+Given a profile in PENDING_APPROVAL naming a privileged bundle and another naming a non-privileged bundle, both created by one user,
+When a different Senior Ops user rejects the privileged one, and then rejects the other with a reason_code,
+Then the first is refused with INSUFFICIENT_AUTHORITY and stays PENDING_APPROVAL,
+And the second becomes REJECTED, terminal and still queryable, with approved_by naming the rejecting user,
+And a Platform Admin other than the maker rejects the privileged one, which becomes REJECTED,
+And the maker rejecting their own profile is refused with SELF_APPROVAL_FORBIDDEN, an empty reason_code with REASON_REQUIRED and a retired or unknown one with REASON_NOT_ACTIVE,
+And an Ops Staff user is refused with PERMISSION_DENIED,
+And a new profile naming a rejected profile's work email is accepted, while a profile that is not rejected still answers WORK_EMAIL_IN_USE.
+```
+
+**Governs:** §30.8, [state-machines.md](../../contracts/state-machines.md) §13.3 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `INSUFFICIENT_AUTHORITY`, `SELF_APPROVAL_FORBIDDEN`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`, `PERMISSION_DENIED`, `WORK_EMAIL_IN_USE`
+
+### `AC-SLICE-000-123` — A privileged identity with no ACTIVE factor reaches the second step and is stopped there
+
+```text
+Given a Senior Ops identity that is ACTIVE with an established password and no ACTIVE MfaFactor,
+When the correct email and password are submitted at staffSignIn and the challenge it returns is completed at completeStaffMfaSignIn with any code,
+Then staffSignIn answers 202 with an MfaChallenge, exactly as for an enrolled identity,
+And completeStaffMfaSignIn answers 403 MFA_ENROLMENT_REQUIRED, a code that operation declares, and issues no session and no cookie,
+And that attempt adds nothing to the identity's failed-attempt count, so any number of them lock nothing,
+And the identity still cannot hold a session until a factor is proven.
+```
+
+**Governs:** [errors-and-enums.md](../../contracts/errors-and-enums.md) §4 and §5.8, [state-machines.md](../../contracts/state-machines.md) §13 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `MFA_ENROLMENT_REQUIRED`
+
+### `AC-SLICE-000-126` — A TOTP code is six digits, single-use and accepted one step either side
+
+```text
+Given a privileged identity with an ACTIVE MfaFactor,
+When a code is presented at completeStaffMfaSignIn or at completeMfaEnrolment,
+Then a value that is not exactly six decimal digits is refused by the schema with VALIDATION_FAILED,
+And a code computed on the 30-second step with SHA-1 is accepted in the current step and one step either side of it,
+And a code two steps away is refused with MFA_PROOF_INVALID,
+And a code already used is refused again inside its window with MFA_PROOF_INVALID.
+```
+
+**Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.5 · **Surface:** Melarc Ops · **Test level:** contract · **Code:** `VALIDATION_FAILED`, `MFA_PROOF_INVALID`
+
+### `AC-SLICE-000-127` — The session cookies end with the browser and the vendor device credential lasts 400 days
+
+```text
+Given a successful Ops Portal sign-in and a successful Vendor PWA sign-in,
+When the Set-Cookie fields of each response are inspected,
+Then melarc_session and melarc_csrf carry the Secure attribute and neither Max-Age nor Expires,
+And the session ends only by the absolute timeout, the idle timeout, sign-out or revocation,
+And on the vendor sign-in melarc_vendor_device is set with Max-Age=34560000 and the Secure attribute, as the same credential the browser presented, which renews its lifetime without rotating its value or registering a browser,
+And the browser tests record, for each engine they run in, whether a Secure cookie set on http://127.0.0.1 is stored.
+```
+
+**Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2 · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** e2e
+
+### `AC-SLICE-000-129` — A work email has one canonical form
+
+```text
+Given a staff profile whose work email was entered as Ama.Mensah@Example.COM,
+When the profile is read, another profile is created with ama.mensah@example.com, and a third with ama.mensah+ops@example.com,
+Then the first is stored and displayed as entered,
+And the second is refused with WORK_EMAIL_IN_USE, because both are the same address in canonical form,
+And the third is accepted, because no dot or plus-tag folding is applied,
+And the staff sign-in rate limit counts sign-ins that spell the first address either way in one bucket.
+```
+
+**Governs:** [domain-model.md](../../contracts/domain-model.md) §6.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `WORK_EMAIL_IN_USE`
 
 ## 14. Open questions blocking this feature
 
