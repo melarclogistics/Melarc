@@ -15,7 +15,9 @@ export type DatabaseTransaction = Parameters<Parameters<NodePgDatabase['transact
 /**
  * Facts about the role this connection runs as. A runtime identity may hold none of them
  * (SECURITY_DESIGN.md §14.6): superuser, BYPASSRLS, creating databases or roles, owning the database or
- * owning any object. Each makes row-level security either bypassable or removable by the connection.
+ * owning a table, view, sequence or index. Each makes row-level security either bypassable or removable by the
+ * connection. Not inspected yet: owning a schema or function, and CREATE on a schema or the database (the
+ * "schema modification" of §14.6); provisioning and the migrations are what keep those from being granted.
  *
  * Owning includes owning through membership: a role that is a member of the owner has the owner's powers
  * (it can alter or drop a table's policies), so it counts as the owner. `pg_has_role(.., 'MEMBER')` is true
@@ -75,6 +77,16 @@ export class DatabaseService {
     // An idle client can fail (the database restarting). Without a listener that is an uncaught exception.
     pool.on('error', (error) => {
       this.logger.error({ err: error }, 'idle database client error');
+    });
+    // The pool's listener covers a client only while it sits idle: at checkout the pool takes it off. A connection
+    // lost while a transaction holds the client (a restart, a failover, a terminated backend) would then be an
+    // `error` event with nobody listening, which is an uncaught exception and ends the process. A listener of our
+    // own stays for the client's whole life; the query or transaction that was using it fails through its own
+    // path, and the request that made it answers with the platform's 500.
+    pool.on('connect', (client) => {
+      client.on('error', (error) => {
+        this.logger.error({ err: error }, 'database client error');
+      });
     });
     shutdown.register({ name: 'database-pool', close: () => this.close() });
     readiness.register({ name: 'database', check: () => this.check() });

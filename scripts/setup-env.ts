@@ -125,7 +125,11 @@ export function setupLocalEnv(root: string, options: SetupEnvOptions = {}): Setu
     pgEnv = readFileSync(join(root, PG_ENV), 'utf8');
     result.leftAlone.push(PG_ENV);
   } else {
-    pgEnv = readExample(root, PG_ENV).replace(new RegExp(PLACEHOLDER, 'g'), () => random());
+    // Only a setting's value is replaced: the example's own explanation names the placeholder too.
+    pgEnv = readExample(root, PG_ENV).replace(
+      new RegExp(`^([A-Z][A-Z0-9_]*=)${PLACEHOLDER}(\\r?)$`, 'gm'),
+      (_match, assignment: string, lineEnd: string) => `${assignment}${random()}${lineEnd}`,
+    );
     writes.push([PG_ENV, pgEnv]);
   }
 

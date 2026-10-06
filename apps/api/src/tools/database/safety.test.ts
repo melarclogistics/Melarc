@@ -83,6 +83,14 @@ describe('assertDisposableName', () => {
     'melarc_dev"; DROP DATABASE postgres; --',
     'melarc_dev; select 1',
     '',
+    // Text before the name, or whitespace around it: a database that merely contains a disposable name is not one.
+    // Without the start anchor "prod_melarc_dev" would be droppable.
+    'prod_melarc_dev',
+    'x_melarc_test_ab12cd34',
+    'old-melarc_test',
+    ' melarc_dev',
+    'melarc_dev ',
+    'melarc_dev\n',
   ])('refuses %j', (name) => {
     expect(() => {
       assertDisposableName(name);

@@ -29,13 +29,18 @@ export async function createApp(options: CreateAppOptions): Promise<NestExpressA
   const logger = createLogger({ config: options.config, destination: options.logDestination });
   const app = await NestFactory.create<NestExpressApplication>(
     options.rootModule({ config: options.config, logger }),
-    { logger: new NestLoggerAdapter(logger) },
+    // Nest would register a JSON and a form-encoded parser when the application starts. Every request body in the
+    // contract is application/json, and a form-encoded one is the kind a cross-site HTML form can send without a
+    // preflight, so only JSON is parsed (below) and a form-encoded body reaches a handler as no body at all.
+    { logger: new NestLoggerAdapter(logger), bodyParser: false },
   );
 
   app.disable('x-powered-by');
   // No automatic body-hash ETag: the contract uses ETag only as an explicit record version.
   app.set('etag', false);
   app.use(createRequestMiddleware(logger));
+  // After the request middleware, so a body that cannot be parsed or is too large still answers with a request id.
+  app.useBodyParser('json');
   app.useGlobalFilters(new AllExceptionsFilter(logger));
   app.setGlobalPrefix(API_PREFIX, { exclude: [...TECHNICAL_ROUTE_PATHS] });
   return app;

@@ -83,6 +83,28 @@ describe('DatabaseService: lifecycle', () => {
     });
     expect(logs.text()).not.toContain('hunter2');
   });
+
+  // Break caught: a connection lost while a transaction holds it. The pool takes its own listener off a client at
+  // checkout, so an error on a client in use has no listener unless the service adds one: an `error` event with
+  // nobody listening is an uncaught exception, and the fault handler then ends the whole process, every other
+  // request in flight included. The idle test above cannot see it.
+  it('logs an error on a client in use without throwing and without its secrets', () => {
+    const { pool, logs } = build();
+    const client = new EventEmitter();
+    pool.emit('connect', client);
+
+    expect(() =>
+      client.emit(
+        'error',
+        new Error('Connection terminated: postgres://melarc_api_runtime:hunter2@db/melarc'),
+      ),
+    ).not.toThrow();
+
+    expect(logs.records().find((record) => record.msg === 'database client error')).toMatchObject({
+      level: 'error',
+    });
+    expect(logs.text()).not.toContain('hunter2');
+  });
 });
 
 describe('DatabaseService: readiness', () => {

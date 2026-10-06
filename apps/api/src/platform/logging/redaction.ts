@@ -30,6 +30,8 @@ const SENSITIVE_SUBSTRINGS = [
   'setupgrant',
   'recovery',
   'totp',
+  // The session credential is the `melarc_session` cookie, and a session id is as good as the credential.
+  'session',
 ];
 
 /** Short words that count only as a whole key: they sit inside ordinary ones ("shipping", "footprint"). */
@@ -44,7 +46,7 @@ function isSensitiveKey(key: string): boolean {
 }
 
 const SECRET_WORDS =
-  'password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential';
+  'password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf';
 const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
 const AUTH_SCHEME = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
 const JSON_SECRET = new RegExp(
@@ -72,6 +74,19 @@ export interface DescribedError {
   cause?: DescribedError;
 }
 
+const QUERY_PARAMETERS_MARK = '\nparams: ';
+
+/**
+ * drizzle-orm ends the message of a failed query with its bound values ("Failed query: <sql>\nparams: <values>").
+ * On a statement that stores a credential those values are the credential, and no text pattern can recognize a
+ * value by where it sits, so everything after the mark goes. The statement stays: it names no value.
+ */
+function withoutQueryParameters(message: string): string {
+  if (!message.startsWith('Failed query: ')) return message;
+  const at = message.indexOf(QUERY_PARAMETERS_MARK);
+  return at === -1 ? message : `${message.slice(0, at)}${QUERY_PARAMETERS_MARK}${REDACTED}`;
+}
+
 /**
  * The only form in which an error reaches a log: type, scrubbed message, scrubbed stack and the
  * cause chain. Every other property is dropped, because the likeliest leak is not a logger call but
@@ -87,11 +102,15 @@ export function describeError(error: unknown, depth = 0): DescribedError {
           : `a non-error value of type ${typeof error} was thrown`,
     };
   }
+  const message = withoutQueryParameters(error.message);
   const described: DescribedError = {
     type: scrubText(error.name),
-    message: scrubText(error.message),
+    message: scrubText(message),
   };
-  if (error.stack !== undefined) described.stack = scrubText(error.stack);
+  // The stack repeats the message verbatim on its first line. A function replaces it, because a statement can
+  // hold `$$` or `$&`, which a replacement string would read as patterns.
+  if (error.stack !== undefined)
+    described.stack = scrubText(error.stack.replace(error.message, () => message));
   if (error.cause !== undefined && depth < MAX_CAUSE_DEPTH) {
     described.cause = describeError(error.cause, depth + 1);
   }

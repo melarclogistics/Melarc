@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Module, Param, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Module, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Logger } from 'pino';
 
@@ -50,6 +50,17 @@ export class FixtureController {
     await new Promise((resolve) => setTimeout(resolve, Number(ms)));
     this.logger.info({ label }, 'fixture handler finished');
     return { label };
+  }
+
+  /** Reads a request body and logs from inside the handler, as every business operation that takes one will. */
+  @Post('body/:label')
+  async withBody(
+    @Param('label') label: string,
+    @Body() body: unknown,
+  ): Promise<{ label: string; received: unknown }> {
+    await Promise.resolve();
+    this.logger.info({ label }, 'fixture handler finished');
+    return { label, received: body };
   }
 }
 

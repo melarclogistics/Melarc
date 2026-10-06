@@ -69,7 +69,10 @@ describe('on a checkout with neither file', () => {
     const root = checkout();
     setupLocalEnv(root, { random: counter() });
     const text = read(root, PG_ENV);
-    assert.ok(!text.includes('CHANGE_ME'));
+    assert.ok(
+      !/^[A-Z][A-Z0-9_]*=CHANGE_ME\s*$/m.test(text),
+      'a setting still holds the placeholder',
+    );
     const values = parseEnv(text);
     const passwords = [
       values.MELARC_PG_ADMIN_PASSWORD,
@@ -77,9 +80,28 @@ describe('on a checkout with neither file', () => {
       values.MELARC_PG_RUNTIME_PASSWORD,
     ];
     assert.equal(new Set(passwords).size, 3);
-    for (const password of passwords) assert.match(password ?? '', /^secret\d\dx$/);
+    // The first three draws, in the order the settings appear: none is spent anywhere else.
+    assert.deepEqual(passwords, ['secret01x', 'secret02x', 'secret03x']);
     assert.equal(values.MELARC_PG_HOST, '127.0.0.1');
     assert.equal(values.MELARC_PG_PORT, '5432');
+  });
+
+  // Break caught: the placeholder in the example's own explanation being replaced like a setting, which writes a
+  // random value into a comment of the developer's file and spends a draw on it.
+  it('changes nothing in the database example except the three password lines', () => {
+    const root = checkout();
+    setupLocalEnv(root, { random: counter() });
+    const example = examples[`${PG_ENV}.example`].split('\n');
+    const generated = read(root, PG_ENV).split('\n');
+    assert.equal(generated.length, example.length);
+    const changed = generated.flatMap((line, index) =>
+      line === example[index] ? [] : [example[index]?.split('=')[0] ?? ''],
+    );
+    assert.deepEqual(changed, [
+      'MELARC_PG_ADMIN_PASSWORD',
+      'MELARC_PG_MIGRATION_PASSWORD',
+      'MELARC_PG_RUNTIME_PASSWORD',
+    ]);
   });
 
   it('uses real randomness by default: long, hexadecimal and different on each call', () => {

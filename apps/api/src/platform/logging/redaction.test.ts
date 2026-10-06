@@ -36,6 +36,10 @@ const SENSITIVE_KEYS = [
   'melarc_vendor_device',
   'device_credential',
   'session_token',
+  // The session credential is the `melarc_session` cookie (contracts/openapi.yaml, x-cookies).
+  'melarc_session',
+  'session_id',
+  'sessionId',
   'private_key',
   'api_key',
   'apiKey',
@@ -146,6 +150,11 @@ describe('scrubText: secrets embedded in free text', () => {
       '{"password":"[REDACTED]","user":"ama"}',
     ],
     ['a short-word pair', 'otp=123456 pin=4321', 'otp=[REDACTED] pin=[REDACTED]'],
+    [
+      'the session and CSRF cookies in a cookie string',
+      'cookie text melarc_session=abc123; melarc_csrf=zzz789; theme=dark',
+      'cookie text melarc_session=[REDACTED]; melarc_csrf=[REDACTED]; theme=dark',
+    ],
     ['nothing sensitive', 'order 42 accepted at hub 7', 'order 42 accepted at hub 7'],
     ['a similar word that is not a secret', 'shipping=express', 'shipping=express'],
   ])('handles %s', (_label, input, expected) => {
@@ -191,6 +200,29 @@ describe('describeError', () => {
       type: 'Error',
       message: 'inner password=[REDACTED]',
     });
+  });
+
+  // Break caught: a failed query carrying its bound values into the log. drizzle-orm ends the message of a
+  // failed query with "params: <the values>", which on the first insert of a credential is a hash, a one-time
+  // code or a token, and none of the text patterns above can know a value by its position.
+  it('keeps the statement of a failed query and drops its bound values, in the message and the stack', () => {
+    const error = new Error(
+      `Failed query: insert into "credential" ("hash") values ($1)\nparams: ${SECRET},line two ${SECRET}\nnext line`,
+    );
+    const described = describeError(error);
+
+    expect(described.message).toBe(
+      `Failed query: insert into "credential" ("hash") values ($1)\nparams: ${REDACTED}`,
+    );
+    expect(JSON.stringify(described)).not.toContain(SECRET);
+    expect(described.stack).toContain('insert into "credential"');
+  });
+
+  // Break caught: the rule above swallowing the tail of an unrelated message that happens to say "params:".
+  it('leaves other messages that mention params alone', () => {
+    expect(describeError(new Error('invalid params: page must be a number')).message).toBe(
+      'invalid params: page must be a number',
+    );
   });
 
   // Break caught: a thrown non-Error (string, object) stringified wholesale into the log.

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
+import { sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -203,6 +204,51 @@ describe('an idle connection that the server ends', () => {
       expect(text).not.toContain('postgres://');
       await expect(service.check()).resolves.toBeUndefined();
     } finally {
+      await shutdown.closeAll();
+    }
+  });
+});
+
+describe('a connection that the server ends during a transaction', () => {
+  // Break caught: a client checked out for a transaction having no error listener (the pool removes its own at
+  // checkout). A restart, a failover or a terminated backend then raised an uncaught exception, which the API's
+  // fault handler turns into the end of the process. The transaction must fail alone, and the pool must go on.
+  it.each([
+    ['between two statements', 'between'],
+    ['while a statement is running', 'during'],
+  ] as const)('fails only that transaction when it happens %s', async (_when, moment) => {
+    const { service, logs, shutdown } = build(database.urlFor(API_RUNTIME_ROLE), 2);
+    const uncaught: unknown[] = [];
+    const record = (error: unknown) => uncaught.push(error);
+    process.on('uncaughtException', record);
+    try {
+      const terminate = (pid: unknown) =>
+        withClient(database.urlFor('postgres'), (client) =>
+          client.query('select pg_terminate_backend($1)', [pid]),
+        );
+
+      await expect(
+        service.transaction(async (tx) => {
+          const pid = (await tx.execute(sql`select pg_backend_pid() as pid`)).rows[0]?.pid;
+          expect(pid).toEqual(expect.any(Number));
+          if (moment === 'between') {
+            await terminate(pid);
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            await tx.execute(sql`select 1`);
+          } else {
+            setTimeout(() => void terminate(pid), 200);
+            await tx.execute(sql`select pg_sleep(5)`);
+          }
+        }),
+      ).rejects.toThrow();
+
+      // An error event that nobody handled arrives on a later tick.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(uncaught).toEqual([]);
+      await expect(service.check()).resolves.toBeUndefined();
+      expect(logs.text()).not.toContain(database.settings.runtimePassword);
+    } finally {
+      process.off('uncaughtException', record);
       await shutdown.closeAll();
     }
   });

@@ -54,6 +54,7 @@ describe('inspectRoutes', () => {
       'GET /api/v1/fixture/throw-secret',
       'GET /livez',
       'GET /readyz',
+      'POST /api/v1/fixture/body/:label',
     ]);
     expect(inspection.outsideNest).toEqual([]);
     expect(inspection.missingFromRouter).toEqual([]);

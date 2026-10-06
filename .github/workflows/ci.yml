@@ -209,9 +209,10 @@ jobs:
       - name: Describe the build
         run: node scripts/ci-revision.ts manifest build-manifest.json apps/api/dist apps/ops-web/dist contracts/openapi.yaml
 
-      # Build output for later deployment work; not a release package. It is kept for every run, passing or not,
-      # and for pull requests too, and only this job tested it: a consumer must use an artifact only when "CI
-      # result" succeeded for the same commit and the manifest's source.ref is refs/heads/main. To check it, unpack
+      # Build output for later deployment work; not a release package. It is kept only when every step above
+      # succeeded (a failed run keeps the diagnostics instead), for pull requests too, and only this job tested
+      # it: a consumer must use an artifact only when "CI result" succeeded for the same commit and the
+      # manifest's source.ref is refs/heads/main. To check it, unpack
       # it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
       - name: Keep the build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

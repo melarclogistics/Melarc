@@ -1,3 +1,5 @@
+import http from 'node:http';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { FixtureModule } from '../../test-support/fixtures.js';
@@ -67,6 +69,39 @@ describe('request ids', () => {
     expect(byLabel.get('slow')).toBe(slow.headers.get('x-request-id'));
     expect(byLabel.get('fast')).toBe(fast.headers.get('x-request-id'));
     expect(byLabel.get('slow')).not.toBe(byLabel.get('fast'));
+  });
+
+  // Break caught: the request id lost once a body has been read. The context is opened before the body parser
+  // runs, and a parser continues from the stream's `end` event, which belongs to no request: every log line a
+  // handler writes for a POST, PUT or PATCH would then carry no id and could not be tied to its request.
+  it('keeps the request id on log lines written while handling a request with a body', async () => {
+    const { baseUrl, logs } = await start();
+    // The body arrives after the headers, as it does from a browser or over a slow link: a body that is already
+    // buffered when the middleware runs hides the loss.
+    const { status, requestId } = await new Promise<{ status: number; requestId: string }>(
+      (resolve, reject) => {
+        const request = http.request(
+          `${baseUrl}/api/v1/fixture/body/posted`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+          (response) => {
+            response.resume();
+            response.on('end', () => {
+              resolve({
+                status: response.statusCode ?? 0,
+                requestId: String(response.headers['x-request-id']),
+              });
+            });
+          },
+        );
+        request.on('error', reject);
+        request.write('{"any":');
+        setTimeout(() => request.end('"thing"}'), 150);
+      },
+    );
+
+    expect(status).toBe(201);
+    const line = logs.records().find((record) => record.msg === 'fixture handler finished');
+    expect(line?.request_id).toBe(requestId);
   });
 });
 

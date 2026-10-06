@@ -74,6 +74,39 @@ describe('malformed request bodies', () => {
   });
 });
 
+describe('request bodies that are not JSON', () => {
+  // Break caught: a form-encoded body being parsed and handed to a handler. Every request body in the contract is
+  // application/json, and a cross-site HTML form can send a form-encoded POST without a preflight, so a parser the
+  // contract never asked for is a way to reach a handler that the JSON-only rule was meant to close.
+  it('are not parsed: the handler sees no body', async () => {
+    const { baseUrl } = await start();
+    const result = await answer(
+      await fetch(`${baseUrl}/api/v1/fixture/body/form`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'role=admin&amount=1',
+      }),
+    );
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ label: 'form' });
+  });
+
+  // Break caught: the rule above switching JSON parsing off with the form parser.
+  it('still parses a JSON body', async () => {
+    const { baseUrl } = await start();
+    const result = await answer(
+      await fetch(`${baseUrl}/api/v1/fixture/body/json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: 1 }),
+      }),
+    );
+
+    expect(result.body).toEqual({ label: 'json', received: { amount: 1 } });
+  });
+});
+
 describe('client errors that have no catalogue code', () => {
   // Break caught: an oversized body reported as a server fault (500, alerting) instead of a client
   // error. The catalogue has no code for it, so the body carries a reason phrase and no `code`.
