@@ -32,7 +32,7 @@ The seven bundles at §11.3 that use this surface: **Ops Staff**, **Senior Ops**
 
 ## 4. Navigation model
 
-Six capability areas from §17.3, each a queue-led workspace. **Queue counts and filters that make pending work visible** are the organising principle (§17.4) — this is a surface where the primary job is knowing what needs attention.
+Seven areas, each a queue-led workspace: the six capability areas of §17.3 and **Doorstep and money**, which §17.3 does not list and which the delivery features below place on this surface. **Queue counts and filters that make pending work visible** are the organising principle (§17.4) — this is a surface where the primary job is knowing what needs attention.
 
 | Area| Screens| Features rendered|
 |---|---|---|
@@ -45,6 +45,8 @@ Six capability areas from §17.3, each a queue-led workspace. **Queue counts and
 | **Administration**| **Staff identities · vendor accounts · rider roster and devices · live sessions** (`SLICE-000`, routes at §7) · courier registry · approved agents · reason catalogue · global settings · audit history · reports| **The courier/station and approved-agent registers have their operations** (`SLICE-005`, `MSC-DEC-417`; routes at §7), and the reason catalogue has `upsertReasonDefinition` (`settings.reason.manage`); global settings, audit history and reports await `SLICE-013`|
 
 **The needs-decision queue is specified in unusual detail** by §17.3 and the fields are mandatory: failure category, reason, evidence, contact attempts, wait time, attempt count, retryability, cap state, escalation state.
+
+**Signed-in navigation depends on caller-capability discovery, which is not specified yet.** Which entries a session may use cannot be derived from the `Session` resource: it carries `authorized_hub_ids` but no permissions or bundle contents, and no operation returns what the caller may do ([staff-authentication](../features/identity/staff-authentication.md) §12: *a client asks the server what it may do*). The shell's navigation component therefore takes a plain list and shows none until a later slice specifies the source; no permission model is invented client-side.
 
 ## 5. Two booking channels, one set of rules
 
@@ -318,7 +320,7 @@ and the server resolves it.
 
 Desktop-first. Dense operational tables may optimise for desktop, but every workflow stays usable at narrower widths (§10.3, §41.2). §41.2 adds that authorised hub and all-hub dashboard and report views are role-driven.
 
-**§40.5 client baseline, to be defined and tested:** supported desktop browsers and the narrower responsive layouts. Accessibility conformance is `OQ-030` and §40.6. **Interim baseline for the `SLICE-000` screens — accepted by the Product Owner for Version 1, the Frontend Engineer confirming it by approving this document; narrower than §40.5 asks, and it closes neither question:** the current and previous major release of Chrome, Edge, Firefox and Safari on desktop; layouts verified at **1280 px** and **768 px**, with narrower widths usable and not optimised. **Accessibility, for every `SLICE-000` screen:** keyboard-operable with a visible focus; every input has a programmatic label and its error is associated with it; status and error messages are announced to assistive technology; nothing is conveyed by colour alone. **WCAG 2.1 level AA is the working target; it is not a conformance claim.**
+**§40.5 client baseline, to be defined and tested:** supported desktop browsers and the narrower responsive layouts. Accessibility conformance is `OQ-030` and §40.6. **Interim baseline for the `SLICE-000` screens — accepted by the Product Owner for Version 1, the Frontend Engineer confirming it by approving this document; narrower than §40.5 asks, and it closes neither question:** the current and previous major release of Chrome, Edge, Firefox and Safari on desktop; layouts verified at **1280 px** and **768 px**, with narrower widths usable and not optimised. **Accessibility, for every `SLICE-000` screen:** keyboard-operable with a visible focus; every input has a programmatic label and its error is associated with it; status and error messages are announced to assistive technology; nothing is conveyed by colour alone. **WCAG 2.1 level AA is the working target; it is not a conformance claim.** The bootstrap browser smoke test runs Chromium only: acceptance on the other browsers named here is future work, and that test makes no claim about it.
 
 **§41.1 requires every user action mapped to an OpenAPI operation and an acceptance criterion.** **The operation half is done for the `SLICE-000` routes** — each names its operations in §7 — and **not for the others**; the acceptance-criterion half is part of what `OQ-030` owes.
 

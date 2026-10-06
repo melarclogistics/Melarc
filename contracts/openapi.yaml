@@ -74,7 +74,7 @@ info:
 # is now structural rather than asserted, because the cross-origin host is not in scope at the
 # root at all.
 #
-# The dedicated host survives where it is genuinely used, declared per operation on the seven
+# The dedicated host survives where it is genuinely used, declared per operation on the eight
 # Rider native operations (OpenAPI 3 operation-level `servers` overrides this list).
 servers:
   - url: /api/v1
@@ -165,6 +165,11 @@ tags:
 # and relying on the permission axis to express anonymity is the defect Gate A closed.
 # The three cookies this API sets. `x-set-cookies` on a response names members of this map,
 # which is what makes the declaration checkable rather than prose.
+# The declaration covers a cookie's EXPIRY as well as its issuance: a response that clears a
+# cookie sets it again with Max-Age=0 and the attributes below, so the browser removes the
+# cookie it holds (sign-out is the case). `x-set-cookies-for: <securityScheme>` limits the
+# declaration to a request that presented that scheme's credential, so a Rider bearer
+# sign-out is owed no cookie while a browser one is owed two.
 # Every cookie below is HOST-ONLY: no Domain attribute is set, so it is returned only to the
 # exact host that issued it. ops.<melarc-domain> and vendor.<melarc-domain> are
 # therefore separate cookie jars, and each browser surface calls the API on a same-origin
@@ -2065,8 +2070,27 @@ paths:
       summary: Sign out
       description: |
         Terminates the session with `SIGNED_OUT`. Idempotent.
+
+        **The session is ended on the server.** Expiring a cookie does not end a session: a client that
+        kept the credential could still present it, so the session record is terminated whatever the
+        client does with its cookies.
+
+        **A browser sign-out also expires the browser's cookies.** `melarc_session` and `melarc_csrf` are
+        set again with `Max-Age=0` (an expiry in the past), host-only, `Path=/` and the `Secure` and
+        `SameSite=Lax` attributes they were issued with (`HttpOnly` for the session), because a browser
+        removes the cookie it holds only when the expiry matches it. `melarc_vendor_device` is **never**
+        cleared: it identifies the vendor's registered browser and is not a session. **A Rider bearer
+        sign-out sets no cookie**: a native client has none to clear.
       responses:
-        '204': { description: Signed out }
+        '204':
+          description: |
+            Signed out. For a request authenticated by the browser session the `Set-Cookie` lines expire
+            `melarc_session` and `melarc_csrf`; for a bearer request there are none.
+          x-set-cookies: [melarc_session, melarc_csrf]
+          x-set-cookies-for: browserSession
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookie'
         '401': { $ref: '#/components/responses/Unauthenticated' }
 
   /auth/sessions:
@@ -3148,7 +3172,8 @@ paths:
           headers:
             Cache-Control:
               description: Always `no-store`. The capability must not be cached by any intermediary
-              schema: { type: string }
+              required: true
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EvidenceRetrievalAuthorization' }
@@ -7857,7 +7882,8 @@ paths:
           headers:
             Cache-Control:
               description: Always `no-store`. The capability must not be cached by any intermediary
-              schema: { type: string }
+              required: true
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AccountingExportRetrievalAuthorization' }
@@ -7937,8 +7963,14 @@ components:
         One or more real `Set-Cookie` field lines.
 
         **A response may emit several.** HTTP allows repeated `Set-Cookie` fields and OpenAPI
-        cannot name them individually, so WHICH cookies a response establishes is declared by the
-        `x-set-cookies` extension on that response, resolving against the root `x-cookies` map.
+        cannot name them individually, so WHICH cookies a response establishes or expires is declared
+        by the `x-set-cookies` extension on that response, resolving against the root `x-cookies` map.
+
+        **Expiry is declared the same way.** A cookie is removed by setting it again with `Max-Age=0`
+        and the attributes it was issued with, so the cookies a sign-out clears are named in its
+        `x-set-cookies` and checked against the same `x-cookies` attributes. `x-set-cookies-for` names
+        a security scheme and limits the declaration to a request that presented that scheme's
+        credential: any other request is owed none of those cookies and may not receive them.
 
         **The previous representation invented `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie`
         to work around that limitation.** Those are not HTTP headers. An implementation reading the
@@ -7951,7 +7983,12 @@ components:
       description: |
         `no-store`. Set on any response carrying a raw setup credential, so no
         intermediary or browser cache retains an enrolment secret.
-      schema: { type: string }
+
+        **Required, and exactly `no-store`.** A response that references this header must carry it,
+        and its value is the constant `no-store`: omitting it, or saying `public`, `private` or
+        `no-cache`, does not conform.
+      required: true
+      schema: { type: string, const: no-store }
     ETag:
       description: Opaque record version. Send back as `If-Match` on the next mutation.
       schema: { type: string }
@@ -8129,22 +8166,19 @@ components:
             The calculated service date. Carried forward unchanged on every revision - it answers
             what ordinary service would have produced, and recomputing it destroys that.
         requestedDate:
-          type: string
+          type: [string, 'null']
           format: date
-          nullable: true
           description: What the sender or recipient asked for.
         committedDate: { type: string, format: date, description: What Melarc promised }
-        committedWindowStart: { type: string, nullable: true, example: '10:00' }
-        committedWindowEnd: { type: string, nullable: true, example: '16:00' }
+        committedWindowStart: { type: [string, 'null'], example: '10:00' }
+        committedWindowEnd: { type: [string, 'null'], example: '16:00' }
         changeReasonCode:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Mandatory from sequence 2 onward. A CommitmentChangeReason.
         requestedByParty:
-          type: string
-          enum: [SENDER, RECIPIENT, MELARC, SYSTEM]
-          nullable: true
-        approvedByStaffId: { type: string, format: uuid, nullable: true }
+          type: [string, 'null']
+          enum: [SENDER, RECIPIENT, MELARC, SYSTEM, null]
+        approvedByStaffId: { type: [string, 'null'], format: uuid }
         slaStartAt:
           type: string
           format: date-time
@@ -8152,16 +8186,16 @@ components:
             Pickup custody, not hub arrival. Internal delay after pickup does not
             move it.
         createdAt: { type: string, format: date-time }
-        supersededAt: { type: string, format: date-time, nullable: true }
+        supersededAt: { type: [string, 'null'], format: date-time }
 
     DeliveryCommitmentRevision:
       type: object
       required: [committedDate, changeReasonCode, requestedByParty]
       properties:
         committedDate: { type: string, format: date }
-        committedWindowStart: { type: string, nullable: true }
-        committedWindowEnd: { type: string, nullable: true }
-        requestedDate: { type: string, format: date, nullable: true }
+        committedWindowStart: { type: [string, 'null'] }
+        committedWindowEnd: { type: [string, 'null'] }
+        requestedDate: { type: [string, 'null'], format: date }
         changeReasonCode:
           type: string
           description: >-
@@ -8169,7 +8203,7 @@ components:
             Without it the revision is refused - the same change means opposite things depending
             on cause.
         requestedByParty: { type: string, enum: [SENDER, RECIPIENT, MELARC, SYSTEM] }
-        note: { type: string, nullable: true }
+        note: { type: [string, 'null'] }
 
     ServiceWindowOverride:
       type: object
@@ -8177,12 +8211,12 @@ components:
       properties:
         revisedWindowStart: { type: string, example: '08:30' }
         revisedWindowEnd: { type: string, example: '10:00' }
-        revisedDate: { type: string, format: date, nullable: true }
+        revisedDate: { type: [string, 'null'], format: date }
         reasonCode: { type: string, description: Mandatory }
         customerNotified:
           type: boolean
           description: The customer notification state at the time of the override.
-        note: { type: string, nullable: true }
+        note: { type: [string, 'null'] }
 
     ParcelHandlingAssessment:
       type: object
@@ -8193,10 +8227,9 @@ components:
       properties:
         assessment: { type: string, enum: [STANDARD_HANDLING, REQUIRES_REVIEW, NOT_ACCEPTABLE] }
         reasonCode:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Mandatory for REQUIRES_REVIEW and NOT_ACCEPTABLE.
-        note: { type: string, nullable: true }
+        note: { type: [string, 'null'] }
         assessedAt: { type: string, format: date-time, readOnly: true }
 
     VerificationFallbackRequest:
@@ -8209,7 +8242,7 @@ components:
         failureReasonCode: { type: string }
         recipientPresent: { type: boolean }
         attemptsMade: { type: integer, minimum: 0 }
-        note: { type: string, nullable: true }
+        note: { type: [string, 'null'] }
         status: { type: string, enum: [REQUESTED, GRANTED, REFUSED], readOnly: true }
 
     ManualPaymentConfirmation:
@@ -8238,8 +8271,8 @@ components:
       properties:
         id: { type: string, format: uuid }
         riderId: { type: string, format: uuid }
-        deliveryRunId: { type: string, format: uuid, nullable: true }
-        motorcycleId: { type: string, format: uuid, nullable: true }
+        deliveryRunId: { type: [string, 'null'], format: uuid }
+        motorcycleId: { type: [string, 'null'], format: uuid }
         responsibleHubId: { type: string, format: uuid }
         categoryCode: { type: string, description: From the configurable catalogue }
         amountMinor: { type: integer, minimum: 1 }
@@ -8252,42 +8285,40 @@ components:
             alone reduces nothing. RIDER_PERSONAL records a
             reimbursement obligation and COMPANY_FLOAT reconciles against the float.
         description: { type: string }
-        evidenceId: { type: string, format: uuid, nullable: true }
+        evidenceId: { type: [string, 'null'], format: uuid }
         status: { type: string, enum: [CLAIMED, APPROVED, REJECTED] }
-        decidedByStaffId: { type: string, format: uuid, nullable: true }
-        decisionReasonCode: { type: string, nullable: true }
+        decidedByStaffId: { type: [string, 'null'], format: uuid }
+        decisionReasonCode: { type: [string, 'null'] }
         appliedToCashHandoverId:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
           readOnly: true
           description: >-
             The one handover this expense reduced, or null while unapplied. Write-once per
             expense and immutable once set. NOT unique across expenses - many
             expenses may name one handover.
         appliedAt:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
           readOnly: true
           description: >-
             When this expense was applied. APPROVAL made it eligible; application is what
             reduced expected cash, and the two are different events at different times.
         incurredAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
-        decidedAt: { type: string, format: date-time, nullable: true }
+        decidedAt: { type: [string, 'null'], format: date-time }
 
     RoadExpenseCreate:
       type: object
       required: [categoryCode, amountMinor, fundingSource, description, incurredAt]
       properties:
-        deliveryRunId: { type: string, format: uuid, nullable: true }
-        motorcycleId: { type: string, format: uuid, nullable: true }
+        deliveryRunId: { type: [string, 'null'], format: uuid }
+        motorcycleId: { type: [string, 'null'], format: uuid }
         categoryCode: { type: string }
         amountMinor: { type: integer, minimum: 1 }
         fundingSource: { type: string, enum: [COLLECTION_CASH, RIDER_PERSONAL, COMPANY_FLOAT] }
         description: { type: string }
-        evidenceId: { type: string, format: uuid, nullable: true }
+        evidenceId: { type: [string, 'null'], format: uuid }
         incurredAt: { type: string, format: date-time }
 
     RoadExpenseDecision:
@@ -8295,8 +8326,8 @@ components:
       required: [decision]
       properties:
         decision: { type: string, enum: [APPROVED, REJECTED] }
-        reasonCode: { type: string, nullable: true, description: Mandatory on REJECTED }
-        note: { type: string, nullable: true }
+        reasonCode: { type: [string, 'null'], description: Mandatory on REJECTED }
+        note: { type: [string, 'null'] }
 
     RunCashSummary:
       type: object
@@ -8341,9 +8372,9 @@ components:
               description: >-
                 grossCashMinor minus appliedCollectionCashExpenseMinor (MSC-DEC-316, as
                 corrected at Gate C R1.2). NEVER computed from the approved total.
-            declaredMinor: { type: integer, nullable: true }
-            countedMinor: { type: integer, nullable: true }
-            varianceMinor: { type: integer, nullable: true }
+            declaredMinor: { type: [integer, 'null'] }
+            countedMinor: { type: [integer, 'null'] }
+            varianceMinor: { type: [integer, 'null'] }
         orders:
           type: array
           description: >-
@@ -8369,20 +8400,19 @@ components:
         expectedMinor:
           type: integer
           description: Never edited to match the count.
-        countedMinor: { type: integer, nullable: true }
+        countedMinor: { type: [integer, 'null'] }
         varianceMinor:
-          type: integer
-          nullable: true
+          type: [integer, 'null']
           # The one-line flow mapping read `description: counted minus expected, signed`, and an
           # unquoted comma SEPARATES ENTRIES in a flow mapping - so `signed` parsed as a second
           # key with a null value. An unknown keyword in a schema is silently ignored by some
           # tools and fatal in others; either way it is not what was meant.
           description: Counted minus expected. Signed - a negative value is a shortage.
         state: { type: string, enum: [OPEN, COUNTED, RECONCILED, VARIANCE_OPEN] }
-        varianceReasonCode: { type: string, nullable: true }
-        reconciledByStaffId: { type: string, format: uuid, nullable: true }
+        varianceReasonCode: { type: [string, 'null'] }
+        reconciledByStaffId: { type: [string, 'null'], format: uuid }
         openedAt: { type: string, format: date-time }
-        closedAt: { type: string, format: date-time, nullable: true }
+        closedAt: { type: [string, 'null'], format: date-time }
 
     HubCashCount:
       type: object
@@ -8391,10 +8421,9 @@ components:
         businessDate: { type: string, format: date }
         countedMinor: { type: integer, minimum: 0 }
         varianceReasonCode:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Mandatory where the count differs from the expected position.
-        note: { type: string, nullable: true }
+        note: { type: [string, 'null'] }
 
     CashDisposition:
       type: object
@@ -8411,10 +8440,9 @@ components:
           enum: [BANK_DEPOSIT, MERCHANT_MOMO_TRANSFER, FINANCE_HANDOVER, SAFE_CUSTODY]
         destination: { type: string }
         reference:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Mandatory for BANK_DEPOSIT and MERCHANT_MOMO_TRANSFER.
-        evidenceId: { type: string, format: uuid, nullable: true }
+        evidenceId: { type: [string, 'null'], format: uuid }
         recordedByStaffId: { type: string, format: uuid, readOnly: true }
         recordedAt: { type: string, format: date-time, readOnly: true }
 
@@ -8723,8 +8751,7 @@ components:
         requiresPrepayment: { type: boolean }
         recipientPaidOrdersAllowed: { type: boolean }
         restrictionCategory:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: >-
             An approved HIGH-LEVEL category, only where disclosure is allowed. It never discloses
             that a security hold exists, who raised it or why.
@@ -8786,21 +8813,20 @@ components:
                   riderId: { type: string, format: uuid }
                   systemExpectedMinor: { type: integer, description: CashHandover.system_expected_minor - never rider- or caller-supplied. }
                   declaredTotalMinor: { type: integer, description: CashHandover.declared_total_minor. }
-                  confirmedTotalMinor: { type: integer, nullable: true, description: CashHandover.confirmed_total_minor. Null before the hub counts. }
+                  confirmedTotalMinor: { type: [integer, 'null'], description: CashHandover.confirmed_total_minor. Null before the hub counts. }
                   state: { type: string, description: CashHandover.state - state-machines.md 16.4. }
             roadExpensesAppliedMinor:
               type: integer
               description: Sum of RoadExpense.amount_minor applied to this hub-day's handovers (domain-model.md 6.12).
             hubCashReconciliation:
-              type: object
-              nullable: true
+              type: [object, 'null']
               description: Null where none has been opened yet for this hub-day.
               required: [state, expectedMinor]
               properties:
                 state: { type: string, description: HubCashReconciliation.state - state-machines.md 20.2. }
                 expectedMinor: { type: integer }
-                countedMinor: { type: integer, nullable: true }
-                varianceMinor: { type: integer, nullable: true }
+                countedMinor: { type: [integer, 'null'] }
+                varianceMinor: { type: [integer, 'null'] }
             cashDispositions:
               type: array
               items:
@@ -8828,9 +8854,8 @@ components:
                     type: string
                     enum: [DELIVERY_FEE, REDELIVERY_DELIVERY_FEE, REDELIVERY_FEE, SINGLE_PACKAGE_PICKUP_FEE, RETURN_FEE]
                   commercialMode:
-                    type: string
-                    nullable: true
-                    enum: [STATION_DROP, MELARC_COVERED_THIRD_PARTY_DELIVERY]
+                    type: [string, 'null']
+                    enum: [STATION_DROP, MELARC_COVERED_THIRD_PARTY_DELIVERY, null]
                     description: >-
                       Order.commercial_mode (domain-model.md 6.7), joined via
                       OperationalPaymentDemand.order_id. Present only on DELIVERY_FEE entries;
@@ -9255,24 +9280,66 @@ components:
             and conflict status (§35.3.9).
 
     CollectionRecord:
-      allOf:
-        - $ref: '#/components/schemas/CollectionRecordCreate'
-        - type: object
-          required: [id, pickup_stop_id, declared_count, variance]
-          properties:
-            id: { type: string, format: uuid }
-            pickup_stop_id: { type: string, format: uuid }
-            declared_count: { type: integer, description: 'As stated by the sender at the door.' }
-            variance:
-              type: string
-              enum: [MATCH, SHORT]
-              description: |
-                Present on every collection, not only partials — a clean count is a recorded
-                outcome, not an absence.
-            office_notified_at:
-              type: [string, 'null']
-              format: date-time
-              description: Set when the shortfall flag reached the Ops surface.
+      type: object
+      required: [collected_count, handshake_type, id, pickup_stop_id, declared_count, variance]
+      additionalProperties: false
+      description: |
+        What was recorded for a stop: every field the rider sent (`CollectionRecordCreate`) as stored,
+        and the fields the server adds. **It repeats the creation fields instead of composing the
+        creation schema.** That schema is closed (`additionalProperties: false`, so a rider cannot send a
+        server field), and a closed schema inside an `allOf` refuses every field its sibling adds, so no
+        answer could satisfy the composition. The creation fields below are stated exactly as
+        `CollectionRecordCreate` states them (a test holds the two together); the last five are the
+        server's.
+      properties:
+        collected_count:
+          type: integer
+          minimum: 0
+          description: Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4).
+        variance_reason_code:
+          type: string
+          description: |
+            Required when `collected_count < declared_count`. Its metadata may make a note or
+            photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.
+        variance_note: { type: string }
+        handshake_type:
+          type: string
+          enum: [VENDOR_ENTERED_RIDER_DISPLAYED, SENDER_SMS_RIDER_ENTERED]
+          description: |
+            Direction is fixed by 21.4, MSC-DEC-114–115 and may not be reversed: registered vendors
+            enter a rider-displayed code; ad-hoc senders receive an SMS code the rider enters.
+        handshake_channel:
+          type: string
+          enum: [PORTAL, SMS_FALLBACK, OPS_OVERRIDE]
+          default: PORTAL
+          description: |
+            Which rung of the fallback ladder verified the handshake. **Recorded
+            on every handshake, not only fallbacks** — the control is that persistent fallback
+            use becomes visible, and a ratio needs both terms.
+        evidence_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: |
+            Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise).
+        captured_at:
+          type: string
+          format: date-time
+          description: |
+            Field capture time, distinct from upload time. Preserved on sync along with ordering
+            and conflict status (§35.3.9).
+        id: { type: string, format: uuid }
+        pickup_stop_id: { type: string, format: uuid }
+        declared_count: { type: integer, description: 'As stated by the sender at the door.' }
+        variance:
+          type: string
+          enum: [MATCH, SHORT]
+          description: |
+            Present on every collection, not only partials — a clean count is a recorded
+            outcome, not an absence.
+        office_notified_at:
+          type: [string, 'null']
+          format: date-time
+          description: Set when the shortfall flag reached the Ops surface.
 
     PickupStop:
       type: object
@@ -11700,10 +11767,10 @@ components:
           type: string
           enum: [PROPOSED, APPROVED, REJECTED]
         proposed_by: { type: string, format: uuid }
-        approved_by: { type: string, format: uuid, nullable: true }
+        approved_by: { type: [string, 'null'], format: uuid }
         reason_code: { type: string }
         proposed_at: { type: string, format: date-time }
-        decided_at: { type: string, format: date-time, nullable: true }
+        decided_at: { type: [string, 'null'], format: date-time }
       description: |
         The permission-review record 30.3 requires - "permission-review history" - carrying both
         actors so the same-actor exclusion is auditable after the fact rather than only enforced at
@@ -11716,15 +11783,15 @@ components:
         id: { type: string, format: uuid }
         work_email: { type: string, format: email }
         full_name: { type: string }
-        phone: { type: string, nullable: true }
+        phone: { type: [string, 'null'] }
         status:
           type: string
           enum: [PENDING_APPROVAL, ACTIVE, REJECTED, SUSPENDED, OFFBOARDED]
         role_bundle_id: { type: string, format: uuid }
-        primary_hub_id: { type: string, format: uuid, nullable: true }
+        primary_hub_id: { type: [string, 'null'], format: uuid }
         mfa_enrolled: { type: boolean }
         created_by: { type: string, format: uuid }
-        approved_by: { type: string, format: uuid, nullable: true }
+        approved_by: { type: [string, 'null'], format: uuid }
       description: |
         Entity at domain-model.md 6.8; machine at state-machines.md 13.3.
 
@@ -11857,9 +11924,8 @@ components:
         owner_type: { type: string }
         owner_id: { type: string, format: uuid }
         responsible_hub_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
           readOnly: true
           description: |
             **Derived from the owner at creation and immutable**. The field the
@@ -11871,9 +11937,8 @@ components:
             hub is a real access grant, because whichever hub was chosen could read the object
             and the vendor's other hubs could not. Vendor ownership is the whole boundary there.
         vendor_organization_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
           readOnly: true
           description: |
             **Derived from the owner at creation and immutable.** Null where the owner is
@@ -11883,15 +11948,15 @@ components:
         purpose: { type: string }
         captured_at: { type: string, format: date-time }
         captured_by_actor: { type: string, format: uuid }
-        device_context: { type: object, additionalProperties: true, nullable: true }
+        device_context: { type: [object, 'null'], additionalProperties: true }
         state:
           type: string
           enum: [PENDING_UPLOAD, STORED, EXPIRED]
         access_rule: { type: string }
         retention_policy: { type: string }
-        content_type: { type: string, nullable: true }
-        byte_size: { type: integer, nullable: true }
-        uploaded_at: { type: string, format: date-time, nullable: true }
+        content_type: { type: [string, 'null'] }
+        byte_size: { type: [integer, 'null'] }
+        uploaded_at: { type: [string, 'null'], format: date-time }
       description: |
         Entity at domain-model.md 3.6; lifecycle at state-machines.md 17.
 

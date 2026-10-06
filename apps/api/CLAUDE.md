@@ -1,0 +1,24 @@
+# API (`apps/api`)
+
+NestJS modular monolith. It holds the technical platform and no product route until a slice adds one: `src/tools/contract/implemented-scope.ts` lists the operations that exist. Run and test it as [DEVELOPMENT.md](../../DEVELOPMENT.md) says; what each bootstrap task left undone is in the runbook ([B0.2 and B0.3](../../delivery/planning/BOOTSTRAP_B0_RUNBOOK.md#carried-forward-from-b02-and-b03), [B0.6](../../delivery/planning/BOOTSTRAP_B0_RUNBOOK.md#carried-forward-from-b06)).
+
+## Layout
+
+- `src/platform/`: technical infrastructure (config, contract, database, health, http, lifecycle, logging, openapi, routes). Its production files may import packages and each other, but no relative import may leave `src/platform/` (`src/architecture.test.ts` fails otherwise; test files are exempt).
+- `src/<domain>/`: one module per permission domain, siblings of `platform/` ([architecture §5](../../architecture/SOLUTION_ARCHITECTURE.md#5-module-boundaries)). A new domain needs a Product Owner decision. Domains depend on platform, never the reverse.
+- `src/tools/`: command-line tools that run from `dist`. `migrations/`: the one canonical migration history (Drizzle). `test/`: process and database tests.
+
+## Rules
+
+- Keep layers apart: controller, application service, domain rules, persistence. A controller never calls another controller, and no business operation bypasses its service.
+- Implement an operation contract-first ([plan §7](../../delivery/DEVELOPMENT_EXECUTION_PLAN.md#7-contract-first-implementation)). Each ships negative-access tests ([standards §3.1](../../standards/engineering-standards.md#31-negative-access-tests-are-mandatory-at-five-surfaces)) and tests of its own headers, cookies and status and error pairs ([B0.6 notes](../../delivery/planning/BOOTSTRAP_B0_RUNBOOK.md#carried-forward-from-b06)).
+- An operation exists only when its `operationId` is in `IMPLEMENTED_OPERATIONS` and its handler carries `@ContractOperation(id)` (`src/platform/contract/contract-operation.ts`), in the same change; `pnpm run contract:check` fails on any disagreement. A DTO class cannot state `additionalProperties: false`, `if`/`then` or `allOf`: give an explicit schema with `@ApiBody({ schema })`.
+- Every route must declare how it is reached (`src/platform/routes/access-declaration.ts`). Only `@TechnicalEndpoint()` exists, for probes: never put it on a business route. An undeclared route stops the API at start. The first slice adds the permission declaration and updates `route-inventory.test.ts`.
+- Configuration is validated at start and the process refuses to start on a bad value; [.env.example](.env.example) lists every key. Never log a credential, token or connection string.
+- The API connects only as `melarc_api_runtime` (not the owner, no row-level-security bypass); migrations run as `melarc_migration_elevated`. Run protected queries through `DatabaseService.transactionWithContext`, which sets the row-level-security context. Build driver settings with `postgresConnectionSettings(url)` (`src/platform/database/postgres-url.ts`): never give a driver a `connectionString` (lint refuses it) or a URL with a query string.
+- Migrations only go forward: never edit an applied one, never `drizzle-kit push`. Declare tables in `src/platform/database/schema/`, run `pnpm --filter @melarc/api run db:generate`, then `db:check`. Read the SQL: a new table must, in the same migration, be owned by `melarc_owner` with row-level security enabled and forced, plus policies and grants ([architecture §5.1](../../architecture/MIGRATION_AND_SEEDING.md#51-roles-ownership-and-rls-at-migration-time)). Add what is missing by hand and classify the table in [data-scope-registry.md](../../contracts/data-scope-registry.md). `migration-lint.test.ts` lints every migration for owner, enable and force, and refuses `DISABLE`, `NO FORCE` and any policy that names a role; it checks nothing else.
+- Never hard-delete operational data or rely on cascade defaults. Required audit writes happen in the same transaction as the business change.
+
+## Tests
+
+`pnpm --filter @melarc/api test` runs the unit and process projects, and `pnpm run test:db` the database project against local PostgreSQL. Process and database tests run the built `dist/`: `pnpm test` and `pnpm run test:db` rebuild it through Turbo, but a direct `--filter` command does not, so run `pnpm --filter @melarc/api run build` first. Test real registrations and a real database wherever persistence is involved. Never add a skip or weaken an assertion to get green. Five tests under `test` and one under `test:db` need a real `SIGTERM` and skip on Windows (a skip is not a pass): run them in WSL2, Linux or CI.

@@ -49,7 +49,7 @@ Run it once, record the verdict in the slice document, and re-run it if anything
 - [ ] Page, route and user-flow location known
 - [ ] Approved wireframes, or an explicitly accepted low-fidelity interaction specification
 - [ ] Forms, fields, tables, filters, actions and role visibility defined
-- [ ] **Loading, empty, validation, error, retry, offline, stale/conflict, success and permission-restricted states specified.** Nine states — the eight §44.3 lists and `retry`, which §41.1 adds ([surfaces/overview.md](../surfaces/overview.md) §4) — a screen specified only in its success state is not ready
+- [ ] **Loading, empty, validation, error, retry, offline, stale/conflict, success and permission-restricted states specified.** Nine states, the same nine in §41.1, §44.3 and §45.2 ([surfaces/overview.md](../surfaces/overview.md) §4); a state that cannot apply to the surface is recorded as not applicable, with the reason — a screen specified only in its success state is not ready
 - [ ] Responsive and accessibility expectations stated
 
 ## E. Backend and contract readiness *(§44.4)*

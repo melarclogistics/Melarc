@@ -1,0 +1,272 @@
+# The development gate. Every mandatory check runs here, in parallel jobs, and one job judges them all:
+#
+#   static      formatting, lint, strict types, the migration history, the generated client is current
+#   unit        unit, component and process tests of every workspace, and the repository's own tooling tests
+#   database    the PostgreSQL tests, against a real server
+#   integrated  build, the API against the contract, browser smoke test, the browser-API-database journey;
+#               then the build is described and kept
+#   audit       dependency vulnerabilities of high or critical severity
+#   ci          "CI result": waits for all of the above and fails unless every one succeeded
+#
+# Require the "CI result" check, and only that one, in the branch rule for main: it cannot pass while any
+# mandatory job failed, was cancelled or was skipped. scripts/ci-workflow.test.ts keeps this file to that
+# design (no check dropped, no failure absorbed, one verdict, every job on the commit under test).
+#
+# To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
+# ticked: the static job fails on purpose and "CI result" must fail with it.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      rehearse-failure:
+        description: Fail the static job on purpose, to prove that "CI result" fails when a mandatory job does.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A pull request's older run is cancelled when it is pushed again. Every other run is its own group and is
+# never cancelled or replaced by a later one, so each commit that reaches main gets its own verdict.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Check the migration history
+        run: pnpm --filter @melarc/api run db:check
+
+      - name: Check the generated API client is current
+        run: pnpm run api-client:check
+
+      - name: Rehearse a failing check
+        if: github.event_name == 'workflow_dispatch' && inputs.rehearse-failure
+        run: |
+          echo "::error title=Rehearsal::This failure is on purpose. The CI result job must now fail."
+          exit 1
+
+  unit:
+    name: Unit, component and process tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      - name: Test
+        run: pnpm run test
+
+  database:
+    name: Database tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    # The PostgreSQL server lives for this job only, and the credentials below protect nothing else: they are
+    # generated nowhere and are not used outside this job. The image tag matches infrastructure/postgres/
+    # compose.yaml, the local service (scripts/ci-workflow.test.ts holds the two together).
+    services:
+      postgres:
+        image: postgres:18.6-bookworm
+        env:
+          POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      MELARC_PG_HOST: 127.0.0.1
+      MELARC_PG_PORT: '5432'
+      MELARC_PG_ADMIN_PASSWORD: ci-admin-password-for-this-job-only
+      MELARC_PG_MIGRATION_PASSWORD: ci-migration-password-for-this-job-only
+      MELARC_PG_RUNTIME_PASSWORD: ci-runtime-password-for-this-job-only
+
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      - name: Database tests
+        run: pnpm run test:db
+
+  integrated:
+    name: Build, contract and browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    # Same disposable server as the database job; the browser journey creates a database of its own on it.
+    services:
+      postgres:
+        image: postgres:18.6-bookworm
+        env:
+          POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      MELARC_PG_HOST: 127.0.0.1
+      MELARC_PG_PORT: '5432'
+      MELARC_PG_ADMIN_PASSWORD: ci-admin-password-for-this-job-only
+      MELARC_PG_MIGRATION_PASSWORD: ci-migration-password-for-this-job-only
+      MELARC_PG_RUNTIME_PASSWORD: ci-runtime-password-for-this-job-only
+
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Check the API against the contract
+        run: pnpm run contract:check
+
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it.
+      - name: Install the browser
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
+
+      - name: Browser smoke test of the Ops shell
+        run: pnpm run test:browser
+
+      - name: Browser, API and database journey
+        run: pnpm run test:e2e
+
+      # Logs of every process, the outbound-connection record and traces of the failed run. The harness hides
+      # the passwords it describes; the job's own credentials are throwaway.
+      - name: Keep the failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: melarc-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            e2e/test-results
+            apps/ops-web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # What is kept below is the build the checks above ran against, from a tree that is the committed
+      # revision: the first step fails if any tool changed a tracked file or left an unignored one behind.
+      - name: Confirm the tree is still the revision under test
+        run: node scripts/ci-revision.ts clean
+
+      - name: Describe the build
+        run: node scripts/ci-revision.ts manifest build-manifest.json apps/api/dist apps/ops-web/dist contracts/openapi.yaml
+
+      # Build output for later deployment work; not a release package. It is kept for every run, passing or not,
+      # and for pull requests too, and only this job tested it: a consumer must use an artifact only when "CI
+      # result" succeeded for the same commit and the manifest's source.ref is refs/heads/main. To check it, unpack
+      # it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
+      - name: Keep the build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: melarc-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            apps/api/dist
+            apps/ops-web/dist
+            contracts/openapi.yaml
+            build-manifest.json
+          if-no-files-found: error
+          # The manifest lists every file under these paths; an upload that skipped a dotfile would not match it.
+          include-hidden-files: true
+          retention-days: 14
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      # High and critical findings need a fix or a recorded, time-bounded exception (standards/engineering-standards.md
+      # section 3.3). Lower severities are reported by "pnpm audit" and do not fail the job.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+
+  ci:
+    name: CI result
+    if: always()
+    needs: [static, unit, database, integrated, audit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # The judging script has no dependencies, so this job needs Node.js and no install.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      # Fails unless every job above succeeded. A failed, cancelled or skipped job is not a success.
+      - name: Require every mandatory job to have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci-aggregate.ts static unit database integrated audit

@@ -5,6 +5,9 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# Generated API client: collapsed in reviews. Regenerate it, never edit it (pnpm run api-client:generate).
+packages/api-client/src/generated/** linguist-generated=true
+
 # Binary assets
 *.png binary
 *.jpg binary

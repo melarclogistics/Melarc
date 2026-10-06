@@ -1,0 +1,20 @@
+{
+  "name": "@melarc/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Integrated test harness: a real browser, the Ops build, the API process and a disposable PostgreSQL database.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.1",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

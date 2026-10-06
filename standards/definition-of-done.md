@@ -37,7 +37,7 @@ Any unticked box here means stop. The feature is not Done and the rest of the ch
 ## B. Frontend completion *(§45.2)*
 
 - [ ] Approved screens and interactions implemented for authorized roles
-- [ ] Loading, empty, validation, error, **retry**, offline, conflict, success and permission states all work — nine, per [surfaces/overview.md](../surfaces/overview.md) §4
+- [ ] Loading, empty, validation, error, **retry**, offline, conflict, success and permission states all work, or are recorded as not applicable to the surface — nine, per [surfaces/overview.md](../surfaces/overview.md) §4
 - [ ] Responsive and accessibility requirements verified
 - [ ] The frontend uses canonical contract enums and **does not duplicate authoritative calculations**
 - [ ] Sensitive data not exposed in UI, storage, analytics or logs beyond approved need

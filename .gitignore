@@ -10,6 +10,9 @@ out/
 .vite/
 .next/
 
+# Written by CI (scripts/ci-revision.ts manifest) to describe the build it kept
+/build-manifest.json
+
 # Test and coverage output
 coverage/
 .nyc_output/
@@ -41,15 +44,6 @@ yarn-error.log*
 .local-data/
 tmp/
 temp/
-
-# Python utility environments/caches
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
 # IDE and operating-system files
 .idea/

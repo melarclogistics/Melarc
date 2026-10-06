@@ -1,0 +1,44 @@
+{
+  "name": "melarc",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Melarc monorepo root. Workspace tooling only; product code lives in apps/ and packages/.",
+  "type": "module",
+  "packageManager": "pnpm@11.1.3",
+  "engines": {
+    "node": "^24.21.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "pnpm run typecheck:root && turbo run typecheck",
+    "typecheck:root": "tsc --project tsconfig.json",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "api-client:generate": "pnpm --filter @melarc/api-client run generate",
+    "api-client:check": "pnpm --filter @melarc/api-client run check",
+    "contract:check": "pnpm --filter @melarc/api run contract:check",
+    "setup:env": "node scripts/setup-env.ts",
+    "infra:up": "docker compose -f infrastructure/postgres/compose.yaml --env-file infrastructure/postgres/.env up -d --wait",
+    "infra:status": "docker compose -f infrastructure/postgres/compose.yaml --env-file infrastructure/postgres/.env ps",
+    "infra:stop": "docker compose -f infrastructure/postgres/compose.yaml --env-file infrastructure/postgres/.env stop",
+    "infra:check": "node scripts/infra-check.ts",
+    "package:source": "node scripts/package-source.ts",
+    "test": "pnpm run test:root && turbo run test",
+    "test:browser": "turbo run test:browser",
+    "test:db": "turbo run test:db",
+    "test:e2e": "turbo run test:e2e",
+    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.1",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "prettier": "3.9.9",
+    "turbo": "2.11.7",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "yaml": "2.9.1"
+  }
+}

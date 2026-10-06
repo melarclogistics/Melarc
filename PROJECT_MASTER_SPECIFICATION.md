@@ -518,7 +518,7 @@ Platform Admin and specifically authorized HQ/company-wide roles receive a conso
 
 ## 10.4 Design work still required
 
-Before frontend implementation is ready, each application requires a controlled page/screen inventory, navigation model, role/permission states, forms/tables/cards, loading/empty/error/offline states, responsive rules, accessibility criteria, Figma/component references, and mapping to OpenAPI operation IDs and acceptance criteria.
+Before frontend implementation is ready, each application requires a controlled page/screen inventory, navigation model, role/permission states, forms/tables/cards, interface states (Section 41.1), responsive rules, accessibility criteria, Figma/component references, and mapping to OpenAPI operation IDs and acceptance criteria.
 
 # 11. Roles and permissions
 
@@ -2290,7 +2290,7 @@ All monetary values use ISO 4217 currency code `GHS` and fixed-decimal represent
 ## 34.7 Identity, timestamps, and evidence
 
 - Business records should use stable, non-guessable identifiers and may also expose human-readable operational codes.
-- All persisted timestamps must be timezone-aware. The operating timezone is expected to be Ghana time, but storage/display conventions require approval.
+- All persisted timestamps must be timezone-aware and are stored as UTC instants. The operating timezone is `Africa/Accra` (Ghana time). The display convention is 24-hour local time with no timezone label (`MSC-DEC-203`); exports and anything readable outside Ghana carry an explicit offset (`contracts/domain-model.md` §3.3).
 - Photographs, signatures, OTP evidence, and uploaded documents are controlled evidence objects, not unstructured incidental attachments.
 - Evidence records require owner, purpose, captured-at time, actor/device context, storage reference, access rules, and retention policy.
 - Historical business records must remain interpretable after users, settings, prices, reasons, or providers are changed or deactivated.
@@ -3042,7 +3042,7 @@ All frontend applications must:
 
 - consume the approved version-controlled OpenAPI contract and generated/shared schemas where adopted;
 - never invent enum values, error formats, money/date behaviour or state transitions;
-- enforce clear loading, empty, validation, error, retry, permission-denied and stale/concurrency states;
+- enforce clear loading, empty, validation error, error, retry, offline, stale or conflict, success and permission-restricted states, each either implemented or recorded as not applicable to that surface;
 - display authoritative backend validation and status;
 - preserve idempotency/retry identifiers where the contract requires them;
 - protect tokens, sessions, local data and evidence according to the security design;
@@ -3078,7 +3078,7 @@ Before implementation, produce:
 - navigation and role-based action matrix;
 - Figma/wireframes and reusable component/state definitions;
 - responsive and Android device layouts;
-- loading, empty, error, retry, offline and permission states;
+- the interface states of Section 41.1, each specified or recorded as not applicable;
 - accessibility requirements;
 - OpenAPI operation mapping; and
 - frontend acceptance-test coverage.
@@ -3432,7 +3432,7 @@ A feature is not accepted merely because its main screen and happy-path endpoint
 
 - Approved business rules, commercial gates, and permissions.
 - Canonical states and errors.
-- Frontend loading/empty/error/offline/conflict states.
+- Frontend interface states (Section 41.1).
 - Backend validation, authorization, idempotency, and concurrency behaviour.
 - Audit and notification effects.
 - Evidence/file behaviour.
@@ -3664,7 +3664,7 @@ A feature or implementation slice is **Ready for Development** only when the tea
 - The page/route and user-flow location is known.
 - Approved wireframes/Figma references or an explicitly accepted low-fidelity interaction specification exist.
 - Forms, fields, tables/cards, filters, actions, and role visibility are defined.
-- Loading, empty, validation, error, offline, stale/conflict, success, and permission-restricted states are specified.
+- Loading, empty, validation error, error, retry, offline, stale or conflict, success, and permission-restricted states are specified, or recorded as not applicable to the surface.
 - Responsive/device and accessibility expectations are stated.
 
 ## 44.4 Backend and contract readiness
@@ -3709,7 +3709,7 @@ A feature is **Done** only when it delivers the approved user/business outcome a
 ## 45.2 Frontend completion
 
 - Approved screens and interactions are implemented for authorized roles.
-- Loading, empty, validation, error, offline, conflict, success, and permission states work.
+- Loading, empty, validation error, error, retry, offline, stale or conflict, success, and permission-restricted states work, or are recorded as not applicable to the surface.
 - Responsive and accessibility requirements are verified.
 - The frontend uses the canonical contract/enums and does not duplicate authoritative calculations.
 - Sensitive data is not exposed in UI, storage, analytics, or logs beyond approved need.
@@ -4026,7 +4026,7 @@ This section lists only the remaining implementation-gating residue. It delibera
 - `OQ-005` — finance/domain/OpenAPI/integration design for provider states, payment allocation, reconciliation, receipts, refunds/reversals, immutable ledger, and accounting export.
 - `OQ-018` — canonical entity/state catalogue and exhaustive transition matrices.
 - `OQ-027` — native Android offline action set, encryption, retry, conflict, evidence, device loss, and idempotency.
-- `OQ-030` — complete Figma/UI page, route, navigation, responsive, loading, empty, error, offline, and permission-state inventory.
+- `OQ-030` — complete Figma/UI page, route, navigation, responsive, and interface-state (Section 41.1) inventory.
 - Complete permission-key enumeration, service-account permissions, and whether per-user overrides are permitted.
 - Exact SMS/payment provider contracts, OTP security parameters, notification templates, mapping/geocoding choice, and file-storage mechanics.
 - Dashboard/report formulas, data dictionary, masking, export scale, and retention.

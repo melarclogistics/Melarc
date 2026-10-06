@@ -55,13 +55,13 @@ The rule of thumb: **do-the-work goes to the field surface; configure, approve a
 
 ## 4. The nine interface states
 
-**Nine, not eight.** §44.3 lists eight; **§41.1 adds `retry`**, and the union is what every surface owes:
+**Nine, not eight.** §44.3 listed eight and only **§41.1 named `retry`**; §41.1, §44.3 and §45.2 now carry the same nine, and the union is what every surface owes:
 
 `loading` · `empty` · `validation error` · `error` · **`retry`** · `offline` · `stale or conflict` · `success` · `permission-restricted`
 
 A screen specified only in its success state is not ready. `retry` was missed until the Phase 1–2 audit because §44.3 was treated as the complete list and §41 had not been read.
 
-Each surface document carries these for its own screens. Two apply differently by surface: **offline** is substantive only on Rider, and even there §19.8 approves offline behaviour for hub-handover queuing alone. **Permission-restricted** applies everywhere, and must degrade to a clear refusal rather than a blank screen.
+Each surface document carries these for its own screens. A state that cannot apply to a screen is recorded there as not applicable, with the reason, rather than left out. Two apply differently by surface: **offline** is substantive only on Rider, and even there §19.8 approves offline behaviour for hub-handover queuing alone. **Permission-restricted** applies everywhere, and must degrade to a clear refusal rather than a blank screen.
 
 ## 4a. What §41 requires of every frontend
 

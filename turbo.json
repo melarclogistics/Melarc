@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/turbo/schema.json",
+  "agentGuidance": false,
+  "globalDependencies": ["contracts/openapi.yaml"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {},
+    "test": {},
+    "test:db": {
+      "cache": false,
+      "passThroughEnv": [
+        "MELARC_PG_HOST",
+        "MELARC_PG_PORT",
+        "MELARC_PG_ADMIN_PASSWORD",
+        "MELARC_PG_MIGRATION_PASSWORD",
+        "MELARC_PG_RUNTIME_PASSWORD"
+      ]
+    },
+    "test:e2e": {
+      "cache": false,
+      "dependsOn": ["@melarc/api#build", "@melarc/ops-web#build"],
+      "passThroughEnv": [
+        "MELARC_PG_HOST",
+        "MELARC_PG_PORT",
+        "MELARC_PG_ADMIN_PASSWORD",
+        "MELARC_PG_MIGRATION_PASSWORD",
+        "MELARC_PG_RUNTIME_PASSWORD",
+        "PLAYWRIGHT_BROWSERS_PATH"
+      ]
+    },
+    "test:browser": {
+      "cache": false,
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH"]
+    }
+  }
+}

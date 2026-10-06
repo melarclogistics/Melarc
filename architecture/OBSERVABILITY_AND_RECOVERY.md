@@ -278,7 +278,7 @@ A successful recovery set includes, as applicable: **PostgreSQL base backup or s
 | Packet loss| **1%**|
 | Jitter| **up to 20 ms**|
 
-**This is a load-test fixture and nothing else.** It is **not a supported-network guarantee**, **not a minimum customer bandwidth requirement** and **not a Product SLA** — Melarc makes no promise about the network a vendor or rider happens to be on, and §40 still requires the interfaces to work on constrained connections. **It exists so that two runs of the same test are comparable.**
+**This is a load-test fixture and nothing else.** It is **not a supported-network guarantee**, **not a minimum customer bandwidth requirement** and **not a Product SLA** — Melarc makes no promise about the network a vendor or rider happens to be on, and no retained specification sets a bandwidth or network-quality requirement: §7.8 and §41.4 ask only that the Rider application tolerate unreliable connectivity. **It exists so that two runs of the same test are comparable.**
 
 **Server-side latency is recorded separately on every run**, per the diagnostic row above, so a degradation caused by the fixture's own 150 ms and 1% loss stays distinguishable from a degradation in Melarc's backend. **Without that separation the fixture would hide the thing it was introduced to measure.**
 

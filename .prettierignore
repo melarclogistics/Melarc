@@ -1,0 +1,20 @@
+# Specification set and project documents: hand-authored by their owners, never reformatted by tooling.
+# contracts/openapi.yaml is the canonical API contract and must stay byte-for-byte as authored.
+/architecture/
+/contracts/
+/delivery/
+/design/
+/features/
+/registers/
+/standards/
+/surfaces/
+/PROJECT_MASTER_SPECIFICATION.md
+/README.md
+/CLAUDE.md
+
+# Generated
+/pnpm-lock.yaml
+# Machine output of packages/api-client/scripts/generate.ts. Its freshness check is exact, so no tool may rewrite it.
+/packages/api-client/src/generated/
+# drizzle-kit writes the migration journal and snapshots in its own format and rewrites them on each generate.
+/apps/api/migrations/meta/

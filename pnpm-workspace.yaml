@@ -1,0 +1,23 @@
+packages:
+  - apps/*
+  - packages/*
+  - e2e
+
+# Dependency build scripts never run unless approved here. Approve deliberately, one package at a time.
+allowBuilds:
+  # Install-time analytics beacon pulled in by swagger-ui-dist (a hard dependency of @nestjs/swagger).
+  '@scarf/scarf': false
+  # Pulled in by drizzle-kit, directly and through tsx. The platform binary arrives as an optional
+  # dependency, so the postinstall script, which only verifies and re-links it, is not needed.
+  esbuild: false
+
+# Fail the install, instead of only warning, when the active Node.js is outside package.json "engines".
+engineStrict: true
+
+# openapi-typescript (the generator behind packages/api-client) declares typescript ^5.x, and this repository
+# pins 6.0.3 because typescript-eslint does not yet allow 7. The generator was run under 6.0.3 and its output
+# type-checks; the freshness check and generator tests in packages/api-client fail if a TypeScript change ever
+# alters what it produces. Remove this when the generator's own range includes the pinned TypeScript.
+peerDependencyRules:
+  allowedVersions:
+    openapi-typescript>typescript: '6'

@@ -1,0 +1,48 @@
+{
+  "name": "@melarc/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Melarc backend API (NestJS). Technical platform only until a product slice adds routes.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "vitest run --project unit --project process",
+    "test:db": "vitest run --project database",
+    "start": "node dist/main.js",
+    "start:local": "node --env-file=.env dist/main.js",
+    "openapi:generate": "node dist/tools/generate-openapi.js",
+    "contract:check": "node dist/tools/check-contract.js",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:bootstrap": "node dist/tools/db-bootstrap.js",
+    "db:migrate": "node dist/tools/db-migrate.js",
+    "db:reset": "node dist/tools/db-reset.js",
+    "db:orphans": "node dist/tools/db-orphans.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-express": "12.1.2",
+    "@nestjs/swagger": "12.0.2",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "12.1.2",
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.1",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
+    "typescript": "6.0.3",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}

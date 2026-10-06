@@ -277,7 +277,7 @@ Only `Session.token_hash` and `Session.csrf_token_hash` are persisted. Unsafe co
 
 **The contract enforces that rather than describing it**. `csrfToken` is a security scheme composed with `browserSession`; the global default is the CSRF-bearing alternative, safe reads opt out explicitly, and a mechanical check reports **protected unsafe operations missing browser CSRF requirement: 0**.
 
-**Cookies are declared as cookies.** One real `Set-Cookie` header plus an `x-set-cookies` extension naming which of the three cookies a response sets, resolving against a root registry. The contract previously invented `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie` — **not HTTP headers**, and a literal implementation would have emitted two headers no browser stores.
+**Cookies are declared as cookies.** One real `Set-Cookie` header plus an `x-set-cookies` extension naming which of the three cookies a response sets or expires, resolving against a root registry; `x-set-cookies-for` limits that to a request that presented one security scheme's credential, which is how a browser sign-out clears two cookies while a Rider's bearer sign-out sets none. The contract previously invented `X-Set-Csrf-Cookie` and `X-Set-Vendor-Device-Cookie` — **not HTTP headers**, and a literal implementation would have emitted two headers no browser stores.
 
 **The vendor device credential is a declared pre-session security scheme**. `vendorDevice` sits alongside `browserSession`, `csrfToken` and `riderSession`: it proves *which browser* before any session exists, and `vendorSignIn` requires it. **A credential no operation requires is not a factor**, and this one was required by nothing until R1.2.
 

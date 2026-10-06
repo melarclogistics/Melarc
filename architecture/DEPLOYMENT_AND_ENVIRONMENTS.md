@@ -45,7 +45,7 @@ The fourth of the six artifacts `MSC-DEC-205` created a home for, and the one §
 
 **Staging must be able to run the §45.1 demonstration end to end.** §45.1 requires the Product Owner to demonstrate normal and exception paths, and `SLICE-001` §6 scripts twelve steps plus nineteen exception rows. That is the real sizing requirement for staging, not a general "production-like" aspiration.
 
-**Region: Africa or Europe, decided on measured latency to Accra.** §40 requires interfaces usable on constrained networks. Ghanaian traffic commonly routes via Europe, so a European region may genuinely beat a nominally closer one. **This must be measured before it is chosen** — no figure is asserted here.
+**Region: Africa or Europe, decided on measured latency to Accra.** No retained specification sets a network-quality target for the web surfaces; §7.8 and §41.4 ask only the Rider application to tolerate unreliable connectivity. Ghanaian traffic commonly routes via Europe, so a European region may genuinely beat a nominally closer one. **This must be measured before it is chosen** — no figure is asserted here.
 
 ## 4. Sandbox integrations are mandatory, not convenient
 
@@ -276,6 +276,42 @@ Production permits **no "development mode" bypass** of RLS, authentication, KMS-
 **Credential and recovery message delivery is another** (Gate PD-3R1, `PDA-54`). **Production refuses to start** with the capture adapter selected, or without a configured production adapter and its timeout, for the SMS channel and for the email channel ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.9a). The providers are **external deployment inputs** that no document has selected; this section names the failure so that the day one is chosen the application already refuses to run without it. **A test proves each refusal**, exactly as for the attestation substitute.
 
 **Staging exercises real RLS policies, real database-role separation and representative cloud security controls.** Local may simplify the infrastructure but its tests must still exercise the **logical** boundaries — scope classes, policies and role separation — rather than stubbing them, or the first place they run is production.
+
+### 12.5 The API runtime's probes, configuration and shutdown, and the browser-history fallback
+
+This is what the B0.2 API skeleton (`apps/api`), its B0.4 database foundation and the B0.3 Ops Portal shell (`apps/ops-web`) actually do, so that a deployment can be built against it. None of it is a product setting: the product's own settings are in [settings.md](../contracts/settings.md).
+
+**Technical probes.** `GET /livez` and `GET /readyz` sit outside `/api/v1`, take no principal and send `Cache-Control: no-store`. `/livez` answers `200 {"status":"ok"}` while the process runs, **including while it drains**, so the platform does not kill an instance that is finishing its work. `/readyz` answers `200 {"status":"ready"}` or `503 {"status":"not_ready","reason":…}` with one coarse reason (`starting`, `shutting_down` or `dependency_unavailable`) and never a dependency name or an error. It turns `503` the moment shutdown begins and while a registered dependency check fails. **They are not part of the business API:** the generated OpenAPI description excludes them (its `paths` stays empty until business operations exist), `contracts/openapi.yaml` does not contain them, and the generated route inventory lists them as technical routes.
+
+**Isolation is a network property, not a path property.** The edge forwards only `/api/...`, so it does not route the probes. That is a routing rule, not isolation: anyone who can reach the runtime's listener can request them. The API runtime therefore stays unreachable from browsers and the Internet (§12: edge only), and the platform's health checker is the only intended caller of the probes.
+
+**Configuration.** The API reads its environment at start. A missing or invalid value stops it with exit code `1` and one log line that names the key and never the value.
+
+| Variable| Required| Default| Bounds|
+|---|---|---|---|
+| `NODE_ENV`| yes| none| `development`, `test` or `production`; `production` is required when `APP_ENV` is `staging` or `production`|
+| `APP_ENV`| yes| none| `local`, `staging` or `production`|
+| `HTTP_HOST`| no| `127.0.0.1`| letters, digits, `.`, `_`, `:` and `-`|
+| `HTTP_PORT`| yes| none| integer 1–65535|
+| `LOG_LEVEL`| no| `info`| `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`|
+| `SHUTDOWN_TIMEOUT_MS`| no| `15000`| integer 1000–300000|
+| `SHUTDOWN_DRAIN_DELAY_MS`| no| `0`| integer 0–60000, and less than `SHUTDOWN_TIMEOUT_MS`|
+| `DATABASE_URL`| yes| none| a `postgres://` or `postgresql://` URL naming a host, one database and the user `melarc_api_runtime`; any other user is refused. **No query string or fragment is accepted**, so no connection option (TLS included) can be set through the URL until a deployment specifies them; a URL with one is refused, never stripped|
+| `DATABASE_POOL_MAX`| no| `10`| integer 1–100|
+
+`DATABASE_MIGRATION_URL` is **forbidden** in the API's environment: its presence, with any value, stops the API at start, so that migration credentials are never within reach of a request handler. Only the migration command reads it.
+
+**Shutdown has one budget.** On `SIGTERM` or `SIGINT` readiness turns `503` at once and the listener keeps serving for `SHUTDOWN_DRAIN_DELAY_MS`. Then Nest closes the application (the listener stops accepting, in-flight requests finish, the shutdown hooks run) and the registered resources close, last registered first (the database pool, from B0.4). **The drain delay and every step after it run inside `SHUTDOWN_TIMEOUT_MS`.** A clean shutdown exits `0` once the event loop drains. When the budget ends, nothing stalled is waited for: the listener and the remaining connections are closed, resources not yet confirmed are started but not awaited, the log names what is unconfirmed, and the process **exits with code `1` at once, even while a handle is still open**. A forced exit never claims that everything closed. **The supervisor's stop grace period must be longer than `SHUTDOWN_TIMEOUT_MS`**, so that the process ends itself, with its own record, before the supervisor kills it. `SHUTDOWN_DRAIN_DELAY_MS` should cover the time the load balancer needs to stop sending traffic after `/readyz` turns `503`.
+
+**Database, roles and migrations.** The API reaches PostgreSQL through one lazily connecting pool, registered for shutdown, and sets a request's security context only inside a transaction (`set_config(…, true)`), so nothing survives on a pooled connection. `/readyz` is `503` with `dependency_unavailable` while the database does not answer **and while the connected role is not a safe runtime identity**: a superuser, a `BYPASSRLS` role, one that can create databases or roles, or one that owns the database or any object, directly or as a member of the owning role. Three roles exist, each with its own credential, provisioned outside the migrations: `melarc_owner` (`NOLOGIN`; owns every object), `melarc_migration_elevated` (runs migrations; a member of `melarc_owner`) and `melarc_api_runtime` (owns nothing, bypasses nothing, is a member of nothing).
+
+**Schema changes are applied by one command and never by the API at start:** `pnpm --filter @melarc/api db:migrate` applies `apps/api/migrations/`, the one canonical history, as the migration identity (`DATABASE_MIGRATION_URL`), forward only, in one transaction and under an advisory lock, so two runs at once serialise and a repeat applies nothing. `drizzle-kit push` is not used. A migration that creates a table must, in the same file, assign it to `melarc_owner` and enable **and** force row-level security; the migration lint in `pnpm test` fails the build otherwise.
+
+**Locally**, `infrastructure/postgres/compose.yaml` runs the server (loopback only; the image, `postgres:18.6-bookworm`, is a provisional engineering choice, since no retained specification names a version). `db:bootstrap`, `db:migrate` and `db:reset` prepare it; `db:reset` refuses any server not on the machine, any `APP_ENV` of `staging` or `production`, any database but a `melarc_dev` or `melarc_test` one, and any database that does not carry the marker this tooling puts on what it creates. `pnpm test:db` runs the tests that need the server, each in a database of its own, and CI runs them against a service container. A run removes only the databases it made. A database a killed run leaves behind is never removed on a guess, because one with no connection may belong to a run between two steps: `db:orphans` lists the `melarc_test_*` databases that carry the marker (changing nothing), and `db:orphans --drop <name>…` removes the ones a person names, refusing any with a session connected unless `--disconnect` is added.
+
+**Browser-history fallback.** The Ops Portal routes with the browser history, so its host must answer a request for **a document route** with the surface's `index.html`: a deep link or a reload on an unknown path must not be a `404` from the host. The fallback applies to document requests only. **It never applies to `/api/...`, to `/livez` and `/readyz`, or to a missing asset:** those keep their own `404`, so that a stale or mistyped asset fails visibly instead of arriving as HTML. This states the behaviour a host must have; what serves the bundle is still the proposal in §12.1.
+
+**Not decided yet, and not implemented.** The trusted proxy topology: which proxies the API may believe for client address, scheme and request id. Today it trusts none and ignores a client-supplied request id. Explicit business request-size and upload limits: today only the framework's default body limit applies, and no business route accepts a body.
 
 ## 13. Production access, deployment identity and the backup plane
 
