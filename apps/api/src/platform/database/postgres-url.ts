@@ -36,6 +36,7 @@ const PROBLEMS = {
   user: 'must name a user',
   port: 'must use a port from 1 to 65535',
   database: 'must name exactly one database',
+  characters: 'must not contain control characters',
 } as const;
 
 export type PostgresUrlProblem = keyof typeof PROBLEMS;
@@ -49,6 +50,15 @@ export class PostgresUrlError extends Error {
     this.name = 'PostgresUrlError';
     this.problem = problem;
   }
+}
+
+/** Whether the text has a character below U+0020, or U+007F. */
+function hasControlCharacter(text: string): boolean {
+  for (let at = 0; at < text.length; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
 }
 
 type Reading =
@@ -91,6 +101,11 @@ function read(url: string): Reading {
     database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
   } catch {
     return { problem: 'unreadable' };
+  }
+  // The driver writes these into its startup message as NUL-terminated strings, so a NUL, a newline or any
+  // other control character would end one and begin the next.
+  if (hasControlCharacter(user) || hasControlCharacter(password) || hasControlCharacter(database)) {
+    return { problem: 'characters' };
   }
   if (user === '') return { problem: 'user' };
   if (database === '' || database.includes('/')) return { problem: 'database' };

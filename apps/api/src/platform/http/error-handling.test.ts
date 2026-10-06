@@ -51,6 +51,50 @@ describe('unknown routes', () => {
   });
 });
 
+describe('paths and methods no route answers', () => {
+  // Break caught: Express's own page. Nest answers an unknown path with the contract envelope only under the
+  // API prefix; everywhere else (and for a method a technical route does not take) Express's default handler
+  // sent an HTML page that echoes the method and path, carries no request id and names the framework.
+  it.each([
+    ['a path outside the API prefix', 'GET', '/no-such-thing-xyz'],
+    ['the root', 'GET', '/'],
+    ['a prefix that only starts like the API prefix', 'GET', '/api/v1evil-xyz'],
+    ['a method a technical route does not take', 'POST', '/livez'],
+    ['a method a technical route does not take, on readiness', 'DELETE', '/readyz'],
+    ['a technical route in capitals', 'GET', '/LIVEZ'],
+    ['a technical route with a trailing slash', 'GET', '/livez/'],
+    ['a route of the API in capitals', 'GET', '/api/v1/FIXTURE/orders/1'],
+    ['the API prefix in capitals', 'GET', '/API/V1/fixture/orders/1'],
+    ['a route of the API with a trailing slash', 'GET', '/api/v1/fixture/orders/1/'],
+  ])(
+    'answer %s with 404 in the contract envelope, echoing nothing',
+    async (_label, method, path) => {
+      const { baseUrl } = await start();
+      const result = await answer(await fetch(`${baseUrl}${path}`, { method }));
+
+      expect(result.status).toBe(404);
+      expect(result.contentType).toContain('application/json');
+      expect(result.body).toEqual({
+        code: 'NOT_FOUND',
+        message: 'Resource not found',
+        request_id: result.requestId,
+      });
+      expect(result.requestId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(result.text).not.toContain('xyz');
+      expect(result.text.toLowerCase()).not.toContain('cannot');
+    },
+  );
+
+  // Break caught: the new fallback answering a path a route does serve, or one that is not in the contract.
+  it('still answer the technical routes and the routes of the application', async () => {
+    const { baseUrl } = await start();
+
+    expect((await fetch(`${baseUrl}/livez`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/readyz`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/v1/fixture/orders/1`)).status).toBe(200);
+  });
+});
+
 describe('malformed request bodies', () => {
   // Break caught: the framework's 400 echoing the body. Nest 12 maps body-parser's SyntaxError to a
   // BadRequestException whose message, Node's JSON error text, can quote the request body.
@@ -90,6 +134,106 @@ describe('request bodies that are not JSON', () => {
 
     expect(result.status).toBe(201);
     expect(result.body).toEqual({ label: 'form' });
+  });
+
+  // Break caught: a JSON body in a charset other than UTF-8 being decoded and handed to a handler. The body
+  // parser accepts every charset that begins `utf-` and its decoder reads UTF-7, UTF-16 and UTF-32, so
+  // `+AHsAIg...-` arrived as an object while anything in front of the application that read the bytes as UTF-8
+  // (a gateway, a filter) saw something else.
+  it.each([
+    ['utf-7', 'application/json; charset=utf-7'],
+    ['utf-16le', 'application/json; charset=utf-16le'],
+    ['utf-32', 'application/json;charset=UTF-32'],
+    ['latin1', 'application/json; charset=latin1'],
+    ['a quoted charset that is not UTF-8', 'application/json; charset="utf-7"'],
+    ['two charsets, the second not UTF-8', 'application/json; charset=utf-8; charset=utf-7'],
+    ['two charsets that agree', 'application/json; charset=utf-8; charset=utf-8'],
+    ['an empty charset', 'application/json; charset='],
+  ])(
+    'refuse a JSON body declared as %s with 415, and the handler is not reached',
+    async (_label, type) => {
+      const { baseUrl, logs } = await start();
+      const result = await answer(
+        await fetch(`${baseUrl}/api/v1/fixture/body/charset`, {
+          method: 'POST',
+          headers: { 'Content-Type': type },
+          // JSON.stringify output is the same bytes in UTF-8 and ASCII-compatible charsets: only the label differs.
+          body: '{"amount":1}',
+        }),
+      );
+
+      expect(result.status).toBe(415);
+      expect(result.body).toEqual({
+        message: 'Unsupported Media Type',
+        request_id: result.requestId,
+      });
+      expect(logs.records().filter((record) => record.msg === 'fixture handler finished')).toEqual(
+        [],
+      );
+    },
+  );
+
+  // Break caught: a JSON body that names __proto__ reaching a handler. JSON.parse makes it an ordinary property,
+  // and the first Object.assign({}, body) or merge in a handler would set the prototype of what it built.
+  it.each([
+    ['at the top', '{"__proto__": {"admin": true}}'],
+    ['nested in an object', '{"a": {"b": {"__proto__": {"admin": true}}}}'],
+    ['inside an array', '[{"__proto__": 1}]'],
+  ])(
+    'refuse a body that has a __proto__ key %s, as a body that is not valid',
+    async (_label, body) => {
+      const { baseUrl, logs } = await start();
+      const result = await answer(
+        await fetch(`${baseUrl}/api/v1/fixture/body/proto`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        }),
+      );
+
+      expect(result.status).toBe(400);
+      expect(result.body).toEqual({
+        code: 'VALIDATION_FAILED',
+        message: 'The request is not valid',
+        request_id: result.requestId,
+      });
+      expect(logs.records().filter((record) => record.msg === 'fixture handler finished')).toEqual(
+        [],
+      );
+    },
+  );
+
+  it('accept a body whose keys only look like it', async () => {
+    const { baseUrl } = await start();
+    const result = await answer(
+      await fetch(`${baseUrl}/api/v1/fixture/body/proto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{"proto": 1, "__proto": 2, "_proto_": 3, "constructor": 4}',
+      }),
+    );
+
+    expect(result.status).toBe(201);
+  });
+
+  // Break caught: the rule above refusing what it must accept.
+  it.each([
+    ['no charset', 'application/json'],
+    ['UTF-8 in capitals', 'application/json; charset=UTF-8'],
+    ['a quoted UTF-8', 'application/json; charset="utf-8"'],
+    ['another parameter', 'application/json; profile=x'],
+  ])('accept a JSON body with %s', async (_label, type) => {
+    const { baseUrl } = await start();
+    const result = await answer(
+      await fetch(`${baseUrl}/api/v1/fixture/body/charset`, {
+        method: 'POST',
+        headers: { 'Content-Type': type },
+        body: '{"amount":1}',
+      }),
+    );
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ label: 'charset', received: { amount: 1 } });
   });
 
   // Break caught: the rule above switching JSON parsing off with the form parser.

@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { parseEnv } from 'node:util';
 
-import { runSetupEnv, setupLocalEnv, SetupEnvError } from './setup-env.ts';
+import { createPrivateFile, runSetupEnv, setupLocalEnv, SetupEnvError } from './setup-env.ts';
 
 const repositoryRoot = resolve(import.meta.dirname, '..');
 const PG_ENV = 'infrastructure/postgres/.env';
@@ -139,11 +148,21 @@ describe('on a checkout with neither file', () => {
     assert.match(after[differing[0] ?? 0] ?? '', /^DATABASE_URL=/);
   });
 
-  // Break caught: a secrets file readable by other users of a shared machine (POSIX; Windows has no such bits).
-  it('keeps the files private to the owner where the platform has permissions', () => {
-    const root = checkout();
-    setupLocalEnv(root, { random: counter() });
-    if (process.platform !== 'win32') {
+  // Break caught: a secrets file readable by other users of a shared machine. The bits themselves can be read
+  // back only where the file system has them: on Windows Node applies no mode bits (a new file takes the access
+  // rights of its folder, and only the read-only attribute follows the mode), so this test is skipped there,
+  // and the next one proves what was asked of the file system on every platform.
+  it(
+    'leaves the files neither group nor world accessible',
+    {
+      skip:
+        process.platform === 'win32'
+          ? 'Windows has no POSIX mode bits to read back: the options asked for are checked by the next test'
+          : false,
+    },
+    () => {
+      const root = checkout();
+      setupLocalEnv(root, { random: counter() });
       for (const path of [PG_ENV, API_ENV]) {
         assert.equal(
           statSync(join(root, path)).mode & 0o077,
@@ -151,7 +170,136 @@ describe('on a checkout with neither file', () => {
           `${path} must not be group or world accessible`,
         );
       }
-    }
+    },
+  );
+
+  // Break caught: the owner-only mode (or the exclusive-creation flag) dropped from the call that writes the
+  // file. This holds on every platform because it looks at the options handed to the write, not at the result.
+  it('asks the file system for exclusive creation and owner-only permissions, for each file', () => {
+    const root = checkout();
+    const asked: { directory: string; options: unknown }[] = [];
+    setupLocalEnv(root, {
+      random: counter(),
+      files: {
+        write: (path, content, options) => {
+          asked.push({ directory: dirname(path), options });
+          writeFileSync(path, content, options);
+        },
+      },
+    });
+    assert.equal(asked.length, 2);
+    for (const { options } of asked) assert.deepEqual(options, { flag: 'wx', mode: 0o600 });
+  });
+});
+
+describe('writing a file', () => {
+  const targetOf = (root: string): string => join(root, PG_ENV);
+  const settingsFiles = (root: string): string[] =>
+    readdirSync(dirname(targetOf(root))).filter((name) => name.startsWith('.env'));
+
+  // Break caught: a run killed while it writes leaving a truncated settings file that the next run then refuses
+  // to repair, because the file exists. The file appears only complete: it is written under another name in the
+  // same folder and put in place in one step.
+  it('writes under another name in the same folder, and the settings file is never half written', () => {
+    const root = checkout();
+    const target = targetOf(root);
+    let seen: { path: string; targetThen: boolean } | undefined;
+    assert.throws(() => {
+      createPrivateFile(root, PG_ENV, 'KEY=complete\n', {
+        write: (path, content, options) => {
+          writeFileSync(path, content.slice(0, 4), options);
+          seen = { path, targetThen: existsSync(target) };
+          throw new Error('killed while writing');
+        },
+      });
+    }, /killed while writing/);
+    assert.ok(seen !== undefined);
+    assert.notEqual(seen.path, target, 'the data is written to a file of another name');
+    assert.equal(
+      dirname(seen.path),
+      dirname(target),
+      'in the same folder, so the move is one step',
+    );
+    assert.equal(
+      seen.targetThen,
+      false,
+      'the settings file does not exist while the data is written',
+    );
+    assert.equal(existsSync(target), false, 'a failed write leaves no settings file');
+    assert.deepEqual(settingsFiles(root), ['.env.example'], 'and no file of the other name');
+  });
+
+  it('puts the whole content in place, with nothing left beside it', () => {
+    const root = checkout();
+    createPrivateFile(root, PG_ENV, 'KEY=complete\n');
+    assert.equal(read(root, PG_ENV), 'KEY=complete\n');
+    assert.deepEqual(settingsFiles(root).toSorted(), ['.env', '.env.example']);
+  });
+
+  // Break caught: a temporary file that a killed run could not remove stopping the next run.
+  it('is not stopped by a temporary file that an earlier killed run left behind', () => {
+    const root = checkout({ [`${PG_ENV}.tmp-killed`]: 'MELARC_PG_ADMIN_PASSWORD=half' });
+    const result = setupLocalEnv(root, { random: counter() });
+    assert.deepEqual(result.created, [PG_ENV, API_ENV]);
+    assert.match(read(root, PG_ENV), /MELARC_PG_RUNTIME_PASSWORD=secret03x/);
+  });
+
+  // Break caught: the guard against replacing a file that appeared while the new one was being written (a
+  // second run at the same moment), which a plain move over it would not notice.
+  it('refuses to replace a file that exists when it is put in place, and removes its own', () => {
+    const root = checkout({ [PG_ENV]: 'KEY=the developers own\n' });
+    assert.throws(
+      () => {
+        createPrivateFile(root, PG_ENV, 'KEY=new\n');
+      },
+      (error: unknown) => {
+        assert.ok(error instanceof SetupEnvError);
+        assert.match(error.message, /infrastructure\/postgres\/\.env already exists/);
+        return true;
+      },
+    );
+    assert.equal(read(root, PG_ENV), 'KEY=the developers own\n');
+    assert.deepEqual(settingsFiles(root).toSorted(), ['.env', '.env.example']);
+  });
+
+  // Break caught: a file system without hard links (some network and removable volumes) that cannot be set up at
+  // all, or one where the fallback replaces a file that is there.
+  describe('on a file system without hard links', () => {
+    const noLinks = {
+      link: (): void => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      },
+    };
+
+    it('still puts the whole file in place, and leaves nothing beside it', () => {
+      const root = checkout();
+      createPrivateFile(root, PG_ENV, 'KEY=complete\n', noLinks);
+      assert.equal(read(root, PG_ENV), 'KEY=complete\n');
+      assert.deepEqual(settingsFiles(root).toSorted(), ['.env', '.env.example']);
+    });
+
+    it('still refuses to replace a file that is there', () => {
+      const root = checkout({ [PG_ENV]: 'KEY=the developers own\n' });
+      assert.throws(() => {
+        createPrivateFile(root, PG_ENV, 'KEY=new\n', noLinks);
+      }, SetupEnvError);
+      assert.equal(read(root, PG_ENV), 'KEY=the developers own\n');
+      assert.deepEqual(settingsFiles(root).toSorted(), ['.env', '.env.example']);
+    });
+  });
+
+  it('refuses when the file appears between the write and the move', () => {
+    const root = checkout();
+    assert.throws(() => {
+      createPrivateFile(root, PG_ENV, 'KEY=new\n', {
+        write: (path, content, options) => {
+          writeFileSync(path, content, options);
+          writeFileSync(targetOf(root), 'KEY=from another run\n');
+        },
+      });
+    }, SetupEnvError);
+    assert.equal(read(root, PG_ENV), 'KEY=from another run\n');
+    assert.deepEqual(settingsFiles(root).toSorted(), ['.env', '.env.example']);
   });
 });
 
@@ -194,6 +342,28 @@ describe('when the files already exist', () => {
     });
     setupLocalEnv(root, { random: counter() });
     assert.match(read(root, API_ENV), /@localhost:5433\/melarc_dev$/m);
+  });
+
+  // Break caught: an IPv6 address written into the URL as it is, where its colons are read as the port's: the API
+  // would be given a connection string that does not parse (or names another host).
+  it('writes an IPv6 host in brackets, as a URL needs it', () => {
+    const root = checkout({ [PG_ENV]: pgEnvText({ MELARC_PG_HOST: '::1' }) });
+    setupLocalEnv(root, { random: counter() });
+    assert.match(read(root, API_ENV), /@\[::1\]:5432\/melarc_dev$/m);
+    const url = new URL(parseEnv(read(root, API_ENV)).DATABASE_URL ?? '');
+    assert.equal(url.hostname, '[::1]');
+    assert.equal(url.port, '5432');
+  });
+
+  it('leaves a host that is already in brackets, a name and an IPv4 address as they are', () => {
+    for (const host of ['[::1]', 'localhost', '127.0.0.1']) {
+      const root = checkout({ [PG_ENV]: pgEnvText({ MELARC_PG_HOST: host }) });
+      setupLocalEnv(root, { random: counter() });
+      assert.match(
+        read(root, API_ENV),
+        new RegExp(`@${host.replace(/[[\]]/g, '\\$&')}:5432/melarc_dev$`, 'm'),
+      );
+    }
   });
 
   it('assumes the usual host and port when the database file names none', () => {

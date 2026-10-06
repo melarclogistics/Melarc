@@ -33,6 +33,34 @@ function messageOf(action: () => unknown): string {
   return '';
 }
 
+describe('readLocalPostgres: the three passwords', () => {
+  // Break caught: one password used for two roles. The migration role may create objects and run as the owner,
+  // the runtime role may do neither, and a password they share makes the second a way into the first.
+  it.each([
+    [
+      'the administrator and the migration role',
+      { MELARC_PG_MIGRATION_PASSWORD: ENV.MELARC_PG_ADMIN_PASSWORD },
+    ],
+    [
+      'the administrator and the runtime role',
+      { MELARC_PG_RUNTIME_PASSWORD: ENV.MELARC_PG_ADMIN_PASSWORD },
+    ],
+    [
+      'the migration role and the runtime role',
+      { MELARC_PG_RUNTIME_PASSWORD: ENV.MELARC_PG_MIGRATION_PASSWORD },
+    ],
+  ])('refuses one password for %s, without saying what it is', (_label, override) => {
+    const message = messageOf(() => readLocalPostgres({ env: { ...ENV, ...override }, envFile }));
+
+    expect(message).toContain('must all differ');
+    expect(message).not.toContain('secret-');
+  });
+
+  it('accepts three different passwords', () => {
+    expect(() => readLocalPostgres({ env: ENV, envFile })).not.toThrow();
+  });
+});
+
 describe('readLocalPostgres', () => {
   // Break caught: the settings not being read from the environment, which is how CI supplies them.
   it('reads the settings from the environment and defaults the host and port', () => {

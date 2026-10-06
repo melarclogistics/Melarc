@@ -8,7 +8,9 @@
  * depth: the primary control is never putting request data into a log in the first place.
  */
 
-export const REDACTED = '[REDACTED]';
+import { REDACTED, scrubText } from './scrub-text.js';
+
+export { REDACTED, scrubText };
 
 const MAX_DEPTH = 10;
 const MAX_CAUSE_DEPTH = 3;
@@ -43,28 +45,6 @@ function isSensitiveKey(key: string): boolean {
     SENSITIVE_WHOLE_KEYS.has(normalised) ||
     SENSITIVE_SUBSTRINGS.some((word) => normalised.includes(word))
   );
-}
-
-const SECRET_WORDS =
-  'password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf';
-const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
-const AUTH_SCHEME = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
-const JSON_SECRET = new RegExp(
-  `("(?:[A-Za-z0-9_-]*(?:${SECRET_WORDS})[A-Za-z0-9_-]*|pin|otp|sig)"\\s*:\\s*")[^"]*(")`,
-  'gi',
-);
-const PAIR_SECRET = new RegExp(
-  `\\b((?:[A-Za-z0-9_-]*(?:${SECRET_WORDS})[A-Za-z0-9_-]*)|pin|otp|sig)=([^&\\s;,'"]+)`,
-  'gi',
-);
-
-/** Removes secrets that travel inside text: URL credentials, bearer headers, key=value pairs, JSON. */
-export function scrubText(text: string): string {
-  return text
-    .replace(URL_CREDENTIALS, `$1${REDACTED}@`)
-    .replace(AUTH_SCHEME, `$1 ${REDACTED}`)
-    .replace(JSON_SECRET, `$1${REDACTED}$2`)
-    .replace(PAIR_SECRET, `$1=${REDACTED}`);
 }
 
 export interface DescribedError {

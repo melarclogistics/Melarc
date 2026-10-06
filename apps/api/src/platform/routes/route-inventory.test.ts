@@ -1,8 +1,16 @@
+import { createRequire } from 'node:module';
+
+import type { Router as ExpressRouter } from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { AccessFixtureModule, FixtureModule } from '../../test-support/fixtures.js';
 import { appWith, startTestApp, type TestApp } from '../../test-support/test-app.js';
 import { assertRoutesAreSound, inspectRoutes } from './route-inventory.js';
+
+// The router class of the Express that the platform adapter runs on: the application does not depend on it directly.
+const { Router } = createRequire(
+  createRequire(import.meta.url).resolve('@nestjs/platform-express'),
+)('express') as { Router: () => ExpressRouter };
 
 let running: TestApp | undefined;
 
@@ -84,6 +92,37 @@ describe('inspectRoutes', () => {
 
     expect(inspectRoutes(app).outsideNest).toEqual([{ method: 'GET', path: '/raw-debug' }]);
   });
+
+  // Break caught: a router mounted by hand being mistaken for Nest's own fallthrough. Nest's is an `_all` route on
+  // `*path` and both halves of that must hold: a route that is only one of them is somebody's route and is named,
+  // with a path that can never equal a declared one.
+  it.each([
+    ['a mounted route for every method on another path', 'all', '/hidden-all'],
+    ['a mounted route on *path for one method only', 'get', '*path'],
+  ])('names %s', async (_label, method, path) => {
+    const { app } = await start();
+    const express = app.getHttpAdapter().getInstance() as {
+      use: (mount: string, router: unknown) => void;
+    };
+    const mounted = Router();
+    mounted[method as 'all' | 'get'](path, () => undefined);
+    express.use('/mounted', mounted);
+
+    const named = inspectRoutes(app).outsideNest.map((route) => `${route.method} ${route.path}`);
+    expect(named).toEqual([`${method === 'all' ? 'ALL' : 'GET'} (mounted router) ${path}`]);
+  });
+
+  // Break caught: a route that a controller declares but the router does not answer going unreported by the
+  // inspection itself, which is what the assertion below relies on.
+  it('names a declared route that the router does not answer', async () => {
+    const { app } = await start();
+    const express = app.getHttpAdapter().getInstance() as {
+      router: { stack: { route?: { path: string } }[] };
+    };
+    express.router.stack = express.router.stack.filter((layer) => layer.route?.path !== '/livez');
+
+    expect(inspectRoutes(app).missingFromRouter).toEqual([{ method: 'GET', path: '/livez' }]);
+  });
 });
 
 describe('assertRoutesAreSound', () => {
@@ -107,5 +146,19 @@ describe('assertRoutesAreSound', () => {
     expect(() => {
       assertRoutesAreSound(app);
     }).toThrow(/GET \/raw-debug/);
+  });
+
+  // Break caught: the assertion passing an application that declares a route the router does not serve, which a
+  // client would meet as a 404 on an operation the documents promise.
+  it('refuses an application that declares a route the router does not answer, naming it', async () => {
+    const { app } = await start();
+    const express = app.getHttpAdapter().getInstance() as {
+      router: { stack: { route?: { path: string } }[] };
+    };
+    express.router.stack = express.router.stack.filter((layer) => layer.route?.path !== '/readyz');
+
+    expect(() => {
+      assertRoutesAreSound(app);
+    }).toThrow(/declared but not served: GET \/readyz/);
   });
 });

@@ -39,6 +39,7 @@ Any unticked box here means stop. The feature is not Done and the rest of the ch
 - [ ] Approved screens and interactions implemented for authorized roles
 - [ ] Loading, empty, validation, error, **retry**, offline, conflict, success and permission states all work, or are recorded as not applicable to the surface — nine, per [surfaces/overview.md](../surfaces/overview.md) §4
 - [ ] Responsive and accessibility requirements verified
+- [ ] The interface uses the tokens and components of the [design system](../design/DESIGN_SYSTEM.md) and [component patterns](../design/COMPONENT_PATTERNS.md), with no colour or one-off value of its own; a component or token added is recorded there; a new interactive component is driven in a real browser by keyboard, at 320 px and with enlarged text, in forced colours and under reduced motion
 - [ ] The frontend uses canonical contract enums and **does not duplicate authoritative calculations**
 - [ ] Sensitive data not exposed in UI, storage, analytics or logs beyond approved need
 - [ ] **No hidden server value is echoed back** — the blind declared count, authoritative price, ownership identifier or permission decision (§42.3)

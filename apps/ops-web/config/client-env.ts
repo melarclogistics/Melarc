@@ -1,7 +1,9 @@
 /** Vite exposes exactly the variables with this prefix to the browser bundle. */
 export const CLIENT_ENV_PREFIX = 'VITE_';
 
-const LOOKS_LIKE_A_SECRET = /(SECRET|TOKEN|PASSWORD|PASSWD|KEY|CREDENTIAL|PRIVATE|SIGNATURE)/i;
+/** Exported so that its test can try every word in it. */
+export const LOOKS_LIKE_A_SECRET =
+  /(SECRET|TOKEN|PASSWORD|PASSWD|KEY|CREDENTIAL|PRIVATE|SIGNATURE)/i;
 
 /**
  * Refuses to build when a variable that will be bundled into public JavaScript is named like a secret.

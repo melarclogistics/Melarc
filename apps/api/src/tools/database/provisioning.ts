@@ -180,10 +180,26 @@ async function disposableMarker(
   return { exists: row !== undefined, marked: row?.comment === DISPOSABLE_MARKER };
 }
 
+/** Shuts a database to every role but the two that may connect to it. Safe to repeat. */
+async function restrictConnections(client: SqlClient, name: string): Promise<void> {
+  await runFormatted(client, 'REVOKE ALL ON DATABASE %I FROM PUBLIC', name);
+  await runFormatted(
+    client,
+    'GRANT CONNECT ON DATABASE %I TO %I, %I',
+    name,
+    MIGRATION_ROLE,
+    API_RUNTIME_ROLE,
+  );
+}
+
 /**
  * Creates a development or test database owned by the owner role and marks it disposable. Only the
- * migration and runtime roles may connect. Safe to repeat for a database this tooling already made;
- * refuses one it did not make.
+ * migration and runtime roles may connect. Safe to repeat for a database this tooling already made: that one is
+ * shut to everyone else again, in case an earlier run ended before it had done so; refuses one it did not make.
+ *
+ * CREATE DATABASE cannot be part of a transaction, so a failure after it would leave a database that is not
+ * marked, which this tooling would then refuse to adopt for ever, or one that is marked and open to every role.
+ * A database that this call created and could not finish is dropped again.
  */
 export async function createDisposableDatabase(admin: LocalAdmin, name: string): Promise<void> {
   assertDisposableName(name);
@@ -196,17 +212,21 @@ export async function createDisposableDatabase(admin: LocalAdmin, name: string):
         `database "${name}" already exists and was not created by this tooling, so it is not adopted`,
       );
     }
-    if (exists) return;
+    if (exists) {
+      await restrictConnections(client, name);
+      return;
+    }
     await runFormatted(client, 'CREATE DATABASE %I OWNER %I TEMPLATE template0', name, OWNER_ROLE);
-    await runFormatted(client, 'COMMENT ON DATABASE %I IS %L', name, DISPOSABLE_MARKER);
-    await runFormatted(client, 'REVOKE ALL ON DATABASE %I FROM PUBLIC', name);
-    await runFormatted(
-      client,
-      'GRANT CONNECT ON DATABASE %I TO %I, %I',
-      name,
-      MIGRATION_ROLE,
-      API_RUNTIME_ROLE,
-    );
+    try {
+      await runFormatted(client, 'COMMENT ON DATABASE %I IS %L', name, DISPOSABLE_MARKER);
+      await restrictConnections(client, name);
+    } catch (error) {
+      // The failure that matters is the one that stopped the creation, not one of the cleanup.
+      await runFormatted(client, 'DROP DATABASE IF EXISTS %I WITH (FORCE)', name).catch(
+        () => undefined,
+      );
+      throw error;
+    }
   });
 }
 

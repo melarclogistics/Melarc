@@ -23,29 +23,243 @@ const document = read('DEVELOPMENT.md');
 const commands = fencedCommandLines(document);
 const packages = workspaceScripts(root);
 
+/** The level-2 headings of a Markdown document in order, outside code blocks, as written after the `## `. */
+function headingsOf(markdown: string): string[] {
+  const found: string[] = [];
+  let inside = false;
+  for (const line of markdown.split('\n')) {
+    if (line.trimStart().startsWith('```')) inside = !inside;
+    else if (!inside && line.startsWith('## ')) found.push(line.slice(3).trimEnd());
+  }
+  return found;
+}
+
+/** The text of the section under a level-2 heading, up to the next one; undefined when the heading is not there. */
+function sectionOf(markdown: string, heading: string): string | undefined {
+  const start = markdown.indexOf(`\n## ${heading}\n`);
+  if (start === -1) return undefined;
+  const from = start + 1;
+  const next = markdown.indexOf('\n## ', from + 1);
+  return markdown.slice(from, next === -1 ? undefined : next);
+}
+
+/** The sections the page has, in its order; other documents and tests link to them by these names. */
+const SECTIONS = [
+  'Prerequisites',
+  '1. Install dependencies',
+  '2. Create the local settings',
+  '3. Start the database',
+  '4. Build and migrate',
+  '5. Run the applications',
+  '6. Run the checks and the smoke tests',
+  '7. Stop safely',
+  '8. Reset to a known state',
+  '9. Package the source for review',
+  'Windows, WSL2 and Linux',
+  'When something goes wrong',
+  'Not provided yet',
+];
+
+/**
+ * What each topic of the setup must show, as lines of a code block (a command in running text would not be
+ * copied): the section it sits in and the commands that make it what its heading says.
+ */
+const TOPICS: [topic: string, heading: string, commands: string[]][] = [
+  [
+    'dependency installation',
+    '1. Install dependencies',
+    [
+      'pnpm install --frozen-lockfile',
+      'pnpm --filter @melarc/e2e exec playwright install chromium',
+    ],
+  ],
+  ['local settings', '2. Create the local settings', ['pnpm run setup:env']],
+  [
+    'infrastructure startup',
+    '3. Start the database',
+    ['pnpm run infra:up', 'pnpm run infra:status', 'pnpm run infra:check'],
+  ],
+  [
+    'migration',
+    '4. Build and migrate',
+    [
+      'pnpm run build',
+      'pnpm --filter @melarc/api run db:bootstrap',
+      'pnpm --filter @melarc/api run db:migrate',
+    ],
+  ],
+  [
+    'development startup',
+    '5. Run the applications',
+    [
+      'pnpm --filter @melarc/api run start:local',
+      'pnpm --filter @melarc/ops-web run dev',
+      'curl http://127.0.0.1:3000/livez',
+      'curl http://127.0.0.1:3000/readyz',
+    ],
+  ],
+  [
+    'tests and smoke checks',
+    '6. Run the checks and the smoke tests',
+    ['pnpm test', 'pnpm run test:db', 'pnpm run test:browser', 'pnpm run test:e2e'],
+  ],
+  ['safe shutdown', '7. Stop safely', ['pnpm run infra:stop']],
+  [
+    'disposable local reset',
+    '8. Reset to a known state',
+    [
+      'pnpm --filter @melarc/api run db:reset',
+      'pnpm --filter @melarc/api run db:orphans',
+      'docker compose -f infrastructure/postgres/compose.yaml --env-file infrastructure/postgres/.env down --volumes',
+      'pnpm run infra:up',
+      'pnpm --filter @melarc/api run db:bootstrap',
+      'pnpm --filter @melarc/api run db:migrate',
+    ],
+  ],
+  ['source packaging for review', '9. Package the source for review', ['pnpm run package:source']],
+  ['the WSL2 database check', 'Windows, WSL2 and Linux', ['pnpm run infra:check']],
+];
+
+/** The checks the table of the checks section lists, by name. */
+const TABLE_COMMANDS = [
+  'pnpm run format:check',
+  'pnpm run lint',
+  'pnpm run typecheck',
+  'pnpm test',
+  'pnpm run contract:check',
+  'pnpm run api-client:check',
+  'pnpm run test:db',
+  'pnpm run test:browser',
+  'pnpm run test:e2e',
+];
+
+const PLATFORM_LABELS = ['**Windows.**', '**Linux and CI.**', '**WSL2.**'];
+const PREREQUISITES = ['Git', 'Node.js', 'pnpm', 'Docker'];
+
+/** Why a document is not the setup page: its sections, the commands of each topic, the table, the platforms. */
+function structureProblems(markdown: string): string[] {
+  const problems: string[] = [];
+  const headings = headingsOf(markdown);
+  if (headings.join('\n') !== SECTIONS.join('\n')) {
+    const missing = SECTIONS.filter((heading) => !headings.includes(heading));
+    problems.push(
+      missing.length > 0
+        ? `sections missing or renamed: ${missing.join('; ')}`
+        : 'the sections are not in the order of the setup',
+    );
+  }
+  for (const [topic, heading, expected] of TOPICS) {
+    const section = sectionOf(markdown, heading);
+    if (section === undefined) continue;
+    const shown = fencedCommandLines(section);
+    for (const command of expected.filter((candidate) => !shown.includes(candidate))) {
+      problems.push(`${topic}: "${command}" is not a line of a code block under "${heading}"`);
+    }
+  }
+  const checks = sectionOf(markdown, '6. Run the checks and the smoke tests') ?? '';
+  for (const command of TABLE_COMMANDS.filter(
+    (candidate) => !checks.includes(`\`${candidate}\``),
+  )) {
+    problems.push(`the checks table does not list ${command}`);
+  }
+  const platforms = sectionOf(markdown, 'Windows, WSL2 and Linux') ?? '';
+  for (const label of PLATFORM_LABELS) {
+    if (!platforms.split('\n').some((line) => line.startsWith(`- ${label}`))) {
+      problems.push(`the platform section has no bullet ${label}`);
+    }
+  }
+  const prerequisites = sectionOf(markdown, 'Prerequisites') ?? '';
+  const rows = prerequisites.split('\n');
+  for (const need of PREREQUISITES.filter(
+    (candidate) => !rows.some((row) => row.startsWith(`| ${candidate} `)),
+  )) {
+    problems.push(`the prerequisites table has no row for ${need}`);
+  }
+  return problems;
+}
+
 describe('DEVELOPMENT.md', () => {
-  // Break caught: a required topic dropped from the document, leaving a step of the setup undocumented.
-  const topics: [topic: string, heading: RegExp][] = [
-    ['dependency installation', /^## .*install/im],
-    ['local settings', /^## .*settings/im],
-    ['infrastructure startup', /^## .*(start|infrastructure)/im],
-    ['migration', /^## .*migrat/im],
-    ['development startup', /^## .*(run|development)/im],
-    ['tests and smoke checks', /^## .*(test|smoke)/im],
-    ['safe shutdown', /^## .*(stop|shutdown)/im],
-    ['disposable local reset', /^## .*reset/im],
-    ['source packaging for review', /^## .*package the source/im],
+  // Break caught: a section renamed, dropped, split or moved, a topic kept as a heading with its commands gone,
+  // or a platform named in passing (this page says "Linux" in a table cell) and given no paragraph of its own: the
+  // page then no longer walks a developer from a clean checkout to a running system, in order.
+  it('has the sections, commands, table and platforms of the setup', () => {
+    assert.deepEqual(structureProblems(document), []);
+  });
+
+  it('has exactly these sections, in this order', () => {
+    assert.deepEqual(headingsOf(document), SECTIONS);
+  });
+
+  // Break caught: a `## ` line inside a code block (a shell comment, a config file) read as a section.
+  it('reads the sections outside code blocks only, and only those of the second level', () => {
+    assert.deepEqual(headingsOf('# T\n## A\n```text\n## B\n```\n## C \n### D\n'), ['A', 'C']);
+  });
+
+  // The same check on the page with one thing broken: each break must be reported, by name. (Edits of a copy in
+  // memory; the page is not touched.)
+  const breaks: [label: string, change: (text: string) => string, reported: RegExp][] = [
+    [
+      'a section renamed, as its old name still matches a loose pattern',
+      (text) => text.replace('## 3. Start the database', '## 3. Start the services'),
+      /3\. Start the database/,
+    ],
+    [
+      'a section dropped',
+      (text) => text.replace('## 7. Stop safely', '### 7. Stop safely'),
+      /7\. Stop safely/,
+    ],
+    [
+      'two sections swapped',
+      (text) =>
+        text
+          .replace('## 4. Build and migrate', '## @@')
+          .replace('## 5. Run the applications', '## 4. Build and migrate')
+          .replace('## @@', '## 5. Run the applications'),
+      /not in the order/,
+    ],
+    [
+      'a command removed from its code block',
+      (text) =>
+        text.replace('pnpm run infra:up\npnpm run infra:status\n', 'pnpm run infra:status\n'),
+      /infrastructure startup: "pnpm run infra:up"/,
+    ],
+    [
+      'a command moved out of its code block into running text',
+      (text) => text.replace('```text\npnpm run setup:env\n```', 'Run `pnpm run setup:env`.'),
+      /local settings: "pnpm run setup:env"/,
+    ],
+    [
+      'the packaging command removed',
+      (text) => text.replace('pnpm run package:source\n', ''),
+      /source packaging for review: "pnpm run package:source"/,
+    ],
+    [
+      'a check removed from the table',
+      (text) => text.replace('`pnpm run api-client:check`', '`pnpm run api-client:other`'),
+      /the checks table does not list pnpm run api-client:check/,
+    ],
+    [
+      'a platform bullet removed',
+      (text) => text.replace('- **WSL2.**', '- WSL2.'),
+      /no bullet \*\*WSL2\.\*\*/,
+    ],
+    [
+      'a prerequisite removed',
+      (text) => text.replace('| Docker ', '| Podman '),
+      /no row for Docker/,
+    ],
   ];
-  for (const [topic, heading] of topics) {
-    it(`documents ${topic}`, () => {
-      assert.match(document, heading);
+  for (const [label, change, reported] of breaks) {
+    it(`reports ${label}`, () => {
+      const changed = change(document);
+      assert.notEqual(changed, document, 'the change did not apply to the page');
+      const found = structureProblems(changed);
+      assert.ok(
+        found.some((problem) => reported.test(problem)),
+        `not reported: ${found.join(' | ') || '(nothing)'}`,
+      );
     });
   }
-
-  it('documents Windows, WSL2 and Linux', () => {
-    for (const platform of ['Windows', 'WSL2', 'Linux'])
-      assert.ok(document.includes(platform), platform);
-  });
 
   // Break caught (audit B-03): WSL2 told that it reaches a database running on Windows at 127.0.0.1 without
   // saying when. In WSL2's default (NAT) networking 127.0.0.1 is the WSL2 virtual machine, so that holds only

@@ -150,6 +150,123 @@ export function denyReason(path: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Paths that cannot be extracted everywhere
+
+/** A name as a case-insensitive file system compares it: Windows and macOS keep one file for such a pair. */
+const foldedName = (text: string): string => text.normalize('NFC').toLowerCase();
+
+/**
+ * The groups of paths that are one name on Windows and macOS: they differ only by case or by the Unicode form of
+ * an accent. A folder is a path of its own, so `Dir/a` and `dir/b` are reported as `Dir` and `dir`, once, and
+ * not again for every file below them. Each group is in path order, and the groups too.
+ */
+export function findPathCollisions(paths: readonly string[]): string[][] {
+  const spellings = new Map<string, Set<string>>();
+  for (const path of paths) {
+    const segments = path.split('/');
+    for (let length = 1; length <= segments.length; length += 1) {
+      const prefix = segments.slice(0, length).join('/');
+      const key = foldedName(prefix);
+      spellings.set(key, (spellings.get(key) ?? new Set<string>()).add(prefix));
+    }
+  }
+  const colliding = new Set([...spellings].filter(([, set]) => set.size > 1).map(([key]) => key));
+  return [...spellings]
+    .filter(([key, set]) => set.size > 1 && !colliding.has(key.slice(0, key.lastIndexOf('/'))))
+    .map(([, set]) => [...set].sort())
+    .sort((a, b) => ((a[0] ?? '') < (b[0] ?? '') ? -1 : 1));
+}
+
+/** The names Windows keeps for devices, before any extension: CON, PRN, AUX, NUL, COM0-9, LPT0-9 (also with ¹²³). */
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)$/i;
+const WINDOWS_FORBIDDEN = '<>:"|?*\\';
+
+/** Whether a name holds a control character, a backslash or one of < > : " | ? *, which Windows does not allow. */
+function hasForbiddenCharacter(name: string): boolean {
+  for (let index = 0; index < name.length; index += 1) {
+    if (name.charCodeAt(index) < 0x20 || WINDOWS_FORBIDDEN.includes(name.charAt(index)))
+      return true;
+  }
+  return false;
+}
+
+/**
+ * Why a path (with forward slashes) cannot be extracted on Windows, or undefined when it can: a folder or file
+ * named like a device (with or without an extension: `aux.ts` is the device), a name ending in a dot or a space
+ * (Windows drops it, so the name collides or cannot be reached), or a character a name may not hold (`:` starts
+ * an alternate data stream on NTFS). The first problem along the path is the one named.
+ */
+export function windowsNameProblem(path: string): string | undefined {
+  for (const segment of path.split('/')) {
+    if (segment === '.' || segment === '..') continue;
+    if (WINDOWS_DEVICE.test(segment.split('.')[0] ?? '')) {
+      return `${segment} is a reserved device name on Windows`;
+    }
+    if (/[. ]$/.test(segment)) {
+      return `${segment} ends with a ${segment.endsWith('.') ? 'dot' : 'space'}, which Windows removes`;
+    }
+    if (hasForbiddenCharacter(segment)) {
+      return `${segment} has a character Windows does not allow in a name`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A private key as it sits in a file: the header of a PEM block (`BEGIN`, an optional kind such as RSA, EC or
+ * OPENSSH, `PRIVATE KEY`, and for PGP `BLOCK`), then a body of base64 (after any header lines such as
+ * `Proc-Type:`), with the line breaks written as such or as the escapes `\n` of a JSON string. A line that only
+ * names the header, as documents and tests do, has no body and is not a key.
+ */
+const PRIVATE_KEY_BLOCK =
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:[\r\n\t ]|\\[nrt])+(?:[A-Za-z][A-Za-z0-9-]*: [^\r\n]*(?:[\r\n]|\\[nr])+)*[A-Za-z0-9+/]{20,}/;
+
+/** The paths of the files that hold a private key block, sorted, once each. Never the key. */
+export function findPrivateKeys(files: readonly ZipEntry[]): string[] {
+  return [
+    ...new Set(
+      files
+        .filter(
+          (file) =>
+            file.data.includes('-----BEGIN ') &&
+            PRIVATE_KEY_BLOCK.test(file.data.toString('latin1')),
+        )
+        .map((file) => file.path),
+    ),
+  ].sort();
+}
+
+const SHOWN = 10;
+
+/** `items` as one sentence part: the first ten, then how many more. */
+const listed = (items: readonly string[]): string =>
+  items.length <= SHOWN
+    ? items.join('; ')
+    : `${items.slice(0, SHOWN).join('; ')}; and ${String(items.length - SHOWN)} more`;
+
+/** Refuses paths that cannot be unpacked on Windows and macOS. Nothing has been written when it throws. */
+function refuseUnextractable(paths: readonly string[]): void {
+  const collisions = findPathCollisions(paths).map((group) => group.join(', '));
+  const names = paths.flatMap((path) => {
+    const reason = windowsNameProblem(path);
+    return reason === undefined ? [] : [`${path} (${reason})`];
+  });
+  const sentences = [
+    ...(collisions.length === 0
+      ? []
+      : [
+          `these paths differ only by case or Unicode form, so they are one name on Windows and macOS and one would overwrite the other: ${listed(collisions)}`,
+        ]),
+    ...(names.length === 0 ? [] : [`these paths cannot be unpacked on Windows: ${listed(names)}`]),
+  ];
+  if (sentences.length > 0) {
+    throw new PackageSourceError(
+      `${sentences.join('. Also, ')}. Nothing was written. Rename them in the repository.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Local secrets
 
 const SECRET_WORDS = new Set([
@@ -448,6 +565,10 @@ export function packageSource(root: string, options: PackageOptions = {}): Packa
       entriesOf(git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])),
     ),
   ];
+  // The names of what would be packed (not of what is left out by name) must be unpackable everywhere.
+  refuseUnextractable(
+    candidates.filter((path) => path !== ownPath && denyReason(path) === undefined),
+  );
   const listedIgnored = entriesOf(
     git(root, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']),
   );
@@ -505,6 +626,13 @@ export function packageSource(root: string, options: PackageOptions = {}): Packa
     throw new PackageSourceError(
       `a local credential appears in ${leaks.join(', ')}. Nothing was written. Remove it from ${leaks.length === 1 ? 'that file' : 'those files'}` +
         ' and, if the file was shared, replace the credential. The value is not shown.',
+    );
+  }
+  const keyed = findPrivateKeys(packed);
+  if (keyed.length > 0) {
+    throw new PackageSourceError(
+      `a private key block appears in ${keyed.join(', ')}. Nothing was written. Remove it from ${keyed.length === 1 ? 'that file' : 'those files'}` +
+        ' and, if the file was shared, replace the key. The key is not shown.',
     );
   }
 

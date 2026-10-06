@@ -27,6 +27,9 @@ const SAFE_ROLE = {
   rolbypassrls: false,
   rolcreatedb: false,
   rolcreaterole: false,
+  rolreplication: false,
+  has_predefined_role: false,
+  has_stored_context: false,
   owns_database: false,
   owns_objects: false,
 };
@@ -128,13 +131,16 @@ describe('DatabaseService: readiness', () => {
   // Break caught: an instance configured with a role that can bypass what protects the data (the owner,
   // a superuser, BYPASSRLS) being served traffic. Row-level security would be on and enforce nothing.
   it.each([
-    ['a superuser', { rolsuper: true }],
-    ['a role with BYPASSRLS', { rolbypassrls: true }],
-    ['a role that can create databases', { rolcreatedb: true }],
-    ['a role that can create roles', { rolcreaterole: true }],
-    ['the owner of the database', { owns_database: true }],
-    ['the owner of objects', { owns_objects: true }],
-  ])('is never ready when connected as %s', async (_label, flags) => {
+    ['a superuser', { rolsuper: true }, 'rolsuper'],
+    ['a role with BYPASSRLS', { rolbypassrls: true }, 'rolbypassrls'],
+    ['a role that can create databases', { rolcreatedb: true }, 'rolcreatedb'],
+    ['a role that can create roles', { rolcreaterole: true }, 'rolcreaterole'],
+    ['a role that can replicate', { rolreplication: true }, 'rolreplication'],
+    ['a member of a predefined role', { has_predefined_role: true }, 'has_predefined_role'],
+    ['a role with a stored security context', { has_stored_context: true }, 'has_stored_context'],
+    ['the owner of the database', { owns_database: true }, 'owns_database'],
+    ['the owner of objects', { owns_objects: true }, 'owns_objects'],
+  ])('is never ready when connected as %s', async (_label, flags, flag) => {
     const { pool, readiness, logs } = build();
     pool.query.mockResolvedValue({ rows: [{ ...SAFE_ROLE, ...flags }] });
 
@@ -145,7 +151,8 @@ describe('DatabaseService: readiness', () => {
       .records()
       .filter((record) => record.msg === 'database role is not a safe runtime identity');
     expect(said).toHaveLength(1);
-    expect(said[0]).toMatchObject({ level: 'error', role: 'melarc_api_runtime' });
+    // The flag is what the operator needs: which power the role has that a runtime identity may not.
+    expect(said[0]).toMatchObject({ level: 'error', role: 'melarc_api_runtime', flags: [flag] });
   });
 
   // Break caught: a query that finds no row for the connected role (it was dropped) counted as healthy.

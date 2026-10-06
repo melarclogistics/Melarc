@@ -1,0 +1,179 @@
+/*
+ * The design tokens of the Ops Portal: the one executable source (design/DESIGN_SYSTEM.md section 29.1). Components
+ * consume these custom properties and write no colour of their own. scripts/design-tokens.test.ts holds this file to
+ * the document: every token it defines exists here with the same value, and the pairings the components use meet their
+ * contrast thresholds. Change a value in the document and here together, and add a pairing to section 4.6 first.
+ *
+ * Names follow section 29.1: dots become hyphens and camelCase becomes kebab-case, so color.action.primaryHover is
+ * --color-action-primary-hover. Type and spacing are in rem so that enlarged text scales them; borders, outlines and
+ * focus widths are in px. Every value is a provisional baseline until the Product Owner reviews the document, except
+ * where the document records a decision. Dark mode is deferred (section 31).
+ */
+:root {
+  color-scheme: light;
+
+  /* Primitive tokens: the palette (section 4.2). Feature code consumes the semantic layer below, not these. */
+  --crimson-50: #fff4f5;
+  --crimson-100: #fcebed;
+  --crimson-200: #f7cdd2;
+  --crimson-300: #eda3ac;
+  --crimson-500: #c93d4a;
+  --crimson-600: #b4232e;
+  --crimson-700: #971b26;
+  --crimson-800: #7d1720;
+  --crimson-900: #65131b;
+
+  --ink-950: #172033;
+  --gray-900: #1f2937;
+  --gray-800: #344054;
+  --gray-700: #475467;
+  --gray-600: #667085;
+  --gray-550: #7c879b;
+  --gray-500: #8a94a6;
+  --gray-400: #98a2b3;
+  --gray-300: #d0d5dd;
+  --gray-200: #dde1e7;
+  --gray-100: #eaecf0;
+  --gray-50: #f7f8fa;
+  --white: #ffffff;
+  --black: #000000;
+
+  /* Semantic colour tokens (sections 4.3 and 4.4). */
+  --color-surface-page: var(--gray-50);
+  --color-surface-default: var(--white);
+  --color-surface-subtle: #f2f4f7;
+  --color-surface-inverse: var(--ink-950);
+  --color-surface-selected: var(--crimson-100);
+  --color-surface-disabled: var(--color-surface-subtle);
+
+  --color-text-primary: var(--ink-950);
+  --color-text-secondary: var(--gray-700);
+  --color-text-muted: var(--gray-600);
+  --color-text-disabled: var(--gray-400);
+  --color-text-inverse: var(--white);
+  --color-text-link: var(--crimson-700);
+  --color-text-link-hover: var(--crimson-800);
+
+  --color-border-subtle: var(--gray-200);
+  --color-border-default: var(--gray-300);
+  --color-border-control: var(--gray-550);
+  --color-border-strong: var(--gray-600);
+  --color-border-disabled: var(--gray-200);
+
+  --color-action-primary: var(--crimson-600);
+  --color-action-primary-hover: var(--crimson-700);
+  --color-action-primary-pressed: var(--crimson-800);
+  --color-action-primary-text: var(--white);
+  --color-action-secondary: var(--white);
+  --color-action-secondary-text: var(--ink-950);
+  --color-action-disabled: var(--gray-100);
+  --color-action-disabled-text: var(--gray-400);
+
+  --color-status-success-foreground: #0f5d42;
+  --color-status-success-background: #e8f6f0;
+  --color-status-success-border: #86cdb1;
+  --color-status-warning-foreground: #8a5200;
+  --color-status-warning-background: #fff4e5;
+  --color-status-warning-border: #e8b76a;
+  --color-status-danger-foreground: #8f1d27;
+  --color-status-danger-background: var(--crimson-100);
+  --color-status-danger-border: #e8aab1;
+  --color-status-info-foreground: #1f4f86;
+  --color-status-info-background: #eaf2fb;
+  --color-status-info-border: #9fc1e3;
+  --color-status-neutral-foreground: var(--gray-700);
+  --color-status-neutral-background: #f2f4f7;
+  --color-status-neutral-border: var(--gray-300);
+
+  /* Focus (sections 4.3 and 4.6): a ring outside a band that separates it from the control. Drawn with outline. */
+  --focus-ring: #2563a6;
+  --focus-offset: var(--white);
+  --focus-width: 2px;
+  --focus-offset-width: 2px;
+  /* The inverse recipe, for the authenticated Ops shell on surface.inverse (approved 6 October 2026). */
+  --focus-ring-inverse: var(--white);
+  --focus-offset-inverse: var(--ink-950);
+
+  /* Typography (section 5). No font file is bundled until a typeface is accepted (section 5.1). */
+  --font-family-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --text-display-sm-size: 2rem;
+  --text-display-sm-line-height: 2.5rem;
+  --text-display-sm-weight: 600;
+  --text-heading-xl-size: 1.75rem;
+  --text-heading-xl-line-height: 2.25rem;
+  --text-heading-xl-weight: 600;
+  --text-heading-lg-size: 1.5rem;
+  --text-heading-lg-line-height: 2rem;
+  --text-heading-lg-weight: 600;
+  --text-heading-md-size: 1.25rem;
+  --text-heading-md-line-height: 1.75rem;
+  --text-heading-md-weight: 600;
+  --text-heading-sm-size: 1.125rem;
+  --text-heading-sm-line-height: 1.625rem;
+  --text-heading-sm-weight: 600;
+  --text-body-lg-size: 1rem;
+  --text-body-lg-line-height: 1.5rem;
+  --text-body-lg-weight: 400;
+  --text-body-md-size: 0.875rem;
+  --text-body-md-line-height: 1.375rem;
+  --text-body-md-weight: 400;
+  --text-body-sm-size: 0.8125rem;
+  --text-body-sm-line-height: 1.25rem;
+  --text-body-sm-weight: 400;
+  --text-label-md-size: 0.875rem;
+  --text-label-md-line-height: 1.25rem;
+  --text-label-md-weight: 500;
+  --text-label-sm-size: 0.75rem;
+  --text-label-sm-line-height: 1.125rem;
+  --text-label-sm-weight: 500;
+  --text-caption-size: 0.75rem;
+  --text-caption-line-height: 1.125rem;
+  --text-caption-weight: 400;
+
+  /* Spacing, a 4px rhythm (section 6). */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+
+  /* Radius (section 7), elevation (section 8) and motion (section 9). */
+  --radius-none: 0;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06);
+  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.1);
+  --shadow-lg: 0 12px 28px rgb(16 24 40 / 0.14);
+
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-slow: 240ms;
+
+  /* Control heights are minimums (section 11): a control sets min-height in rem so enlarged text grows it. */
+  --control-height-sm: 2rem;
+  --control-height-md: 2.5rem;
+  --control-height-lg: 3rem;
+
+  /*
+   * Component tokens (section 3.3), added only where a component needs a value the semantic layer does not name.
+   * The pressed fill of a Secondary button is written in section 4.6 as a bare #EAECF0, which is gray.100.
+   */
+  --button-pressed-background: var(--gray-100);
+
+  /* Layout: the width the frame has always given the main landmark. Not a design-system token (section 13.2). */
+  --layout-content-width: 72rem;
+}

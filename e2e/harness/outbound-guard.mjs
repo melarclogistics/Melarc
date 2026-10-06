@@ -15,6 +15,7 @@ const captureFile = process.env.MELARC_E2E_CAPTURE_FILE;
 
 /** Exactly this machine: localhost, 127.x.y.z and ::1, matched as a whole so that "localhost.evil.example" is not. */
 function isLoopback(host) {
+  // No host at all (`net.connect(port)`, `{ port }`, a path) is the local machine: Node connects to localhost.
   if (host === undefined || host === null || host === '') return true;
   const name = String(host).toLowerCase();
   if (name === 'localhost' || name === '::1' || name === '[::1]') return true;
@@ -24,9 +25,13 @@ function isLoopback(host) {
 
 /**
  * The target of the many shapes net.Socket#connect accepts: (options), (port, host), (path), and the already
- * normalized `[options, callback]` array that net.connect hands to it. A shape that is not recognised has no
- * host, and a missing host is the local machine, so an unrecognised shape would be let through: it is
- * refused instead.
+ * normalized `[options, callback]` array that net.connect hands to it. They are read as Node itself reads
+ * them: a number or a numeric string is a port, and only a string second argument is a host; any other string
+ * is a pipe or socket path.
+ *
+ * A shape that is none of these (undefined, null, a boolean, an object with no path and no port) is not
+ * refused here. It has no host, and a missing host is the local machine, so it is passed on, and Node's own
+ * argument check rejects it (ERR_MISSING_ARGS, ERR_INVALID_ARG_TYPE) before any connection is made.
  */
 function targetOf(args) {
   const [raw, second] = args;

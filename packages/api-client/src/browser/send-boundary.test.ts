@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { ApiError } from './api-error.ts';
 import { BrowserTransportError, createSendBoundary } from './send-boundary.ts';
 
 const ORIGIN = 'https://ops.melarc.test';
@@ -51,16 +52,22 @@ describe('the final send boundary: a request that obeys the rules', () => {
     expect(response.status).toBe(204);
   });
 
-  // Break caught: a failure of the sender being turned into a result.
-  it('lets the sender fail', async () => {
-    const failure = new TypeError('Failed to fetch');
+  // Break caught: a failure of the sender being turned into a result. It is still a rejection, and it is an
+  // ApiError of the kind `network`: the browser's own "Failed to fetch" says nothing a program can act on.
+  it('lets the sender fail, as an ApiError of the kind network', async () => {
     const send = createSendBoundary({
       origin: ORIGIN,
       readCookies: () => '',
-      send: () => Promise.reject(failure),
+      send: () => Promise.reject(new TypeError('Failed to fetch')),
     });
 
-    await expect(send(request())).rejects.toBe(failure);
+    const failure = await send(request()).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).toMatchObject({ kind: 'network' });
   });
 });
 
@@ -140,6 +147,22 @@ describe('the final send boundary: how a request is made', () => {
     await expect(send(request({ mode: 'no-cors' }))).rejects.toBeInstanceOf(BrowserTransportError);
     expect(sent).toHaveLength(0);
   });
+
+  // Break caught: a mode that keeps the CSRF header being refused. A same-origin request is one the page may
+  // make (its own origin is the only one this boundary lets through), and it carries custom headers; `cors` is
+  // what a request has by default. Only a mode that loses the header is refused.
+  it.each(['cors', 'same-origin'] as const)(
+    'allows mode %s, and the request carries its CSRF header',
+    async (mode) => {
+      const { send, sent } = boundary(`melarc_csrf=${TOKEN}`);
+
+      await send(request({ method: 'POST', mode }));
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.mode).toBe(mode);
+      expect(sent[0]?.headers.get('X-CSRF-Token')).toBe(TOKEN);
+    },
+  );
 
   // Break caught: a Bearer credential from the Rider transport reaching a browser request.
   it.each(['Authorization', 'authorization', 'Proxy-Authorization'])(

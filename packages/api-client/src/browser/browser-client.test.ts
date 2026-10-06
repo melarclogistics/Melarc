@@ -393,8 +393,13 @@ describe('the client object (audit F02)', () => {
 describe('the options a call may use', () => {
   // Break caught: the answer being read as JSON when the caller asked for text.
   it('parseAs chooses how the answer is read', async () => {
+    // JSON, because an answer that is anything else is refused before it can be read (see response-boundary.test.ts).
     const { client } = harness(
-      () => new Response('plain text', { status: 200, headers: { 'Content-Type': 'text/plain' } }),
+      () =>
+        new Response('{"id":"x"}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
     );
 
     const result = await client.GET('/pickup-requests/{id}', {
@@ -402,7 +407,7 @@ describe('the options a call may use', () => {
       parseAs: 'text',
     });
 
-    expect(result.data).toBe('plain text');
+    expect(result.data).toBe('{"id":"x"}');
   });
 
   // Break caught: an abort signal being dropped, so that a call cannot be cancelled.
@@ -551,12 +556,16 @@ describe('what comes back', () => {
   });
 
   // Break caught: a network failure swallowed into an empty result, so the caller believes nothing was wrong.
-  it('lets a network failure reject', async () => {
+  it('lets a network failure reject, as an ApiError that says no answer came', async () => {
     const { client } = harness(() => Promise.reject(new TypeError('Failed to fetch')));
 
     await expect(
       client.GET('/pickup-requests/{id}', { params: { path: { id: ID } } }),
-    ).rejects.toThrow('Failed to fetch');
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      kind: 'network',
+      message: 'The API did not answer',
+    });
   });
 });
 

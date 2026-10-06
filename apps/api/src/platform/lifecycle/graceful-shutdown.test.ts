@@ -275,6 +275,38 @@ describe('gracefulShutdown with something that never finishes', () => {
     expect(elapsed).toBeLessThan(2600);
   });
 
+  // Break caught: a drain delay longer than the budget being waited out in full. The configuration refuses such a
+  // pair, but this function is the one that has to keep its promise to settle within the budget, whoever calls it.
+  it('never drains for longer than the budget, whatever the delay it is given', async () => {
+    const { app, logs } = await start();
+
+    const startedAt = performance.now();
+    await gracefulShutdown(app, { timeoutMs: 400, drainDelayMs: 6000, logger: logs.logger });
+
+    expect(performance.now() - startedAt).toBeLessThan(2500);
+  });
+
+  // Break caught: a second expiry replacing the first. When the application close stalls and a resource then
+  // does too, the listener is closed once and the log names the stage that ran out first, not whichever was last.
+  it('reports the first stage that ran out of time, once, when a later one stalls too', async () => {
+    const { app, logs } = await start(StalledDestroyHookModule);
+    app.get(ShutdownRegistry).register({ name: 'stalled-client', close: never });
+
+    const outcome = await gracefulShutdown(app, {
+      timeoutMs: 400,
+      drainDelayMs: 0,
+      logger: logs.logger,
+    });
+
+    expect(outcome).toBe('forced');
+    const timedOut = logs.records().filter((record) => record.msg === 'shutdown timed out');
+    expect(timedOut).toHaveLength(1);
+    expect(timedOut[0]).toMatchObject({ stage: 'application' });
+    expect(logs.records().find((record) => record.msg === 'shutdown forced')).toMatchObject({
+      stage: 'application',
+    });
+  });
+
   // Break caught: a stalled cleanup that fails later becoming an unhandled rejection, which the fault
   // handlers treat as fatal, and its error text reaching the log unredacted.
   it('handles a failure that arrives after the budget, without logging it', async () => {

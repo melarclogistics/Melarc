@@ -2,11 +2,18 @@
  * Rules the CI workflow must keep, checked from its text. They guard against a pipeline that is green because it
  * asks less, not because the code is right:
  *
- *   - every mandatory command is still run;
+ *   - every mandatory command is still run, as the whole script of a step of its own: not after another command,
+ *     not behind an echo, not in a longer script, and not in another shell or folder;
  *   - no failure can be absorbed (continue-on-error, `|| true`, `exit 0`) or skipped (a conditional job or step);
  *   - one aggregate job, which runs whatever happened, waits for every other job and judges them with
  *     scripts/ci-aggregate.ts, so a branch rule can require that single check (GitHub counts a skipped required
- *     check as passed, which is why the aggregate must run even when a job it needs failed);
+ *     check as passed, which is why the aggregate must run even when a job it needs failed). It alone is named
+ *     "CI result", the name the branch rule requires;
+ *   - the browser tests run all three engines: the step sets MELARC_BROWSERS to chromium,firefox,webkit and an
+ *     earlier step of the job installs exactly those three;
+ *   - every job runs on the one runner image the toolchain was tried on;
+ *   - the workflow runs only on pushes, pull requests and by hand: not on events that give it a token that can
+ *     write or secrets, and not on a schedule;
  *   - every job tests the commit the run is about, and what is published is described by a manifest of that
  *     commit (scripts/ci-revision.ts);
  *   - a step that fails on purpose to rehearse the pipeline runs only when someone asked for it by hand;
@@ -22,7 +29,7 @@ import { isAction, inputsOf, isRecord, stepsOf, type Step } from './workflow-sha
 
 export const AGGREGATE_JOB = 'ci';
 
-/** What the pipeline must run, each as a whole line of some step's script. */
+/** What the pipeline must run, each as the whole script of a step of its own. */
 export const REQUIRED_COMMANDS: readonly string[] = [
   'pnpm run format:check',
   'pnpm run lint',
@@ -40,7 +47,9 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 
 export type WorkflowProblemCode =
   | 'TRIGGER_MISSING'
+  | 'TRIGGER_FORBIDDEN'
   | 'PERMISSIONS_BROAD'
+  | 'RUNNER_DRIFT'
   | 'JOB_NO_TIMEOUT'
   | 'JOB_CONDITIONAL'
   | 'CONTINUE_ON_ERROR'
@@ -51,7 +60,12 @@ export type WorkflowProblemCode =
   | 'CHECKOUT_NOT_REVISION'
   | 'CHECKOUT_PERSISTS_CREDENTIALS'
   | 'COMMAND_MISSING'
+  | 'COMMAND_STEP_ALTERED'
+  | 'DEFAULTS_RUN'
+  | 'BROWSER_MATRIX_ENV'
+  | 'BROWSER_INSTALL_DRIFT'
   | 'AGGREGATE_MISSING'
+  | 'AGGREGATE_NAME'
   | 'AGGREGATE_NOT_ALWAYS'
   | 'AGGREGATE_NEEDS_DRIFT'
   | 'AGGREGATE_COMMAND_DRIFT'
@@ -72,6 +86,12 @@ export interface WorkflowProblem {
 
 const REVISION = '${{ github.sha }}';
 const MAX_TIMEOUT_MINUTES = 30;
+/** The one runner image of every job: a moving label such as ubuntu-latest changes what a green run proves. */
+const RUNNER = 'ubuntu-24.04';
+/** The name of the aggregate job's check, which the branch rule for main requires. */
+export const VERDICT_NAME = 'CI result';
+/** The only events that start the workflow. */
+export const ALLOWED_TRIGGERS: readonly string[] = ['push', 'pull_request', 'workflow_dispatch'];
 const REHEARSAL_INPUT = 'rehearse-failure';
 const REHEARSAL_GUARDS = ["github.event_name == 'workflow_dispatch'", `inputs.${REHEARSAL_INPUT}`];
 
@@ -110,20 +130,44 @@ const linesOf = (script: string): string[] => script.split('\n').map((line) => l
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
   a.size === b.size && [...a].every((item) => b.has(item));
 
+/** The events a workflow's `on` names, whether it is written as one name, a list of names or a map. */
+function triggerNames(triggers: unknown): string[] {
+  if (typeof triggers === 'string') return [triggers];
+  if (Array.isArray(triggers)) return triggers.filter((name) => typeof name === 'string');
+  return isRecord(triggers) ? Object.keys(triggers) : [];
+}
+
 function checkTriggers(workflow: unknown): WorkflowProblem[] {
   const triggers = isRecord(workflow) ? workflow.on : undefined;
   const push = isRecord(triggers) ? triggers.push : undefined;
   const branches = isRecord(push) ? push.branches : undefined;
   const pushesToMain = Array.isArray(branches) && branches.includes('main');
   const pullRequests = isRecord(triggers) && Object.hasOwn(triggers, 'pull_request');
-  if (pushesToMain && pullRequests) return [];
-  return [
-    {
+  const problems: WorkflowProblem[] = [];
+  if (!pushesToMain || !pullRequests) {
+    problems.push({
       code: 'TRIGGER_MISSING',
       message:
         'CI must run on pushes to main (on.push.branches) and on pull requests (on.pull_request).',
-    },
-  ];
+    });
+  }
+  const forbidden = triggerNames(triggers).filter((name) => !ALLOWED_TRIGGERS.includes(name));
+  if (forbidden.length > 0) {
+    problems.push({
+      code: 'TRIGGER_FORBIDDEN',
+      message: `CI may start only on ${ALLOWED_TRIGGERS.join(', ')}; remove ${forbidden.join(', ')}. Events such as pull_request_target and workflow_run run pull-request code with secrets and a token that can write.`,
+    });
+  }
+  return problems;
+}
+
+function checkRunners(jobs: readonly Job[]): WorkflowProblem[] {
+  return jobs
+    .filter(({ body }) => body['runs-on'] !== RUNNER)
+    .map(({ id }) => ({
+      code: 'RUNNER_DRIFT',
+      message: `Job ${id} must have runs-on: ${RUNNER}, the image the toolchain was tried on (and a job that only calls another workflow has steps nobody checks here).`,
+    }));
 }
 
 function readOnly(permissions: unknown): boolean {
@@ -268,14 +312,136 @@ function checkCheckouts(jobs: readonly Job[]): WorkflowProblem[] {
   return problems;
 }
 
-function checkCommands(jobs: readonly Job[]): WorkflowProblem[] {
-  const lines = new Set(
-    jobs.flatMap(({ steps }) => steps.flatMap((step) => linesOf(scriptOf(step)))),
-  );
-  return REQUIRED_COMMANDS.filter((command) => !lines.has(command)).map((command) => ({
+const isMandatoryStep = (step: Step): boolean => REQUIRED_COMMANDS.includes(scriptOf(step).trim());
+
+/**
+ * Each mandatory command must be the whole script of a step: a command that is only one line of a longer script
+ * can be preceded by `exit`, a condition or an echo, be followed by `|| true`, or sit in a comment or a heredoc,
+ * and a reader of the workflow would still see its name. Such a step must also run in the default shell and
+ * folder (a `shell:` or `working-directory:` changes what the command is or where), and no default may do it
+ * from afar (`defaults.run`).
+ */
+function checkCommands(workflow: unknown, jobs: readonly Job[]): WorkflowProblem[] {
+  const whole = new Set(jobs.flatMap(({ steps }) => steps.map((step) => scriptOf(step).trim())));
+  const problems: WorkflowProblem[] = REQUIRED_COMMANDS.filter(
+    (command) => !whole.has(command),
+  ).map((command) => ({
     code: 'COMMAND_MISSING',
-    message: `No step runs "${command}" as a line of its script.`,
+    message: `No step has "${command}" as the whole of its script (the command may not share a script with others).`,
   }));
+
+  for (const { id, steps } of jobs) {
+    for (const step of steps.filter(isMandatoryStep)) {
+      const altered = ['shell', 'working-directory'].filter((key) => key in step);
+      if (altered.length > 0) {
+        problems.push({
+          code: 'COMMAND_STEP_ALTERED',
+          message: `Step "${id}: ${scriptOf(step).trim()}" sets ${altered.join(' and ')}, so the mandatory command may not run as written.`,
+        });
+      }
+    }
+  }
+
+  const holders = [
+    ...(hasDefaultRun(workflow) ? ['the workflow'] : []),
+    ...jobs.filter(({ body }) => hasDefaultRun(body)).map(({ id }) => `job ${id}`),
+  ];
+  if (holders.length > 0) {
+    problems.push({
+      code: 'DEFAULTS_RUN',
+      message: `Remove defaults.run from ${holders.join(', ')}: it changes the shell or folder of every command without a mark on the step.`,
+    });
+  }
+  return problems;
+}
+
+function hasDefaultRun(holder: unknown): boolean {
+  const defaults = isRecord(holder) ? holder.defaults : undefined;
+  return isRecord(defaults) && 'run' in defaults;
+}
+
+/** The engines of the supported browsers (surfaces/ops-portal.md section 11), all of which CI must run. */
+const BROWSERS: readonly string[] = ['chromium', 'firefox', 'webkit'];
+const BROWSER_LIST = BROWSERS.join(',');
+const BROWSER_TESTS = 'pnpm run test:browser';
+/** The whole script of a step that downloads browsers: the options (`--with-deps`), then the engines. */
+const BROWSER_INSTALL = /^pnpm (?:--filter \S+ )?exec playwright install((?: [^\s&|;<>]+)*)$/;
+
+/** Whether the list is each of the three engines once (in any order). */
+const namesEachEngineOnce = (engines: readonly string[]): boolean =>
+  engines.toSorted().join(',') === BROWSERS.toSorted().join(',');
+
+/** The engines a script installs when it is exactly an install command, or undefined when it is not one. */
+function installedEngines(script: string): string[] | undefined {
+  const match = BROWSER_INSTALL.exec(script.trim());
+  if (match === null) return undefined;
+  return (match[1] ?? '').split(' ').filter((word) => word !== '' && !word.startsWith('-'));
+}
+
+/**
+ * The browser tests run the engines MELARC_BROWSERS names (Chromium alone when it is not set). CI runs all
+ * three, so the step that runs them must set the variable to exactly that list, and a step before it, in the same
+ * job, must install exactly those three engines: a pipeline that stops setting the variable or installs fewer
+ * stays green while an engine is never run.
+ */
+function checkBrowsers(jobs: readonly Job[]): WorkflowProblem[] {
+  const problems: WorkflowProblem[] = [];
+  for (const { id, steps } of jobs) {
+    steps.forEach((step, index) => {
+      if (scriptOf(step).trim() !== BROWSER_TESTS) return;
+      const env = isRecord(step.env) ? step.env : {};
+      if (env.MELARC_BROWSERS !== BROWSER_LIST) {
+        problems.push({
+          code: 'BROWSER_MATRIX_ENV',
+          message: `Job ${id}: the step that runs ${BROWSER_TESTS} must set env MELARC_BROWSERS to exactly ${BROWSER_LIST}, or the tests run Chromium alone.`,
+        });
+      }
+      const installs = steps
+        .slice(0, index)
+        .map((earlier) => installedEngines(scriptOf(earlier)))
+        .filter((engines) => engines !== undefined);
+      if (!installs.some(namesEachEngineOnce)) {
+        problems.push({
+          code: 'BROWSER_INSTALL_DRIFT',
+          message: `Job ${id}: a step before ${BROWSER_TESTS} must be exactly "pnpm --filter @melarc/e2e exec playwright install [--with-deps] ${BROWSERS.join(' ')}", naming each engine once.`,
+        });
+      }
+    });
+  }
+  return problems;
+}
+
+const sameName = (value: unknown, name: string): boolean =>
+  typeof value === 'string' && value.trim().toLowerCase() === name.toLowerCase();
+
+/**
+ * The verdict is the check a branch rule requires by name, so the aggregate job must carry exactly that name and
+ * no other job or step may (whatever its case or spacing), or a job that judges nothing could stand in for it.
+ */
+function checkVerdictName(jobs: readonly Job[]): WorkflowProblem[] {
+  const problems: WorkflowProblem[] = [];
+  const aggregate = jobs.find(({ id }) => id === AGGREGATE_JOB);
+  if (aggregate !== undefined && aggregate.body.name !== VERDICT_NAME) {
+    problems.push({
+      code: 'AGGREGATE_NAME',
+      message: `Job ${AGGREGATE_JOB} must have name: ${VERDICT_NAME}, the check the branch rule for main requires.`,
+    });
+  }
+  for (const { id, body, expanded } of jobs) {
+    if (id !== AGGREGATE_JOB && sameName(body.name, VERDICT_NAME)) {
+      problems.push({
+        code: 'AGGREGATE_NAME',
+        message: `Job ${id} is named like the verdict (${VERDICT_NAME}); only job ${AGGREGATE_JOB} may be.`,
+      });
+    }
+    for (const step of expanded.filter((candidate) => sameName(candidate.name, VERDICT_NAME))) {
+      problems.push({
+        code: 'AGGREGATE_NAME',
+        message: `A step of job ${id} is named like the verdict (${String(step.name)}); only job ${AGGREGATE_JOB} may be.`,
+      });
+    }
+  }
+  return problems;
 }
 
 function checkAggregate(jobs: readonly Job[]): WorkflowProblem[] {
@@ -450,8 +616,11 @@ export function findWorkflowProblems(
     ...checkFailuresPropagate(jobs),
     ...checkRehearsal(workflow, jobs),
     ...checkCheckouts(jobs),
-    ...checkCommands(jobs),
+    ...checkRunners(jobs),
+    ...checkCommands(workflow, jobs),
+    ...checkBrowsers(jobs),
     ...checkAggregate(jobs),
+    ...checkVerdictName(jobs),
     ...checkArtifacts(jobs),
   ];
 }

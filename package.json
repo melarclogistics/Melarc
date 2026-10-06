@@ -28,7 +28,7 @@
     "test:browser": "turbo run test:browser",
     "test:db": "turbo run test:db",
     "test:e2e": "turbo run test:e2e",
-    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts"
+    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/design-tokens.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts scripts/test-inventory.test.ts scripts/dependency-policy.test.ts scripts/gitignore.test.ts scripts/eslint-rules.test.ts scripts/markdown-links.test.ts scripts/repository-shape.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

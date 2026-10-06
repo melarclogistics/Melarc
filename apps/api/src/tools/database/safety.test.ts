@@ -165,6 +165,34 @@ describe('assertNotDeployedEnvironment', () => {
     }).toThrow(UnsafeTargetError);
   });
 
+  // Break caught: a guard that recognises two spellings and lets every other one through. A mistyped or oddly
+  // cased environment name is not a local one: the guard allows what it knows to be local, and nothing else.
+  it.each([
+    'Production',
+    'STAGING',
+    'prod',
+    'production ',
+    ' staging',
+    'prd',
+    'live',
+    'test',
+    'local ',
+  ])('refuses APP_ENV=%j, which is not the local environment', (appEnv) => {
+    expect(() => {
+      assertNotDeployedEnvironment({ APP_ENV: appEnv });
+    }).toThrow(UnsafeTargetError);
+  });
+
+  // Break caught: the refusal echoing something that is not a name, such as a control character or a very long value.
+  it('says which value it refused, with anything that is not a word character made visible', () => {
+    expect(() => {
+      assertNotDeployedEnvironment({ APP_ENV: 'prod\nx ' + 'y'.repeat(100) });
+    }).toThrow(/APP_ENV=prod\?x\?y{33}: only/);
+    expect(() => {
+      assertNotDeployedEnvironment({ APP_ENV: 'staging' });
+    }).toThrow('APP_ENV=staging:');
+  });
+
   it.each([{}, { APP_ENV: 'local' }, { APP_ENV: '' }])('allows %j', (env) => {
     expect(() => {
       assertNotDeployedEnvironment(env);

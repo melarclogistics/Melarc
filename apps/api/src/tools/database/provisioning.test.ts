@@ -344,3 +344,155 @@ describe('dropDisposableDatabase without disconnecting anyone (audit F07)', () =
     );
   });
 });
+
+/** What `format()` does on the server for the two specifiers the provisioning code uses (always quoting). */
+function serverFormat(template: string, args: readonly string[]): string {
+  let next = 0;
+  return template.replace(/%([IL])/g, (_match, kind: string) => {
+    const value = String(args[next++]);
+    return kind === 'I' ? `"${value.replaceAll('"', '""')}"` : `'${value.replaceAll("'", "''")}'`;
+  });
+}
+
+/**
+ * An administrator whose server formats statements the way PostgreSQL does and records every statement it
+ * is sent with its parameters, in order, so what the provisioning code asks the server to do is a fact the
+ * test can read. This is the unit-level account; that the server then grants and revokes as asked is the
+ * database project's to prove.
+ */
+function serverAdmin(options: { exists?: boolean; marker?: string | null; failOn?: RegExp } = {}) {
+  const calls: { text: string; values: readonly unknown[] | undefined }[] = [];
+  const query = vi.fn<SqlClient['query']>((text, values) => {
+    calls.push({ text, values });
+    if (text.includes('shobj_description')) {
+      const marker = options.marker === undefined ? DISPOSABLE_MARKER : options.marker;
+      return Promise.resolve({ rows: options.exists === false ? [] : [{ comment: marker }] });
+    }
+    if (text.startsWith('select format(')) {
+      const [template, args] = values as [string, string[]];
+      return Promise.resolve({ rows: [{ statement: serverFormat(template, args) }] });
+    }
+    if (options.failOn?.test(text) === true) return Promise.reject(new Error('refused'));
+    return Promise.resolve({ rows: [] });
+  });
+  const admin: LocalAdmin = {
+    client: { query },
+    host: '127.0.0.1',
+    close: () => Promise.resolve(),
+  };
+  /** The statements that change the server, as the server received them. */
+  const changes = () =>
+    calls
+      .map((call) => call.text)
+      .filter((text) => /^(CREATE|COMMENT|REVOKE|GRANT|ALTER|DROP) /.test(text));
+  return { admin, calls, changes };
+}
+
+describe('createDisposableDatabase: the statements it sends', () => {
+  const NAME = 'melarc_test_ab12cd34';
+
+  // Break caught: a database left open to PUBLIC. PostgreSQL lets every role connect to a new database until
+  // that is revoked, so without the REVOKE any role on the server, including one with no business in a test
+  // database, could connect; the grant that follows names the only two roles that may. The order matters
+  // too: the revoke must come before the grant, or it would take the grant away again.
+  it('creates it, marks it, shuts it to PUBLIC and opens it to the two login roles only, in that order', async () => {
+    const { admin, changes } = serverAdmin({ exists: false });
+
+    await createDisposableDatabase(admin, NAME);
+
+    expect(changes()).toEqual([
+      `CREATE DATABASE "${NAME}" OWNER "melarc_owner" TEMPLATE template0`,
+      `COMMENT ON DATABASE "${NAME}" IS 'melarc:disposable'`,
+      `REVOKE ALL ON DATABASE "${NAME}" FROM PUBLIC`,
+      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime"`,
+    ]);
+  });
+
+  // Break caught: provisioning runs not serialised, so parallel test files race over the cluster-wide roles
+  // and databases; and a lock that stays held when a statement fails, which hangs every later run.
+  it('holds the provisioning lock around the work, and lets it go when a statement fails', async () => {
+    const done = serverAdmin({ exists: false });
+    await createDisposableDatabase(done.admin, NAME);
+    const texts = done.calls.map((call) => call.text);
+
+    expect(texts[0]).toMatch(/^select pg_advisory_lock\(/);
+    expect(texts.at(-1)).toMatch(/^select pg_advisory_unlock\(/);
+
+    const failing = serverAdmin({ exists: false, failOn: /^COMMENT ON/ });
+    await expect(createDisposableDatabase(failing.admin, NAME)).rejects.toThrow('refused');
+    expect(failing.calls.at(-1)?.text).toMatch(/^select pg_advisory_unlock\(/);
+    expect(failing.changes().some((text) => text.startsWith('GRANT'))).toBe(false);
+  });
+
+  // Break caught: running it again changing a database that is already there beyond what it must: it is not
+  // created or marked again, and it is shut to everyone but the two roles again, because an earlier run may have
+  // ended between the mark and the revoke, and a database open to every role on the server is not found out.
+  it('only shuts a database that is already there and marked to the other roles again', async () => {
+    const { admin, changes } = serverAdmin();
+
+    await createDisposableDatabase(admin, NAME);
+
+    expect(changes()).toEqual([
+      `REVOKE ALL ON DATABASE "${NAME}" FROM PUBLIC`,
+      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime"`,
+    ]);
+  });
+
+  // Break caught: a creation that stops half way leaving a database behind. CREATE DATABASE cannot be rolled back,
+  // so a failure at the mark leaves one this tooling refuses to adopt for ever, and a failure at the grant leaves
+  // a marked one that is open to every role.
+  it.each([
+    ['marking it', /^COMMENT ON/],
+    ['shutting it to PUBLIC', /^REVOKE ALL/],
+    ['opening it to the two roles', /^GRANT CONNECT/],
+  ])(
+    'drops the database it created when %s fails, and says what failed',
+    async (_label, failOn) => {
+      const { admin, changes } = serverAdmin({ exists: false, failOn });
+
+      await expect(createDisposableDatabase(admin, NAME)).rejects.toThrow('refused');
+
+      expect(changes().at(-1)).toBe(`DROP DATABASE IF EXISTS "${NAME}" WITH (FORCE)`);
+    },
+  );
+
+  it('reports the failure that stopped it even when the cleanup fails too', async () => {
+    const { admin } = serverAdmin({ exists: false, failOn: /^(COMMENT ON|DROP DATABASE)/ });
+
+    await expect(createDisposableDatabase(admin, NAME)).rejects.toThrow('refused');
+  });
+
+  // Break caught: the cleanup reaching a database this call did not create.
+  it('drops nothing when it fails to adopt a database that exists', async () => {
+    const { admin, changes } = serverAdmin({ marker: null });
+
+    await expect(createDisposableDatabase(admin, NAME)).rejects.toThrow(
+      /not created by this tooling/,
+    );
+
+    expect(changes()).toEqual([]);
+  });
+});
+
+describe('dropDisposableDatabase: the statements it sends', () => {
+  const NAME = 'melarc_test_ab12cd34';
+
+  // Break caught: the drop ending the administrator's own session. The administrator connection is the one
+  // doing the dropping: if it terminates itself the DROP is never sent, or fails on a closed connection, and
+  // the database stays behind. Every other session of the database is ended, and before the drop.
+  it('ends every other session of the database, never its own, and only then drops it', async () => {
+    const { admin, calls } = serverAdmin();
+
+    await dropDisposableDatabase(admin, NAME);
+
+    const terminate = calls.findIndex((call) => call.text.includes('pg_terminate_backend'));
+    const drop = calls.findIndex((call) => call.text.startsWith('DROP DATABASE'));
+    expect(terminate).toBeGreaterThan(-1);
+    expect(drop).toBeGreaterThan(terminate);
+    expect(calls[terminate]?.text).toBe(
+      'select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()',
+    );
+    expect(calls[terminate]?.values).toEqual([NAME]);
+    expect(calls[drop]?.text).toBe(`DROP DATABASE IF EXISTS "${NAME}" WITH (FORCE)`);
+  });
+});

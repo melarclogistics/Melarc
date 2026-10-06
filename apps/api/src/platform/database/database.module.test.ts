@@ -1,9 +1,11 @@
 import { Injectable, Module } from '@nestjs/common';
-import { afterEach, describe, expect, it } from 'vitest';
+import type pg from 'pg';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { appWith, startTestApp, TEST_CONFIG, type TestApp } from '../../test-support/test-app.js';
 import type { AppConfig, DatabaseConfig } from '../config/load-config.js';
 import { gracefulShutdown } from '../lifecycle/graceful-shutdown.js';
+import { DATABASE_POOL } from '../platform.tokens.js';
 import { createPool } from './database.module.js';
 import { DatabaseService } from './database.service.js';
 import { PostgresUrlError } from './postgres-url.js';
@@ -122,5 +124,28 @@ describe('the database module', () => {
 
     expect(outcome).toBe('clean');
     expect(running.logs.records().map((record) => record.msg)).toContain('shutdown complete');
+  });
+
+  // Break caught: a close that reports success and ends nothing. The test above sees only a clean outcome and
+  // a log line, which a no-op close produces as well. This one watches the real pool the application built: it
+  // is ended once, by the shutdown and not by the test, holds no connection afterwards and refuses new work.
+  it('ends the pool the application built exactly once, leaving no connection open', async () => {
+    running = await startTestApp({ config: UNREACHABLE });
+    await readyz(running.baseUrl);
+    const pool = running.app.get<pg.Pool>(DATABASE_POOL, { strict: false });
+    const end = vi.spyOn(pool, 'end');
+    expect(pool.ended).toBe(false);
+
+    const outcome = await gracefulShutdown(running.app, {
+      timeoutMs: 5000,
+      drainDelayMs: 0,
+      logger: running.logs.logger,
+    });
+
+    expect(outcome).toBe('clean');
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(pool.ended).toBe(true);
+    expect([pool.totalCount, pool.idleCount, pool.waitingCount]).toEqual([0, 0, 0]);
+    await expect(pool.query('select 1')).rejects.toThrow(/after calling end/);
   });
 });

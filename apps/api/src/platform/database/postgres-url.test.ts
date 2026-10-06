@@ -125,6 +125,30 @@ const HOST_DISAGREEMENTS: readonly (readonly [string, string])[] = [
   ['an escaped digit', 'postgres://melarc_api_runtime:FAKE-PW@127.0.0.%32/melarc_test_demo'],
 ];
 
+describe('control characters in a connection URL', () => {
+  // Break caught: a percent-escaped NUL or newline in the user, the password or the database name. The URL parser
+  // decodes it, and the driver writes the decoded text into its startup message, which PostgreSQL reads as
+  // NUL-terminated strings: the text after the NUL is read as the next parameter.
+  it.each([
+    ['a NUL in the user', 'postgres://app%00x:pw@127.0.0.1/db'],
+    ['a NUL in the password', 'postgres://app:p%00w@127.0.0.1/db'],
+    ['a NUL in the database', 'postgres://app:pw@127.0.0.1/d%00b'],
+    ['a newline in the user', 'postgres://app%0Ax:pw@127.0.0.1/db'],
+    ['a carriage return in the password', 'postgres://app:p%0Dw@127.0.0.1/db'],
+    ['a unit separator in the database', 'postgres://app:pw@127.0.0.1/d%1Fb'],
+    ['a delete character in the user', 'postgres://app%7Fx:pw@127.0.0.1/db'],
+  ])('refuses %s, in fixed text', (_label, url) => {
+    expect(parsePostgresUrl(url)).toBeUndefined();
+    expect(postgresUrlProblem(url)).toBe('must not contain control characters');
+    expect(() => postgresConnectionSettings(url)).toThrow(PostgresUrlError);
+  });
+
+  it('still accepts a password with every printable character that needs escaping', () => {
+    const url = 'postgres://app:p%40ss%3Aw%2Frd%20%25@127.0.0.1/db';
+    expect(postgresConnectionSettings(url).password).toBe('p@ss:w/rd %');
+  });
+});
+
 describe('the one reading of a connection URL (audit F01)', () => {
   // Break caught: the guard and the driver reading different things. If this table stops holding, the
   // driver changed what it does with a query string and the reasons for refusing one should be reviewed.

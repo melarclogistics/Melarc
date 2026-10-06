@@ -7,6 +7,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const CONFIG_FILE = resolve(APP_ROOT, 'vite.config.ts');
+const REPOSITORY_ROOT = resolve(APP_ROOT, '../..');
+const CONTRACT = resolve(REPOSITORY_ROOT, 'contracts/openapi.yaml');
+const GENERATED_SCHEMA = resolve(REPOSITORY_ROOT, 'packages/api-client/src/generated/schema.ts');
+
+// What the production bundle must not hold, as the contract and the generated file spell it. Schema names that
+// exist nowhere but in the contract's wire types, and the dedicated Rider host the contract lists as a server.
+const WIRE_TYPE_NAMES = ['PickupRequestCreate', 'HubIntakePreCount'];
+const RIDER_HOST = 'api.melarc.example';
 
 // Values that exist only in the build environment. None may ever appear in browser code. The first
 // is deliberately named like a secret: a server-side variable that looks like one is not a problem,
@@ -111,6 +119,29 @@ describe('the production build', () => {
     expect(html).not.toMatch(/https?:\/\//);
   });
 
+  // Break caught: the development showcase shipping to users, in its route, its code, its styles or its synthetic text.
+  // `import.meta.env.DEV` is false in a production build, so they must be removed from the files and not merely hidden
+  // from the navigation (COMPONENT_PATTERNS section 27).
+  it('contains no trace of the development showcase', () => {
+    expect(output.size).toBeGreaterThan(2);
+    for (const [name, content] of output) {
+      expect(name, name).not.toMatch(/showcase/i);
+      expect(content, name).not.toMatch(/__showcase|showcase-|Component showcase|synthetic/i);
+    }
+  });
+
+  // Break caught: the check above passing because it looks for text that is not in the showcase at all.
+  it('looks for text that the showcase source really holds', async () => {
+    const page = await readFile(resolve(APP_ROOT, 'src/showcase/ShowcasePage.tsx'), 'utf8');
+    const styles = await readFile(resolve(APP_ROOT, 'src/showcase/showcase.css'), 'utf8');
+    const routes = await readFile(resolve(APP_ROOT, 'src/app/routes.tsx'), 'utf8');
+
+    expect(page).toContain('Component showcase');
+    expect(page).toMatch(/synthetic/i);
+    expect(styles).toContain('showcase-');
+    expect(routes).toContain('__showcase');
+  });
+
   // Break caught: a build-environment value, such as a credential or the address of the API, copied
   // into public JavaScript, for example by embedding process.env wholesale.
   it('contains no value that exists only in the build environment', () => {
@@ -157,16 +188,40 @@ describe('the production build and the API client', () => {
   // Break caught: the generated wire types imported as values, which would put hundreds of kilobytes of
   // contract text into every visitor's download. They are compile-time only; these names exist nowhere
   // else, so finding one means the types were bundled.
-  it('ships none of the generated wire types', () => {
-    expect(script).not.toContain('PickupRequestCreate');
-    expect(script).not.toContain('HubIntakePreCount');
+  // Break caught: this test passing because the names it looks for no longer exist. A schema renamed in the
+  // contract would leave "not found in the bundle" true for ever, whatever the bundle held. So each name is
+  // first shown to be where it comes from, in the contract and as a declared schema of the generated file, and
+  // only then is it looked for in the bundle.
+  it('ships none of the generated wire types', async () => {
+    const contract = await readFile(CONTRACT, 'utf8');
+    const generated = await readFile(GENERATED_SCHEMA, 'utf8');
+
+    for (const name of WIRE_TYPE_NAMES) {
+      expect(contract, `${name} is no longer a schema of the contract`).toMatch(
+        new RegExp(`^ {4}${name}:\\r?$`, 'm'),
+      );
+      expect(generated, `${name} is no longer a schema of the generated file`).toMatch(
+        new RegExp(`^ {8}${name}: `, 'm'),
+      );
+      expect(script, `${name} is in the production bundle`).not.toContain(name);
+    }
+    expect(generated, 'the generated file no longer carries its marker').toContain(
+      'GENERATED FILE - DO NOT EDIT',
+    );
     expect(script).not.toContain('GENERATED FILE');
   });
 
   // Break caught: the contract's dedicated Rider host reaching the browser. Eight operations list it; the
-  // browser transport never uses it, and its address must not be in the bundle.
-  it('does not contain the dedicated Rider host', () => {
-    expect(script).not.toContain('api.melarc.example');
+  // browser transport never uses it, and its address must not be in the bundle. As above, the host is first
+  // shown to be in the contract's server lists: were it renamed there, the check below would find nothing
+  // whatever the bundle held. The generated file carries no server address, so it is not searched.
+  it('does not contain the dedicated Rider host', async () => {
+    const contract = await readFile(CONTRACT, 'utf8');
+
+    expect(contract, 'the Rider host is no longer a server of the contract').toMatch(
+      new RegExp(`^\\s+- url: https://${RIDER_HOST.replaceAll('.', '\\.')}/`, 'm'),
+    );
+    expect(script).not.toContain(RIDER_HOST);
   });
 });
 

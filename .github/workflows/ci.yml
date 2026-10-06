@@ -103,7 +103,7 @@ jobs:
     # compose.yaml, the local service (scripts/ci-workflow.test.ts holds the two together).
     services:
       postgres:
-        image: postgres:18.6-bookworm
+        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
         env:
           POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
@@ -143,7 +143,7 @@ jobs:
     # Same disposable server as the database job; the browser journey creates a database of its own on it.
     services:
       postgres:
-        image: postgres:18.6-bookworm
+        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
         env:
           POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
@@ -178,11 +178,15 @@ jobs:
       - name: Check the API against the contract
         run: pnpm run contract:check
 
-      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it.
-      - name: Install the browser
-        run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
+      # The browsers come from the Playwright version the lockfile pins; the revisions they download follow from it.
+      # Chromium also serves the journey below; Firefox and WebKit are the other engines of the supported browsers
+      # (surfaces/ops-portal.md section 11) and run the Ops shell and component tests.
+      - name: Install the browsers
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit
 
-      - name: Browser smoke test of the Ops shell
+      - name: Browser tests of the Ops shell and components
+        env:
+          MELARC_BROWSERS: chromium,firefox,webkit
         run: pnpm run test:browser
 
       - name: Browser, API and database journey

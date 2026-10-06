@@ -1,7 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { Inject, Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { Logger } from 'pino';
 
 import { ReadinessRegistry } from '../health/readiness.registry.js';
@@ -9,14 +11,22 @@ import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DATABASE_POOL, LOGGER } from '../platform.tokens.js';
 import { toContextSettings, type SecurityContext } from './transaction-context.js';
 
-/** What the work inside a transaction receives. */
-export type DatabaseTransaction = Parameters<Parameters<NodePgDatabase['transaction']>[0]>[0];
+/**
+ * What the work inside a transaction receives: queries on the one connection the transaction holds. It cannot open
+ * a transaction of its own: the one it runs in is the only one there is, and it ends when the work does.
+ */
+export type DatabaseTransaction = Omit<NodePgDatabase, 'transaction'>;
+
+/** Set while a transaction's work runs, so that a transaction opened inside it is seen for what it is. */
+const openTransaction = new AsyncLocalStorage<true>();
 
 /**
  * Facts about the role this connection runs as. A runtime identity may hold none of them
- * (SECURITY_DESIGN.md §14.6): superuser, BYPASSRLS, creating databases or roles, owning the database or
- * owning a table, view, sequence or index. Each makes row-level security either bypassable or removable by the
- * connection. Not inspected yet: owning a schema or function, and CREATE on a schema or the database (the
+ * (SECURITY_DESIGN.md §14.6): superuser, BYPASSRLS, creating databases or roles, replication, owning the database
+ * or owning a table, view, sequence or index, a predefined role (`pg_*`: each is power that no runtime identity
+ * needs), or a `melarc.*` setting stored on the role or the database, which would be a security context that no
+ * transaction set. Each makes row-level security either bypassable or removable by the connection, or the context
+ * that it reads not the application's to decide. Not inspected yet: owning a schema or function, and CREATE on a schema or the database (the
  * "schema modification" of §14.6); provisioning and the migrations are what keep those from being granted.
  *
  * Owning includes owning through membership: a role that is a member of the owner has the owner's powers
@@ -25,7 +35,14 @@ export type DatabaseTransaction = Parameters<Parameters<NodePgDatabase['transact
  */
 const ROLE_POSTURE_SQL = `
   SELECT r.rolname AS role,
-         r.rolsuper, r.rolbypassrls, r.rolcreatedb, r.rolcreaterole,
+         r.rolsuper, r.rolbypassrls, r.rolcreatedb, r.rolcreaterole, r.rolreplication,
+         EXISTS (SELECT 1 FROM pg_roles p
+                  WHERE p.rolname LIKE 'pg\\_%' AND p.rolname <> 'pg_database_owner'
+                    AND pg_has_role(r.oid, p.oid, 'MEMBER')) AS has_predefined_role,
+         EXISTS (SELECT 1 FROM pg_db_role_setting s, unnest(s.setconfig) AS setting
+                  WHERE s.setrole IN (r.oid, 0)
+                    AND s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+                    AND setting LIKE 'melarc.%') AS has_stored_context,
          EXISTS (SELECT 1 FROM pg_database d
                   WHERE d.datname = current_database()
                     AND pg_has_role(r.oid, d.datdba, 'MEMBER')) AS owns_database,
@@ -41,6 +58,9 @@ interface RolePosture {
   readonly rolbypassrls: boolean;
   readonly rolcreatedb: boolean;
   readonly rolcreaterole: boolean;
+  readonly rolreplication: boolean;
+  readonly has_predefined_role: boolean;
+  readonly has_stored_context: boolean;
   readonly owns_database: boolean;
   readonly owns_objects: boolean;
 }
@@ -50,6 +70,9 @@ const UNSAFE_FLAGS = [
   'rolbypassrls',
   'rolcreatedb',
   'rolcreaterole',
+  'rolreplication',
+  'has_predefined_role',
+  'has_stored_context',
   'owns_database',
   'owns_objects',
 ] as const;
@@ -94,7 +117,7 @@ export class DatabaseService {
 
   /** A transaction with no principal context: protected tables answer nothing to it. */
   transaction<T>(work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
-    return this.db.transaction(work);
+    return this.runInTransaction(work);
   }
 
   /**
@@ -106,11 +129,76 @@ export class DatabaseService {
     work: (tx: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
     const settings = toContextSettings(context);
-    return this.db.transaction(async (tx) => {
+    return this.runInTransaction(async (tx) => {
       const assignments = settings.map(([name, value]) => sql`set_config(${name}, ${value}, true)`);
       await tx.execute(sql`select ${sql.join(assignments, sql`, `)}`);
       return work(tx);
     });
+  }
+
+  /**
+   * Runs the work in a transaction on one connection that this method takes and gives back. It does not use
+   * drizzle's own `transaction`, which has three defects the security context cannot afford: it sends BEGIN before
+   * the block that releases the connection, so a failed BEGIN leaks the connection; it returns a connection whose
+   * ROLLBACK failed to the pool, with the failed request's context still set on it; and it hands out a transaction
+   * object that goes on working after the transaction has ended, on a connection another request may be using.
+   *
+   * A connection that failed to begin, to roll back or to commit is destroyed and not reused. The transaction
+   * object stops working when the transaction ends. A transaction opened inside another is refused: it would hold a
+   * second connection while the first is held, and as many such requests as the pool has connections wait for each
+   * other for ever.
+   */
+  private async runInTransaction<T>(work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+    if (openTransaction.getStore() === true) {
+      throw new Error(
+        'A transaction is already open in this request: do the work in it, a second one would hold a second connection',
+      );
+    }
+
+    const client = await this.pool.connect();
+    let open = true;
+    // Only `query` is what the transaction needs of a connection, and only while the transaction is open.
+    const guarded = {
+      query: (...args: unknown[]) =>
+        open
+          ? (client.query as (...forwarded: unknown[]) => Promise<unknown>)(...args)
+          : Promise.reject(
+              new Error('The transaction has ended: its connection is no longer its own'),
+            ),
+    };
+    let destroyBecause: Error | undefined;
+    let began = false;
+    try {
+      await client.query('begin');
+      began = true;
+      const tx = drizzle(guarded as never);
+      const result = await openTransaction.run(true, () => work(tx));
+      await client.query('commit');
+      return result;
+    } catch (error) {
+      // A connection that could not begin is not trusted again; one that did is rolled back, and is trusted
+      // again only if the rollback worked.
+      destroyBecause = began
+        ? await this.rollBack(client)
+        : error instanceof Error
+          ? error
+          : new Error('begin failed');
+      throw error;
+    } finally {
+      open = false;
+      client.release(destroyBecause);
+    }
+  }
+
+  /** Rolls the transaction back. Resolves to why the connection must not be reused, when it must not. */
+  private async rollBack(client: PoolClient): Promise<Error | undefined> {
+    try {
+      await client.query('rollback');
+      return undefined;
+    } catch (error) {
+      this.logger.error({ err: error }, 'database transaction could not be rolled back');
+      return error instanceof Error ? error : new Error('rollback failed');
+    }
   }
 
   /**

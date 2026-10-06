@@ -99,6 +99,41 @@ describe('toContextSettings: accepted contexts', () => {
     expect(settings).toContainEqual(['melarc.principal_id', PRINCIPAL]);
   });
 
+  // Break caught: the bound of a correlation id being one short. The contract's Idempotency-Key is 128 long, and a
+  // correlation id may be one.
+  it('accepts a correlation id of exactly 128 characters', () => {
+    const correlationId = 'x'.repeat(128);
+    expect(toContextSettings({ ...STAFF, correlationId })).toContainEqual([
+      'melarc.correlation_id',
+      correlationId,
+    ]);
+  });
+
+  // Break caught: an identifier written in capitals reaching a policy as it came, where it compares unequal to the
+  // same identifier in a row. Every identifier is lower-cased, the hub set included.
+  it('writes every identifier in lower case, the hubs and the boundaries too', () => {
+    const settings = toContextSettings({
+      principalType: 'STAFF',
+      principalId: PRINCIPAL,
+      sessionId: SESSION.toUpperCase(),
+      surface: 'OPS_PORTAL',
+      hubScopeMode: 'SET',
+      authorizedHubIds: [HUB_A.toUpperCase(), HUB_B.toUpperCase()],
+      vendorOrganizationId: VENDOR.toUpperCase(),
+      riderId: RIDER.toUpperCase(),
+      correlationId: 'r',
+    });
+
+    expect(settings).toEqual(
+      expect.arrayContaining([
+        ['melarc.session_id', SESSION],
+        ['melarc.authorized_hub_ids', `${HUB_A},${HUB_B}`],
+        ['melarc.vendor_organization_id', VENDOR],
+        ['melarc.rider_id', RIDER],
+      ]),
+    );
+  });
+
   // Break caught: ALL being dropped, or a hub list being demanded for it. It is never inferred, so it must
   // arrive exactly as given.
   it('carries an explicit all-hub scope', () => {
@@ -137,6 +172,38 @@ describe('toContextSettings: refused contexts', () => {
       { ...STAFF, authorizationKey: 'Pickup Request' },
       'authorizationKey',
     ],
+    [
+      'an authorization key of one word',
+      { ...STAFF, authorizationKey: 'pickup' },
+      'authorizationKey',
+    ],
+    [
+      'an authorization key ending in a dot',
+      { ...STAFF, authorizationKey: 'pickup.' },
+      'authorizationKey',
+    ],
+    [
+      'an authorization key starting with a dot',
+      { ...STAFF, authorizationKey: '.pickup' },
+      'authorizationKey',
+    ],
+    [
+      'an authorization key in capitals',
+      { ...STAFF, authorizationKey: 'Pickup.Request' },
+      'authorizationKey',
+    ],
+    [
+      'a hub list with a hole in it',
+      // eslint-disable-next-line no-sparse-arrays -- a sparse list is the input under test
+      { ...STAFF, authorizedHubIds: [HUB_A, , HUB_B] },
+      'authorizedHubIds',
+    ],
+    [
+      'a vendor organization on a staff principal that is not a uuid',
+      { ...STAFF, vendorOrganizationId: 'nope' },
+      'vendorOrganizationId',
+    ],
+    ['a rider on a staff principal that is not a uuid', { ...STAFF, riderId: 'nope' }, 'riderId'],
     [
       'an authorization key with an injection attempt',
       { ...STAFF, authorizationKey: "a.b'; --" },

@@ -51,4 +51,31 @@ describe('requireBuilds', () => {
       requireBuilds(paths);
     }).toThrow(/e2e-database\.js/);
   });
+
+  // Break caught: a missing build whose message names another file, or all of them, so that the person who
+  // reads it does not know which build to make. Each of the three is left out in turn: the message names that
+  // file, with its whole path, and names neither of the two that exist.
+  it.each([
+    ['api', 'apiMain'],
+    ['ops', 'opsIndex'],
+    ['database', 'databaseTool'],
+  ] as const)('names the %s build, and only it, when that one is missing', (which, key) => {
+    const paths = repositoryPaths(root);
+    for (const other of ['api', 'ops', 'database'] as const)
+      if (other !== which) build(paths, other);
+    const present = [paths.apiMain, paths.opsIndex, paths.databaseTool].filter(
+      (file) => file !== paths[key],
+    );
+
+    let message = '';
+    try {
+      requireBuilds(paths);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain(`  ${paths[key]}`);
+    for (const file of present) expect(message).not.toContain(file);
+    expect(message).toContain('pnpm run build');
+  });
 });

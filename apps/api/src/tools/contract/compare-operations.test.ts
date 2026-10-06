@@ -349,6 +349,66 @@ describe('deliberate drift: error responses', () => {
 
     expect(codes(findings)).toEqual(['RESPONSE_DRIFT']);
   });
+
+  // Break caught: the line between success and error drawn one status too high. 400 is the first error
+  // status, and `createPickupRequest` answers it for every request the contract's schema refuses: a 400 that
+  // is missing, or whose body changed, is an error-response drift and not a success-response one. Both
+  // places that name the kind (a status on one side only, and a media type that differs) are exercised.
+  it('classes a 400 answer as an error response, missing or changed', () => {
+    const at = 'POST /pickup-requests > response 400';
+    const missing = driftAfter('createPickupRequest', (copy) => {
+      copy.remove(['paths', '/pickup-requests', 'post', 'responses', '400']);
+    });
+    const invented = driftAfter('createPickupRequest', (copy) => {
+      copy.set(['paths', '/pickup-requests', 'post', 'responses', '418'], { description: 'tea' });
+    });
+    const media = driftAfter('createPickupRequest', (copy) => {
+      copy.update<{ content: Record<string, unknown> }>(
+        ['components', 'responses', 'ValidationFailed'],
+        (answer) => ({ ...answer, content: { 'text/plain': answer.content['application/json'] } }),
+      );
+    });
+
+    expect(missing.map((finding) => [finding.code, finding.at])).toEqual([
+      ['ERROR_RESPONSE_DRIFT', at],
+    ]);
+    expect(invented.map((finding) => [finding.code, finding.at])).toEqual([
+      ['ERROR_RESPONSE_DRIFT', 'POST /pickup-requests > response 418'],
+    ]);
+    expect(media.map((finding) => [finding.code, finding.at])).toEqual([
+      ['ERROR_RESPONSE_DRIFT', at],
+    ]);
+  });
+
+  // Break caught: the catch-all `default` answer, which is for failures, reported as a success drift, and
+  // a status below 400 (a created resource, a redirect) reported as an error.
+  it('classes `default` as an error response, and the statuses below 400 as success responses', () => {
+    const answering = (...statuses: string[]): JsonObject => ({
+      openapi: '3.1.0',
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'thing',
+            responses: Object.fromEntries(statuses.map((status) => [status, { description: 'x' }])),
+          },
+        },
+      },
+    });
+    /** The kind of drift when the contract answers `status` as well as 200 and the code only 200. */
+    const kindOfMissing = (status: string) =>
+      codes(
+        compareOperations(
+          describeIn(answering('200', status), 'thing'),
+          describeIn(answering('200'), 'thing'),
+        ),
+      );
+
+    expect(kindOfMissing('default')).toEqual(['ERROR_RESPONSE_DRIFT']);
+    expect(kindOfMissing('400')).toEqual(['ERROR_RESPONSE_DRIFT']);
+    expect(kindOfMissing('599')).toEqual(['ERROR_RESPONSE_DRIFT']);
+    expect(kindOfMissing('308')).toEqual(['RESPONSE_DRIFT']);
+    expect(kindOfMissing('201')).toEqual(['RESPONSE_DRIFT']);
+  });
 });
 
 describe('deliberate drift: authentication and security', () => {
@@ -449,6 +509,43 @@ describe('deliberate drift: headers and cookies', () => {
     expect(codes(findings)).toEqual(['HEADER_DRIFT']);
     expect(findings[0]?.at).toBe('GET /pickup-requests/{id} > response 200');
     expect(findings[0]?.message).toContain('ETag');
+  });
+
+  // Break caught: the schema of a response header left out of the comparison, so that the version a client
+  // sends back as `If-Match` could become a number, or gain a format, with no finding: only the header's
+  // name and whether it is always sent were compared.
+  it('reports a response header whose schema changed, at the header', () => {
+    const type = driftAfter('getPickupRequest', (copy) => {
+      copy.set(['components', 'headers', 'ETag', 'schema'], { type: 'integer' });
+    });
+    const format = driftAfter('getPickupRequest', (copy) => {
+      copy.set(['components', 'headers', 'ETag', 'schema'], { type: 'string', format: 'uuid' });
+    });
+
+    expect(codes(type)).toEqual(['SCHEMA_TYPE']);
+    expect(type[0]?.at).toBe('GET /pickup-requests/{id} > response 200 > header ETag');
+    expect(codes(format)).toEqual(['SCHEMA_FORMAT']);
+    expect(format[0]?.at).toBe('GET /pickup-requests/{id} > response 200 > header ETag');
+  });
+
+  // Break caught: a response header the contract says is always sent (the `no-store` on a response that
+  // carries a setup credential) becoming optional in the code, or the reverse.
+  it('reports a response header that stopped being always sent, and one that became so', () => {
+    const optional = driftAfter('registerRiderDevice', (copy) => {
+      copy.set(['components', 'headers', 'CacheControlNoStore', 'required'], false);
+    });
+    const required = driftAfter('getPickupRequest', (copy) => {
+      copy.set(['components', 'headers', 'ETag', 'required'], true);
+    });
+
+    expect(codes(optional)).toEqual(['HEADER_DRIFT']);
+    expect(optional[0]?.message).toBe(
+      'The response header Cache-Control is always sent in the contract and not always in the code.',
+    );
+    expect(codes(required)).toEqual(['HEADER_DRIFT']);
+    expect(required[0]?.message).toBe(
+      'The response header ETag is not always sent in the contract and always in the code.',
+    );
   });
 
   // Break caught: a sign-in that stops setting the CSRF cookie. Without it the browser has no token to

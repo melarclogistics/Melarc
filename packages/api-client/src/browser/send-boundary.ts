@@ -1,3 +1,4 @@
+import { ApiError } from './api-error.ts';
 import { CSRF_HEADER_NAME, readCsrfToken } from './csrf.ts';
 
 /**
@@ -39,6 +40,9 @@ export interface SendBoundaryOptions {
  * - It carries no `Authorization` header: a browser authenticates by its cookie.
  * - `X-CSRF-Token` is the readable `melarc_csrf` cookie's value on a state-changing method, and absent
  *   otherwise. Nothing but the cookie can set it. With no cookie (before sign-in) the request goes without it.
+ *
+ * What comes back is judged too (see judged): a success status must carry the contract's JSON, or nothing, and a
+ * request that got no answer is an ApiError of the kind `network`, not the browser's own TypeError.
  *
  * Each refusal says what was refused and never repeats a value that could be a credential.
  */
@@ -88,6 +92,68 @@ export function createSendBoundary({
       const token = readCsrfToken(readCookies());
       if (token !== undefined) request.headers.set(CSRF_HEADER_NAME, token);
     }
-    return send(request);
+    return judged(await sent(send, request));
   };
+}
+
+/** An abort is the caller's own doing and keeps its identity: a query that is no longer wanted is cancelled. */
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/** Sends the request. A request that gets no answer is an ApiError of the kind `network`. */
+async function sent(
+  send: (request: Request) => Promise<Response>,
+  request: Request,
+): Promise<Response> {
+  try {
+    return await send(request);
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    throw new ApiError({ kind: 'network' });
+  }
+}
+
+/** A JSON media type, with or without parameters: `application/json; charset=utf-8`, `application/problem+json`. */
+const JSON_MEDIA_TYPE = /^\s*application\/(?:[\w.+-]*\+)?json\s*(?:;|$)/i;
+
+/**
+ * An answer with a success status carries the contract's JSON, or no body. The contract has no other kind of
+ * success, so anything else is not from the API: a proxy's page, a portal's login form, an error served with a
+ * wrong status. It is refused here, with the status it came with, because openapi-fetch would otherwise reject with
+ * a bare SyntaxError, or hand the page a string as if it were data.
+ *
+ * The body is read to be sure it is JSON, and the answer is rebuilt from it with the same status and headers, so
+ * what the caller gets is the answer that was checked. An error answer is not judged: it is an error whatever it
+ * holds, and `unwrap` says so from its status.
+ */
+async function judged(response: Response): Promise<Response> {
+  const noContent =
+    response.status === 204 ||
+    response.status === 205 ||
+    response.headers.get('Content-Length') === '0';
+  if (!response.ok || noContent) return response;
+
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    throw new ApiError({ kind: 'network' });
+  }
+  if (text !== '') {
+    let parsesAsJson = JSON_MEDIA_TYPE.test(response.headers.get('Content-Type') ?? '');
+    if (parsesAsJson) {
+      try {
+        JSON.parse(text);
+      } catch {
+        parsesAsJson = false;
+      }
+    }
+    if (!parsesAsJson) throw new ApiError({ kind: 'unexpected-response', status: response.status });
+  }
+  return new Response(text, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }

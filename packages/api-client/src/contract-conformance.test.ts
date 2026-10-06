@@ -304,3 +304,37 @@ describe('the real transport, driven once for every operation in the contract', 
     }
   });
 });
+
+describe('the answers the browser transport judges', () => {
+  /** The media types of every success response of the contract, resolving a response that is a reference. */
+  function successMediaTypes(): string[] {
+    const responses =
+      (contract as unknown as { components: { responses?: Record<string, unknown> } }).components
+        .responses ?? {};
+    const types: string[] = [];
+    for (const item of Object.values(contract.paths)) {
+      for (const method of HTTP_METHODS) {
+        const operation = item[method] as { responses?: Record<string, unknown> } | undefined;
+        for (const [status, declared] of Object.entries(operation?.responses ?? {})) {
+          if (!status.startsWith('2')) continue;
+          const reference = (declared as { $ref?: string }).$ref;
+          const response = (
+            reference === undefined ? declared : responses[reference.split('/').pop() ?? '']
+          ) as { content?: Record<string, unknown> } | undefined;
+          types.push(...Object.keys(response?.content ?? {}));
+        }
+      }
+    }
+    return types;
+  }
+
+  // Break caught: the premise of the transport's check of a success answer. It refuses a success that is not JSON
+  // (a proxy's page, a portal's login form) because the contract has no other kind. The day the contract declares a
+  // download, that check would refuse it, and this test says so first, naming what to change.
+  it('is JSON everywhere: no success of the contract is anything else, so the transport may refuse the rest', () => {
+    const types = successMediaTypes();
+
+    expect(types.length).toBeGreaterThan(100);
+    expect(new Set(types)).toEqual(new Set(['application/json']));
+  });
+});

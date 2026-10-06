@@ -6,7 +6,11 @@ import { currentRequestContext } from './request-context.js';
 
 export interface CreateLoggerOptions {
   readonly config: AppConfig;
-  /** Defaults to stdout. Tests pass an in-memory stream so they can search every byte logged. */
+  /**
+   * Defaults to stdout, written synchronously: the fault handlers log a crash and exit at once, and a line that is
+   * still in an asynchronous buffer at that moment is the line that says why. Tests pass an in-memory stream so
+   * they can search every byte logged.
+   */
   readonly destination?: DestinationStream;
 }
 
@@ -39,6 +43,6 @@ export function createLogger({ config, destination }: CreateLoggerOptions): Logg
         },
       },
     },
-    destination,
+    destination ?? pino.destination({ fd: 1, sync: true }),
   );
 }

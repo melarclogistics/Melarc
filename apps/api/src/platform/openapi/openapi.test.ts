@@ -81,6 +81,57 @@ describe('listDocumentedRoutes', () => {
   });
 });
 
+describe('diffRoutes', () => {
+  const probe = { method: 'GET', path: '/livez' };
+  const ghost = { method: 'GET', path: '/api/v1/ghosts/:ghostId' };
+  const hidden = { method: 'POST', path: '/api/v1/hidden' };
+
+  // Break caught: a route the description documents and the router does not serve going unreported. The
+  // application test below asserts an empty `documentedButNotLive`, which an implementation that never
+  // reports anything also satisfies, so this one feeds the function a documented route nobody serves.
+  it('reports a documented route that is not live, and nothing else', () => {
+    const diff = diffRoutes([probe], [probe, ghost]);
+
+    expect(diff.documentedButNotLive).toEqual([ghost]);
+    expect(diff.liveButNotDocumented).toEqual([]);
+  });
+
+  // Break caught: the reverse: a live route the description leaves out going unreported, which is how a
+  // route hidden with an exclusion decorator would escape.
+  it('reports a live route that is not documented, and nothing else', () => {
+    const diff = diffRoutes([probe, hidden], [probe]);
+
+    expect(diff.liveButNotDocumented).toEqual([hidden]);
+    expect(diff.documentedButNotLive).toEqual([]);
+  });
+
+  // Break caught: a route known by its path alone. The same path under another method is another route, so
+  // a documented POST does not make a live GET documented, and the reverse.
+  it('tells the two directions apart when the method is the only difference', () => {
+    const live = { method: 'GET', path: '/api/v1/things' };
+    const documented = { method: 'POST', path: '/api/v1/things' };
+
+    expect(diffRoutes([live], [documented])).toEqual({
+      liveButNotDocumented: [live],
+      documentedButNotLive: [documented],
+    });
+  });
+
+  it('reports nothing when the two agree, whatever the order', () => {
+    expect(diffRoutes([probe, hidden], [hidden, probe])).toEqual({
+      liveButNotDocumented: [],
+      documentedButNotLive: [],
+    });
+  });
+
+  it('reports every route that is on one side only, in the order given', () => {
+    const second = { method: 'DELETE', path: '/api/v1/ghosts/:ghostId' };
+
+    expect(diffRoutes([], [ghost, second]).documentedButNotLive).toEqual([ghost, second]);
+    expect(diffRoutes([ghost, second], []).liveButNotDocumented).toEqual([ghost, second]);
+  });
+});
+
 describe('the generated description of the real application', () => {
   // Break caught: a business route documented that does not exist, or the technical probes leaking into
   // a description that is compared with the product contract.

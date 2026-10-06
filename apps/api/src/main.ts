@@ -38,8 +38,9 @@ async function main(): Promise<void> {
 
   installProcessShutdown(app, { logger, shutdown: config.shutdown });
 
-  await listenAndMarkReady(app, config.http);
-  logger.info({ host: config.http.host, port: config.http.port }, 'api listening');
+  if (await listenAndMarkReady(app, config.http)) {
+    logger.info({ host: config.http.host, port: config.http.port }, 'api listening');
+  }
 }
 
 main().catch((error: unknown) => {

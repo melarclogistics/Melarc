@@ -25,8 +25,24 @@ export class ReadinessRegistry {
     this.checks.set(check.name, check);
   }
 
-  /** The names of the checks that fail or do not answer within the timeout. */
-  async failing(timeoutMs: number = DEFAULT_CHECK_TIMEOUT_MS): Promise<string[]> {
+  private running: Promise<string[]> | undefined;
+
+  /**
+   * The names of the checks that fail or do not answer within the timeout.
+   *
+   * Probes that arrive while a run is under way share it. A probe is unauthenticated and the checks are real
+   * queries on the pool that serves the business, so one run per probe would let a flood of probes (or one slow
+   * database and a patient load balancer) put as many queries on the pool as there are probes. The run is not
+   * kept once it ends: the next probe asks again.
+   */
+  failing(timeoutMs: number = DEFAULT_CHECK_TIMEOUT_MS): Promise<string[]> {
+    this.running ??= this.runChecks(timeoutMs).finally(() => {
+      this.running = undefined;
+    });
+    return this.running;
+  }
+
+  private async runChecks(timeoutMs: number): Promise<string[]> {
     const outcomes = await Promise.all(
       [...this.checks.values()].map(async (check) => {
         let timer: NodeJS.Timeout | undefined;

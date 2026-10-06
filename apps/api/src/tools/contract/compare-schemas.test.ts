@@ -154,6 +154,29 @@ describe('drift in a field a client relies on', () => {
       'SCHEMA_ACCESS',
     ]);
   });
+
+  // Break caught: `writeOnly` dropped from the access flags that are compared. A field the contract says is
+  // only ever sent to the server (a secret, a one-time code) could then start coming back in responses, or
+  // stop being accepted in requests, with no finding. Each direction, each flag and the finding's wording.
+  it('reports a changed write-only flag in either direction, naming the flag', () => {
+    const gained = drift({ type: 'string' }, { type: 'string', writeOnly: true });
+    const lost = drift({ type: 'string', writeOnly: true }, { type: 'string' });
+
+    expect(codes(gained)).toEqual(['SCHEMA_ACCESS']);
+    expect(gained[0]?.at).toBe('body');
+    expect(gained[0]?.message).toBe('writeOnly is false in the contract and true in the code.');
+    expect(codes(lost)).toEqual(['SCHEMA_ACCESS']);
+    expect(lost[0]?.message).toBe('writeOnly is true in the contract and false in the code.');
+    expect(drift({ type: 'string', writeOnly: true }, { type: 'string', writeOnly: true })).toEqual(
+      [],
+    );
+    // The two flags are separate rules: swapping one for the other changes both.
+    const swapped = drift({ type: 'string', readOnly: true }, { type: 'string', writeOnly: true });
+    expect(swapped.map((finding) => finding.message)).toEqual([
+      'readOnly is true in the contract and false in the code.',
+      'writeOnly is false in the contract and true in the code.',
+    ]);
+  });
 });
 
 describe('drift in what an object may contain', () => {

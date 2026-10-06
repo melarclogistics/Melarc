@@ -210,6 +210,7 @@ The logo must not be recolored merely to match interface tokens.
 | `gray.800` | `#344054` |
 | `gray.700` | `#475467` |
 | `gray.600` | `#667085` |
+| `gray.550` | `#7C879B` |
 | `gray.500` | `#8A94A6` |
 | `gray.400` | `#98A2B3` |
 | `gray.300` | `#D0D5DD` |
@@ -261,7 +262,7 @@ The logo must not be recolored merely to match interface tokens.
 |---|---:|---|
 | `color.border.subtle` | `#DDE1E7` | decorative separators only |
 | `color.border.default` | `#D0D5DD` | normal structural borders |
-| `color.border.control` | `#8A94A6` | control boundary where border is visually required |
+| `color.border.control` | `#7C879B` | control boundary where border is visually required (`gray.550`; 3:1 on every light surface of §4.6) |
 | `color.border.strong` | `#667085` | high-emphasis boundary |
 | `color.border.disabled` | `#DDE1E7` | disabled treatment |
 
@@ -402,14 +403,15 @@ A text field is identified by its boundary, so the boundary must reach 3:1 again
 
 | Border | `surface.default` | `surface.page` | `surface.subtle` | `surface.selected` |
 |---|---:|---:|---:|---:|
-| `border.control` `#8A94A6` | 3.06 thin | ✗ 2.88 | ✗ 2.78 | ✗ 2.66 |
+| `border.control` `#7C879B` | 3.62 | 3.41 | 3.29 | 3.15 thin |
 | `border.strong` `#667085` | 4.97 | 4.68 | 4.51 | 4.32 |
 | `border.default` `#D0D5DD` | ✗ 1.47 | ✗ 1.39 | ✗ 1.34 | ✗ 1.28 |
 | `border.subtle` `#DDE1E7` | ✗ 1.31 | ✗ 1.24 | ✗ 1.19 | ✗ 1.14 |
 
-- `border.control` is supported only for a control that sits on `surface.default`. On any other surface use
-  `border.strong`. It passes by 0.06 on white, a thinner margin than this system prefers; a darker value is a change
-  to a provisional token and is left to the Product Owner (§36).
+- `border.control` is supported on all four light surfaces. The Product Owner darkened it from `#8A94A6` (3.06 on white,
+  below 3:1 on every other surface) to `#7C879B` on 6 October 2026, so one token is the boundary of an input wherever it
+  sits. On `surface.selected` it passes by 0.15, the thinnest margin: prefer `border.strong` there. `border.strong` stays
+  the boundary where more emphasis is wanted, and `gray.500` is no longer used for a control boundary.
 - `border.default` and `border.subtle` are structural and decorative. They are never the only boundary of an input.
   A button is identified by its label, so `border.default` on a Secondary button is allowed.
 
@@ -455,7 +457,7 @@ Tokens only (written without the `color.` prefix of §4.3); the ratio is the tex
 | Tertiary: default, hover, pressed | none, `surface.subtle`, `#EAECF0` | `text.link`, `text.linkHover`, `text.linkHover` (8.40 on white, 9.46 and 8.81 on the hover and pressed fills) | no border |
 | Danger (outline; proposed) | `surface.default`, `status.danger.background`, `#EAECF0` | `status.danger.foreground` (8.85, 7.69, 7.48) | wording names the consequence; never a filled button, because a fill of `#8F1D27` would be almost the same colour as Primary hover `#971B26` |
 | Link: default, hover | none | `text.link`, `text.linkHover` | underlined in running text; no separate visited colour until a screen needs one |
-| Input: default, hover | `surface.default` | `text.primary`; placeholder `text.muted` (4.97) | `border.control` on white, `border.strong` elsewhere; hover `border.strong` |
+| Input: default, hover | `surface.default` | `text.primary`; placeholder `text.muted` (4.97) | `border.control` (`border.strong` on `surface.selected`); hover `border.strong` |
 | Input: invalid | `surface.default` | `text.primary`; message `status.danger.foreground` (8.85) | 2px `status.danger.foreground` border and an icon and the message and `aria-invalid`; never the red border alone |
 | Input: read-only | `surface.subtle` | `text.primary` (14.76) | `border.strong` (4.51); value stays selectable; not styled as disabled |
 | Input: disabled | `surface.disabled` | `text.disabled` (exempt) | `border.disabled`; native `disabled` |
@@ -742,7 +744,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
 |---|---|---|---|---|
 | **Neutral frame** | the seven pre-authentication routes (`/sign-in`, `/sign-in/mfa`, `/recovery`, `/recovery/complete`, `/setup/credential`, `/setup/mfa`, `/setup/mfa/complete`), and any address that matches no route | a skip link, a banner that names the product, the main landmark, the move of focus to the new page's heading after a navigation | navigation, a user menu, sign-out, session data, anything loaded for a signed-in user | `apps/ops-web/src/app/AppFrame.tsx` |
 | **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the neutral frame's skip link and landmarks, Ink primary navigation, a top context area for session identity and hub context | content for a caller who has no session | not built: the identity slice adds it around the signed-in routes |
-| **Setup layout** | `/setup/*`, which are reached by a grant and carry no session | see the open decision below | the authenticated shell, navigation | the neutral frame, unchanged |
+| **Setup layout** | `/setup/*`, which are reached by a grant and carry no session | the neutral frame (decided below) | the authenticated shell, navigation | the neutral frame, unchanged |
 
 - The route tree chooses the layout; a page never decides which frame it sits in.
 - Every layout keeps the skip link, the landmarks and the focus move after a navigation.
@@ -753,12 +755,12 @@ parts, because a pre-authentication page must never be able to show a signed-in 
 - A generic restyle does not wrap every route in the Ink shell.
 - The authenticated shell should feel spacious and stable; the neutral frame is quiet, with no Ink navigation.
 
-**Open decision (Product Owner): the setup layout.** The Ops spec says the setup routes render "no application shell"
-and must not render "the authenticated shell". The neutral frame is not the authenticated shell: it has a banner with
-the product name and no navigation. This document proposes that the setup layout is the neutral frame, with the product
-name (and the logo once an approved asset exists, §26) as identification only and not as navigation. If "no
-application shell" is read as forbidding even that banner, the setup routes need a bare layout with a skip link and a
-main landmark. Until this is decided, build nothing that makes the setup routes differ from the neutral frame.
+**Decided (Product Owner, 6 October 2026): the setup layout is the neutral frame.** The Ops spec says the setup routes
+render "no application shell" and must not render "the authenticated shell". The neutral frame is not the authenticated
+shell: it has a banner with the product name and no navigation. The product name (and the logo once an approved asset
+exists, §26) is identification only and never navigation. Build nothing that makes the setup routes differ from the
+neutral frame; if "no application shell" is later read as forbidding even that banner, the route tree changes, not the
+components.
 
 ### 13.2 Content width
 
@@ -829,12 +831,19 @@ Entry and 3.2.6 Consistent Help.
 ### What the automated checks cover today
 
 - Vitest (jsdom), `apps/ops-web/src/test-support/wcag.ts`: axe with the `wcag2a`, `wcag2aa`, `wcag21a` and `wcag21aa`
-  tags. Colour contrast is off there, because jsdom has no layout.
-- The browser test, `apps/ops-web/test/browser/shell.spec.ts` (Chromium only): the same tags with contrast, and no
-  sideways scrolling at 1280 and 768 px.
-- axe-core 4.13.0 has one WCAG 2.2 AA rule, `target-size`, and it is disabled by default. It needs layout, so enabling
-  it belongs in the browser test. The other new 2.2 criteria (focus not obscured, accessible authentication, redundant
-  entry, dragging, consistent help) have no automated rule and rest on the manual checks above.
+  tags, and keyboard, label, description and state tests of each component. Colour contrast is off there, because jsdom
+  has no layout.
+- The token test, `scripts/design-tokens.test.ts`: the token file equals this document, every pairing the components
+  use meets its threshold from the file's own values, no colour is written outside the file, and every focus rule draws
+  an outline.
+- The browser tests, `apps/ops-web/test/browser/`: `shell.spec.ts` against the production build and `components.spec.ts`
+  against the development-only showcase. They run axe with the WCAG 2.2 tags, so contrast and `target-size` are checked
+  with layout, at 1280, 768 and 320 px; no sideways scrolling at those widths; keyboard order, Enter and Space, and the
+  focus ring on every stop; text enlarged to 200%; forced colours (not WebKit, which Playwright cannot emulate) and
+  reduced motion; and a failed submit that moves focus to the first invalid field.
+- axe-core 4.13.0 has one WCAG 2.2 AA rule, `target-size`, which the browser tests enable. The other new 2.2 criteria
+  (focus not obscured, accessible authentication, redundant entry, dragging, consistent help) have no automated rule and
+  rest on the manual checks above.
 - An automated scan does not prove these behaviours. Before the first identity flow is accepted, record one
   keyboard-only pass and one screen-reader pass (a desktop screen reader with its usual browser, for example NVDA with
   Firefox or Chrome), with the versions used and what was done.
@@ -842,8 +851,10 @@ Entry and 3.2.6 Consistent Help.
 ### Supported browsers
 
 The promise stays: the current and previous major release of Chrome, Edge, Firefox and Safari on desktop
-([surfaces/ops-portal.md](../surfaces/ops-portal.md) §11). The Playwright browser tests run Chromium only and make no
-claim about the others, so acceptance on the other three is a manual check until more engines are added to them.
+([surfaces/ops-portal.md](../surfaces/ops-portal.md) §11). The Playwright browser tests run Chromium, Firefox and WebKit
+in CI (`MELARC_BROWSERS`; Chromium alone runs locally unless more are installed). Edge is Chromium and WebKit is
+Safari's engine, not Safari itself, and only the engines' current releases are tested: Safari as a product and the
+previous major releases remain a manual check.
 
 ---
 
@@ -1228,7 +1239,7 @@ If CSS custom properties are used, semantic tokens should map cleanly:
   --color-action-primary: #b4232e;
   --color-action-primary-hover: #971b26;
 
-  --color-border-control: #8a94a6;
+  --color-border-control: #7c879b;
 
   --focus-ring: #2563a6;
 }
@@ -1421,7 +1432,7 @@ Each pattern should eventually document:
 | Primitive palette values | **PROPOSED BASELINE** |
 | Interface crimson `#B4232E` | **PROVISIONAL** |
 | Interface ink `#172033` | **PROVISIONAL** |
-| Inter | **RECOMMENDED / NOT YET FINAL** |
+| Inter | **RECOMMENDED / NOT YET FINAL**; the foundation builds on the fallback stack with no font file (decided 6 October 2026) |
 | 4px spacing base | **PROPOSED BASELINE** |
 | Responsive breakpoint set | **PROPOSED BASELINE** |
 | Blue focus ring `#2563A6` | **PROPOSED BASELINE** |
@@ -1431,10 +1442,12 @@ Each pattern should eventually document:
 | Shared web component package | **NOT YET REQUIRED** |
 | Shared brand asset package | **POSSIBLE LATER** |
 | Supported pairings and state recipes (§4.6) | **PROPOSED BASELINE** |
-| Inverse focus, inverse link and Ink-shell indicator values (§4.6) | **PROPOSED** |
-| `border.control` margin on white (3.06:1) | **OPEN, Product Owner** (a provisional value) |
-| WCAG 2.2 AA design baseline against the surfaces' 2.1 AA working target (§14) | **RECONCILED**; the formal conformance level stays **OPEN** (master §40.6) |
-| Setup routes: neutral frame or a bare layout (§13.1) | **OPEN, Product Owner** |
+| Inverse focus, inverse link and Ink-shell indicator values (§4.6) | **APPROVED** as proposed (Product Owner, 6 October 2026); first used by the authenticated Ops shell |
+| `border.control` | **DECIDED** 6 October 2026: darkened to `#7C879B` (`gray.550`), 3:1 on every light surface (§4.6); a provisional value like the rest |
+| WCAG 2.2 AA design baseline against the surfaces' 2.1 AA working target (§14) | **DECIDED** 6 October 2026: components are tested to 2.2 AA. Raising the working-target wording of `surfaces/ops-portal.md` §11 and `vendor-pwa.md` §9 from 2.1 to 2.2 AA is the Product Owner's edit to those approved documents; the formal conformance level stays **OPEN** (master §40.6) |
+| Setup routes: neutral frame or a bare layout (§13.1) | **DECIDED** 6 October 2026: the neutral frame |
+| First implementation scope (COMPONENT_PATTERNS §42.2) | **CONFIRMED** 6 October 2026, built in three increments |
+| Browser coverage of the component acceptance (§14) | **DECIDED** 6 October 2026: Chromium, Firefox and WebKit in CI; Chromium locally unless the others are installed |
 | Source of the signed-in navigation entries (§22) | **OPEN**: no contract provides it yet |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |

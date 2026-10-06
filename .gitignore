@@ -36,11 +36,22 @@ yarn-error.log*
 *.key
 *.p12
 *.pfx
+# Signing keys and service files of the mobile builds (Android keystores, Apple auth keys, Firebase settings)
+*.jks
+*.keystore
+*.p8
+google-services.json
+GoogleService-Info.plist
+# PostgreSQL password files
+.pgpass
+pgpass.conf
 
 # Local databases and runtime data
 *.sqlite
 *.sqlite3
 *.db
+# Database dumps (pg_dump -Fc and friends): data, never source. Migrations are .sql files and stay tracked.
+*.dump
 .local-data/
 tmp/
 temp/

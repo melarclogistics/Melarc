@@ -7,14 +7,15 @@
  *                                  using the runtime password and the host and port from the file above
  *
  * It never overwrites a file, never prints a password, and writes nothing unless it can write everything it was
- * asked to. A file that already exists is left alone, and a DATABASE_URL in it that does not match the runtime
+ * asked to. Each file appears whole or not at all, so a killed run leaves nothing the next run would refuse to
+ * repair (createPrivateFile says how). A file that already exists is left alone, and a DATABASE_URL in it that does not match the runtime
  * password is reported as a note (by name, never by value), because that fails only when the API starts.
  *
  * Usage: node scripts/setup-env.ts [directory]    (default: the repository this script is in)
  */
 
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 
@@ -43,9 +44,25 @@ export interface SetupEnvResult {
   notes: string[];
 }
 
+/** How a file is created: exclusively (never replacing one), readable and writable by its owner only. */
+export interface CreateOptions {
+  flag: 'wx';
+  mode: number;
+}
+
+/** The file system operations that create a file. A test replaces them to see what is asked of the file system. */
+export interface FileOperations {
+  /** Writes the file (default: `fs.writeFileSync`). */
+  write: (path: string, content: string, options: CreateOptions) => void;
+  /** Gives an existing file a second name, failing when that name is taken (default: `fs.linkSync`). */
+  link: (existing: string, created: string) => void;
+}
+
 export interface SetupEnvOptions {
   /** Produces one password. Real randomness by default; a test passes a predictable one. */
   random?: () => string;
+  /** Replaces some file system operations; the rest are the real ones. */
+  files?: Partial<FileOperations>;
 }
 
 const randomPassword = (): string => randomBytes(24).toString('hex');
@@ -76,9 +93,14 @@ function runtimePasswordIn(pgEnv: string): string {
 
 function databaseUrl(pgEnv: string): string {
   const password = encodeURIComponent(runtimePasswordIn(pgEnv));
-  const host = valueIn(pgEnv, 'MELARC_PG_HOST') ?? DEFAULT_HOST;
+  const host = urlHost(valueIn(pgEnv, 'MELARC_PG_HOST') ?? DEFAULT_HOST);
   const port = valueIn(pgEnv, 'MELARC_PG_PORT') ?? DEFAULT_PORT;
   return `postgres://${RUNTIME_USER}:${password}@${host}:${port}/${API_DATABASE}`;
+}
+
+/** A host as a URL writes it: an IPv6 address has its colons inside brackets (`::1` becomes `[::1]`). */
+function urlHost(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
 function apiEnvFrom(example: string, url: string): string {
@@ -106,9 +128,42 @@ function apiEnvNote(apiEnv: string, pgEnv: string): string | undefined {
   return `The DATABASE_URL in ${API_ENV} does not use MELARC_PG_RUNTIME_PASSWORD from ${PG_ENV}, so the API will be refused by the database. Edit it, or delete ${API_ENV} to have it rebuilt.`;
 }
 
-/** Writes a new file with permissions private to the owner, refusing to replace anything. */
-function create(root: string, path: string, content: string): void {
-  writeFileSync(join(root, path), content, { flag: 'wx', mode: 0o600 });
+const PRIVATE_FILE: CreateOptions = { flag: 'wx', mode: 0o600 };
+
+/**
+ * Creates `path` (relative to `root`) with all of `content` or not at all, and never replaces a file. The content
+ * is written under another name in the same folder and then given its final name by a hard link, which fails
+ * when that name is taken. A run killed while it writes therefore leaves no truncated settings file, which the
+ * next run would refuse to repair because the file exists; at worst it leaves a `.env.tmp-*` file beside it
+ * (git-ignored like every `.env.*`, and refused by name by the source package) that the next run ignores.
+ *
+ * The file is made private to its owner (0600) where the file system has permission bits. On Windows Node
+ * applies no mode bits: a new file takes the access rights of its folder, so keep the checkout in your own
+ * profile. Only a file system without hard links falls back to a check followed by a rename.
+ */
+export function createPrivateFile(
+  root: string,
+  path: string,
+  content: string,
+  files: Partial<FileOperations> = {},
+): void {
+  const write = files.write ?? writeFileSync;
+  const link = files.link ?? linkSync;
+  const target = join(root, path);
+  const temporary = `${target}.tmp-${randomBytes(6).toString('hex')}`;
+  const taken = new SetupEnvError(`${path} already exists, so it was left alone.`);
+  try {
+    write(temporary, content, PRIVATE_FILE);
+    try {
+      link(temporary, target);
+    } catch {
+      // The name is taken, or this file system has no hard links: the first is refused, the second is moved.
+      if (existsSync(target)) throw taken;
+      renameSync(temporary, target);
+    }
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 /**
@@ -142,7 +197,7 @@ export function setupLocalEnv(root: string, options: SetupEnvOptions = {}): Setu
   }
 
   for (const [path, content] of writes) {
-    create(root, path, content);
+    createPrivateFile(root, path, content, options.files);
     result.created.push(path);
   }
   return result;

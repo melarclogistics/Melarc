@@ -184,7 +184,7 @@ These are not implemented by either task, and later tasks must not assume them:
 - **DTO validation and schema conformance.** The API validates only its own configuration. Request and response validation against the contract belongs to B0.6 and must exist before the first business route; B0.6 provides it (see its carried-forward notes for what remains).
 - **Trusted proxy topology.** The API trusts no proxy and ignores a client-supplied request id ([DEPLOYMENT_AND_ENVIRONMENTS.md](../../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.5).
 - **Explicit business request and upload limits.** Only the framework's default body limit applies today (same section).
-- **Full supported-browser acceptance.** The B0.3 browser smoke test runs Chromium only; the browsers and widths in [surfaces/ops-portal.md](../../surfaces/ops-portal.md) §11 are accepted separately.
+- **Full supported-browser acceptance.** The B0.3 browser smoke test ran Chromium only. The browser suite now runs Chromium, Firefox and WebKit in CI (see B0.10, UI foundation). Safari and Edge as products, and the previous major release of each, are accepted by hand (owed item 8 in B0.10); the widths in [surfaces/ops-portal.md](../../surfaces/ops-portal.md) §11 are tested at 320, 768 and 1280 px.
 
 ---
 
@@ -399,7 +399,7 @@ These are not implemented by B0.8, and later tasks must not assume them:
 - **The kept build.** After the browser tests, `scripts/ci-revision.ts clean` fails if any tracked file differs from the commit or an unignored file exists (a tool rewrote a file, or generated output was not committed). The job then keeps `melarc-build-<sha>-<attempt>` for 14 days: `apps/api/dist`, `apps/ops-web/dist`, `contracts/openapi.yaml` and `build-manifest.json`, which records the revision, the run and ref, the Node.js and pnpm versions, the lockfile and contract hashes and the SHA-256 of every file. It describes the files uploaded, which are the build output on disk after the browser tests ran; the Ops smoke test rebuilds `apps/ops-web/dist` and `test:e2e` restores the cached build, so that they are also what each test ran against rests on the build being deterministic (two from-scratch builds on Windows gave identical hashes; not yet shown on a Linux runner). Only the `integrated` job tested it, and it is kept only when every earlier step of that job succeeded (a failed run keeps the diagnostics instead), pull requests included, whose `<sha>` is then the merge commit: a later deployment task must use an artifact only when `CI result` succeeded for the same commit and `source.ref` is `refs/heads/main`. To check one, unpack it at the root of a checkout of that commit and run `node scripts/ci-revision.ts verify build-manifest.json`. It refuses a manifest that is empty, malformed or inconsistent (every field, path and hash is validated, and nothing unknown is accepted), reports files that changed, went missing or were added, and, in a Git checkout, requires HEAD to be the manifest's revision (outside a checkout it says that the revision was not checked). It establishes file contents and checkout only: matching checksums do not authenticate the artifact and do not show that CI succeeded, which is checked separately through the run and the branch. It does not compare the checkout's own files with the manifest's recorded inputs, because a Windows working copy can hold CRLF where CI held LF. It is build output, not a release package: it carries no dependencies, container image or signature, and the contract hash is of the file as checked out (LF on Linux; the baseline commit stores LF although some Windows working copies hold CRLF).
 - **Diagnostics.** When `integrated` fails it keeps `melarc-diagnostics-<sha>-<attempt>` for 7 days: `e2e/test-results` and `apps/ops-web/test-results` (process logs, the outbound-connection record, traces). The other jobs print their output only.
 - **Dependency audit.** `pnpm audit --audit-level high` fails `audit` for a high or critical advisory ([engineering-standards.md](../../standards/engineering-standards.md) section 3.3). It reads the registry's live advisory data, so a new advisory can turn an unchanged commit red and a registry outage fails it closed (re-run it). A recorded, time-bounded exception has no mechanism yet. At this commit it reports one moderate advisory and passes: esbuild 0.24.2 or older, reached only through drizzle-kit's `@esbuild-kit` packages.
-- **Not covered.** Windows and macOS runners, browsers other than Chromium, a cache of the downloaded browser (the pnpm store is the only cache), coverage thresholds, deployment or release, scheduled runs, and automatic bumps of the pinned action SHAs.
+- **Not covered.** Windows and macOS runners, browsers other than Playwright's three engines (Safari and Edge as products), a cache of the downloaded browsers (the pnpm store is the only cache), coverage thresholds, deployment or release, scheduled runs, and automatic bumps of the pinned action SHAs.
 
 ---
 
@@ -461,7 +461,7 @@ Each finding was reproduced on its own before it was changed, and each repair is
 | B-02 manifest verification | **Repaired** | `ci-revision.ts` validates the manifest strictly (schema, fields, canonical paths, git object names, hashes, non-empty files and roots, consistency with the contract) and `verify` states what it proves and what it does not |
 | B-03 WSL2 setup | **Repaired; WSL2 not run** | [DEVELOPMENT.md](../../DEVELOPMENT.md) names the two supported WSL2 setups and says what is unverified; `pnpm run infra:check` is the non-destructive check; the password and Playwright statements are corrected |
 | B-04 review archives | **Repaired** | `pnpm run package:source` (see B0.9). The earlier archive carried populated settings files: whether to replace those local passwords is the owner's decision, see below |
-| B-05 CI and setup evidence | **Partly closed: item 1 done, items 2 to 7 open** | the hosted run of `7509f51` is green (see B0.8's notes); the list below says what is still owed |
+| B-05 CI and setup evidence | **Partly closed: item 1 done, items 2 to 9 open** (8 and 9 are the UI evidence added on 6 October) | the hosted run of `7509f51` is green (see B0.8's notes); the list below says what is still owed |
 | D-01 to D-07 design documents | **Reconciled, with open decisions** | layout families, supported colour pairings and recipes, the accessibility baseline and its test matrix, the nine states and the error-copy boundary, the existing-code map and bounded first scope, asset, token and font ownership, formatting boundaries. `scripts/design-contrast.test.ts` holds the colour tables to their hex values |
 
 **Decisions this pass leaves to the Product Owner.** Whether the setup routes use the neutral frame or a bare layout
@@ -476,7 +476,7 @@ agree meanwhile); and whether the local passwords in the earlier review archive 
 
 Made on the committed `7509f51`, from a fresh forced run of every gate step on Windows, six independent read-only
 reviews of the code, probes against the built application and a mutation check of the highest-stakes existing logic.
-Nothing was committed. After the repairs below, with every step forced past Turbo's cache (Node 24.21.0, pnpm 11.1.3),
+These repairs were committed as `36f7b22`, whose [hosted run](https://github.com/melarclogistics/Melarc/actions/runs/37423750540) is green in all six jobs. After the repairs below, with every step forced past Turbo's cache (Node 24.21.0, pnpm 11.1.3),
 all 13 steps exit 0: root 627 passed and 1 skipped, Ops 114, api-client 214, harness 142 passed and 1 skipped, API
 1093 passed and 5 skipped, `test:db` 142 passed and 1 skipped, `test:browser` 7, `test:e2e` 16, `pnpm audit` one
 moderate advisory as before. Each repair has a test that failed on the old code first.
@@ -502,10 +502,202 @@ the contract's open response schemas where it promises a field never appears (`H
 status for `CSRF_VALIDATION_FAILED`; `IDEMPOTENCY_KEY_CONFLICT` absent from the operations' responses; the role-posture
 check not covering schema modification (SECURITY_DESIGN §14.6) and the context check not pairing a surface with a
 principal type (§14.1b, which names no pairing); no statement or idle-in-transaction timeouts; the browser client not
-pinned to `location.origin`; the retry policy's reliance on an error `status` nobody defines yet; a possible start-up
-race when `SIGTERM` arrives before the server listens (not reproduced, Linux only); no injectable API clock; the UI
+pinned to `location.origin`; no injectable API clock; the UI
 foundation (COMPONENT_PATTERNS §42.2) is on no roadmap line; SLICE-000 lists Vendor and Rider screens for which no
-client exists.
+client exists. (The retry policy's reliance on an error `status` and the possible start-up race on `SIGTERM`, both listed
+here when this pass was written, were repaired in the third pass below.)
+
+### UI foundation (6 October 2026)
+
+Built to [COMPONENT_PATTERNS §42.2](../../design/COMPONENT_PATTERNS.md) after the Product Owner settled the setup layout (the
+neutral frame), the typeface (the fallback stack, no font file), the control border (`#7C879B`), the inverse tokens
+(approved as proposed), the scope (§42.2 in three increments), the accessibility target (tested to WCAG 2.2 AA) and the
+browser coverage (Chromium, Firefox and WebKit in CI); each is recorded in DESIGN_SYSTEM §36. What exists, and where it
+differs from the plan, is COMPONENT_PATTERNS §42.3: the token file `apps/ops-web/src/styles/tokens.css`, Button, Link,
+Alert, Field, Input, LoadingIndicator, PageHeader, the restyled neutral frame, the error and not-found screens on the new
+components (copy unchanged), and a development-only showcase that the production build provably lacks. No navigation entry
+or permission-driven menu was built: caller-capability discovery is still an identity-contract dependency.
+
+It is held by `scripts/design-tokens.test.ts` (the token file equals the document and defines nothing else but three
+recorded tokens, the pairings the components use meet their thresholds, no colour written outside the file whether hex,
+named, quoted or derived, no `var()` of an undefined property, every focus rule draws an outline and no rule removes
+one), by tests of each component, and by browser tests of the real components: the exact keyboard order and the
+specified focus ring on every stop, Enter and Space, a failed submit that moves focus to the first invalid field, no
+sideways scrolling at 320, 768 and 1280 px, text enlarged to 200%, forced colours, reduced motion, hover states, and axe
+with WCAG 2.2 in the resting, invalid and success states. An independent review of the work found no blocker; its
+findings were fixed test-first (an `id` passed to an `Input` inside a `Field` orphaned the label; the guard let a quoted
+hex, a named colour and an `outline: none` on a non-focus rule through; an alert's action link changed colour on hover; a
+loading button changed fill under the pointer; the Button overwrote ARIA the caller set). Two mutation batches of the new
+logic left no survivor except one equivalent: the forced-colours border colour, which the browsers force themselves.
+
+With every step forced past Turbo's cache on Windows: root 651 passed and 1 skipped, Ops 165 (it was 114), `test:browser`
+24 on Chromium, and the other steps unchanged. The browser suite also passes on Firefox (24) and on WebKit (23 and one
+skip: Playwright cannot emulate forced colours there). WebKit for Windows never moves focus to a link on Tab, as Safari
+does by default, so the keyboard tests ask the engine and follow its real order; whether the Linux WebKit of CI does is
+unknown until it runs.
+
+Not proven: the three-engine run in CI (it runs locally here on Windows, which is not the CI runner), and anything that
+needs a person (the passes listed below). WebKit is Safari's engine, not Safari. Known and left: read-only and editable
+inputs look alike under forced colours, and a button that starts loading grows by its spinner.
+
+### Adversarial review before acceptance (6 October 2026, third pass)
+
+Made on `36f7b22` with the UI foundation on top, at the Product Owner's request, before this task's acceptance. Seven
+independent read-only reviews were told to break something: the HTTP runtime (against the built code and the libraries'
+source), the data layer and isolation, the client boundary, supply chain and CI, test integrity (52 mutants of the
+highest-stakes logic), the contract and SLICE-000's readiness, and completeness against this runbook. The lead also
+probed the built API over raw HTTP, timed the redaction and ran a Turbo probe. Every claim was reproduced or refuted
+before anything changed. Each repair has a test that failed on the old code, or a mutant of the new code that the tests
+kill; the mutation tool applies a change to the real file, runs the tests and restores the file byte for byte.
+
+**Test integrity.** Of the reviewer's 52 mutants, 42 were suspected survivors and 10 were controls. The 10 controls were
+killed, which shows that the commands run tests; all 42 survived, each a real gap (a boundary, an assertion that only
+looked, a branch only the database project reached). All 52 are killed now, in a re-run on the final tree. The lead's own
+mutants of the new code and guards (about 90) are killed too, after six of them survived at first and their tests were
+strengthened (a test that sat in a file the mutant's command did not run, a branch the end state could not tell apart, an
+array parameter, a line-ending case, a probe that Prettier had moved). Three helper agents closed the other gaps and ran
+about 300 mutants of their own; the lead re-ran every third mutant of each of their lists (102): all are killed except one,
+which the agent had already reported as equivalent (a branch that cannot change the result). One test I believed I had
+added was not in the file; a surviving mutant showed it, so every edit is now checked to have applied.
+
+| Found | Repaired |
+|---|---|
+| Redaction took cubic time on text such as `password-` repeated (20 s for 144 KB, the event loop blocked) | `scrub-text.ts` is linear scanners; 40,000 generated texts agree with the old expressions; half a megabyte of each hostile shape finishes in milliseconds. A JSON value cut short is now scrubbed to its end |
+| A path outside `/api/v1`, or a method a technical route does not take, got Express's HTML page, echoing the path and with no request id | `NotFoundFallback` answers every unmatched request with the contract envelope; routing is case-sensitive and strict |
+| A JSON body in UTF-7, UTF-16 or UTF-32 was decoded and handed to a handler | refused with 415 before it is read; a `__proto__` key anywhere in a body is refused; an empty chunked body no longer counts as `{}` |
+| Ajv's coercion accepted `0x10`, ` 5` and `1e1` as the integer, so `parseInt` and `Number` disagreed in a handler; its `uuid` accepted `urn:uuid:` and PostgreSQL then answered 500 | the text must be what the value is written as; strict uuid text |
+| A stop signal during start-up left a listener nobody closed, a process that answered 503 for ever and ignored a second signal | `listenAndMarkReady` does not listen when the instance is draining and closes the listener if it began draining while opening |
+| After `shutdown complete` a handle nobody registered could keep the process alive for the platform's whole grace period | the process is ended, non-zero and with a line saying why, if it has not ended by itself in five seconds |
+| `/readyz` ran its queries once per probe on the business pool; the error filter took any thrown object's 4xx `status` for the API's; stdout was asynchronous, so a fatal line could be lost at exit | probes share one run; only an `HttpException` or an error that says it is meant for the client keeps its status; stdout is synchronous |
+| The migrator skips a migration dated before the latest applied one and never notices an edited one | `migration-history.ts` refuses an edited or removed applied migration, a non-increasing `when`, a file the journal does not name and a new migration dated before one that ran |
+| drizzle's own transaction leaks the connection when BEGIN fails, returns a connection whose ROLLBACK failed to the pool and lets the transaction object work after it ended | `DatabaseService` owns its transaction: it destroys a connection it cannot trust, ends the object when the transaction ends and refuses a nested transaction (two connections per request would starve the pool) |
+| The migration lint read text, and its holes (`--` in a string, combined `ALTER TABLE` actions, a later owner change, `ALTER POLICY`, `GRANT … TO PUBLIC`, default privileges) let a table through; the database tests pinned exactly the B0 objects | a string-aware, statement-aware lint, and `catalog-invariants.ts`, which asks the migrated database for owner, row-level security, policies, PUBLIC and default privileges and is shown to fire on 14 deliberate violations; a first product-shaped table passes both |
+| The role posture missed replication, a predefined role (`pg_*`) and a `melarc.*` setting stored on the role or the database | all three are unsafe flags, proved with real roles |
+| A disposable database half made was left behind, the three local passwords could be one, a NUL in a URL part reached the driver, the environment guard let `Production` through, and `new Pool(url)` and `drizzle(url)` passed the lint that forbids a connection string | cleaned up, distinct, refused, allow-listed, linted |
+| `if (error)` is false for a 403 or 502 with an empty body, a JSON `null` or `0` and a 304, so a failed command could be shown as done; a 200 HTML page rejected with a bare `SyntaxError` | `unwrap` reads the status; the transport refuses a success that is not the contract's JSON (the contract has no other, and a test says so) and turns a missing answer into an `ApiError` of kind `network`; `ApiError` never carries server text |
+| Nothing owned the end of a session, and a failed query's "Try again" re-threw the cached failure without asking the server | `createQueryClient({ onSessionEnded })` and `endSession` clear the cache on `SESSION_INVALID` and `SESSION_SUPERSEDED`; the error page resets the failed queries first |
+| Nothing forbade raw `fetch`, XHR, web storage, `window.open`, `dangerouslySetInnerHTML` or `eval` in the Ops Portal | ESLint refuses them there, and `eslint-rules.test.ts` runs the real configuration over snippets, 37 checks. The token guard also refuses `@import`, a remote `url()`, `!important` and a token redeclared outside the token file |
+| CI guards could be satisfied by text that did not run: `pnpm install --frozen-lockfile=false` and `echo "pnpm ci"` passed; a mandatory command could sit inside a longer script; a test file could be run by nothing; dependency, lockfile and `.gitignore` policy had no test; the three-engine browser matrix was not pinned | each is held (`ci-workflow`, `workspace-pins`, `test-inventory`, `dependency-policy`, `gitignore`, `package-source`, `setup-env` and `turbo.json` tests); `setup-env` writes each file whole or not at all; the PostgreSQL image is pinned by digest |
+
+**Refuted.** A reviewer's claim that `forbidOnly` is dead under Turbo's strict environment: a probe shows `CI` passes
+through and an ordinary variable does not. Two reviewer items were design choices, not defects, and are in the decisions
+below.
+
+**Left, with the reason.** Validation work on a hostile body is dominated by Ajv, which collects every error; capping what
+is reported (already done) and bounding the contract's arrays (the contract's, not this repository's, to change) are the
+remedies. Response checks, `no-store` and cookie attributes are off in production by design and wait for the decision
+below. Ajv runs with `strict: false`, so a mistyped keyword in the contract is silent: a strict compile of the contract
+needs its extension keywords registered, which no test does yet. A route loader cannot reach the API client (the router
+is built before the providers). `Form` and `SecretInput` wait for the identity slice. `TechnicalEndpoint` is not limited
+to the two probes at run time, only by a test. Log lines from a logged user object can collide with `level`, `msg` and
+`request_id`. Node's own 400 and 431 answers are not logged. An `ApiException` cannot yet set a header (`Retry-After`).
+
+### Open decisions for the Product Owner
+
+None of these was decided by the work above, and none changes what bootstrap delivers. Each is a decision the first slices
+cannot avoid, so it is listed here with what the review found and, where there is one, the recommendation.
+
+**Platform**
+
+1. **How a migration or seed writes to a table with forced row-level security.** The owner and the migration role are
+   subject to the policies of a table that forces them, and a superuser is not available in a deployment, so a seed or a
+   backfill (the two bootstrap administrators, the default zone, role bundles, settings) has no sanctioned way in.
+   Recommended: a provisioning accessor that is true only for the migration session (compare `session_user` with the
+   migration role, which a `SET ROLE` or `set_config` cannot forge), `OR melarc.provisioning()` in the policy template, a
+   lint that every policy carries it, and a database test. Needed before SLICE-000's first table. `MIGRATION_AND_SEEDING.md`
+   §3.2 says what the seed must not do and not how it writes.
+2. **The security context can be set by the runtime role itself.** The role has to be able to set it, so `set_config(...,
+   false)` or `SET melarc.principal_type` on a pooled connection is possible for code that already runs as the API: row-level
+   security protects against a handler that forgets a filter, not against code that chooses to lie. Accept this and
+   record it in SECURITY_DESIGN §14.1, or bind the context (for example with a MAC the policies check).
+3. **`Cache-Control: no-store`.** The contract declares it on four responses and a test forbids declaring it elsewhere, while
+   GBT-W8 and SECURITY_DESIGN §794 require it on authentication and recovery responses, including the ones that carry the
+   TOTP seed and the access token. Apply it to every API response at the platform, or declare it on those operations.
+4. **The HTTP status vocabulary.** `CSRF_VALIDATION_FAILED` and about fifteen identity codes have no status in
+   `errors-and-enums.md` §4; `VALIDATION_FAILED` is 400 on some operations and 422 on others; some declared codes have no
+   matching response (`registerRiderDevice` and `STATE_CONFLICT`).
+5. **`ON DELETE CASCADE`, DELETE grants and `TRUNCATE`.** The standards say delete behaviour is explicit and never a
+   framework default; whether a cascade is an acceptable explicit choice, and whether the runtime role may DELETE at all,
+   is not said. The migration lint does not look at either.
+6. **A time-bounded audit exception needs pnpm 11.16 or later** (`audit.ignore`); the pin is 11.1.3. Bump the pin, or keep
+   failing the audit on every advisory.
+7. **Public-repository hygiene:** a licence, `SECURITY.md` with a contact, automatic dependency updates, secret scanning and
+   push protection, `CODEOWNERS` for the files that hold the guards (a pull request can edit `scripts/` and the workflow
+   that check it), and a ruleset that requires code-owner review and SHA-pinned actions.
+8. **The PostgreSQL image is now pinned by digest** (`postgres:18.6-bookworm@sha256:afc7e2d4…`), so a rebuilt tag cannot change
+   what CI and local development run. The cost is that a security update to the image is a deliberate edit of three lines.
+   Revert it, or add an automatic update, if that is not wanted.
+9. **The design documents are still marked draft.** The decisions that were taken (neutral frame, typeface, control border,
+   inverse tokens, scope, WCAG 2.2 AA, three engines) are recorded in DESIGN_SYSTEM §36; whether the documents become
+   active is yours.
+10. **Whether owed items 8 and 9 below gate bootstrap acceptance**, or only the first identity flow, as DESIGN_SYSTEM §14 says.
+
+**Contract and specification** (found by the review of SLICE-000's readiness; none of these files was edited)
+
+11. A privileged identity with no active factor has no consistent sign-in outcome: `AC-SLICE-000-32` says a challenge,
+    `MFA_ENROLMENT_REQUIRED` says another, and no operation declares the code.
+12. `completeCredentialRecovery` declares the vendor device cookie for every answer, so a staff recovery (a 204 with no
+    cookie) would fail the runtime validator. The contract needs a principal-conditioned declaration.
+13. What the two bootstrap administrators can reach is unresolved (every hub, or the seeded hub): rows 1, 2 and 12 of
+    SLICE-000's walkthrough depend on it, and `staff.identity.create` and `.approve` are "own hub" keys.
+14. `riderSignIn` checks a locked rider before a rider that is not active in the contract and the other way round in
+    SECURITY_DESIGN, the feature document and `AC-SLICE-000-109`.
+15. `SESSION_SUPERSEDED` is declared by no operation, though `AC-SLICE-000-14` needs every vendor session operation to
+    return it. Seven operations declare `RATE_LIMITED` and belong to none of the six buckets, and the rider's rate-limit key
+    differs between documents.
+16. Undefined for the identity slice: the source of every `reason_code`; the state preconditions of `resetStaffMfa`, the
+    recovery operations, `revokeSession` and the rider device operations; the order in which refusals are evaluated; whether
+    `registerRiderDevice` may bind a new handset after a revocation; TOTP parameters; cookie lifetimes; email
+    normalisation; the vendor delivery channel when both exist; whether a bundle edit ends live sessions; who may reject a
+    privileged profile.
+17. The contract states 120 live error codes in prose and lists 121 in its tables and in the enum.
+
+The 14 questions the reviewer put to the Product Owner are in this list. SLICE-000's definition of ready is not
+satisfied until items 11 to 16 have answers.
+
+### Acceptance record (6 October 2026)
+
+What the bootstrap is, on the evidence one Windows machine can give. Every step ran forced past Turbo's cache
+(`TURBO_FORCE`) on one tree, after the repairs above: Node 24.21.0, pnpm 11.1.3, Windows 11, PostgreSQL 18.6 in Docker
+Desktop, Chromium, Firefox and WebKit through Playwright 1.63.0 (`MELARC_BROWSERS=chromium,firefox,webkit`, as CI sets
+it).
+
+| Step | Observed |
+|---|---|
+| frozen install, `format:check`, `lint`, `typecheck` (root and four workspaces) | exit 0 |
+| `api-client:check`, `build`, `contract:check`, `db:check` | exit 0; `contract:check` compared 0 operations, because none is implemented |
+| `pnpm test` | root 1181 (1179 passed, 2 skipped: the symlink test of `package-source` and the POSIX-mode test of `setup-env`), Ops 216, api-client 250, API 1401 passed and 5 skipped (the real `SIGTERM` tests Windows cannot run), harness 191 passed and 1 skipped |
+| `test:db` | 170 passed, 1 skipped (a real `SIGTERM`) |
+| `test:browser` | 71 passed, 1 skipped (WebKit cannot emulate forced colours), over three engines |
+| `test:e2e` | 16 passed |
+| `pnpm audit --audit-level high` | exit 0; one moderate advisory, as before |
+
+The gate leaves the tree as it found it (`git status` is the same before and after).
+
+**From a clean copy.** The same thirteen steps, forced, ran on a copy of the working tree: 422 files, tracked and untracked,
+nothing ignored (no `node_modules`, build output or `tmp/`), made into a Git repository of its own, with the two
+git-ignored settings files copied in and nothing generated or rotated. Every step exited 0 with the same counts as above.
+That shows that nothing machine-local is needed (the git-ignored `tmp/`, a cache, a built `dist`); it is the same
+machine and operating system, so it is not the Linux or WSL2 proof, and it ran on files that were not yet committed.
+
+| Task | The plan's exit criterion | Evidence | Held |
+|---|---|---|---|
+| B0.1 | clean install, deterministic root commands, no domain implementation | frozen install; the pin, dependency-policy and repository-shape tests; `IMPLEMENTED_OPERATIONS` is empty and the route inventory holds only the two probes | proven here, and by the hosted runs of `7509f51` and `36f7b22` |
+| B0.2 | boots, refuses bad configuration, shuts down cleanly, no fake endpoints | configuration, process, shutdown and route-inventory tests; every unmatched request answers in the contract envelope | proven here; the five real-`SIGTERM` tests ran only on hosted Linux, whose logs nobody has read (owed item 1) |
+| B0.3 | production build and smoke tests pass, nothing fabricated | build; 71 browser tests on three engines; no navigation, user menu or session data | proven here; the three-engine run on the Linux runner is not yet seen |
+| B0.4 | fresh migrations, a non-owner runtime, proven transactions, safe teardown | `test:db`: migrations from empty and repeated, the history check, the catalogue invariants, the runtime role's refusals, pooled context, the transaction runner, the reset tools' refusals | proven here against a real server |
+| B0.5 | deterministic generation, freshness, Ops imports generated types, a separate browser transport | `api-client:check`, 250 client tests, `unwrap` and `ApiError`, the no-duplicate-wire-types test | proven |
+| B0.6 | deliberate mismatches fail the conformance checks | the comparator tests, now including a real contract operation, the runtime validator tests, the 52 mutants | proven for the machinery; there is no live product operation to compare |
+| B0.7 | a real browser, API and database journey, safe teardown | `test:e2e` 16, the harness's 191 | proven here |
+| B0.8 | failures propagate, artifacts match the tested revision, CI works from clean | the workflow's guard tests; hosted runs of `7509f51` and `36f7b22`, all jobs green | **partly**: the failure rehearsal, the branch rule and a downloaded-build check are the owner's (owed items 2 to 4) |
+| B0.9 | a clean checkout installs, starts, migrates, runs, tests and stops | the clean-clone proof of B0.9 and the one below | proven on Windows; WSL2, Linux, `infra:up` from nothing and `down --volumes` are the owner's (owed items 5 and 6) |
+| B0.10 | the foundations are ready for product slices | everything above | **ready in code; not accepted**, see below |
+
+**Where this leaves the bootstrap.** The code, the tests and the guards are complete and green on this machine, and the
+review above left no known defect in them. The bootstrap is not accepted by this runbook's own terms: evidence only the
+Product Owner can produce is owed (items 1 to 9 below, item 1 again for this commit), and `SLICE-000` is not ready to
+begin while the specification and contract findings in the decisions above (11 to 16) have no answer, because an
+implementation would have to invent one. Nothing here has been run on GitHub for this commit.
 
 ### Evidence still owed (audit B-05)
 
@@ -538,6 +730,14 @@ bootstrap is not accepted without them. Record each result with its date and the
 7. **The latest suites on the final commit:** `pnpm test`, `pnpm run test:db`, `pnpm run test:browser` and
    `pnpm run test:e2e`, with the tests that Windows skips accounted for by a Linux, WSL2 or CI run: five API process
    tests, one under `test:db`, one harness test and the symlink test in `package-source.test.ts`.
+8. **The recorded passes the design system requires before the first identity flow is accepted** (DESIGN_SYSTEM §14):
+   one keyboard-only pass and one screen-reader pass (a desktop screen reader with its usual browser, for example NVDA
+   with Firefox or Chrome) of the showcase and the shell, with the versions used and what was done; a pass in Windows
+   high-contrast mode; and Safari and Edge as products, and the previous major release of each browser, checked by hand.
+9. **The surface-document wording, the Product Owner's edit.** `surfaces/ops-portal.md` §11 and `surfaces/vendor-pwa.md`
+   §9 say "WCAG 2.1 level AA is the working target; it is not a conformance claim". The decision is that components are
+   tested to 2.2 AA (2.2 adds criteria to 2.1 AA and drops only 4.1.1), so the sentence becomes "WCAG 2.2 level AA is the
+   working target; it is not a conformance claim". The approved documents were not edited.
 
 ### Validation scope
 

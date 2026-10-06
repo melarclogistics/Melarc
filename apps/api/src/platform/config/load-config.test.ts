@@ -114,6 +114,7 @@ describe('loadConfig: refused environments', () => {
     ['HTTP_HOST', ''],
     ['HTTP_HOST', 'host name'],
     ['SHUTDOWN_TIMEOUT_MS', '15'],
+    ['SHUTDOWN_TIMEOUT_MS', '999'],
     ['SHUTDOWN_TIMEOUT_MS', '300001'],
     ['SHUTDOWN_TIMEOUT_MS', 'soon'],
     ['SHUTDOWN_DRAIN_DELAY_MS', '1.5'],
@@ -185,6 +186,44 @@ describe('loadConfig: refused environments', () => {
     expect(problemsFor(env)).toEqual([
       expect.objectContaining({ key: 'DATABASE_MIGRATION_URL', problem: 'invalid' }),
     ]);
+  });
+
+  // Break caught: the migration URL going unreported when another key is wrong too, so the operator fixes the one
+  // they were told about, starts the API again and is refused a second time for the credential that was there all along.
+  it('reports the migration database URL together with every other invalid key', () => {
+    const env = {
+      ...MINIMAL_ENV,
+      HTTP_PORT: '0',
+      DATABASE_MIGRATION_URL: 'postgres://melarc_migration_elevated:x@127.0.0.1/melarc_dev',
+    };
+    expect(problemsFor(env).map((problem) => problem.key)).toEqual([
+      'HTTP_PORT',
+      'DATABASE_MIGRATION_URL',
+    ]);
+  });
+
+  // Break caught: a bound moved by one. The values refused above are one step outside each bound; these are
+  // the bounds themselves, which must be accepted.
+  it.each([
+    ['HTTP_PORT', '1'],
+    ['HTTP_PORT', '65535'],
+    ['SHUTDOWN_TIMEOUT_MS', '1000'],
+    ['SHUTDOWN_TIMEOUT_MS', '300000'],
+    ['SHUTDOWN_DRAIN_DELAY_MS', '0'],
+    ['DATABASE_POOL_MAX', '1'],
+    ['DATABASE_POOL_MAX', '100'],
+  ])('accepts %s=%j', (key, value) => {
+    expect(loadConfig({ ...MINIMAL_ENV, [key]: value }).ok).toBe(true);
+  });
+
+  it('accepts the largest drain delay when the timeout is longer', () => {
+    expect(
+      loadConfig({
+        ...MINIMAL_ENV,
+        SHUTDOWN_DRAIN_DELAY_MS: '60000',
+        SHUTDOWN_TIMEOUT_MS: '120000',
+      }).ok,
+    ).toBe(true);
   });
 
   // Break caught: an empty value, as left by a copied .env template, counted as migration credentials.

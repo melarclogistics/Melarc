@@ -66,6 +66,9 @@ export interface ResponseParts {
 
 const CONTRACT_ID = 'urn:melarc:contract';
 
+/** The hyphenated text form of a UUID, in either case, and nothing around it. */
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const requireModule = createRequire(import.meta.url);
 
 /**
@@ -129,6 +132,31 @@ function anchorReferences(value: Json): Json {
         : anchorReferences(child),
     ]),
   );
+}
+
+/**
+ * Whether Ajv read this text as a value of another type that the text does not write. Its coercion takes
+ * `0x10`, ` 5`, `1e1`, `+5` and `05` for an integer, so the parameter validates while the handler, which is
+ * given the text as it was sent, may read it another way (`parseInt` and `Number` disagree on those). A value
+ * is accepted only when the text is exactly what the number or boolean would be written as, and a number is
+ * finite.
+ */
+function readAsOther(sent: unknown, read: unknown): boolean {
+  if (typeof sent === 'string') {
+    if (typeof read === 'number') return !Number.isFinite(read) || String(read) !== sent;
+    if (typeof read === 'boolean' || read === null) return String(read) !== sent;
+    if (Array.isArray(read)) return read.length !== 1 || readAsOther(sent, read[0]);
+    return false;
+  }
+  if (Array.isArray(sent) && Array.isArray(read)) {
+    return sent.some((item, index) => readAsOther(item, read[index]));
+  }
+  return false;
+}
+
+/** The names of the parameters in `sent` that were read as another type that their text does not write. */
+function namesReadAsOther(sent: Record<string, unknown>, read: Record<string, unknown>): string[] {
+  return Object.keys(read).filter((name) => readAsOther(sent[name], read[name]));
 }
 
 function decodeSegment(segment: string): string {
@@ -215,6 +243,9 @@ export class ContractValidator {
     this.coercingAjv = new Ajv({ ...options, coerceTypes: 'array' });
     for (const ajv of [this.strictAjv, this.coercingAjv]) {
       addFormats(ajv);
+      // ajv-formats' own `uuid` allows a `urn:uuid:` prefix. That text is valid here, refused by the database
+      // (22P02, a server error and an alert) and a second way to write one identifier.
+      ajv.addFormat('uuid', UUID_TEXT);
       ajv.addSchema({ $id: CONTRACT_ID, components: contract.components ?? {} }, CONTRACT_ID);
     }
 
@@ -249,32 +280,41 @@ export class ContractValidator {
 
     // A parameter's violation is named by the parameter (`idempotency-key`), without the path inside its value.
     const named = (pointer: string): string => pointer.split('/')[1] ?? '';
-    const checks: [ParameterLocation, Record<string, unknown>][] = [
-      ['path', structuredClone({ ...request.params })],
-      ['query', structuredClone({ ...request.query })],
-      [
-        'header',
-        structuredClone(
-          Object.fromEntries(
-            Object.entries(request.headers).filter(([, value]) => value !== undefined),
-          ),
-        ),
-      ],
+    const sentHeaders = Object.fromEntries(
+      Object.entries(request.headers).filter(([, value]) => value !== undefined),
+    );
+    // What was sent, and a copy of it that Ajv reads as the type the contract gives and so changes.
+    const checks: [ParameterLocation, Record<string, unknown>, Record<string, unknown>][] = [
+      ['path', { ...request.params }, structuredClone({ ...request.params })],
+      ['query', { ...request.query }, structuredClone({ ...request.query })],
+      ['header', sentHeaders, structuredClone(sentHeaders)],
       // Only the cookies the operation declares are looked at. That one is present and well formed says
       // nothing about whether it is a valid session: that is for the guard.
-      ['cookie', Object.fromEntries(parseCookieHeader(request.headers.cookie))],
+      [
+        'cookie',
+        Object.fromEntries(parseCookieHeader(request.headers.cookie)),
+        Object.fromEntries(parseCookieHeader(request.headers.cookie)),
+      ],
     ];
-    for (const [location, value] of checks) {
+    for (const [location, sent, read] of checks) {
       const compiled = prepared.parameters[location];
-      if (compiled === undefined || compiled.validate(value)) continue;
-      violations.push(
-        ...violationsOf(
-          location,
-          compiled.validate.errors,
-          (path) => this.pointers.pointer(compiled.schema, path),
-          named,
-        ),
-      );
+      if (compiled === undefined) continue;
+      if (!compiled.validate(read)) {
+        violations.push(
+          ...violationsOf(
+            location,
+            compiled.validate.errors,
+            (path) => this.pointers.pointer(compiled.schema, path),
+            named,
+          ),
+        );
+        continue;
+      }
+      // Valid as read. It must also be the text of what it was read as: see readAsOther. The name is the
+      // contract's, because only a parameter the contract declares has a type to be read as.
+      for (const name of namesReadAsOther(sent, read)) {
+        violations.push({ in: location, pointer: name, rule: 'type' });
+      }
     }
 
     if (prepared.body !== undefined) {

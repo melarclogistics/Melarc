@@ -95,12 +95,19 @@ export function redactUrl(url: string): string {
   return parsed.toString();
 }
 
-/** What the database command needs from this machine: its PostgreSQL settings, and what Windows needs to run. */
+/**
+ * What the database command needs from this machine: its PostgreSQL settings, and what Windows needs to run.
+ * SystemRoot is read by name, as ManagedProcess does, and not found by comparing the names in the environment:
+ * Windows names are not case-sensitive, and a process started from a shell that writes them in capitals
+ * (`SYSTEMROOT`) must pass it on all the same.
+ */
 function commandEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith('MELARC_PG_') || key === 'SystemRoot') env[key] = value;
+    if (key.startsWith('MELARC_PG_')) env[key] = value;
   }
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot !== undefined) env.SystemRoot = systemRoot;
   return env;
 }
 

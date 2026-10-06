@@ -1,0 +1,92 @@
+/*
+ * Element defaults and the neutral frame (design/DESIGN_SYSTEM.md section 13.1). Every colour, size and space comes
+ * from tokens.css: scripts/design-tokens.test.ts fails if a colour is written here. Components bring their own
+ * styles; there is no global rule for buttons or links.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-page);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body-md-size);
+  font-weight: var(--text-body-md-weight);
+  line-height: var(--text-body-md-line-height);
+  overflow-wrap: anywhere;
+}
+
+p {
+  margin: 0 0 var(--space-4);
+}
+
+/*
+ * Focus (sections 4.3 and 4.6): a ring outside a band that separates it from the control. The ring is an outline,
+ * because forced-colours mode keeps outlines and drops box-shadow; the band is only a refinement and may vanish.
+ */
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
+}
+
+.skip-link {
+  position: absolute;
+  top: -4rem;
+  left: var(--space-2);
+  z-index: 10;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-link);
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-label-md-line-height);
+  text-decoration: underline;
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
+}
+
+.app-header {
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-surface-default);
+}
+
+.app-name {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.app-main {
+  max-width: var(--layout-content-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.page-heading {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-heading-xl-size);
+  font-weight: var(--text-heading-xl-weight);
+  line-height: var(--text-heading-xl-line-height);
+}
+
+@media (max-width: 48rem) {
+  .app-header,
+  .app-main {
+    padding-right: var(--space-4);
+    padding-left: var(--space-4);
+  }
+}

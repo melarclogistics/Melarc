@@ -65,6 +65,32 @@ describe('generateWireTypes', () => {
     expect(output).not.toMatch(/^\s+flag: boolean;$/m);
   });
 
+  // Break caught: the generator's option that opens every object the contract does not close. It adds
+  // `[key: string]: unknown` to each of them, which makes any misspelt property a valid one and hides the
+  // very mistakes the client exists to catch. An object is open only when the contract says so itself.
+  it('adds no index signature to an object the contract does not declare open', async () => {
+    const output = await generateWireTypes(FIXTURE);
+
+    expect(output).toMatch(/^\s+Thing: \{$/m);
+    expect(output).toMatch(/^\s+ThingCreate: \{$/m);
+    expect(output).not.toMatch(/\[key: string\]/);
+  });
+
+  // Break caught: the check above passing because the pattern it looks for is not what the generator writes.
+  // An object the contract does declare open, by name, as a map of strings, does get an index signature, and
+  // this is what the first test would see if the option were on.
+  it('writes an index signature for a map the contract declares, so the check above can fail', async () => {
+    const withMap = FIXTURE.replace(
+      '        flag: { type: boolean, default: false }\n',
+      '        flag: { type: boolean, default: false }\n        labels: { type: object, additionalProperties: { type: string } }\n',
+    );
+    expect(withMap, 'the fixture no longer has the line this test extends').not.toBe(FIXTURE);
+
+    const output = await generateWireTypes(withMap);
+
+    expect(output).toMatch(/^\s+labels\?: \{\s+\[key: string\]: string;\s+\};$/m);
+  });
+
   // Break caught: a generator that ignores the contract's nullability, typing a value the server can
   // send as null as always present. Both spellings occur in the real contract.
   it('types a nullable property as nullable, in both the 3.0 and the 3.1 spelling', async () => {

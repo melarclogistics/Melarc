@@ -66,13 +66,19 @@ export function assertMigrationIdentity(user: string): void {
   }
 }
 
-/** A local destructive command must not run with a deployed environment in scope. */
+/**
+ * A local destructive command runs only where the environment is local, or says nothing. It allows what it knows
+ * to be local and refuses everything else: a list of the deployed names would let `Production`, `prod` or a
+ * name with a space in it through, which is the kind of mistake this exists for.
+ */
 export function assertNotDeployedEnvironment(
   env: Readonly<Record<string, string | undefined>>,
 ): void {
-  if (env.APP_ENV === 'staging' || env.APP_ENV === 'production') {
+  const appEnv = env.APP_ENV;
+  if (appEnv !== undefined && appEnv !== '' && appEnv !== 'local') {
     throw new UnsafeTargetError(
-      `refusing to run a local database command with APP_ENV=${env.APP_ENV}`,
+      // Echoed so that the operator sees which value it was, with anything that is not a word character made visible.
+      `refusing to run a local database command with APP_ENV=${appEnv.slice(0, 40).replaceAll(/[^\w.-]/g, '?')}: only an unset APP_ENV or local is accepted`,
     );
   }
 }

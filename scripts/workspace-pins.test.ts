@@ -94,7 +94,28 @@ describe('package manager pin', () => {
     });
   }
 
-  for (const rejected of ['pnpm@11', 'pnpm@^11.1.3', 'pnpm@latest', 'npm@10.9.2', 'pnpm', '']) {
+  // The rest are exact versions with something after them (a pre-release, a second hash, a command, a line break):
+  // a pattern that stops matching at the end of the version would accept every one of them.
+  const withTrailingText = [
+    'pnpm@11.1.3-beta.1',
+    'pnpm@11.1.3.4',
+    'pnpm@11.1.3 ',
+    'pnpm@11.1.3\n',
+    'pnpm@11.1.3\nnpm@10.9.2',
+    'pnpm@11.1.3; latest',
+    'pnpm@11.1.3+sha512.0a1b2c3d garbage',
+    'pnpm@11.1.3+sha512.0a1b2c3dXYZ',
+    'xpnpm@11.1.3',
+  ];
+  for (const rejected of [
+    'pnpm@11',
+    'pnpm@^11.1.3',
+    'pnpm@latest',
+    'npm@10.9.2',
+    'pnpm',
+    '',
+    ...withTrailingText,
+  ]) {
     it(`rejects packageManager ${JSON.stringify(rejected)}`, () => {
       const packageJson = { ...GOOD_PACKAGE_JSON, packageManager: rejected };
       assert.deepEqual(codesFor({ packageJson }), ['PACKAGE_MANAGER_FORMAT']);
@@ -170,14 +191,87 @@ describe('CI workflow pins', () => {
     });
   }
 
-  for (const run of ['pnpm install --frozen-lockfile', 'pnpm ci']) {
+  // Break caught: text that only mentions a frozen install, or turns the freeze off, counted as the install: the
+  // flag switched off or negated, the command named inside an echo or a comment, the command not at the start of
+  // its line, another install run when the frozen one fails, a flag that only starts like the real one.
+  const notAFrozenInstall = [
+    'pnpm install --frozen-lockfile=false',
+    'pnpm install --frozen-lockfile=0',
+    'pnpm install --frozen-lockfile --no-frozen-lockfile',
+    'pnpm install --no-frozen-lockfile --frozen-lockfile',
+    'pnpm install --frozen-lockfile=false --frozen-lockfile',
+    'pnpm install --frozen-lockfilee',
+    'pnpm install --frozen-lockfile-ish',
+    'echo "pnpm ci"',
+    'echo pnpm install --frozen-lockfile',
+    'echo "pnpm install --frozen-lockfile"',
+    '# pnpm install --frozen-lockfile',
+    '    # pnpm install --frozen-lockfile',
+    '# pnpm ci',
+    'pnpm install # --frozen-lockfile',
+    'pnpm install --frozen-lockfile || pnpm install',
+    'if false; then pnpm install --frozen-lockfile; fi',
+    'echo start && pnpm install --frozen-lockfile',
+    'pnpm cinema',
+    'pnpm ci-extra',
+    'pnpm run install --frozen-lockfile',
+    'pnpm install --frozen-lockfile=',
+    'pnpm install --frozen-lockfile --frozen-lockfile=trueish',
+    'pnpm install && pnpm run build --frozen-lockfile',
+    'pnpm install --frozen-lockfile && pnpm install --no-frozen-lockfile',
+    'pnpm install --frozen-lockfile; pnpm install --frozen-lockfile=false',
+    'npm ci',
+    'yarn install --frozen-lockfile',
+    'echo "pnpm ci"\npnpm install',
+    '# pnpm install --frozen-lockfile\npnpm install',
+  ];
+  for (const run of notAFrozenInstall) {
+    it(`rejects ${JSON.stringify(run)} as the only install`, () => {
+      assert.deepEqual(codesForSteps(CHECKOUT, PNPM_SETUP, NODE_SETUP, { run }), [
+        'CI_FROZEN_INSTALL',
+      ]);
+    });
+  }
+
+  it('rejects an install that is only named in the name of a step', () => {
+    const named = { name: 'pnpm install --frozen-lockfile', run: 'pnpm run build' };
+    assert.deepEqual(codesForSteps(CHECKOUT, PNPM_SETUP, NODE_SETUP, named), ['CI_FROZEN_INSTALL']);
+  });
+
+  const frozenInstalls = [
+    'pnpm install --frozen-lockfile',
+    'pnpm ci',
+    '  pnpm install --frozen-lockfile  ',
+    'pnpm install --frozen-lockfile=true',
+    'pnpm install --frozen-lockfile --ignore-scripts',
+    'pnpm install --frozen-lockfile && pnpm run build',
+    'pnpm install --frozen-lockfile # the lockfile decides',
+    'pnpm install --frozen-lockfile # never --no-frozen-lockfile',
+    'echo start\npnpm install --frozen-lockfile\necho done',
+    '# no floating installs\npnpm install --frozen-lockfile',
+    'pnpm install \\\n  --frozen-lockfile',
+    'pnpm install --frozen-lockfile\r\npnpm run build',
+  ];
+  for (const run of frozenInstalls) {
     it(`accepts ${JSON.stringify(run)} as the install`, () => {
       assert.deepEqual(codesForSteps(CHECKOUT, PNPM_SETUP, NODE_SETUP, { run }), []);
     });
   }
 
   // Break caught: a mutable tag or branch lets an action's code change without a reviewed commit.
-  const mutableRefs = ['v7', 'v7.0.1', 'main', SHA.slice(0, 39), SHA.toUpperCase()];
+  // The last four are a full SHA with something after it or in front of the hex digits: a reference that merely
+  // contains the SHA is not the SHA, and the text after it can name another commit, tag or path.
+  const mutableRefs = [
+    'v7',
+    'v7.0.1',
+    'main',
+    SHA.slice(0, 39),
+    SHA.toUpperCase(),
+    `${SHA}a`,
+    `${SHA}-v7`,
+    `${SHA} extra`,
+    `v${SHA}`,
+  ];
   for (const ref of mutableRefs) {
     it(`rejects action reference @${ref}`, () => {
       const unpinned = { uses: `actions/checkout@${ref}` };

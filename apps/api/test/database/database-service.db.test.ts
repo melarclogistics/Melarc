@@ -97,15 +97,24 @@ describe('readiness against the real server', () => {
   });
 });
 
+/** What a probe role needs done to the cluster, and how to undo it. */
+interface Setup {
+  readonly apply?: string;
+  readonly undo?: string;
+}
+
 describe('a connection that is not a safe runtime identity', () => {
   /** A login role with one extra attribute, allowed to connect to this database and to read the schema. */
-  async function roleWith(attributes: string, memberOfOwner = false) {
+  async function roleWith(attributes: string, memberOfOwner = false, setup: Setup = {}) {
     const name = `melarc_probe_${suffix()}`;
     const password = `pw-${suffix()}`;
+    const fill = (statement: string) =>
+      statement.replaceAll('%ROLE%', name).replaceAll('%DATABASE%', `"${database.name}"`);
     await withClient(database.urlFor('postgres'), async (client) => {
       await client.query(`create role ${name} login ${attributes} password '${password}'`);
       await client.query(`grant connect on database "${database.name}" to ${name}`);
       if (memberOfOwner) await client.query(`grant ${OWNER_ROLE} to ${name}`);
+      if (setup.apply !== undefined) await client.query(fill(setup.apply));
     });
     const url = buildDatabaseUrl({
       host: database.settings.host,
@@ -119,6 +128,8 @@ describe('a connection that is not a safe runtime identity', () => {
       url,
       drop: () =>
         withClient(database.urlFor('postgres'), async (client) => {
+          // What the probe stored on the database is undone, or every test after it would find it there.
+          if (setup.undo !== undefined) await client.query(fill(setup.undo));
           await client.query(`drop owned by ${name}`);
           await client.query(`drop role ${name}`);
         }),
@@ -128,14 +139,39 @@ describe('a connection that is not a safe runtime identity', () => {
   // Break caught: a runtime connection with any power that makes row-level security bypassable or
   // removable being accepted as ready (SECURITY_DESIGN.md section 14.6). Each is a role the server will
   // really let connect; the check has to refuse it, and say which kind it was.
-  it.each([
+  it.each<[string, string, boolean, string, Setup?]>([
     ['a superuser', 'superuser', false, 'rolsuper'],
     ['a role that bypasses row-level security', 'bypassrls', false, 'rolbypassrls'],
     ['a role that can create databases', 'createdb', false, 'rolcreatedb'],
     ['a role that can create roles', 'createrole', false, 'rolcreaterole'],
     ['a role that is a member of the owner', '', true, 'owns_database'],
-  ] as const)('refuses %s', async (_label, attributes, memberOfOwner, flag) => {
-    const probe = await roleWith(attributes, memberOfOwner);
+    ['a role that can replicate', 'replication', false, 'rolreplication'],
+    [
+      'a role that is a member of a predefined role',
+      '',
+      false,
+      'has_predefined_role',
+      { apply: 'grant pg_read_all_data to %ROLE%' },
+    ],
+    [
+      'a role with a security context stored on it',
+      '',
+      false,
+      'has_stored_context',
+      { apply: "alter role %ROLE% set melarc.principal_type = 'SYSTEM'" },
+    ],
+    [
+      'a role in a database with a security context stored on it',
+      '',
+      false,
+      'has_stored_context',
+      {
+        apply: "alter database %DATABASE% set melarc.principal_type = 'SYSTEM'",
+        undo: 'alter database %DATABASE% reset melarc.principal_type',
+      },
+    ],
+  ])('refuses %s', async (_label, attributes, memberOfOwner, flag, setup) => {
+    const probe = await roleWith(attributes, memberOfOwner, setup);
     const { service, logs, shutdown } = build(probe.url);
     try {
       await expect(service.check()).rejects.toThrow('not a safe runtime identity');

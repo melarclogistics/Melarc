@@ -45,6 +45,11 @@ const SENSITIVE_KEYS = [
   'apiKey',
   'signed_url',
   'signature',
+  // Names that hold no other sensitive word, so that dropping their entry from the list is what fails.
+  'passwd',
+  'recovery_code',
+  'sig',
+  'SIG',
 ];
 
 describe('redactValue: sensitive keys', () => {
@@ -105,6 +110,33 @@ describe('redactValue: sensitive keys', () => {
     let deep: Record<string, unknown> = { leaf: true };
     for (let level = 0; level < 50; level += 1) deep = { next: deep };
     expect(JSON.stringify(redactValue(deep))).toContain('[Truncated]');
+  });
+
+  // Break caught: the depth limit moving by one level, which is either a log line that stops short or one that
+  // walks an object a level too far.
+  it('keeps ten levels and truncates the eleventh', () => {
+    let nested: Record<string, unknown> = { leaf: true };
+    for (let level = 0; level < 15; level += 1) nested = { next: nested };
+
+    let hops = 0;
+    let at: unknown = redactValue(nested);
+    while (typeof at === 'object' && at !== null) {
+      at = (at as { next: unknown }).next;
+      hops += 1;
+    }
+
+    expect(at).toBe('[Truncated]');
+    expect(hops).toBe(10);
+  });
+
+  // Break caught: an object that is merely mentioned twice being reported as a loop and dropped.
+  it('keeps an object that appears twice without being its own ancestor', () => {
+    const shared = { status: 'ok' };
+    expect(redactValue({ first: shared, second: shared, list: [shared, shared] })).toEqual({
+      first: { status: 'ok' },
+      second: { status: 'ok' },
+      list: [{ status: 'ok' }, { status: 'ok' }],
+    });
   });
 
   // Break caught: binary payloads (an uploaded file, a key) written into a log.

@@ -1,0 +1,95 @@
+/*
+ * Button (design/COMPONENT_PATTERNS.md section 4, DESIGN_SYSTEM section 4.6 state recipes). Medium size: the height is
+ * a minimum, in rem, so enlarged text grows the button and a long label wraps instead of being clipped.
+ */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-label-md-line-height);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    border-color var(--motion-fast);
+}
+
+.ui-button--primary {
+  background: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+}
+
+.ui-button--primary:hover {
+  background: var(--color-action-primary-hover);
+}
+
+.ui-button--primary:active {
+  background: var(--color-action-primary-pressed);
+}
+
+.ui-button--secondary {
+  border-color: var(--color-border-default);
+  background: var(--color-action-secondary);
+  color: var(--color-action-secondary-text);
+}
+
+.ui-button--secondary:hover {
+  background: var(--color-surface-subtle);
+}
+
+.ui-button--secondary:active {
+  background: var(--button-pressed-background);
+}
+
+/*
+ * Loading keeps the label and the colours (DESIGN_SYSTEM section 4.6): a button that is not taking input does not change
+ * under the pointer, and only the cursor says the work is under way. These come after the hover and pressed fills and
+ * are more specific, so they win; a native-disabled button is left to the disabled rule below.
+ */
+.ui-button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.ui-button--primary[aria-busy='true']:not(:disabled):hover,
+.ui-button--primary[aria-busy='true']:not(:disabled):active {
+  background: var(--color-action-primary);
+}
+
+.ui-button--secondary[aria-busy='true']:not(:disabled):hover,
+.ui-button--secondary[aria-busy='true']:not(:disabled):active {
+  background: var(--color-action-secondary);
+}
+
+/* Disabled is the native attribute, so the style never appears without the behaviour. */
+.ui-button:disabled {
+  border-color: transparent;
+  background: var(--color-action-disabled);
+  color: var(--color-action-disabled-text);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button {
+    transition: none;
+  }
+}
+
+/* Forced colours: the system draws a button by its border, so give every state one. */
+@media (forced-colors: active) {
+  .ui-button {
+    border-color: ButtonText;
+  }
+
+  .ui-button:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+}

@@ -1,5 +1,8 @@
-/** Settings a test may add or change, but never these: they are what make a run local, sandboxed and safe. */
-const PROTECTED = [
+/**
+ * Settings a test may add or change, but never these: they are what make a run local, sandboxed and safe.
+ * Exported so that its test can try every one of them.
+ */
+export const PROTECTED_KEYS: readonly string[] = [
   'APP_ENV',
   'NODE_ENV',
   'DATABASE_URL',
@@ -23,7 +26,7 @@ export interface ApiEnvironmentOptions {
  */
 export function apiEnvironment(options: ApiEnvironmentOptions): Record<string, string> {
   for (const key of Object.keys(options.extra ?? {})) {
-    if (PROTECTED.includes(key))
+    if (PROTECTED_KEYS.includes(key))
       throw new Error(`${key} is set by the harness and cannot be overridden.`);
   }
   return {

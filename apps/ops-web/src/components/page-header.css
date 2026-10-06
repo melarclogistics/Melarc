@@ -1,0 +1,32 @@
+/*
+ * PageHeader (design/COMPONENT_PATTERNS.md section 11): spacious density. The actions wrap below the title when there
+ * is no room, so nothing is hidden on a narrow screen.
+ */
+.ui-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ui-page-header__text {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.ui-page-header .page-heading {
+  margin-bottom: var(--space-1);
+}
+
+.ui-page-header__description {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

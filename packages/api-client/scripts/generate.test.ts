@@ -172,6 +172,51 @@ describe('the freshness check', () => {
     expect(result.status).toBe(0);
   });
 
+  // Break caught: the generated file on disk being compared byte for byte. Git on Windows checks a file out
+  // with CRLF line endings (core.autocrlf), so the file that `--check` reads is not the LF text the generator
+  // writes, and a client that is current would be reported as stale on every Windows machine. This is the
+  // output's own line endings, which the contract test above does not cover.
+  it('accepts a current output whose file on disk has CRLF line endings, and does not touch it', async () => {
+    const contract = scratch('contract.yaml');
+    const output = scratch('schema.ts');
+    await writeFile(contract, FIXTURE_CONTRACT);
+    expect(runCli('--contract', contract, '--output', output).status).toBe(0);
+    const generated = await readFile(output, 'utf8');
+    expect(generated).not.toContain('\r');
+    const windowsCopy = generated.replaceAll('\n', '\r\n');
+    await writeFile(output, windowsCopy);
+
+    const result = runCli('--check', '--contract', contract, '--output', output);
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('current');
+    expect(await readFile(output, 'utf8')).toBe(windowsCopy);
+  });
+
+  // Break caught: CRLF being forgiven so far that a stale file passes, or a stale CRLF file being reported at the
+  // wrong place: every line would differ by its `\r`, and the report would name the first line of the file.
+  it('still fails a stale output with CRLF line endings, and names the line that really differs', async () => {
+    const contract = scratch('contract.yaml');
+    const output = scratch('schema.ts');
+    await writeFile(contract, FIXTURE_CONTRACT);
+    expect(runCli('--contract', contract, '--output', output).status).toBe(0);
+    const generated = await readFile(output, 'utf8');
+    const lines = generated.split('\n');
+    const changed = lines.findIndex((line) => line.startsWith('export interface paths'));
+    expect(changed, 'the generated file no longer has `export interface paths`').toBeGreaterThan(0);
+    lines[changed] = 'export interface pathz {';
+    await writeFile(output, lines.join('\r\n'));
+
+    const result = runCli('--check', '--contract', contract, '--output', output);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('stale');
+    expect(result.stderr).toContain(`first difference at line ${String(changed + 1)}:`);
+    expect(result.stderr).toContain('found:    export interface pathz {');
+    expect(result.stderr).not.toContain('\r');
+  });
+
   // Break caught, one case per row: a deliberate edit to the canonical contract that the check lets pass.
   // The first changes a type. The second changes only the security a browser must satisfy, which produces
   // no type difference at all. The third changes nothing but a comment. All three must fail, because the

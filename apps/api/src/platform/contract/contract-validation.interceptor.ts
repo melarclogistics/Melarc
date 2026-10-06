@@ -10,6 +10,7 @@ import { map, type Observable } from 'rxjs';
 
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
+import { bodyBytesOf } from '../http/json-body.js';
 import { CONTRACT_OPERATION_KEY } from './contract-operation.js';
 import { ContractValidationService } from './contract-validation.service.js';
 import type { ContractViolation } from './contract-validator.js';
@@ -33,7 +34,14 @@ export class ContractViolationError extends Error {
   }
 }
 
+/**
+ * Whether the request carried a body at all. What the body parser counted is the answer when it read one: it hands
+ * over `{}` for an empty JSON body, which is not a body, and a chunked request has no length to say so. The headers
+ * decide only for a request that was not read as JSON.
+ */
 function hasBody(request: Request): boolean {
+  const read = bodyBytesOf(request);
+  if (read !== undefined) return read > 0;
   const length = Number(request.headers['content-length'] ?? 0);
   return length > 0 || request.headers['transfer-encoding'] !== undefined;
 }

@@ -1,0 +1,45 @@
+/*
+ * Field (design/COMPONENT_PATTERNS.md section 6): label, control, help, error, in that order, 16px between fields
+ * (DESIGN_SYSTEM section 10.2). The error carries an icon and words; the colour only supports them.
+ */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.ui-field__label {
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-field__required {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-field__help {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-field__error {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-status-danger-foreground);
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-field__error svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.125rem;
+}

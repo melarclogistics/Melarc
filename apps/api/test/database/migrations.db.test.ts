@@ -1,8 +1,16 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
 import { OWNER_ROLE } from '../../src/tools/database/provisioning.js';
@@ -66,7 +74,9 @@ describe('migrating an empty database', () => {
         `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'melarc' order by p.proname`,
       );
-      expect(functions.rows.map((row) => row.proname)).toEqual([...ACCESSORS].sort());
+      // The accessors are there. Other objects may be too: what the migrations may leave is the catalogue
+      // invariants' to say (catalog-invariants.db.test.ts), not a list that every new migration must edit.
+      expect(functions.rows.map((row) => row.proname)).toEqual(expect.arrayContaining(ACCESSORS));
     });
   });
 
@@ -84,7 +94,7 @@ describe('migrating an empty database', () => {
          select 'relation', c.relname, pg_get_userbyid(c.relowner)
            from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'melarc'`,
       );
-      expect(rows.length).toBe(1 + ACCESSORS.length);
+      expect(rows.length).toBeGreaterThanOrEqual(1 + ACCESSORS.length);
       expect(new Set(rows.map((row) => row.owner))).toEqual(new Set([OWNER_ROLE]));
       expect(
         await scalar(client, 'select rolcanlogin from pg_roles where rolname = $1', [OWNER_ROLE]),
@@ -262,5 +272,139 @@ describe('a migration that fails', () => {
 
     const recovered = await runMigrations({ url: database.urlFor(MIGRATION_ROLE) });
     expect(recovered.applied).toBe(COMMITTED);
+  });
+});
+
+describe('a history that does not agree with the folder', () => {
+  let database: TestDatabase;
+  let folder: string;
+
+  /** Applies the committed migrations from a private copy of the folder, then returns the journal's size. */
+  async function migrateCopy(): Promise<void> {
+    const result = await runMigrations({ url: database.urlFor(MIGRATION_ROLE), folder });
+    expect(result.applied).toBe(COMMITTED);
+  }
+
+  const rerun = () => runMigrations({ url: database.urlFor(MIGRATION_ROLE), folder });
+
+  const journalPath = () => join(folder, 'meta', '_journal.json');
+  const readJournal = () =>
+    JSON.parse(readFileSync(journalPath(), 'utf8')) as {
+      entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
+    };
+
+  beforeEach(async () => {
+    database = await createTestDatabase({ migrate: false });
+    folder = mkdtempSync(join(tmpdir(), 'melarc-history-db-'));
+    cpSync(MIGRATIONS_FOLDER, folder, { recursive: true });
+    await migrateCopy();
+  });
+  afterEach(async () => {
+    rmSync(folder, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  const firstFile = (): string => {
+    const file = readdirSync(folder).find((name) => name.endsWith('.sql'));
+    if (file === undefined) throw new Error('no migration in the folder');
+    return file;
+  };
+
+  // Break caught: the migrator's silence about a migration that was edited after it ran. The database keeps the
+  // text that ran and the repository holds another, and the next environment is built from the one nobody reviewed.
+  it('refuses a migration whose text was edited after it was applied, and changes nothing', async () => {
+    const file = join(folder, firstFile());
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\n-- edited after it ran\n`);
+
+    await expect(rerun()).rejects.toThrow(/was edited after it ran/);
+
+    expect(await journalRows(database)).toBe(COMMITTED);
+  });
+
+  // Break caught: the check refusing a working copy that only has the other line ending, as every Windows
+  // checkout of a repository that was built on Linux does.
+  it('accepts the same text with Windows line endings', async () => {
+    const file = join(folder, firstFile());
+    writeFileSync(
+      file,
+      readFileSync(file, 'utf8').replaceAll('\r\n', '\n').replaceAll('\n', '\r\n'),
+    );
+
+    expect((await rerun()).applied).toBe(0);
+  });
+
+  // Break caught: a migration deleted or renamed after it ran.
+  it('refuses a folder from which an applied migration has gone', async () => {
+    const entries = readJournal();
+    const last = entries.entries.at(-1);
+    if (last === undefined) throw new Error('no migration in the folder');
+    writeFileSync(journalPath(), JSON.stringify({ ...entries, entries: [] }));
+    rmSync(join(folder, `${last.tag}.sql`));
+
+    await expect(rerun()).rejects.toThrow(/is not in the folder any more/);
+  });
+
+  // Break caught: the silent skip. A new migration dated before the latest applied one is never run by the
+  // migrator, which compares each with the latest and with nothing else, and nothing says so.
+  it('refuses a new migration that is dated before one that has run, instead of skipping it', async () => {
+    const journal = readJournal();
+    const first = journal.entries[0];
+    if (first === undefined) throw new Error('no migration in the folder');
+    writeFileSync(join(folder, '0000_dated_too_early.sql'), 'SELECT 1;');
+    writeFileSync(
+      journalPath(),
+      JSON.stringify({
+        ...journal,
+        entries: [
+          {
+            idx: 0,
+            version: '7',
+            when: first.when - 1000,
+            tag: '0000_dated_too_early',
+            breakpoints: true,
+          },
+          ...journal.entries.map((entry) => ({ ...entry, idx: entry.idx + 1 })),
+        ],
+      }),
+    );
+
+    await expect(rerun()).rejects.toThrow(/older than one that has/);
+
+    expect(await journalRows(database)).toBe(COMMITTED);
+  });
+
+  // Control for the refusals above: a new migration that follows the applied ones is applied, once.
+  it('applies a new migration that follows the applied ones', async () => {
+    const journal = readJournal();
+    const last = journal.entries.at(-1);
+    if (last === undefined) throw new Error('no migration in the folder');
+    writeFileSync(join(folder, '9999_next.sql'), 'SELECT 1;');
+    writeFileSync(
+      journalPath(),
+      JSON.stringify({
+        ...journal,
+        entries: [
+          ...journal.entries,
+          {
+            idx: journal.entries.length,
+            version: '7',
+            when: last.when + 1000,
+            tag: '9999_next',
+            breakpoints: true,
+          },
+        ],
+      }),
+    );
+
+    expect((await rerun()).applied).toBe(1);
+    expect((await rerun()).applied).toBe(0);
+    expect(await journalRows(database)).toBe(COMMITTED + 1);
+  });
+
+  // Break caught: a migration file the journal does not name, which would never be applied.
+  it('refuses a migration file that is not in the journal', async () => {
+    writeFileSync(join(folder, '0002_forgotten.sql'), 'SELECT 1;');
+
+    await expect(rerun()).rejects.toThrow(/is in the folder and is not in the journal/);
   });
 });

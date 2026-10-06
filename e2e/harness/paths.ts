@@ -34,7 +34,10 @@ export function repositoryPaths(
 
 /**
  * The harness runs the built API and the built Ops bundle, as production does, and never a build of its own:
- * a stale or missing build is a failure here, before anything starts, and not a mystery in the middle of a run.
+ * a missing build is a failure here, before anything starts, and not a mystery in the middle of a run. Only
+ * the existence of the three files is checked. A build that is present but older than the source is not
+ * detected: `pnpm run test:e2e` builds both applications first (turbo.json), and a run started any other way
+ * is on the build the developer made.
  */
 export function requireBuilds(paths: RepositoryPaths): void {
   const missing = [paths.apiMain, paths.databaseTool, paths.opsIndex].filter(

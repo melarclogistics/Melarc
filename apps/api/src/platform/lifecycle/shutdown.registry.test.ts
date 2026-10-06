@@ -102,6 +102,23 @@ describe('ShutdownRegistry under a budget', () => {
     expect(report.stalled).toEqual(['late']);
   });
 
+  // Break caught: every resource being given the whole budget instead of what is left of it, so a shutdown of N
+  // slow resources takes N budgets and outlasts the grace period the platform allows.
+  it('shares one budget between the resources: each one gets what is left', async () => {
+    const registry = new ShutdownRegistry();
+    for (const name of ['third', 'second', 'first']) {
+      registry.register({ name, close: () => sleep(200) });
+    }
+
+    const startedAt = performance.now();
+    const report = await registry.closeAll(500);
+
+    // Registered first, closed last: the two that were closed first took 400 of the 500, the last needs 200 more.
+    expect(report.closed).toEqual(['first', 'second']);
+    expect(report.stalled).toEqual(['third']);
+    expect(performance.now() - startedAt).toBeLessThan(500 + 700);
+  });
+
   // Break caught: a rejection that arrives after the budget ending as an unhandled rejection, which
   // the fault handlers treat as fatal and would replace the shutdown report with a crash.
   it('swallows a failure that arrives after the budget', async () => {

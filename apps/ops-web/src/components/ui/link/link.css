@@ -1,0 +1,15 @@
+/*
+ * Link (design/COMPONENT_PATTERNS.md section 5). Always underlined: text.link against the surrounding text is only 1.94:1,
+ * so colour alone does not identify a link (DESIGN_SYSTEM section 4.6). Focus is the global ring in base.css.
+ */
+.ui-link {
+  color: var(--color-text-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+.ui-link:hover {
+  color: var(--color-text-link-hover);
+  text-decoration-thickness: 2px;
+}

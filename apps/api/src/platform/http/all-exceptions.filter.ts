@@ -14,12 +14,20 @@ interface Rendered {
   readonly body: Record<string, unknown>;
 }
 
-/** A 4xx status carried by the framework or by Express middleware (body-parser throws these). */
+/**
+ * A 4xx status carried by the framework or by Express middleware (body-parser throws these). Another error that
+ * happens to have a numeric `status` (a client library's, an upstream's) does not count: a 401 or a 429 from a
+ * dependency is not one for the caller of this API. The `http-errors` convention marks an error meant for the
+ * client with `expose`, and that is what the body parser's errors carry.
+ */
 function clientErrorStatus(exception: unknown): number | undefined {
-  const status =
-    exception instanceof HttpException
-      ? exception.getStatus()
-      : (exception as { status?: unknown } | null)?.status;
+  let status: unknown;
+  if (exception instanceof HttpException) {
+    status = exception.getStatus();
+  } else {
+    const carried = exception as { status?: unknown; expose?: unknown } | null;
+    status = carried?.expose === true ? carried.status : undefined;
+  }
   return typeof status === 'number' && status >= 400 && status < 500 ? status : undefined;
 }
 
@@ -76,23 +84,31 @@ function render(exception: unknown): { rendered: Rendered; serverFault: boolean 
   };
 }
 
+/**
+ * Answers a request with the failure it ended in. The filter below uses it for everything Nest handles; the
+ * fallback for requests no route answers uses it too (see NotFoundFallback), so that one function, and not
+ * Express's default page, is what a client ever sees of a failure.
+ */
+export function sendFailure(response: Response, exception: unknown, logger: Logger): void {
+  const { rendered, serverFault } = render(exception);
+
+  // The exception goes to the log only through the redacting logger's error serializer.
+  if (serverFault) logger.error({ err: exception }, 'unhandled error');
+
+  // An answer that has already left cannot be replaced: writing again would throw out of the filter.
+  if (response.headersSent) return;
+
+  response.status(rendered.status).json({
+    ...rendered.body,
+    request_id: response.getHeader(REQUEST_ID_HEADER),
+  });
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   constructor(private readonly logger: Logger) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const response = host.switchToHttp().getResponse<Response>();
-    const { rendered, serverFault } = render(exception);
-
-    // The exception goes to the log only through the redacting logger's error serializer.
-    if (serverFault) this.logger.error({ err: exception }, 'unhandled error');
-
-    // An answer that has already left cannot be replaced: writing again would throw out of the filter.
-    if (response.headersSent) return;
-
-    response.status(rendered.status).json({
-      ...rendered.body,
-      request_id: response.getHeader(REQUEST_ID_HEADER),
-    });
+    sendFailure(host.switchToHttp().getResponse<Response>(), exception, this.logger);
   }
 }

@@ -1,0 +1,63 @@
+/* The development showcase only (design/COMPONENT_PATTERNS.md section 27). Not part of the production build. */
+.showcase-section {
+  margin-bottom: var(--space-8);
+}
+
+.showcase-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-heading-md-size);
+  font-weight: var(--text-heading-md-weight);
+  line-height: var(--text-heading-md-line-height);
+}
+
+.showcase-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.showcase-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.showcase-surfaces {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+}
+
+.showcase-surface {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+}
+
+.showcase-surface h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.showcase-surface--page {
+  background: var(--color-surface-page);
+}
+
+.showcase-surface--default {
+  background: var(--color-surface-default);
+}
+
+.showcase-surface--subtle {
+  background: var(--color-surface-subtle);
+}
+
+.showcase-surface--selected {
+  background: var(--color-surface-selected);
+}
+
+.showcase-secondary {
+  color: var(--color-text-secondary);
+}

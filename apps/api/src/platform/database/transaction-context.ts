@@ -93,8 +93,12 @@ export function toContextSettings(context: unknown): ContextSetting[] {
   }
 
   if (given.authorizedHubIds !== undefined) {
-    const hubs = given.authorizedHubIds;
-    if (Array.isArray(hubs) && hubs.every(isUuid)) {
+    // Array.from reads a hole in a sparse list as undefined: `every` skips holes, and a list with one would
+    // be written as `a,,b`, which the accessor cannot read as a set of UUIDs.
+    const hubs: unknown[] | undefined = Array.isArray(given.authorizedHubIds)
+      ? Array.from(given.authorizedHubIds as unknown[])
+      : undefined;
+    if (hubs?.every(isUuid) === true) {
       add('authorized_hub_ids', hubs.map((hub) => hub.toLowerCase()).join(','));
     } else invalid.push('authorizedHubIds');
   }

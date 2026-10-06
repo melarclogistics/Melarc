@@ -5,6 +5,12 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 
 import { postgresConnectionSettings } from '../../platform/database/postgres-url.js';
+import {
+  checkAgainstApplied,
+  MigrationHistoryError,
+  readMigrationFolder,
+  type AppliedMigration,
+} from './migration-history.js';
 import { assertMigrationIdentity } from './safety.js';
 
 /** The one canonical migration history (DEVELOPMENT_EXECUTION_PLAN.md section 5). */
@@ -18,20 +24,27 @@ export interface MigrationResult {
   readonly applied: number;
 }
 
-async function journalCount(client: pg.Client): Promise<number> {
+/** What the journal table holds, oldest first; nothing when no migration has ever run. */
+async function appliedMigrations(client: pg.Client): Promise<AppliedMigration[]> {
   const { rows } = await client.query<{ present: boolean }>(
     'select to_regclass($1) is not null as present',
     [JOURNAL],
   );
-  if (rows[0]?.present !== true) return 0;
-  const counted = await client.query<{ count: string }>(`select count(*) from ${JOURNAL}`);
-  return Number(counted.rows[0]?.count ?? 0);
+  if (rows[0]?.present !== true) return [];
+  const applied = await client.query<{ hash: string; created_at: string }>(
+    `select hash, created_at from ${JOURNAL} order by id`,
+  );
+  return applied.rows.map((row) => ({ hash: row.hash, createdAt: row.created_at }));
 }
 
 /**
  * Applies every migration not yet in the journal, in order, as the migration identity.
  *
- * Safe to repeat: applied migrations are skipped. Safe to run twice at once: a session advisory lock
+ * Safe to repeat: applied migrations are skipped. Before anything is applied the folder is checked against the
+ * journal (see migration-history.ts): an applied migration that was edited or removed, or a new one dated before
+ * one that has run, stops the run, because the migrator would otherwise skip it without a word. The migrations
+ * of one run are applied in one transaction, so a statement that cannot run in a transaction (CREATE INDEX
+ * CONCURRENTLY, a new enum value used in the same run) cannot be part of a migration. Safe to run twice at once: a session advisory lock
  * makes a second run wait for the first and then find nothing to do. It never touches a database it was
  * not given, and it refuses any identity but `melarc_migration_elevated` before it connects, because who
  * runs a migration decides who owns what it creates. The identity that is checked is the identity that
@@ -60,9 +73,14 @@ export async function runMigrations(options: {
     await client.query("select set_config('lock_timeout', $1, false)", [`${timeout}ms`]);
     await client.query(`select pg_advisory_lock(${LOCK})`);
     try {
-      const before = await journalCount(client);
-      await migrate(drizzle(client), { migrationsFolder: options.folder ?? MIGRATIONS_FOLDER });
-      return { applied: (await journalCount(client)) - before };
+      const folder = options.folder ?? MIGRATIONS_FOLDER;
+      const files = readMigrationFolder(folder);
+      const before = await appliedMigrations(client);
+      const problems = [...files.problems, ...checkAgainstApplied(files.migrations, before)];
+      if (problems.length > 0) throw new MigrationHistoryError(problems);
+
+      await migrate(drizzle(client), { migrationsFolder: folder });
+      return { applied: (await appliedMigrations(client)).length - before.length };
     } finally {
       await client.query(`select pg_advisory_unlock(${LOCK})`);
     }

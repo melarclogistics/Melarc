@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,10 +21,13 @@ import {
   PackageSourceError,
   denyReason,
   findLeaks,
+  findPathCollisions,
+  findPrivateKeys,
   packageSource,
   parseStatus,
   readSecretValues,
   secretKey,
+  windowsNameProblem,
   writeZip,
   type ZipEntry,
 } from './package-source.ts';
@@ -231,6 +235,9 @@ describe('denyReason', () => {
     ['apps/api/.env', /settings/],
     ['apps/api/.env.local', /settings/],
     ['infrastructure/postgres/.env.old', /settings/],
+    // What a killed `setup:env` can leave beside a settings file (see createPrivateFile in setup-env.ts).
+    ['infrastructure/postgres/.env.tmp-0a1b2c3d4e5f', /settings/],
+    ['apps/api/.env.tmp-0a1b2c3d4e5f', /settings/],
     ['apps/api/.env.production', /settings/],
     ['config/production.env', /settings/],
     ['certs/server.pem', /key/],
@@ -467,6 +474,283 @@ describe('findLeaks', () => {
   it('finds nothing when there is nothing to find', () => {
     assert.deepEqual(findLeaks([{ path: 'a', data: Buffer.from('x') }], []), []);
     assert.deepEqual(findLeaks([], ['somethinglongenough']), []);
+  });
+});
+
+describe('findPathCollisions', () => {
+  it('finds nothing in paths that are all different', () => {
+    assert.deepEqual(
+      findPathCollisions(['a/b.ts', 'a/c.ts', 'A.md', 'a/bb.ts', 'dir/a', 'dir/b']),
+      [],
+    );
+    assert.deepEqual(findPathCollisions([]), []);
+  });
+
+  // Break caught: a repository that cannot be cloned or unpacked on Windows or macOS, where two names that
+  // differ only by case are one file, so one overwrites the other.
+  it('groups files whose names differ only by case, in path order', () => {
+    assert.deepEqual(findPathCollisions(['a/b.ts', 'a/B.ts', 'a/c.ts']), [['a/B.ts', 'a/b.ts']]);
+    assert.deepEqual(findPathCollisions(['x/abc', 'x/ABC', 'x/Abc']), [
+      ['x/ABC', 'x/Abc', 'x/abc'],
+    ]);
+    assert.deepEqual(findPathCollisions(['README.md', 'readme.md']), [['README.md', 'readme.md']]);
+  });
+
+  // Break caught: folders that differ only by case, whose files never share a name and so look unrelated.
+  it('groups folders that differ only by case, once, and not each file below them', () => {
+    assert.deepEqual(findPathCollisions(['Dir/a.ts', 'dir/b.ts']), [['Dir', 'dir']]);
+    assert.deepEqual(findPathCollisions(['Dir/a.ts', 'dir/a.ts']), [['Dir', 'dir']]);
+    assert.deepEqual(findPathCollisions(['a/Dir/x', 'a/dir/y', 'a/dir/z']), [['a/Dir', 'a/dir']]);
+    assert.deepEqual(findPathCollisions(['A/b', 'a/B']), [['A', 'a']]);
+  });
+
+  it('reports a collision below a folder that is the same', () => {
+    assert.deepEqual(findPathCollisions(['d/x/Y', 'd/x/y', 'd/z']), [['d/x/Y', 'd/x/y']]);
+  });
+
+  it('reports each collision as a group of its own', () => {
+    assert.deepEqual(findPathCollisions(['a/X', 'a/x', 'b/Y', 'b/y', 'c']), [
+      ['a/X', 'a/x'],
+      ['b/Y', 'b/y'],
+    ]);
+  });
+
+  // Break caught: the same file name written with a precomposed and a decomposed accent, which macOS treats
+  // as one name, and capitals beyond ASCII.
+  it('treats a precomposed and a decomposed accent, and capitals beyond ASCII, as the same name', () => {
+    assert.deepEqual(findPathCollisions(['docs/café.md', 'docs/café.md']).length, 1);
+    assert.deepEqual(findPathCollisions(['docs/É.md', 'docs/é.md']).length, 1);
+    assert.deepEqual(findPathCollisions(['docs/café.md', 'docs/cafe.md']), []);
+  });
+});
+
+describe('windowsNameProblem', () => {
+  const reserved = [
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    ...Array.from({ length: 10 }, (_, index) => `COM${String(index)}`),
+    ...Array.from({ length: 10 }, (_, index) => `LPT${String(index)}`),
+    'COM¹',
+    'COM²',
+    'COM³',
+    'LPT¹',
+    'LPT²',
+    'LPT³',
+    'CONIN$',
+    'CONOUT$',
+  ];
+
+  // Break caught: a file Windows takes for a device, which cannot be created there and which writes to the
+  // device when it is tried.
+  for (const name of reserved) {
+    it(`refuses ${name}, in any case, with or without an extension, as a file or a folder`, () => {
+      for (const spelling of [
+        name,
+        name.toLowerCase(),
+        `${name.slice(0, 1)}${name.slice(1).toLowerCase()}`,
+      ]) {
+        for (const path of [
+          spelling,
+          `${spelling}.txt`,
+          `${spelling}.tar.gz`,
+          `src/${spelling}`,
+          `src/${spelling}.ts`,
+          `${spelling}/index.ts`,
+          `a/${spelling}/b/c.ts`,
+        ]) {
+          assert.match(windowsNameProblem(path) ?? 'allowed', /reserved/, path);
+        }
+      }
+    });
+  }
+
+  it('allows names that only start or end like a reserved one', () => {
+    for (const path of [
+      'console.ts',
+      'src/conf.json',
+      'auxiliary.md',
+      'nullable.ts',
+      'com10.txt',
+      'com.txt',
+      'lpt.ts',
+      'prnt',
+      'my.aux',
+      'a.con',
+      'src/context/con-text.ts',
+      'docs/comm1.md',
+      'x/lpt11',
+      'COM1x/a',
+      'xCON',
+      'CON-1',
+    ]) {
+      assert.equal(windowsNameProblem(path), undefined, path);
+    }
+  });
+
+  // Break caught: a name Windows silently shortens (it drops a trailing dot or space), which collides with
+  // another name or cannot be reached at all.
+  it('refuses a name that ends in a dot or a space, as a file or a folder', () => {
+    for (const path of [
+      'file.',
+      'a/file.',
+      'dir./x',
+      'a/b ',
+      'a /b',
+      'x/y. ',
+      'x/y .',
+      'ends-with-dots...',
+    ]) {
+      assert.match(windowsNameProblem(path) ?? 'allowed', /ends with a (?:dot|space)/, path);
+    }
+  });
+
+  it('allows names with dots and spaces inside, and leading ones', () => {
+    for (const path of [
+      '.github/workflows/ci.yml',
+      'a/.hidden',
+      'file.name.ts',
+      'a b/c d.md',
+      ' lead/x',
+      '.env.example',
+      'x/.a.b',
+    ]) {
+      assert.equal(windowsNameProblem(path), undefined, path);
+    }
+  });
+
+  // Break caught: the segments `.` and `..`, which name a folder and are not names themselves, flagged as names
+  // that end in a dot (the archive writer refuses such paths on its own, with its own message).
+  it('does not take the segments . and .. for names', () => {
+    for (const path of ['.', '..', 'a/./b', 'a/../b', './a', '../a']) {
+      assert.equal(windowsNameProblem(path), undefined, path);
+    }
+  });
+
+  // Break caught: characters Windows does not allow in a name, one of which (:) starts an alternate data
+  // stream on NTFS, so the file would land somewhere else.
+  it('refuses a character Windows does not allow in a name', () => {
+    for (const character of [
+      '<',
+      '>',
+      ':',
+      '"',
+      '|',
+      '?',
+      '*',
+      '\\',
+      '\u0000',
+      '\u0001',
+      '\u001f',
+    ]) {
+      assert.match(
+        windowsNameProblem(`src/a${character}b.ts`) ?? 'allowed',
+        /character/,
+        JSON.stringify(character),
+      );
+    }
+    assert.equal(windowsNameProblem('src/a-b_c(1)[2]{3}@x#y%z&w+v=u,t;s!r~q^p$.ts'), undefined);
+  });
+
+  it('names the first problem of a path, not a later one', () => {
+    assert.match(windowsNameProblem('aux/file.') ?? '', /reserved/);
+  });
+});
+
+describe('findPrivateKeys', () => {
+  // Built from parts, so that this file does not itself hold a key block.
+  const dashes = '-----';
+  const header = (label = ''): string => `${dashes}BEGIN ${label}PRIVATE KEY${dashes}`;
+  const footer = (label = ''): string => `${dashes}END ${label}PRIVATE KEY${dashes}`;
+  const BODY = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VNzpAAAA';
+  const block = (label = '', body = BODY): string =>
+    `${header(label)}\n${body}\n${body}\n${footer(label)}\n`;
+  const entry = (path: string, text: string | Buffer): ZipEntry => ({
+    path,
+    data: Buffer.isBuffer(text) ? text : Buffer.from(text),
+  });
+  const found = (text: string | Buffer): string[] => findPrivateKeys([entry('f', text)]);
+
+  // Break caught: a private key pasted into a file whose name gives no sign of it, which is then shipped.
+  for (const label of ['', 'RSA ', 'EC ', 'DSA ', 'OPENSSH ', 'ENCRYPTED ']) {
+    it(`finds a ${label.trim() || 'PKCS#8'} private key block`, () => {
+      assert.deepEqual(found(block(label)), ['f']);
+    });
+  }
+
+  it('finds a key block among other text, indented, quoted, and in a code fence', () => {
+    assert.deepEqual(found(`Use this:\n\n\`\`\`\n${block()}\`\`\`\nthen restart.\n`), ['f']);
+    assert.deepEqual(found(`key: |\n  ${header()}\n  ${BODY}\n  ${footer()}\n`), ['f']);
+    assert.deepEqual(found(`KEY="${header()}\n${BODY}\n${footer()}"\n`), ['f']);
+  });
+
+  it('finds a key block with Windows line breaks, with tabs, and with a header section', () => {
+    assert.deepEqual(found(block().replaceAll('\n', '\r\n')), ['f']);
+    assert.deepEqual(
+      found(
+        `${header('RSA ')}\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: AES-128-CBC,0123456789ABCDEF\r\n\r\n${BODY}\r\n${footer('RSA ')}\r\n`,
+      ),
+      ['f'],
+    );
+    assert.deepEqual(
+      found(
+        `${dashes}BEGIN PGP PRIVATE KEY BLOCK${dashes}\nVersion: GnuPG v1\n\nlQHYBF8eXAkBBADS0sLxFqhLmNn4\n${dashes}END PGP PRIVATE KEY BLOCK${dashes}\n`,
+      ),
+      ['f'],
+    );
+  });
+
+  // Break caught: a key inside a JSON string, where a line break is the two characters backslash and n (a cloud
+  // provider's service-account file), which a search for a real line break would miss.
+  it('finds a key block written inside a JSON string, with escaped line breaks', () => {
+    const json = JSON.stringify({ type: 'service_account', private_key: block() });
+    assert.ok(json.includes('\\n'));
+    assert.deepEqual(found(json), ['f']);
+    assert.deepEqual(found(json.replaceAll('\\n', '\\r\\n')), ['f']);
+  });
+
+  it('finds a key block in a file that is not text', () => {
+    const binary = Buffer.concat([
+      Buffer.from([0, 1, 2, 255, 254, 0]),
+      Buffer.from(block()),
+      Buffer.from([0, 0, 255]),
+    ]);
+    assert.deepEqual(found(binary), ['f']);
+  });
+
+  it('finds a key whose end is missing, which is a key all the same', () => {
+    assert.deepEqual(found(`${header()}\n${BODY}\n`), ['f']);
+  });
+
+  // Break caught: ordinary documents that name the header (this repository's own tests and security design do)
+  // refused as if they held a key.
+  it('does not take the name of the header, a public key or a certificate for a private key', () => {
+    for (const text of [
+      header(),
+      `${header()}\n`,
+      `Files start with ${header()} and end with ${footer()}.`,
+      `${header()} marks the start of a key. See the documents for how it is stored.`,
+      `${dashes}BEGIN PUBLIC KEY${dashes}\n${BODY}\n${dashes}END PUBLIC KEY${dashes}\n`,
+      `${dashes}BEGIN CERTIFICATE${dashes}\n${BODY}\n${dashes}END CERTIFICATE${dashes}\n`,
+      `${dashes}BEGIN RSA PUBLIC KEY${dashes}\n${BODY}\n${dashes}END RSA PUBLIC KEY${dashes}\n`,
+      `BEGIN PRIVATE KEY\n${BODY}\n`,
+      `${header()}\nshort\n`,
+      '',
+      'nothing to see\n',
+    ]) {
+      assert.deepEqual(found(text), [], JSON.stringify(text));
+    }
+  });
+
+  it('lists each path once, in path order, and never the key', () => {
+    const list = findPrivateKeys([
+      entry('z/last.txt', block()),
+      entry('a/first.txt', `${block()}${block('RSA ')}`),
+      entry('m/clean.txt', 'nothing'),
+    ]);
+    assert.deepEqual(list, ['a/first.txt', 'z/last.txt']);
+    assert.ok(!JSON.stringify(list).includes('MIIE'));
   });
 });
 
@@ -726,6 +1010,124 @@ describe('packageSource', () => {
         .sort(),
       ['apps/api/.env.local', 'certs/server.pem'],
     );
+  });
+
+  // A repository whose index holds these paths too, whatever the file system under test can hold (Windows cannot
+  // create `aux.ts`, or `Readme.md` beside `readme.md`): the index is written directly, not through files.
+  function indexedRepository(paths: string[]): string {
+    const root = repository(sourceFiles);
+    // Git on Windows and macOS refuses such paths by default (and folds case); here they are the case under test.
+    git(root, 'config', 'core.ignorecase', 'false');
+    git(root, 'config', 'core.protectNTFS', 'false');
+    const blob = git(root, 'hash-object', '-w', 'package.json').trim();
+    for (const path of paths)
+      git(root, 'update-index', '--add', '--cacheinfo', `100644,${blob},${path}`);
+    return root;
+  }
+
+  // Break caught: an archive that cannot be unpacked on Windows or macOS, or that loses a file there when two
+  // names collide: it is refused before anything is written, and the paths are named.
+  it('refuses paths that differ only by case, names them, and writes nothing', () => {
+    const root = indexedRepository(['docs/Readme.md', 'docs/readme.md']);
+    const out = outside();
+    assert.throws(
+      () => packageSource(root, { out }),
+      (error: unknown) => {
+        assert.ok(error instanceof PackageSourceError);
+        assert.match(error.message, /differ only by case/);
+        assert.match(error.message, /docs\/Readme\.md, docs\/readme\.md/);
+        return true;
+      },
+    );
+    assert.equal(existsSync(out), false);
+  });
+
+  it('refuses a file or a folder that Windows takes for a device, and names it', () => {
+    for (const path of ['src/aux.ts', 'src/NUL', 'com1/index.ts', 'a/LPT9.md']) {
+      const root = indexedRepository([path]);
+      const out = outside();
+      assert.throws(
+        () => packageSource(root, { out }),
+        (error: unknown) => {
+          assert.ok(error instanceof PackageSourceError);
+          assert.match(error.message, /reserved/);
+          assert.ok(error.message.includes(path), path);
+          return true;
+        },
+        path,
+      );
+      assert.equal(existsSync(out), false);
+    }
+  });
+
+  it('refuses a name that ends in a dot or a space', () => {
+    for (const path of ['src/file.', 'dir /a.ts']) {
+      const root = indexedRepository([path]);
+      assert.throws(
+        () => packageSource(root, { out: outside() }),
+        /ends with a (?:dot|space)/,
+        path,
+      );
+    }
+  });
+
+  // Break caught: the names of files that are never packed (dependencies, output) refused, though they cannot
+  // reach the archive.
+  it('does not look at the names of files it leaves out', () => {
+    const root = indexedRepository(['node_modules/aux/index.js', 'dist/Readme', 'dist/readme']);
+    const out = outside();
+    const result = packageSource(root, { out });
+    assert.ok(result.excluded.some((e) => e.path === 'node_modules/aux/index.js'));
+    assert.equal(existsSync(out), true);
+  });
+
+  // The block is built from parts, so that this file does not hold a key.
+  const dashes = '-----';
+  const keyBlock = (): string =>
+    `${dashes}BEGIN RSA PRIVATE KEY${dashes}\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VNzp\n${dashes}END RSA PRIVATE KEY${dashes}\n`;
+
+  // Break caught: a private key pasted into a note or a script, in a file whose name is no sign of it.
+  it('refuses a private key block inside a file, names the file, and never prints the key', () => {
+    const root = repository({ ...sourceFiles, 'docs/notes.md': `connect with:\n\n${keyBlock()}` });
+    const out = outside();
+    assert.throws(
+      () => packageSource(root, { out }),
+      (error: unknown) => {
+        assert.ok(error instanceof PackageSourceError);
+        assert.match(error.message, /docs\/notes\.md/);
+        assert.match(error.message, /private key/);
+        assert.doesNotMatch(error.message, /MIIEvQIBADANBgkq/);
+        return true;
+      },
+    );
+    assert.equal(existsSync(out), false, 'no archive is left behind');
+  });
+
+  it('refuses a private key block in an untracked file too', () => {
+    const root = project();
+    put(root, { 'scratch-notes.txt': keyBlock() });
+    assert.throws(() => packageSource(root, { out: outside() }), /scratch-notes\.txt/);
+  });
+
+  it('packages a document that only names the header of a key', () => {
+    const root = repository({
+      ...sourceFiles,
+      'docs/security.md': `A key file starts with ${dashes}BEGIN PRIVATE KEY${dashes} and is never committed.\n`,
+    });
+    const out = outside();
+    packageSource(root, { out });
+    assert.ok(readZip(readFileSync(out)).some((e) => e.path === 'docs/security.md'));
+  });
+
+  // The key file itself is refused by name and never read, so it is reported as left out and is not a failure.
+  it('leaves a key file out by name instead of refusing the package', () => {
+    const root = repository({ ...sourceFiles, 'certs/server.pem': keyBlock() });
+    const out = outside();
+    const result = packageSource(root, { out });
+    assert.ok(
+      result.excluded.some((e) => e.path === 'certs/server.pem' && e.reason.includes('key')),
+    );
+    assert.ok(!readZip(readFileSync(out)).some((e) => e.path === 'certs/server.pem'));
   });
 
   it('refuses to package a credential that appears inside a file, and never prints it', () => {
@@ -1007,5 +1409,38 @@ describe('the command line', () => {
     const second = run(root, '--overwrite');
     assert.equal(second.status, 0, second.stdout + second.stderr);
     assert.match(first.stdout, /tmp[\\/]melarc-source-[0-9a-f]{12}\.zip/);
+  });
+});
+
+describe('this repository', () => {
+  const root = resolve(import.meta.dirname, '..');
+
+  // Break caught: a file added to the repository that Windows or macOS cannot unpack, or a key pasted into a
+  // note, found when it is added and not when someone tries to package or clone the source.
+  it('holds only paths that unpack everywhere and no private key block, in what the package would hold', () => {
+    const listed = execFileSync(
+      'git',
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      { cwd: root, maxBuffer: 64 * 1024 * 1024 },
+    )
+      .toString('utf8')
+      .split('\0')
+      .filter((path) => path !== '');
+    const packable = listed.filter(
+      (path) => denyReason(path) === undefined && existsSync(join(root, path)),
+    );
+    assert.ok(packable.length > 100, 'the repository has files to look at');
+    assert.deepEqual(findPathCollisions(listed), []);
+    assert.deepEqual(
+      packable.flatMap((path) => {
+        const reason = windowsNameProblem(path);
+        return reason === undefined ? [] : [`${path}: ${reason}`];
+      }),
+      [],
+    );
+    const files = packable
+      .filter((path) => lstatSync(join(root, path)).isFile())
+      .map((path) => ({ path, data: readFileSync(join(root, path)) }));
+    assert.deepEqual(findPrivateKeys(files), []);
   });
 });

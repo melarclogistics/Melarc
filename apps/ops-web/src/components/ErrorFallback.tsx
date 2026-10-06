@@ -1,4 +1,5 @@
 import { PageHeading } from './PageHeading';
+import { Button } from './ui/button/Button';
 
 /**
  * What the user sees when part of the application fails. It is deliberately generic: the diagnostic
@@ -12,7 +13,7 @@ export function ErrorFallback({ onRetry }: { readonly onRetry: () => void }) {
       <title>Something went wrong · Melarc Ops Portal</title>
       <PageHeading>Something went wrong</PageHeading>
       <p>The page could not be shown.</p>
-      <button
+      <Button
         type="button"
         onClick={(event) => {
           // The button is about to disappear. Park focus on the page content so a keyboard user is not
@@ -22,7 +23,7 @@ export function ErrorFallback({ onRetry }: { readonly onRetry: () => void }) {
         }}
       >
         Try again
-      </button>
+      </Button>
     </div>
   );
 }

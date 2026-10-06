@@ -65,6 +65,10 @@ const BUILD_UPLOAD = {
 const MANIFEST_SCRIPT =
   'node scripts/ci-revision.ts manifest build-manifest.json apps/api/dist apps/ops-web/dist contracts/openapi.yaml';
 const CLEAN_SCRIPT = 'node scripts/ci-revision.ts clean';
+const BROWSER_TESTS = 'pnpm run test:browser';
+const BROWSER_LIST = 'chromium,firefox,webkit';
+const INSTALL_BROWSERS =
+  'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit';
 
 const JOB_IDS = ['static', 'unit', 'database', 'integrated', 'audit'];
 
@@ -100,7 +104,8 @@ function goodShared(): Json {
       integrated: job([
         run('pnpm run build'),
         run('pnpm run contract:check'),
-        run('pnpm run test:browser'),
+        run(INSTALL_BROWSERS),
+        { ...run(BROWSER_TESTS), env: { MELARC_BROWSERS: BROWSER_LIST } },
         run('pnpm run test:e2e'),
         DIAGNOSTICS,
         run(CLEAN_SCRIPT),
@@ -178,6 +183,21 @@ const allJobs = (jobs: Jobs): Json[] => [
   jobs.audit,
   jobs.ci,
 ];
+
+/** The one step, in whichever job, whose whole script is `script`. */
+function runningStep(jobs: Jobs, script: string): Json {
+  const found = allJobs(jobs).flatMap((target) =>
+    stepsOf(target).filter((step) => step.run === script),
+  );
+  assert.equal(
+    found.length,
+    1,
+    `expected one step that runs ${script}, found ${String(found.length)}`,
+  );
+  const [step] = found;
+  assert.ok(step !== undefined);
+  return step;
+}
 
 /** The steps of a job without those that run `script`. */
 function withoutScript(target: Json, script: string): Json[] {
@@ -326,6 +346,106 @@ describe('the aggregate job', () => {
       ['STEP_CONDITIONAL'],
     );
   });
+
+  // Break caught: the verdict published under another name, which a branch rule that requires "CI result" would
+  // never see: it would wait for a check that no job reports (or, worse, count another job as the verdict).
+  for (const name of [undefined, 'CI', 'Result', 'CI Result', 'CI result ', 'ci result']) {
+    it(`must be named "CI result", not ${JSON.stringify(name)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          if (name === undefined) Reflect.deleteProperty(jobs.ci, 'name');
+          else jobs.ci.name = name;
+        }),
+        ['AGGREGATE_NAME'],
+      );
+    });
+  }
+
+  // Break caught: a second check that reports under the verdict's name, so a branch rule would be satisfied by
+  // a job that judges nothing. Whatever the case or spacing, no other job or step may be named like it.
+  for (const name of ['CI result', 'ci result', 'CI RESULT', ' CI result ']) {
+    it(`must be the only job named like it: ${JSON.stringify(name)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          jobs.unit.name = name;
+        }),
+        ['AGGREGATE_NAME'],
+      );
+    });
+
+    it(`must be the only step named like it: ${JSON.stringify(name)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.unit, 2).name = name;
+        }),
+        ['AGGREGATE_NAME'],
+      );
+    });
+  }
+
+  it('must not have a step of its own named like it either', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        stepAt(jobs.ci, 1).name = 'CI result';
+      }),
+      ['AGGREGATE_NAME'],
+    );
+  });
+
+  it('reports a job named like the verdict even when the aggregate job is missing', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        jobs.unit.name = 'CI result';
+        Reflect.deleteProperty(jobs, 'ci');
+      }).toSorted(),
+      ['AGGREGATE_MISSING', 'AGGREGATE_NAME'],
+    );
+  });
+});
+
+describe('the runners', () => {
+  // Break caught: a job moved to a runner image that is not the one the lockfile and the toolchain were tried
+  // on (a moving label such as ubuntu-latest, an older image, a self-hosted machine, a computed value).
+  const others = [
+    'ubuntu-latest',
+    'ubuntu-22.04',
+    'ubuntu-24.04-arm',
+    'windows-latest',
+    'self-hosted',
+    ['ubuntu-24.04'],
+    '${{ matrix.os }}',
+    undefined,
+  ];
+  for (const runner of others) {
+    for (const id of ['unit', 'ci'] as const) {
+      it(`rejects runs-on ${JSON.stringify(runner)} on the job ${id}`, () => {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            if (runner === undefined) Reflect.deleteProperty(jobs[id], 'runs-on');
+            else jobs[id]['runs-on'] = runner;
+          }),
+          ['RUNNER_DRIFT'],
+        );
+      });
+    }
+  }
+
+  // Break caught: a job that calls another workflow, whose steps this file's rules never see.
+  it('rejects a job that calls a reusable workflow', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        jobs.unit = { uses: './.github/workflows/other.yml', 'timeout-minutes': 5 };
+      }).toSorted(),
+      ['CHECKOUT_MISSING', 'COMMAND_MISSING', 'RUNNER_DRIFT'],
+    );
+  });
+
+  it('accepts every job on ubuntu-24.04', () => {
+    assert.deepEqual(
+      codesWith(() => undefined),
+      [],
+    );
+  });
 });
 
 describe('mandatory failures propagate', () => {
@@ -360,13 +480,13 @@ describe('mandatory failures propagate', () => {
   });
 
   // Break caught: a command written so that its failure does not fail the step. Each is also reported as the
-  // mandatory command missing when it changes the line that runs it.
+  // mandatory command missing, because the script of its step is no longer that command alone.
   const swallowed: [script: string, codes: string[]][] = [
     ['pnpm run test || true', ['COMMAND_MISSING', 'FAILURE_SWALLOWED']],
     ['pnpm run test || :', ['COMMAND_MISSING', 'FAILURE_SWALLOWED']],
     ['pnpm run test || exit 0', ['COMMAND_MISSING', 'FAILURE_SWALLOWED']],
-    ['set +e\npnpm run test', ['FAILURE_SWALLOWED']],
-    ['pnpm run test\nexit 0', ['FAILURE_SWALLOWED']],
+    ['set +e\npnpm run test', ['COMMAND_MISSING', 'FAILURE_SWALLOWED']],
+    ['pnpm run test\nexit 0', ['COMMAND_MISSING', 'FAILURE_SWALLOWED']],
   ];
   for (const [script, expected] of swallowed) {
     it(`rejects ${JSON.stringify(script)}`, () => {
@@ -407,6 +527,20 @@ describe('mandatory failures propagate', () => {
           else jobs.unit['timeout-minutes'] = timeout;
         }),
         ['JOB_NO_TIMEOUT'],
+      );
+    });
+  }
+
+  // Break caught: the limit moved by one at either end of the range, so that the longest allowed job (30) or
+  // the shortest (1) is refused, or one minute beyond the longest is let through. The refusals above hold the
+  // outside of the range; these hold its edges.
+  for (const timeout of [1, 30]) {
+    it(`accepts timeout-minutes ${String(timeout)}, an edge of the allowed range`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          jobs.unit['timeout-minutes'] = timeout;
+        }),
+        [],
       );
     });
   }
@@ -479,22 +613,334 @@ describe('mandatory commands', () => {
     );
   });
 
-  it('counts a command inside a multi-line script', () => {
+  // Break caught: a command that is still run, with spaces or line breaks around it, being reported as dropped.
+  // A block scalar (`run: |`) ends with a line break, so a whole script is compared without its edges.
+  for (const run of ['pnpm run test\n', '  pnpm run test   ', '\n\n    pnpm run test   \n\n']) {
+    it(`counts a command that is the whole script of its step, as ${JSON.stringify(run)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.unit, 2).run = run;
+        }),
+        [],
+      );
+    });
+  }
+
+  // Break caught: the command still named in a script that does more than run it, so that the step passes while
+  // the check does not run (after another command or a condition, behind an echo, in a comment, in text that is
+  // never run). The step must be the command and nothing else.
+  const around: [label: string, script: (command: string) => string][] = [
+    ['after another line', (command) => `echo start\n${command}\necho done`],
+    ['before another line', (command) => `${command}\necho done`],
+    ['indented among others', (command) => `echo start\n    ${command}   \necho done`],
+    ['after &&', (command) => `true && ${command}`],
+    ['before &&', (command) => `${command} && echo ok`],
+    ['before ;', (command) => `${command}; echo ok`],
+    ['after ;', (command) => `echo ok; ${command}`],
+    ['behind echo', (command) => `echo ${command}`],
+    ['inside quotes', (command) => `echo "${command}"`],
+    ['behind a colon', (command) => `: ${command}`],
+    ['in a comment', (command) => `# ${command}`],
+    ['with a trailing comment', (command) => `${command} # ok`],
+    ['in a condition', (command) => `if false; then\n${command}\nfi`],
+    ['in a heredoc', (command) => `cat <<'EOF'\n${command}\nEOF`],
+  ];
+  for (const command of REQUIRED_COMMANDS) {
+    it(`requires ${command} to be the whole script of its step`, () => {
+      for (const [label, script] of around) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            runningStep(jobs, command).run = script(command);
+          }),
+          ['COMMAND_MISSING'],
+          label,
+        );
+      }
+    });
+  }
+
+  // Break caught: a failure absorbed by a command written after the check; both the command being no longer
+  // alone (and so missing) and the swallowed failure are reported.
+  it('still reports a failure swallowed after the command', () => {
     assert.deepEqual(
       codesWith((_, jobs) => {
-        stepAt(jobs.unit, 2).run = 'echo start\npnpm run test\necho done';
+        stepAt(jobs.unit, 2).run = 'pnpm run test || true';
+      }).toSorted(),
+      ['COMMAND_MISSING', 'FAILURE_SWALLOWED'],
+    );
+  });
+
+  // Break caught: the same command run by a step that changes where or how it runs: another shell (a `python`
+  // shell would not run it at all, `bash {0}` runs it without the usual stop on error) or another folder (where
+  // the command is a different script or none).
+  for (const command of REQUIRED_COMMANDS) {
+    for (const [key, value] of [
+      ['shell', 'bash'],
+      ['shell', 'bash {0}'],
+      ['shell', 'python'],
+      ['working-directory', 'apps/api'],
+      ['working-directory', '/tmp'],
+    ] as const) {
+      it(`rejects ${key}: ${value} on the step that runs ${command}`, () => {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            runningStep(jobs, command)[key] = value;
+          }),
+          ['COMMAND_STEP_ALTERED'],
+        );
+      });
+    }
+  }
+
+  // Break caught: a mandatory step made to run in another shell or folder from a default that sits far from it.
+  it('rejects defaults.run on the workflow', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        workflow.defaults = { run: { shell: 'bash {0}', 'working-directory': 'apps/api' } };
+      }),
+      ['DEFAULTS_RUN'],
+    );
+  });
+
+  for (const defaults of [
+    { run: { shell: 'bash {0}' } },
+    { run: { 'working-directory': 'apps' } },
+  ]) {
+    it(`rejects defaults.run on a job: ${JSON.stringify(defaults)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          jobs.integrated.defaults = defaults;
+        }),
+        ['DEFAULTS_RUN'],
+      );
+    });
+  }
+
+  it('accepts defaults that name no run settings', () => {
+    assert.deepEqual(
+      codesWith((workflow, jobs) => {
+        workflow.defaults = {};
+        jobs.unit.defaults = {};
       }),
       [],
     );
   });
 
-  // Break caught: a command that is still run, with spaces around it, being reported as dropped.
-  it('counts a command indented or followed by spaces in its line', () => {
+  // Break caught: every mandatory command made skippable or absorbable one step at a time, none by name.
+  for (const command of REQUIRED_COMMANDS) {
+    it(`rejects a condition on the step that runs ${command}`, () => {
+      for (const condition of [
+        "github.event_name == 'push'",
+        'always()',
+        'failure()',
+        'success()',
+      ]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            runningStep(jobs, command).if = condition;
+          }),
+          ['STEP_CONDITIONAL'],
+          condition,
+        );
+      }
+    });
+
+    it(`rejects continue-on-error on the step that runs ${command}`, () => {
+      for (const value of [true, 'true', '${{ always() }}']) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            runningStep(jobs, command)['continue-on-error'] = value;
+          }),
+          ['CONTINUE_ON_ERROR'],
+        );
+      }
+    });
+  }
+});
+
+// The browser tests run the engines MELARC_BROWSERS names, and Chromium alone when it is not set (the Ops
+// Portal's CLAUDE.md says why CI runs all three: they are the engines of the supported browsers). A pipeline that
+// stops setting it, or installs fewer, would keep passing while two of the three engines were never run.
+describe('the browser matrix', () => {
+  const codesOf = (change: (jobs: Jobs) => void): string[] =>
+    codesWith((_, jobs) => {
+      change(jobs);
+    });
+
+  // Break caught: the variable dropped, renamed, reordered, padded or filled with another list or a computed
+  // value, so that the tests run fewer engines than CI promises (or an engine that is not installed).
+  for (const value of [
+    undefined,
+    '',
+    'chromium',
+    'chromium,firefox',
+    'chromium,webkit',
+    'firefox,webkit',
+    'chromium,firefox,webkit,msedge',
+    'firefox,chromium,webkit',
+    'chromium, firefox, webkit',
+    ' chromium,firefox,webkit',
+    'chromium,firefox,webkit ',
+    'chromium,firefox,webkit,',
+    'Chromium,Firefox,WebKit',
+    '${{ vars.BROWSERS }}',
+  ]) {
+    it(`requires MELARC_BROWSERS to be ${BROWSER_LIST}, not ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          const step = runningStep(jobs, BROWSER_TESTS);
+          if (value === undefined) Reflect.deleteProperty(step, 'env');
+          else step.env = { MELARC_BROWSERS: value };
+        }),
+        ['BROWSER_MATRIX_ENV'],
+      );
+    });
+  }
+
+  it('requires the variable on the step itself, not only on the job or the workflow', () => {
     assert.deepEqual(
-      codesWith((_, jobs) => {
-        stepAt(jobs.unit, 2).run = 'echo start\n    pnpm run test   \necho done';
+      codesOf((jobs) => {
+        Reflect.deleteProperty(runningStep(jobs, BROWSER_TESTS), 'env');
+        jobs.integrated.env = { MELARC_BROWSERS: BROWSER_LIST };
+      }),
+      ['BROWSER_MATRIX_ENV'],
+    );
+  });
+
+  it('accepts other variables beside it', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        runningStep(jobs, BROWSER_TESTS).env = { CI: 'true', MELARC_BROWSERS: BROWSER_LIST };
       }),
       [],
+    );
+  });
+
+  // Break caught: the engines not downloaded, or only some of them, so the run would fail for a missing browser
+  // (or, with another engine installed, test one that is not in the list).
+  for (const [label, script] of [
+    ['only Chromium', 'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium'],
+    [
+      'two engines',
+      'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox',
+    ],
+    [
+      'all three without naming them (the default set)',
+      'pnpm --filter @melarc/e2e exec playwright install --with-deps',
+    ],
+    [
+      'a fourth engine too',
+      'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit msedge',
+    ],
+    [
+      'one engine twice, one missing',
+      'pnpm --filter @melarc/e2e exec playwright install chromium chromium firefox',
+    ],
+    [
+      'an engine named twice',
+      'pnpm --filter @melarc/e2e exec playwright install chromium chromium firefox webkit',
+    ],
+    [
+      'one named in capitals',
+      'pnpm --filter @melarc/e2e exec playwright install chromium firefox WebKit',
+    ],
+  ] as const) {
+    it(`requires the install step to install exactly the three: not ${label}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          runningStep(jobs, INSTALL_BROWSERS).run = script;
+        }),
+        ['BROWSER_INSTALL_DRIFT'],
+      );
+    });
+  }
+
+  for (const script of [
+    'pnpm --filter @melarc/e2e exec playwright install --with-deps webkit firefox chromium',
+    'pnpm --filter @melarc/e2e exec playwright install chromium firefox webkit',
+    'pnpm exec playwright install --with-deps chromium firefox webkit',
+    'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit\n',
+    '  pnpm exec playwright install chromium firefox webkit  \n',
+  ]) {
+    it(`accepts the install step ${JSON.stringify(script)}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          runningStep(jobs, INSTALL_BROWSERS).run = script;
+        }),
+        [],
+      );
+    });
+  }
+
+  // Break caught: the install step deleted, or kept in a form that does not install before the tests.
+  it('requires an install step', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        jobs.integrated.steps = withoutScript(jobs.integrated, INSTALL_BROWSERS);
+      }),
+      ['BROWSER_INSTALL_DRIFT'],
+    );
+  });
+
+  it('requires the install to come before the tests that need the browsers', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        const steps = stepsOf(jobs.integrated);
+        const at = steps.findIndex((step) => step.run === INSTALL_BROWSERS);
+        const [install] = steps.splice(at, 1);
+        assert.ok(install !== undefined);
+        steps.splice(steps.findIndex((step) => step.run === BROWSER_TESTS) + 1, 0, install);
+      }),
+      ['BROWSER_INSTALL_DRIFT'],
+    );
+  });
+
+  it('requires the install to be in the job that runs the tests', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        const [install] = stepsOf(jobs.integrated).splice(
+          stepsOf(jobs.integrated).findIndex((step) => step.run === INSTALL_BROWSERS),
+          1,
+        );
+        assert.ok(install !== undefined);
+        stepsOf(jobs.unit).push(install);
+      }),
+      ['BROWSER_INSTALL_DRIFT'],
+    );
+  });
+
+  // Break caught: the install command inside a longer script, where a failure or a condition could skip it
+  // while the line stays in the file.
+  for (const wrap of [
+    (command: string) => `echo start\n${command}`,
+    (command: string) => `${command} || true`,
+    (command: string) => `echo ${command}`,
+    (command: string) => `# ${command}`,
+  ]) {
+    it(`does not count an install step that is not the command alone: ${JSON.stringify(wrap('INSTALL'))}`, () => {
+      const found = codesOf((jobs) => {
+        const step = runningStep(jobs, INSTALL_BROWSERS);
+        step.run = wrap(INSTALL_BROWSERS);
+      });
+      assert.ok(found.includes('BROWSER_INSTALL_DRIFT'), found.join(', '));
+    });
+  }
+
+  it('rejects a condition on the install step like on any other step', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        runningStep(jobs, INSTALL_BROWSERS).if = "github.event_name == 'push'";
+      }),
+      ['STEP_CONDITIONAL'],
+    );
+  });
+
+  it('leaves a workflow without browser tests to the missing-command rule', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        jobs.integrated.steps = withoutScript(jobs.integrated, BROWSER_TESTS);
+      }),
+      ['COMMAND_MISSING'],
     );
   });
 });
@@ -804,6 +1250,70 @@ describe('triggers and permissions', () => {
         Reflect.deleteProperty(workflow.on as Json, 'push');
       }),
       ['TRIGGER_MISSING'],
+    );
+  });
+
+  // Break caught: a trigger that runs this workflow with more than a pull request's own rights, on a schedule or
+  // for an event no change of the code caused. pull_request_target and workflow_run run with the repository's
+  // secrets and a token that can write, on a side of the change the author controls; the others make the
+  // verdict about something other than a commit that was pushed or proposed.
+  for (const trigger of [
+    'pull_request_target',
+    'schedule',
+    'workflow_run',
+    'repository_dispatch',
+    'issue_comment',
+    'issues',
+    'pull_request_review',
+    'pull_request_review_comment',
+    'release',
+    'workflow_call',
+    'check_run',
+    'create',
+    'fork',
+    'watch',
+  ]) {
+    it(`rejects the trigger ${trigger}`, () => {
+      assert.deepEqual(
+        codesWith((workflow) => {
+          (workflow.on as Json)[trigger] = trigger === 'schedule' ? [{ cron: '0 3 * * *' }] : {};
+        }),
+        ['TRIGGER_FORBIDDEN'],
+      );
+    });
+  }
+
+  it('accepts exactly push, pull_request and workflow_dispatch', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        assert.deepEqual(Object.keys(workflow.on as Json).toSorted(), [
+          'pull_request',
+          'push',
+          'workflow_dispatch',
+        ]);
+      }),
+      [],
+    );
+  });
+
+  it('reads the trigger written as a name or a list of names', () => {
+    for (const on of ['pull_request_target', ['push', 'pull_request_target', 'pull_request']]) {
+      assert.ok(
+        codesWith((workflow) => {
+          workflow.on = on;
+        }).includes('TRIGGER_FORBIDDEN'),
+        JSON.stringify(on),
+      );
+    }
+  });
+
+  it('reports a forbidden trigger and a missing one together', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        Reflect.deleteProperty(workflow.on as Json, 'pull_request');
+        (workflow.on as Json).pull_request_target = {};
+      }).toSorted(),
+      ['TRIGGER_FORBIDDEN', 'TRIGGER_MISSING'],
     );
   });
 

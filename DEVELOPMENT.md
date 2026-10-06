@@ -31,6 +31,16 @@ For the browser tests (step 6) install the Chromium that the pinned Playwright e
 pnpm --filter @melarc/e2e exec playwright install chromium
 ```
 
+The browser tests run Chromium unless `MELARC_BROWSERS` names more. CI runs `chromium,firefox,webkit`, the engines of the
+browsers the Ops Portal supports. To do the same on your machine, install the other two once and name them for the run
+(this is `cmd`; in a POSIX shell use `export MELARC_BROWSERS=chromium,firefox,webkit`):
+
+```text
+pnpm --filter @melarc/e2e exec playwright install firefox webkit
+set MELARC_BROWSERS=chromium,firefox,webkit
+pnpm run test:browser
+```
+
 ## 2. Create the local settings
 
 ```text
@@ -98,14 +108,14 @@ curl http://127.0.0.1:3000/readyz
 These are the checks CI runs ([ci.yml](.github/workflows/ci.yml)), which also runs `pnpm run build`,
 `pnpm --filter @melarc/api run db:check` and `pnpm audit --audit-level high`.
 
-| Command                                                        | Needs                          | Proves                                                                                   |
-| -------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
-| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                        | formatting, lint, strict types                                                           |
-| `pnpm test`                                                    | nothing running                | unit, component and process tests of every workspace, and the repository's tooling tests |
-| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first | the API matches the contract; the generated client is current                            |
-| `pnpm run test:db`                                             | the database (step 3)          | migrations, roles, row-level security and connection handling against a real server      |
-| `pnpm run test:browser`                                        | Chromium (step 1)              | the Ops shell in a real browser                                                          |
-| `pnpm run test:e2e`                                            | the database, Chromium, builds | a real browser, the API and a disposable database together                               |
+| Command                                                        | Needs                          | Proves                                                                                    |
+| -------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                        | formatting, lint, strict types                                                            |
+| `pnpm test`                                                    | nothing running                | unit, component and process tests of every workspace, and the repository's tooling tests  |
+| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first | the implemented operations (none yet) match the contract; the generated client is current |
+| `pnpm run test:db`                                             | the database (step 3)          | migrations, roles, row-level security and connection handling against a real server       |
+| `pnpm run test:browser`                                        | Chromium (step 1)              | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit) |
+| `pnpm run test:e2e`                                            | the database, Chromium, builds | a real browser, the API and a disposable database together                                |
 
 ```text
 pnpm test

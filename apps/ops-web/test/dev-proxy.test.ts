@@ -111,6 +111,19 @@ describe('the development proxy', () => {
     expect(seen[0]?.headers.host).toBe(new URL(base).host);
   });
 
+  // Break caught: the rule that decides what is the API forwarding too little. The base itself is a path of the
+  // API (the contract's one server is `/api/v1`), with a query string or without, and a trailing slash does not
+  // change that. Each of these reaches the API with the path and query exactly as sent.
+  it.each(['/api/v1', '/api/v1?x=1', '/api/v1/', '/api/v1/?x=1', '/api/v1/orders'])(
+    'forwards %s',
+    async (path) => {
+      const base = await startDevServer(await startUpstream());
+      await (await fetch(`${base}${path}`)).text();
+
+      expect(seen.map((request) => request.url)).toEqual([path]);
+    },
+  );
+
   // Break caught: the API's cookies and headers not reaching the browser.
   it('returns the API response, including Set-Cookie, to the browser', async () => {
     const base = await startDevServer(await startUpstream());
@@ -122,15 +135,22 @@ describe('the development proxy', () => {
 
   // Break caught: prefix matching that treats /api/v10 or /api/v1evil as part of the API, and anything
   // outside /api/v1 (the technical probes included) being reachable from the browser origin.
-  it.each(['/api/v10/orders', '/api/v1evil', '/api/v2/orders', '/livez', '/readyz', '/api'])(
-    'does not forward %s',
-    async (path) => {
-      const base = await startDevServer(await startUpstream());
-      await (await fetch(`${base}${path}`)).text();
+  it.each([
+    '/api/v10',
+    '/api/v10/orders',
+    '/api/v1x',
+    '/api/v1x?x=1',
+    '/api/v1evil',
+    '/api/v2/orders',
+    '/livez',
+    '/readyz',
+    '/api',
+  ])('does not forward %s', async (path) => {
+    const base = await startDevServer(await startUpstream());
+    await (await fetch(`${base}${path}`)).text();
 
-      expect(seen).toEqual([]);
-    },
-  );
+    expect(seen).toEqual([]);
+  });
 
   // Break caught: the browser being given an absolute API address, which would break same-origin
   // cookies and CSRF (DEPLOYMENT_AND_ENVIRONMENTS.md section 12.1).

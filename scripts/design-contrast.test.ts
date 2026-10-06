@@ -94,8 +94,8 @@ describe('the Design System contrast tables', () => {
     ],
     [
       'a border ratio',
-      '| `border.control` `#8A94A6` | 3.06 thin |',
-      '| `border.control` `#8A94A6` | 3.07 thin |',
+      '| `border.control` `#7C879B` | 3.62 |',
+      '| `border.control` `#7C879B` | 3.63 |',
     ],
     ['a focus ratio', '| `focus.ring` `#2563A6` | 6.15 |', '| `focus.ring` `#2563A6` | 6.16 |'],
   ];

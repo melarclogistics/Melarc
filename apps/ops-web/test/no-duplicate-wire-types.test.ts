@@ -117,6 +117,11 @@ describe('Ops and the contract', () => {
       .filter((source) => moduleSpecifiers(source.text, source.path).includes(`${PACKAGE}/browser`))
       .map((source) => source.path);
 
-    expect(users).toEqual(['src/platform/api/api-client.tsx']);
+    // The provider makes the client; the query client reads the errors it raises (ApiError, BrowserTransportError)
+    // to decide what to retry and when a session has ended. A third user is a decision, so it is named here.
+    expect(users).toEqual([
+      'src/platform/api/api-client.tsx',
+      'src/platform/query/query-client.ts',
+    ]);
   });
 });

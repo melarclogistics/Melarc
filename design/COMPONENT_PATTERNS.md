@@ -1434,8 +1434,29 @@ The foundation gate builds this, and nothing else:
   (a build test proves it; hiding a link does not).
 
 Not built: `tertiary`, `danger` and sizes `sm` and `lg` of Button; the other Alert variants; PasswordInput (identity
-slice); the authenticated Ops shell; every deferred pattern in §37. This minimum is a proposal for the Product Owner to
-confirm when reviewing these documents (§41).
+slice); the authenticated Ops shell; every deferred pattern in §37. The Product Owner confirmed this scope on
+6 October 2026 (DESIGN_SYSTEM §36).
+
+### 42.3 What was built (6 October 2026)
+
+Paths are under `apps/ops-web/src/`. Tests sit beside each component; the browser tests are in `apps/ops-web/test/browser/`.
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| Tokens | `styles/tokens.css` | The one token source (DESIGN_SYSTEM §29.1), held to the document by `scripts/design-tokens.test.ts`. It adds the primitive `gray.550` (`border.control`, §4.6), the component token `--button-pressed-background` (the bare `#EAECF0` of the Secondary pressed recipe) and a layout width the frame already had |
+| Frame, base styles | `styles/base.css` (replaces `styles/app.css`), `app/AppFrame.tsx` | Landmarks, skip link, focus after a navigation and the generic error copy are unchanged and keep their tests. The global `button` and `a` rules are gone |
+| Button | `components/ui/button/` | `primary` and `secondary` at `md`. `type` is a required prop. `loading` sets `aria-busy` and `aria-disabled`, keeps the label and ignores activation, and does not use the native `disabled` (that would drop the button out of the keyboard order); `disabled` is the native attribute |
+| Link | `components/ui/link/` | Default variant, a thin primitive over the router's `Link`, always underlined |
+| Alert | `components/ui/alert/` | `danger` and `success`, an icon and words. `announce` is set only when the alert is inserted by something that just happened: `danger` then has `role="alert"` and `success` `role="status"`; otherwise it has no role |
+| Field, Input | `components/ui/field/`, `components/ui/input/` | `Field` takes `label`, `help`, `error` and `required` and ties them to the control through context; inside a Field the Field owns the control's `id`. The error is text with an icon and is not a live region (§14 of the design system: focus goes to the first invalid field). `Input` takes the native attributes; read-only and disabled differ in look and in behaviour |
+| LoadingIndicator | `components/ui/loading/` | A polite status region with a label (default "Loading…"); the spinner is decorative and optional. The router uses it as the `HydrateFallback` of the page area, so a page loaded on demand shows it inside the frame |
+| PageHeader | `components/PageHeader.tsx` (beside `PageHeading`, not under `layout/`) | Composes `PageHeading`; `title`, optional `description` and `actions`; no breadcrumb yet |
+| ErrorState, NotFoundState | `components/ErrorFallback.tsx`, `app/pages/NotFoundPage.tsx` | Now use Button and Link. The copy is unchanged, because the existing tests pin it and the specification wants the error `code` mapped to copy, not new wording |
+| Showcase | `showcase/`, route `/__showcase` | Development only: `import.meta.env.DEV` removes the route and its import from a production build, and `test/build.test.ts` proves no trace remains. The component browser tests run against the Vite development server for that reason |
+
+The first screens add a variant or size when they first use it (§30). The authenticated Ops shell, its navigation and the
+inverse recipes stay with the identity slice; the frame and `PrimaryNavigation` still show no entries, because nothing
+provides the caller's capabilities yet (DESIGN_SYSTEM §22).
 
 ---
 

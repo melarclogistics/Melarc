@@ -1,7 +1,33 @@
 import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { clientSettings, parseCreated, redactUrl, withClient } from './database.ts';
+import {
+  clientSettings,
+  createDatabase,
+  dropDatabase,
+  listDatabases,
+  parseCreated,
+  redactUrl,
+  withClient,
+} from './database.ts';
+import { repositoryPaths } from './paths.ts';
+
+type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
+interface ExecOptions {
+  readonly env: NodeJS.ProcessEnv;
+  readonly timeout: number;
+  readonly windowsHide: boolean;
+}
+
+// The database command is never run by these tests: the process API is replaced, so a test that gets past a
+// guard it should have stopped at cannot reach a database, a real or a disposable one.
+const { execFileMock } = vi.hoisted(() => ({
+  execFileMock:
+    vi.fn<
+      (file: string, args: readonly string[], options: ExecOptions, callback: ExecCallback) => void
+    >(),
+}));
+vi.mock('node:child_process', () => ({ execFile: execFileMock }));
 
 const MIGRATION =
   'postgres://melarc_migration_elevated:m-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
@@ -170,5 +196,180 @@ describe('redactUrl', () => {
   it('leaves a URL without a password as it is, and does not echo what it cannot read', () => {
     expect(redactUrl('postgres://127.0.0.1:5432/db')).toBe('postgres://127.0.0.1:5432/db');
     expect(redactUrl('not a url with p@ssw0rd in it')).toBe('(unreadable URL)');
+  });
+});
+
+/** Makes the stand-in for the database command answer, as the real one does, with what it was told to print. */
+function commandPrints(stdout: string): void {
+  execFileMock.mockImplementation((_file, _args, _options, callback) => {
+    callback(null, stdout, '');
+  });
+}
+
+/** The one call the stand-in saw: what would have been run, and with which environment and limits. */
+function theCall() {
+  expect(execFileMock).toHaveBeenCalledTimes(1);
+  const [file, args, options] = execFileMock.mock.calls[0] ?? [];
+  return { file, args, options };
+}
+
+describe('dropDatabase', () => {
+  afterEach(() => {
+    execFileMock.mockReset();
+  });
+
+  // Break caught: the database command being asked to drop a database of the right shape and nothing else
+  // changing in how it is run: the name travels as one argument, after the verb, to the built tool.
+  it('drops a database of the shape the harness makes, naming it as one argument', async () => {
+    commandPrints('');
+
+    await dropDatabase('melarc_test_0a1b2c3d');
+
+    expect(theCall().file).toBe(process.execPath);
+    expect(theCall().args).toEqual([
+      repositoryPaths().databaseTool,
+      'drop',
+      'melarc_test_0a1b2c3d',
+    ]);
+  });
+
+  // Break caught (the drop-name guard removed): the harness dropping a database it did not make. A name that
+  // is a real application database (`melarc_dev` is the local one), a system database, a near miss of the
+  // shape, or text with SQL in it must be refused before any command is run, whatever the command itself
+  // would then do with it.
+  it.each([
+    ['the local application database', 'melarc_dev'],
+    ['a name that starts like a harness database but is shorter', 'melarc_test'],
+    ['a system database', 'postgres'],
+    ['a template database', 'template1'],
+    ['an empty name', ''],
+    ['seven hex digits', 'melarc_test_0a1b2c3'],
+    ['nine hex digits', 'melarc_test_0a1b2c3d4'],
+    ['upper-case hex digits', 'melarc_test_0A1B2C3D'],
+    ['a digit that is not hex', 'melarc_test_0a1b2c3g'],
+    ['a prefix before the shape', 'xmelarc_test_0a1b2c3d'],
+    ['a suffix after the shape', 'melarc_test_0a1b2c3d_copy'],
+    ['a trailing newline', 'melarc_test_0a1b2c3d\n'],
+    ['a leading space', ' melarc_test_0a1b2c3d'],
+    ['a path', '../melarc_test_0a1b2c3d'],
+    ['a second statement', 'melarc_test_0a1b2c3d; drop database melarc_dev'],
+    ['a quote and a comment', 'melarc_test_0a1b2c3d" ; drop database melarc_dev; --'],
+    ['an always-true condition', "melarc_test_0a1b2c3d' or '1'='1"],
+    ['a null character', 'melarc_test_0a1b2c3d\u0000'],
+  ])('refuses to drop %s, and runs no command', async (_label, name) => {
+    commandPrints('');
+
+    await expect(dropDatabase(name)).rejects.toThrow('Refusing to drop');
+
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  // Break caught: a failure of the command being reported without what it said, or without which command it
+  // was, which leaves a failed run with nothing to read.
+  it('reports a failed command with its arguments and what it wrote to stderr', async () => {
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(new Error('exit 1'), '', 'database is being accessed by other users\n');
+    });
+
+    await expect(dropDatabase('melarc_test_0a1b2c3d')).rejects.toThrow(
+      'The database command (drop melarc_test_0a1b2c3d) failed: database is being accessed by other users',
+    );
+  });
+
+  it('falls back to the process error when the command wrote nothing to stderr', async () => {
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(new Error('spawn failed'), '', '');
+    });
+
+    await expect(dropDatabase('melarc_test_0a1b2c3d')).rejects.toThrow(/failed: spawn failed$/);
+  });
+});
+
+describe('the database command', () => {
+  afterEach(() => {
+    execFileMock.mockReset();
+    vi.unstubAllEnvs();
+  });
+
+  // Break caught: the wrong verb, so that `create` or `list` runs something else, or the output of the command
+  // being read from the wrong place.
+  it('creates a database with `create` and reads the one line it prints', async () => {
+    commandPrints(created());
+
+    await expect(createDatabase()).resolves.toMatchObject({ name: 'melarc_test_0a1b2c3d' });
+
+    expect(theCall().args).toEqual([repositoryPaths().databaseTool, 'create']);
+  });
+
+  it('lists the disposable databases with `list`', async () => {
+    commandPrints(JSON.stringify({ databases: ['melarc_test_0a1b2c3d', 'melarc_test_1f2e3d4c'] }));
+
+    await expect(listDatabases()).resolves.toEqual([
+      'melarc_test_0a1b2c3d',
+      'melarc_test_1f2e3d4c',
+    ]);
+
+    expect(theCall().args).toEqual([repositoryPaths().databaseTool, 'list']);
+  });
+
+  // Break caught: a command that can hang a run for ever, or one that opens a console window.
+  it('bounds the command in time and keeps its window hidden', async () => {
+    commandPrints(JSON.stringify({ databases: [] }));
+
+    await listDatabases();
+
+    expect(theCall().options).toMatchObject({ timeout: 60_000, windowsHide: true });
+  });
+
+  // Break caught (commandEnvironment): the command being given more than it needs, so that a developer's own
+  // settings (their database URLs, credentials of other tools, NODE_OPTIONS, the sandbox's capture file) steer
+  // what it does, or less than it needs, so that it cannot reach the local server. It gets the MELARC_PG_
+  // settings, which say where the local server is, and nothing else.
+  it('gives the command the MELARC_PG_ settings and nothing else of this machine', async () => {
+    vi.stubEnv('MELARC_PG_HOST', 'db.local.example');
+    vi.stubEnv('MELARC_PG_PORT', '5544');
+    vi.stubEnv('MELARC_PG_ADMIN_PASSWORD', 'admin-secret-value');
+    for (const name of [
+      'DATABASE_URL',
+      'DATABASE_MIGRATION_URL',
+      'PGPASSWORD',
+      'AWS_SECRET_ACCESS_KEY',
+      'NODE_OPTIONS',
+      'MELARC_E2E_CAPTURE_FILE',
+      'MELARC_PGX_NOT_A_SETTING',
+      'XMELARC_PG_PREFIXED',
+      'APP_ENV',
+    ]) {
+      vi.stubEnv(name, 'must-not-reach-the-command');
+    }
+    commandPrints(JSON.stringify({ databases: [] }));
+
+    await listDatabases();
+
+    const passed = theCall().options?.env ?? {};
+    expect(passed).toMatchObject({
+      MELARC_PG_HOST: 'db.local.example',
+      MELARC_PG_PORT: '5544',
+      MELARC_PG_ADMIN_PASSWORD: 'admin-secret-value',
+    });
+    const others = Object.keys(passed).filter(
+      (name) => !name.startsWith('MELARC_PG_') && name.toUpperCase() !== 'SYSTEMROOT',
+    );
+    expect(others).toEqual([]);
+  });
+
+  // Break caught: Windows' own SystemRoot not reaching the command. Without it Node on Windows cannot start
+  // its network code, and the command fails before it says anything. Windows spells the name as its parent
+  // process did (`SystemRoot` or `SYSTEMROOT`), so what must hold is that the value arrives, whatever the
+  // case of the name in this process.
+  it('gives the command SystemRoot when this process has it', async () => {
+    vi.stubEnv('SystemRoot', 'C:\\StubbedWindows');
+    commandPrints(JSON.stringify({ databases: [] }));
+
+    await listDatabases();
+
+    const passed = theCall().options?.env ?? {};
+    const systemRoot = Object.entries(passed).find(([name]) => name.toUpperCase() === 'SYSTEMROOT');
+    expect(systemRoot?.[1]).toBe('C:\\StubbedWindows');
   });
 });

@@ -109,8 +109,34 @@ function readsNodeVersionFile(step: Step): boolean {
   return inputs['node-version-file'] === '.node-version' && !('node-version' in inputs);
 }
 
-const FROZEN_INSTALL = /\bpnpm\s+(?:install\b[^\n]*--frozen-lockfile|ci)\b/;
 const FULL_COMMIT_SHA = /@[0-9a-f]{40}$/;
+
+/** The lines of a script, a line continued by a trailing backslash joined to the next. */
+function commandLines(script: string): string[] {
+  return script.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+}
+
+/** The freeze switched off: `--no-frozen-lockfile`, or `--frozen-lockfile=` with any value but `true`. */
+const FREEZE_OFF = /--no-frozen-lockfile|--frozen-lockfile=(?!true(?:\s|$))/;
+
+/**
+ * Whether a command line is, from its first word, a frozen install: `pnpm ci`, or `pnpm install` with
+ * `--frozen-lockfile` (or `=true`). A line that only mentions the command (in an echo, a comment, a condition or
+ * after another command) is not one; neither is a line that turns the freeze off anywhere (`&& pnpm install
+ * --no-frozen-lockfile`) or answers the failure of the frozen install with another command (`||`).
+ */
+function isFrozenInstall(line: string): boolean {
+  const code = line.replace(/\s#.*$/, '');
+  if (code.includes('||') || FREEZE_OFF.test(code)) return false;
+  const command = (code.split(/&&|;|\||&/)[0] ?? '').trim();
+  const [program, subcommand, ...flags] = command.split(/\s+/);
+  if (program !== 'pnpm') return false;
+  if (subcommand === 'ci') return true;
+  return (
+    subcommand === 'install' &&
+    flags.some((flag) => flag === '--frozen-lockfile' || flag === '--frozen-lockfile=true')
+  );
+}
 
 function checkCiWorkflowPins(ciWorkflow: string, localActions: LocalActions): PinProblem[] {
   const missing = new Set<string>();
@@ -141,7 +167,7 @@ function checkCiWorkflowPins(ciWorkflow: string, localActions: LocalActions): Pi
   }
 
   const runs = steps.map((step) => step.run).filter((run) => typeof run === 'string');
-  if (!runs.some((run) => FROZEN_INSTALL.test(run))) {
+  if (!runs.some((run) => commandLines(run).some(isFrozenInstall))) {
     problems.push({
       code: 'CI_FROZEN_INSTALL',
       message: 'CI must install with pnpm install --frozen-lockfile (or pnpm ci).',

@@ -7,6 +7,7 @@ import { ContractValidationModule } from './contract/contract-validation.module.
 import { fileContractSource, type ContractSource } from './contract/contract-source.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
@@ -39,6 +40,7 @@ export class PlatformModule {
         { provide: APP_CONFIG, useValue: options.config },
         { provide: LOGGER, useValue: options.logger },
         { provide: APP_GUARD, useClass: DenyByDefaultGuard },
+        NotFoundFallback,
         LifecycleService,
         ShutdownRegistry,
       ],

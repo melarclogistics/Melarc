@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { apiEnvironment } from './api-environment.ts';
+import { apiEnvironment, PROTECTED_KEYS } from './api-environment.ts';
 
 const RUNTIME_URL =
   'postgres://melarc_api_runtime:runtime-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
@@ -63,15 +63,44 @@ describe('apiEnvironment', () => {
     });
 
     expect(extra.LOG_LEVEL).toBe('debug');
-    for (const forbidden of ['APP_ENV', 'DATABASE_MIGRATION_URL', 'MELARC_E2E_CAPTURE_FILE']) {
-      expect(() =>
-        apiEnvironment({
-          port: 1,
-          runtimeUrl: RUNTIME_URL,
-          captureFile: '/tmp/capture.jsonl',
-          extra: { [forbidden]: 'x' },
-        }),
-      ).toThrow(forbidden);
-    }
+  });
+
+  // Break caught: a key silently leaving the protected list (a rename, a typo, a deletion), after which a
+  // test could point the API at another database or turn the sandbox's capture off. The list is compared with
+  // a literal, so a change to it is a decision made here, in view, and not a side effect.
+  it('protects exactly the settings that make a run local, sandboxed and safe', () => {
+    expect([...PROTECTED_KEYS].toSorted()).toEqual([
+      'APP_ENV',
+      'DATABASE_MIGRATION_URL',
+      'DATABASE_URL',
+      'MELARC_E2E_CAPTURE_FILE',
+      'NODE_ENV',
+    ]);
+  });
+
+  // Break caught: a protected key that can be overridden through `extra`. Every key of the exported list is
+  // tried, so a key added to it later is covered without anyone remembering to add a case here.
+  it.each(PROTECTED_KEYS)('refuses to let extra settings override %s', (forbidden) => {
+    expect(() =>
+      apiEnvironment({
+        port: 1,
+        runtimeUrl: RUNTIME_URL,
+        captureFile: '/tmp/capture.jsonl',
+        extra: { [forbidden]: 'x' },
+      }),
+    ).toThrow(`${forbidden} is set by the harness and cannot be overridden.`);
+  });
+
+  // Break caught: a refused override that still reaches the environment, or an override that is refused only
+  // when it comes alone and slips through beside an allowed one.
+  it('refuses a protected key even when it comes beside an allowed one', () => {
+    expect(() =>
+      apiEnvironment({
+        port: 1,
+        runtimeUrl: RUNTIME_URL,
+        captureFile: '/tmp/capture.jsonl',
+        extra: { LOG_LEVEL: 'debug', NODE_ENV: 'production' },
+      }),
+    ).toThrow('NODE_ENV');
   });
 });

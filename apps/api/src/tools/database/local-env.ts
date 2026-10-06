@@ -62,6 +62,17 @@ export function readLocalPostgres(
   const migrationPassword = password('MELARC_PG_MIGRATION_PASSWORD');
   const runtimePassword = password('MELARC_PG_RUNTIME_PASSWORD');
 
+  // Each role has its own password: the migration role can create objects and act as the owner, and the runtime
+  // role must be able to do neither, which a password they share would not keep true.
+  const passwords = [adminPassword, migrationPassword, runtimePassword].filter(
+    (value) => value !== '',
+  );
+  if (new Set(passwords).size !== passwords.length) {
+    problems.push(
+      'MELARC_PG_ADMIN_PASSWORD, MELARC_PG_MIGRATION_PASSWORD and MELARC_PG_RUNTIME_PASSWORD must all differ',
+    );
+  }
+
   const rawPort = read('MELARC_PG_PORT') ?? '5432';
   const port = /^\d{1,5}$/.test(rawPort) ? Number(rawPort) : Number.NaN;
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {

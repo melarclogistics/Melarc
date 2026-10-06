@@ -1,7 +1,7 @@
-import type { components } from '@melarc/api-client';
+import type { components, paths } from '@melarc/api-client';
 import { createBrowserApiClient, type BrowserApiClient } from '@melarc/api-client/browser';
 import { render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { AppProviders } from '../../app/providers';
 import { ApiClientProvider, useApiClient } from './api-client';
@@ -161,7 +161,8 @@ type WireMoney = components['schemas']['Money'];
 /**
  * Compile-time proof that Ops consumes the contract's own types instead of a copy: these are the
  * generated shapes, so a value the contract forbids is a type error, and `pnpm typecheck` fails if this
- * one stops being an error. The values are only ever read back by the test below.
+ * one stops being an error. It is exported so that it is part of the checked program and never run: it
+ * proves nothing at run time, and the test below does not pretend that it does.
  */
 export function wireTypeProofs(): WireMoney[] {
   // @ts-expect-error the contract's only currency is GHS.
@@ -170,8 +171,41 @@ export function wireTypeProofs(): WireMoney[] {
 }
 
 describe('the wire types', () => {
-  it('are importable by Ops from the package entry point', () => {
-    expect(wireTypeProofs()[0]).toEqual({ amount_minor: 2550, currency: 'GHS' });
-    expect(typeof createBrowserApiClient).toBe('function');
+  // Break caught (by `pnpm typecheck`, which compiles this file; at run time the type assertions are no-ops):
+  // the types Ops gets from the package entry point drifting from the contract, or Ops being given a client
+  // that is not typed by the contract's paths. A widened currency, a number that became a string, a client
+  // that accepts a path the contract does not have, or one that offers a verb for a path that has none,
+  // each make an assertion below a type error.
+  it('are the types of the contract, and type the client Ops is given', () => {
+    expectTypeOf<WireMoney['currency']>().toEqualTypeOf<'GHS'>();
+    expectTypeOf<WireMoney['amount_minor']>().toEqualTypeOf<number>();
+
+    type PostPath = Parameters<BrowserApiClient['POST']>[0];
+    type GetPath = Parameters<BrowserApiClient['GET']>[0];
+    expectTypeOf<PostPath>().toExtend<keyof paths>();
+    expectTypeOf<'/pickup-requests/{id}/confirm'>().toExtend<PostPath>();
+    expectTypeOf<'/pickup-requests/{id}/confirm'>().not.toExtend<GetPath>();
+    expectTypeOf<'/pickup-requests/{id}'>().toExtend<GetPath>();
+    expectTypeOf<'/not-in-the-contract'>().not.toExtend<PostPath>();
+    expectTypeOf<'/not-in-the-contract'>().not.toExtend<GetPath>();
+  });
+
+  // Break caught: the entry point handing Ops something other than the restricted client: a method that lets a
+  // feature add middleware or swap the sender (`use`, `eject`), or one that can be changed after it was made.
+  it('come with a client that has the HTTP verbs and nothing more, and cannot be changed', () => {
+    const client = createBrowserApiClient({ origin: window.location.origin });
+
+    expect(Object.keys(client).toSorted()).toEqual([
+      'DELETE',
+      'GET',
+      'HEAD',
+      'OPTIONS',
+      'PATCH',
+      'POST',
+      'PUT',
+      'TRACE',
+      'request',
+    ]);
+    expect(Object.isFrozen(client)).toBe(true);
   });
 });

@@ -1,7 +1,12 @@
 {
   "$schema": "./node_modules/turbo/schema.json",
   "agentGuidance": false,
-  "globalDependencies": ["contracts/openapi.yaml"],
+  "globalDependencies": [
+    "contracts/openapi.yaml",
+    "tsconfig.base.json",
+    "pnpm-workspace.yaml",
+    ".node-version"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -33,7 +38,7 @@
     },
     "test:browser": {
       "cache": false,
-      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH"]
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS"]
     }
   }
 }

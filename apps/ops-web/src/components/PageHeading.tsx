@@ -5,5 +5,9 @@ import type { ReactNode } from 'react';
  * navigation tells a screen reader that the page changed.
  */
 export function PageHeading({ children }: { readonly children: ReactNode }) {
-  return <h1 tabIndex={-1}>{children}</h1>;
+  return (
+    <h1 className="page-heading" tabIndex={-1}>
+      {children}
+    </h1>
+  );
 }

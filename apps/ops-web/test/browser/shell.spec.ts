@@ -1,14 +1,16 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-/** The two widths the Ops Portal specification verifies (surfaces/ops-portal.md section 11). */
+import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
+
+/**
+ * The two widths the Ops Portal specification verifies (surfaces/ops-portal.md section 11), and 320 CSS pixels, where
+ * content must reflow without sideways scrolling (WCAG 1.4.10, DESIGN_SYSTEM section 14).
+ */
 const VERIFIED_VIEWPORTS = [
   { width: 1280, height: 800 },
   { width: 768, height: 1024 },
+  { width: 320, height: 640 },
 ] as const;
-
-/** WCAG 2.1 level A and AA, the working target; it is not a conformance claim. */
-const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
 /**
  * A strict policy used only as a compatibility baseline: no inline code, no eval, nothing from another
@@ -26,38 +28,6 @@ const STRICT_POLICY = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
-
-/** Records what a healthy shell never does: log errors, throw, fail a request. Also lists its requests. */
-function watchPage(page: Page) {
-  const problems: string[] = [];
-  const requests: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() !== 'error' && message.type() !== 'warning') return;
-    // Browsers ask for /favicon.ico on their own. No brand assets exist yet, so it is a 404 and the
-    // browser logs it. Delete this allowance when an icon is added.
-    if (message.location().url.endsWith('/favicon.ico')) return;
-    problems.push(`console ${message.type()}: ${message.text()} (${message.location().url})`);
-  });
-  page.on('pageerror', (error) => {
-    problems.push(`uncaught: ${error.message}`);
-  });
-  page.on('requestfailed', (request) => {
-    problems.push(`request failed: ${request.url()}`);
-  });
-  page.on('response', (response) => {
-    if (response.status() >= 400)
-      problems.push(`HTTP ${String(response.status())}: ${response.url()}`);
-  });
-  page.on('request', (request) => {
-    requests.push(request.url());
-  });
-  return { problems, requests };
-}
-
-async function wcagViolations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  return results.violations.map((violation) => `${violation.id}: ${violation.help}`);
-}
 
 test.describe('the application shell in a browser', () => {
   // Break caught: a production build that does not start, logs errors, or reaches for anything other
@@ -107,7 +77,12 @@ test.describe('the application shell in a browser', () => {
     const skipLink = page.getByRole('link', { name: 'Skip to main content' });
     await expect(skipLink).not.toBeInViewport();
 
-    await page.keyboard.press('Tab');
+    // The first stop in the document is the skip link, in every engine; Tab arrives there wherever it reaches links.
+    const tabs = await tabReachesLinks(page);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    expect((await reachableNames(page, true))[0]).toBe('Skip to main content');
+    if (tabs) await page.keyboard.press('Tab');
+    else await skipLink.focus();
 
     await expect(skipLink).toBeFocused();
     await expect(skipLink).toBeInViewport();
@@ -129,15 +104,21 @@ test.describe('the application shell in a browser', () => {
   }) => {
     const seen = watchPage(page);
     await page.goto('/definitely/not/a/page');
+    const tabs = await tabReachesLinks(page);
 
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     await expect(page).toHaveTitle('Page not found · Melarc Ops Portal');
 
     // Tab 1 is the skip link, tab 2 the link home. Following it must not reload the page.
+    const home = page.getByRole('link', { name: 'Go to the start page' });
     await page.evaluate(() => Object.assign(window, { survivedNavigation: true }));
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'Go to the start page' })).toBeFocused();
+    if (tabs) {
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+    } else {
+      await home.focus();
+    }
+    await expect(home).toBeFocused();
     await page.keyboard.press('Enter');
 
     await expect(page).toHaveURL('/');
@@ -187,7 +168,7 @@ test.describe('the application shell in a browser', () => {
   for (const { width, height } of VERIFIED_VIEWPORTS) {
     // Break caught: a layout that breaks at a verified width, or colour contrast that fails in a real
     // browser, which jsdom cannot check. Also with the skip link showing, its most exposed state.
-    test(`has no WCAG 2.1 A or AA violation and no sideways scrolling at ${String(width)} px`, async ({
+    test(`has no WCAG 2.2 A or AA violation and no sideways scrolling at ${String(width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height });
@@ -204,7 +185,10 @@ test.describe('the application shell in a browser', () => {
       }
 
       await page.goto('/');
-      await page.keyboard.press('Tab');
+      const tabs = await tabReachesLinks(page);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      if (tabs) await page.keyboard.press('Tab');
+      else await page.getByRole('link', { name: 'Skip to main content' }).focus();
       await expect(page.getByRole('link', { name: 'Skip to main content' })).toBeInViewport();
       expect(await wcagViolations(page), 'with the skip link focused').toEqual([]);
     });

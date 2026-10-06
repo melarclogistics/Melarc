@@ -1,6 +1,5 @@
-import { Link } from 'react-router';
-
 import { PageHeading } from '../../components/PageHeading';
+import { Link } from '../../components/ui/link/Link';
 
 export function NotFoundPage() {
   return (

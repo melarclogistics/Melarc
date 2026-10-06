@@ -1,3 +1,5 @@
+import http from 'node:http';
+
 import {
   Body,
   Controller,
@@ -248,6 +250,95 @@ describe('a request that breaks the contract', () => {
 
     expect(response.status).toBe(400);
     expect(behaviour.calls).toBe(0);
+  });
+
+  // Break caught: a request with no body at all counted as carrying one. It would then be judged as a value
+  // (undefined) and fail on its type, so the caller is told the body is the wrong type when it is missing.
+  it('is refused as missing its body, not as a body of the wrong type, when none is sent', async () => {
+    const app = await start({
+      rootModule: appWith(ValidatedWidgetsModule),
+      contractSource: fixtureSource(),
+    });
+
+    const response = await fetch(`${app.baseUrl}/api/v1/widgets`, {
+      method: 'POST',
+      headers: { 'idempotency-key': 'k' },
+    });
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { details: unknown }).details).toEqual({
+      violations: [{ in: 'body', pointer: '', rule: 'required' }],
+    });
+    expect(behaviour.calls).toBe(0);
+  });
+});
+
+describe('a body that is empty but is not absent', () => {
+  // Break caught: an empty chunked body counted as the object {}. The body parser answers {} for a JSON request
+  // whose body is empty, and a request with chunked encoding has no length to say so, so a body-less request to an
+  // operation that requires a body passed as an empty object, and a required body whose fields are all optional
+  // passed as valid.
+  it('is refused as missing its body when the request is chunked and has no bytes', async () => {
+    const app = await start({
+      rootModule: appWith(ValidatedWidgetsModule),
+      contractSource: fixtureSource(),
+    });
+
+    const status = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const request = http.request(
+        {
+          host: '127.0.0.1',
+          port: new URL(app.baseUrl).port,
+          method: 'POST',
+          path: '/api/v1/widgets',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'k',
+            'transfer-encoding': 'chunked',
+          },
+        },
+        (response) => {
+          let body = '';
+          response.on('data', (chunk: Buffer) => {
+            body += chunk.toString();
+          });
+          response.on('end', () => {
+            resolve({ status: response.statusCode ?? 0, body });
+          });
+        },
+      );
+      request.on('error', reject);
+      request.end();
+    });
+
+    expect(status.status).toBe(400);
+    expect((JSON.parse(status.body) as { details: unknown }).details).toEqual({
+      violations: [{ in: 'body', pointer: '', rule: 'required' }],
+    });
+    expect(behaviour.calls).toBe(0);
+  });
+
+  // Break caught: the same rule refusing a chunked body that has bytes in it.
+  it('accepts a chunked request that has a body', async () => {
+    const app = await start({
+      rootModule: appWith(ValidatedWidgetsModule),
+      contractSource: fixtureSource(),
+    });
+
+    const response = await fetch(`${app.baseUrl}/api/v1/widgets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'k' },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"label":"Widget"}'));
+          controller.close();
+        },
+      }),
+      // Node's fetch needs this to send a stream body.
+      duplex: 'half',
+    });
+
+    expect(response.status).toBe(201);
   });
 });
 

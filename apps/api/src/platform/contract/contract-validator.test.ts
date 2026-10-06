@@ -971,6 +971,17 @@ describe('the cookies a response sets', () => {
     ).toEqual([{ in: 'response-cookie', pointer: 'melarc_vendor_device', rule: 'undeclared' }]);
   });
 
+  // Break caught: a cookie named like something every object has (`constructor`, `toString`) being taken for one
+  // the contract knows, which names it in the violation. The contract's own names are looked up as its own.
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'does not take a cookie named %s for one the contract knows',
+    (name) => {
+      expect(cookiesOf(200, [SESSION, CSRF, `${name}=1; Path=/`])).toEqual([
+        { in: 'response-cookie', pointer: '*', rule: 'undeclared' },
+      ]);
+    },
+  );
+
   // Break caught: a cookie set with weaker attributes than the contract's `x-cookies` states. Each attribute is
   // its own rule, named in the contract's words.
   it.each([
@@ -1252,5 +1263,125 @@ describe('the real contract, enforced at run time', () => {
     expect(rules).toContain('/pickup_intent:enum');
     expect(rules).toContain('/scheduled_service_date:format');
     expect(rules).toContain('/declared_package_count:minimum');
+  });
+});
+
+describe('text on the wire that the validator reads as another type', () => {
+  // Break caught: a value that is valid only because it was read as a number, while the handler, which is given
+  // the text as it was sent, reads it another way. Ajv's coercion accepts `0x10` (16), ` 5`, `1e1` (10), `+5`,
+  // `05` and `5.0` as the integer they stand for, so `parseInt(text, 10)` and `Number(text)` gave a handler two
+  // different page sizes for the same request. The text must be what the number would be written as.
+  it.each(['0x10', '1e1', ' 5', '5 ', '+5', '05', '5.0', '5.', '0b11'])(
+    'refuses %j as an integer, although it can be read as one',
+    (text) => {
+      expect(
+        real.validateRequest('listPickupManifests', request({ query: { page_size: text } })),
+      ).toEqual([{ in: 'query', pointer: 'page_size', rule: 'type' }]);
+    },
+  );
+
+  it.each(['1', '25', '100'])('accepts %j as an integer', (text) => {
+    expect(
+      real.validateRequest('listPickupManifests', request({ query: { page_size: text } })),
+    ).toEqual([]);
+  });
+
+  // Break caught: the canonical-text rule making a range error disappear, or reporting it twice.
+  it('still reports a number out of range, once', () => {
+    expect(
+      real.validateRequest('listPickupManifests', request({ query: { page_size: '101' } })),
+    ).toEqual([{ in: 'query', pointer: 'page_size', rule: 'maximum' }]);
+  });
+
+  // Break caught: the rule above reading only numbers: a boolean is read from text too, and only the two words
+  // the contract's type is written with stand for one.
+  it('refuses text that is read as a boolean it does not write', () => {
+    expect(
+      fixture.validateRequest('createWidget', createRequest({ query: { dry_run: 'True' } })),
+    ).toEqual([{ in: 'query', pointer: 'dry_run', rule: 'type' }]);
+  });
+});
+
+describe('an identifier written as a URN', () => {
+  // Break caught: ajv-formats' `uuid`, whose pattern allows a `urn:uuid:` prefix. The text validated as an
+  // identifier, PostgreSQL then refused it (22P02) and the caller got a server error and an alert, and the same
+  // identifier could be written as two different strings.
+  it.each([
+    `urn:uuid:${UUID}`,
+    `URN:UUID:${UUID}`,
+    `{${UUID}}`,
+    UUID.replaceAll('-', ''),
+    ` ${UUID}`,
+  ])('refuses %j as a uuid', (id) => {
+    expect(fixture.validateRequest('getWidget', request({ params: { id } }))).toEqual([
+      { in: 'path', pointer: 'id', rule: 'format' },
+    ]);
+  });
+
+  it.each([UUID, UUID.toUpperCase()])('accepts %j as a uuid', (id) => {
+    expect(fixture.validateRequest('getWidget', request({ params: { id } }))).toEqual([]);
+  });
+});
+
+describe('numbers read from text', () => {
+  const numbers = new ContractValidator({
+    openapi: '3.1.0',
+    info: { title: 'Numbers', version: '1' },
+    servers: [{ url: '/api/v1' }],
+    security: [],
+    paths: {
+      '/numbers': {
+        get: {
+          operationId: 'listNumbers',
+          security: [],
+          'x-permission': 'number.read',
+          parameters: [
+            { name: 'amount', in: 'query', required: false, schema: { type: 'number' } },
+            {
+              name: 'counts',
+              in: 'query',
+              required: false,
+              schema: { type: 'array', items: { type: 'integer' } },
+            },
+          ],
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+    },
+  } satisfies JsonObject);
+
+  // Break caught: a number that is not finite standing for the text. `Infinity` is what the text writes, so the
+  // canonical-text rule alone does not refuse it, and a handler that adds it to a total, or compares it, is wrong.
+  it.each(['Infinity', '-Infinity'])('refuses %j as a number', (text) => {
+    expect(numbers.validateRequest('listNumbers', request({ query: { amount: text } }))).toEqual([
+      { in: 'query', pointer: 'amount', rule: 'type' },
+    ]);
+  });
+
+  // Break caught: the canonical-text rule looking only at single values. A single value for an array parameter is
+  // wrapped into a one-item array in the copy that is validated, and its item was read as a number too.
+  it.each([
+    ['a single value that reads as another integer', '0x10'],
+    ['a single value with a space', ' 5'],
+  ])('refuses %s for an array of integers', (_label, text) => {
+    expect(numbers.validateRequest('listNumbers', request({ query: { counts: text } }))).toEqual([
+      { in: 'query', pointer: 'counts', rule: 'type' },
+    ]);
+  });
+
+  it('refuses a list of integers when one of them reads as another', () => {
+    expect(
+      numbers.validateRequest('listNumbers', request({ query: { counts: ['5', '0x10'] } })),
+    ).toEqual([{ in: 'query', pointer: 'counts', rule: 'type' }]);
+  });
+
+  it.each([['5'], [['5', '6']]])('accepts %j for an array of integers', (counts) => {
+    expect(numbers.validateRequest('listNumbers', request({ query: { counts } }))).toEqual([]);
+  });
+
+  it.each(['1.5', '0', '-2', '1000000'])('accepts %j as a number', (text) => {
+    expect(numbers.validateRequest('listNumbers', request({ query: { amount: text } }))).toEqual(
+      [],
+    );
   });
 });

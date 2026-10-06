@@ -39,6 +39,43 @@ describe('request ids', () => {
     expect(typeof completed[0]?.duration_ms).toBe('number');
   });
 
+  // Break caught: every completion line at one level, so alerting on errors sees nothing and a wall of 404s
+  // reads like a wall of successes. A server fault is an error, a client one a warning, the rest information.
+  it.each([
+    ['a success', '/api/v1/fixture/orders/1', 200, 'info'],
+    ['a client error', '/api/v1/fixture/no-such-thing', 404, 'warn'],
+    ['a server fault', '/api/v1/fixture/throw-secret', 500, 'error'],
+  ])('logs %s at the level that says so', async (_label, path, status, level) => {
+    const { baseUrl, logs } = await start();
+    await (await fetch(`${baseUrl}${path}`)).text();
+
+    const completed = logs.records().filter((record) => record.msg === 'request completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ status, level, aborted: false });
+  });
+
+  // Break caught: a request the client gave up on being logged as an ordinary completion, so a handler that is
+  // too slow for its callers cannot be told apart from one that answers.
+  it('says that a request was aborted when the client went away before the answer', async () => {
+    const { baseUrl, logs } = await start();
+    const controller = new AbortController();
+    const request = fetch(`${baseUrl}/api/v1/fixture/slow/gone?ms=600`, {
+      signal: controller.signal,
+    }).catch(() => 'aborted');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    controller.abort();
+    await request;
+
+    const deadline = Date.now() + 3000;
+    let line: Record<string, unknown> | undefined;
+    while (line === undefined && Date.now() < deadline) {
+      line = logs.records().find((record) => record.msg === 'request completed');
+      if (line === undefined) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect(line).toMatchObject({ aborted: true });
+  });
+
   // Break caught: trusting a caller-chosen id, which lets a client forge correlation and inject log text.
   it('ignores an id supplied by the client', async () => {
     const { baseUrl, logs } = await start();
