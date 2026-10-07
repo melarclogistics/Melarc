@@ -886,7 +886,7 @@ States: `PENDING` · `ACTIVE` · `REVOKED`. Terminal: `REVOKED`.
 
 **A Platform Admin cannot turn MFA off.** Reset revokes and re-issues; it does not produce an identity that can hold a privileged session without a factor.
 
-**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). A Platform Admin **cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`). A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. The consequence for a stranded bootstrap administrator is an open question ([credential-recovery.md](../features/identity/credential-recovery.md) §5.6).
+**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). A Platform Admin **cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`). A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. A stranded bootstrap administrator's factor is only `PENDING`, so it is resumed through the provisioning channel and not by this operation ([credential-recovery.md](../features/identity/credential-recovery.md) §5.6).
 
 ## 19. `SetupGrant`
 

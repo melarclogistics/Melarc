@@ -461,7 +461,7 @@ Each finding was reproduced on its own before it was changed, and each repair is
 | B-02 manifest verification | **Repaired** | `ci-revision.ts` validates the manifest strictly (schema, fields, canonical paths, git object names, hashes, non-empty files and roots, consistency with the contract) and `verify` states what it proves and what it does not |
 | B-03 WSL2 setup | **Repaired; WSL2 not run** | [DEVELOPMENT.md](../../DEVELOPMENT.md) names the two supported WSL2 setups and says what is unverified; `pnpm run infra:check` is the non-destructive check; the password and Playwright statements are corrected |
 | B-04 review archives | **Repaired** | `pnpm run package:source` (see B0.9). The earlier archive carried populated settings files: whether to replace those local passwords is the owner's decision, see below |
-| B-05 CI and setup evidence | **Partly closed: items 1 and 9 done, items 2 to 8 open** (8 is the UI evidence added on 6 October; it gates the first identity flow) | the hosted run of `7509f51` is green (see B0.8's notes); the list below says what is still owed |
+| B-05 CI and setup evidence | **Closed for bootstrap acceptance on 7 October 2026 except item 2**: items 1, 3 and 9 done, 2 waits for three manual rehearsal runs, 4 to 7 waived with a milestone, 8 gates the first identity flow | the list "Evidence still owed" below says what each item became |
 | D-01 to D-07 design documents | **Reconciled and approved by the Product Owner on 6 October 2026** | layout families, supported colour pairings and recipes, the accessibility baseline and its test matrix, the nine states and the error-copy boundary, the existing-code map and bounded first scope, asset, token and font ownership, formatting boundaries. `scripts/design-contrast.test.ts` holds the colour tables to their hex values |
 
 **Decisions this pass left to the Product Owner** were all taken on 6 October 2026 (see "Product Owner decisions"
@@ -614,10 +614,10 @@ changed what bootstrap delivers.
 |---|---|---|
 | 11 | A privileged identity with no `ACTIVE` factor gets the same `202` challenge, then `403` `MFA_ENROLMENT_REQUIRED` at `completeStaffMfaSignIn`, which counts toward no lock | [state-machines.md](../../contracts/state-machines.md) §13, [staff-authentication.md](../../features/identity/staff-authentication.md), `AC-SLICE-000-32` and `-123` |
 | 12 | `completeCredentialRecovery` declares the vendor device cookie only for the vendor branch (`x-set-cookies-when`); the runtime validator honours it, and the recovery slice's handler must call `declareAnswerPrincipal` (`answer-context.ts`) or the response check fails | the contract, `contract-validator.ts`, `credentials.test.ts` |
-| 13 | Each bootstrap Platform Admin holds an explicit all-hub grant; `reissueStaffCredentialSetup` refuses a bootstrap identity; the provisioning resume command stops once the other holds an `ACTIVE` credential and factor | [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.2 and §3.3a |
+| 13 | Each bootstrap Platform Admin holds an explicit all-hub grant; `reissueStaffCredentialSetup` refuses a bootstrap identity; the provisioning resume command works for a stranded identity until that identity itself holds an `ACTIVE` factor, whether or not the other is ready | [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.2 and §3.3a |
 | 14 | `riderSignIn` checks status before the lock | the contract text |
 | 15 | `SESSION_SUPERSEDED` is a contract-wide rule for vendor sessions; the seven operations that belonged to no bucket join the credential setup and recovery bucket, and a per-address ceiling at the edge bounds attacker-chosen keys | [errors-and-enums.md](../../contracts/errors-and-enums.md) §4, [settings.md](../../contracts/settings.md) §7.7, [DEPLOYMENT_AND_ENVIRONMENTS.md](../../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.2 |
-| 16 | `reason_code` comes from the reason catalogue in six new identity domains; only Senior Ops and Platform Admin are privileged; the vendor `delivery_channel` is chosen at approval; a revoked rider is re-bound only by `reregisterRiderDevice`; `resetStaffMfa` refuses self-reset, a `PENDING`-only target and a non-privileged one; a rejected profile releases its email and a privileged one is rejected by a Platform Admin; a bundle edit applies at the next sign-in; the recovery supersede guard is 60 seconds; the `Session` carries its permission keys; TOTP is 6 digits, 30 s, SHA-1, one step either side, single use; session and CSRF cookies end with the browser and the vendor device cookie lasts 400 days; one audit event per cross-hub read; the email canonical form is trim, NFKC, lower-case; one refusal order of twelve steps | [domain-model.md](../../contracts/domain-model.md), [settings.md](../../contracts/settings.md) §7.5, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13, [audit.md](../../contracts/audit.md) §5.4, [permission-enforcement.md](../../features/identity/permission-enforcement.md) §5.1, and acceptance criteria `AC-SLICE-000-119` to `-131` |
+| 16 | `reason_code` comes from the reason catalogue in six new identity domains; only Senior Ops and Platform Admin are privileged; the vendor `delivery_channel` is chosen at approval; a revoked rider is re-bound only by `reregisterRiderDevice`; `resetStaffMfa` refuses self-reset, a `PENDING`-only target and a non-privileged one; a rejected profile releases its email and a privileged one is rejected by a Platform Admin; a bundle edit applies at the next sign-in; the recovery supersede guard is 60 seconds; the `Session` carries its permission keys; TOTP is 6 digits, 30 s, SHA-1, one step either side, single use; session and CSRF cookies end with the browser and the vendor device cookie lasts 400 days; one audit event per cross-hub read; the email canonical form is trim, NFKC, lower-case, applied before the address is checked (the schema has no `format: email`); the rider challenge and sign-in bucket is keyed on the submitted phone number; one refusal order of twelve steps | [domain-model.md](../../contracts/domain-model.md), [settings.md](../../contracts/settings.md) §7.5, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13, [audit.md](../../contracts/audit.md) §5.4, [permission-enforcement.md](../../features/identity/permission-enforcement.md) §5.1, and acceptance criteria `AC-SLICE-000-119` to `-131` |
 | 17 | The live-code count is stated as 121 | [errors-and-enums.md](../../contracts/errors-and-enums.md) §5.5 |
 
 `SLICE-000` builds the API for all 37 operations and the Ops Portal screens; the Vendor and Rider rows of its walkthrough
@@ -629,26 +629,25 @@ are verified at API level until those clients exist ([SLICE-000.md](../slices/SL
    (`SESSION_REVOCATION`, `STAFF_PROFILE_REJECTION`, `STAFF_MFA_RESET`, `CREDENTIAL_ADMINISTRATION`,
    `RIDER_DEVICE_REPLACEMENT`, `RIDER_DEVICE_REVOCATION`). Until they exist every identity operation that takes a
    `reason_code` answers `REASON_NOT_ACTIVE`, so the demonstration rows that use one cannot be walked.
-2. **A stranded bootstrap administrator whose factor is only `PENDING`.** Two decisions meet here: `resetStaffMfa` refuses
-   such a target, and the resume command stops once the other administrator is ready. Neither route reaches it (the same
-   holds for an ordinary privileged identity). Either the `PENDING` refusal or the resume command's stop must give way.
-3. **The rider rate-limit key.** `settings.md` and `SECURITY_DESIGN.md` §14.12 say rider and registered device;
-   `SECURITY_DESIGN.md` §13.4b and `rider-authentication.md` say the submitted phone number. Also unset: the key of
-   `requestAdditionalDeviceGrant` (it presents no grant) and the value of the edge ceiling.
+2. **An ordinary privileged identity stranded in the same way** (a password, a `PENDING` factor, a lapsed enrolment
+   grant). The seeded pair has the provisioning command (decided); an ordinary identity has none, and `resetStaffMfa`
+   refuses a `PENDING`-only target, so no route reaches it. Recommended: let `resetStaffMfa` accept a `PENDING`-only
+   privileged target that is not a bootstrap identity, because an approval verified its work email.
+3. **Keys still unset.** The key of `requestAdditionalDeviceGrant` (it presents no grant) and the value of the edge
+   ceiling. The rider key is decided: the submitted phone number.
 4. **Smaller points** recorded in the owning documents: the audit cause for the no-factor refusal; whether HQ roles and
    cross-vendor reads emit the cross-hub audit event; which channel `VENDOR_DEVICE_ENROLMENT` uses when both exist;
    whether the supersede guard covers administrator-initiated recovery; which slices build the Vendor PWA and Rider app
    screens; and that "bundle edit" was read as a change of a bundle's contents (assigning another bundle still ends
    sessions with `AUTHORITY_CHANGED`).
-5. **Points the contract work raised.** (a) The request fields for a work email still carry `format: email`, which
-   refuses a padded or non-ASCII address before any trim or NFKC step could run, so the canonical form cannot be applied
-   to the raw input as decided; the schema or the rule must give way. (b) The contract does not say what
-   `decideVendorOrganization` does when the chosen `delivery_channel` is one the account holds no address for. (c)
-   `vendorSignIn` now renews the `melarc_vendor_device` cookie (the same credential with a fresh `Max-Age`), which
-   reverses the old "never re-issued" wording; the decision asked for the renewal. (d) `SELF_APPROVAL_FORBIDDEN` has no
-   documented status and stays under 422, while `MFA_ENROLMENT_REQUIRED` is the one named code at 403, as the decision
-   about it said. (e) Sign-in operations keep a 422 response that no declared code uses any more. (f) `listSessions`
-   does not carry `permissions`: only the caller's own session does.
+5. **Points the contract work raised.** (a) The contract does not say what `decideVendorOrganization` does when the
+   chosen `delivery_channel` is one the account holds no address for. (b) `vendorSignIn` now renews the
+   `melarc_vendor_device` cookie (the same credential with a fresh `Max-Age`), which reverses the old "never
+   re-issued" wording; the decision asked for the renewal. (c) `SELF_APPROVAL_FORBIDDEN` has no documented status and
+   stays under 422, while `MFA_ENROLMENT_REQUIRED` is the one named code at 403, as the decision about it said. (d)
+   Sign-in operations keep a 422 response that no declared code uses any more. (e) `listSessions` does not carry
+   `permissions`: only the caller's own session does. (f) The three work-email fields had no `maxLength`, and none
+   was added: the address is checked after it is canonicalised.
 
 ### Acceptance record (6 October 2026)
 
@@ -690,53 +689,83 @@ machine and operating system, so it is not the Linux or WSL2 proof, and it ran o
 | B0.5 | deterministic generation, freshness, Ops imports generated types, a separate browser transport | `api-client:check`, 250 client tests, `unwrap` and `ApiError`, the no-duplicate-wire-types test | proven |
 | B0.6 | deliberate mismatches fail the conformance checks | the comparator tests, now including a real contract operation, the runtime validator tests, the 52 mutants | proven for the machinery; there is no live product operation to compare |
 | B0.7 | a real browser, API and database journey, safe teardown | `test:e2e` 16, the harness's 191 | proven here |
-| B0.8 | failures propagate, artifacts match the tested revision, CI works from clean | the workflow's guard tests; hosted runs of `7509f51`, `36f7b22` and `4683bf5`, all jobs green | **partly**: the failure rehearsal, the branch rule and a downloaded-build check are the owner's (owed items 2 to 4) |
-| B0.9 | a clean checkout installs, starts, migrates, runs, tests and stops | the clean-clone proof of B0.9 and the one below | proven on Windows; WSL2, Linux, `infra:up` from nothing and `down --volumes` are the owner's (owed items 5 and 6) |
-| B0.10 | the foundations are ready for product slices | everything above | **ready in code; not accepted**, see below |
+| B0.8 | failures propagate, artifacts match the tested revision, CI works from clean | the workflow's guard tests; hosted runs of `7509f51`, `36f7b22`, `4683bf5` and `25c1e05`, all jobs green; one real failure propagated (item 2) | **proven by a real failure; the manual rehearsals are still to be recorded (item 2)**; the branch rule is in force (item 3), the downloaded-build check is waived to release (item 4) |
+| B0.9 | a clean checkout installs, starts, migrates, runs, tests and stops | the clean-clone proof of B0.9 and the one below | proven on Windows; WSL2, Linux, `infra:up` from nothing and `down --volumes` are waived to release (items 5 and 6) |
+| B0.10 | the foundations are ready for product slices | everything above | **accepted by the Product Owner on 7 October 2026**, with the waivers below |
 
 **Where this leaves the bootstrap.** The code, the tests and the guards are complete and green on this machine, and the
-review above left no known defect in them. The bootstrap is not accepted by this runbook's own terms: evidence only the
-Product Owner can produce is owed (items 2 to 8 below, and item 1 again for the final commit). The specification and
+review above left no known defect in them. **The Product Owner accepted the bootstrap on 7 October 2026**, at
+commit `25c1e05`, on the evidence above and with the waivers in the list below. The specification and
 contract findings that blocked `SLICE-000` (decisions 11 to 16) are answered; what stays with the Product Owner is the
-list under "Still open" above (the identity reason seeds, the stranded bootstrap administrator, the rider rate-limit
-key and the smaller points), each to be settled before the behaviour it touches is implemented, because an
-implementation would have to invent it. Nothing here has been run on GitHub for this commit.
+list under "Still open" above (the identity reason seeds, a stranded ordinary privileged identity, the keys still
+unset and the smaller points), each to be settled before the behaviour it touches is implemented, because an
+implementation would have to invent it. Hosted run [37503211249](https://github.com/melarclogistics/Melarc/actions/runs/37503211249)
+of `25c1e05` succeeded in every job.
 
 ### Evidence still owed (audit B-05)
 
-These are not code failures. They need the owner's GitHub repository, a clean supported machine or WSL2, and the
-bootstrap is not accepted without them. Record each result with its date and the commit.
+Each item is recorded with its date and commit. Acceptance on 7 October 2026 closed or waived every item but 2 and 8,
+each with an owner and the milestone it must meet. A waiver is not a proof: the item stays unproven until it is done.
 
-1. **A hosted CI run of the intended commit. Done 6 October 2026.** The bootstrap and the audit repairs are commit
-   `7509f51` on `main`. In [its Actions run](https://github.com/melarclogistics/Melarc/actions/runs/37412013040),
+1. **A hosted CI run of the intended commit. Done 6 and 7 October 2026.** The bootstrap and the audit repairs are
+   commit `7509f51` on `main`. In [its Actions run](https://github.com/melarclogistics/Melarc/actions/runs/37412013040),
    `Static checks`, `Unit, component and process tests`, `Database tests`, `Build, contract and browser tests`,
    `Dependency audit` and `CI result` all succeeded, and it was the first run of the Linux-only parts. The run of the
    third-pass commit `4683bf5`, [37472521664](https://github.com/melarclogistics/Melarc/actions/runs/37472521664), also
-   succeeded, with only the two designed skips. GitHub shows a
-   job's log only to a signed-in user, so read the two test jobs' logs once and confirm that the POSIX-only tests ran
-   and that nothing else was skipped. Repeat this item for whichever commit is finally accepted, if it is not
-   `7509f51`.
-2. **The failure rehearsal.** Run the workflow by hand with `rehearse-failure` ticked: `Static checks` fails, `CI result`
-   fails with it, and the other four jobs succeed.
-3. **The branch rule.** For `main`, require the check `CI result` with GitHub Actions as its source, and decide and
-   record who may bypass it. Prove it: a pull request whose run is red cannot be merged.
-4. **A downloaded build verifies.** Download `melarc-build-<sha>-1` from the passing run, unpack it at the root of a
-   checkout of that commit and run `node scripts/ci-revision.ts verify build-manifest.json`: it passes. Then the
-   negative cases: change one byte of a file, add a file, and edit the manifest to an empty file list; each is refused
-   with a reason. `verify` checks contents only, so also check the run, the commit and `source.ref` (`refs/heads/main`)
-   yourself.
-5. **A clean supported setup from the committed instructions only.** On a clean Windows machine and in WSL2 or Linux,
-   follow DEVELOPMENT.md from clone to safe stop: `setup:env`, `infra:up` from nothing, `infra:status`, `infra:check`,
-   `db:bootstrap`, `db:migrate`, the API's `/readyz`, the Ops proxy, the tests, `infra:stop`. In WSL2 run
-   `pnpm run infra:check` first and record which of the two setups applied. Re-run the machine-local Linux check
-   (`.\tmp\linux-check.cmd`), which now ends its database step with `infra:check` and has not been run since.
-6. **The disposable reset**, `db:reset` and `down --volumes`, only in a deliberately disposable environment (a clean
-   machine or a throwaway Docker volume), never against a database that holds data you want.
-7. **The latest suites on the final commit:** `pnpm test`, `pnpm run test:db`, `pnpm run test:browser` and
-   `pnpm run test:e2e`, with the tests that Windows skips accounted for by a Linux, WSL2 or CI run: five API process
-   tests, one under `test:db`, one harness test and the symlink test in `package-source.test.ts`.
+   succeeded, with only the two designed skips, and so did the run of the accepted commit `25c1e05`,
+   [37503211249](https://github.com/melarclogistics/Melarc/actions/runs/37503211249). GitHub shows a
+   job's log only to a signed-in user, so nobody has read the two test jobs' logs to confirm that the POSIX-only tests
+   ran and that nothing else was skipped: that reading is waived with item 7. Repeat this item for each commit that
+   changes code.
+2. **The failure rehearsal. Open: the Product Owner asked on 7 October 2026 for three manual runs before it is
+   recorded.** Run the workflow by hand with `rehearse-failure` ticked, three times; each must show `Static checks`
+   failed, `CI result` failed and the other four jobs succeeded. Record the three run links here, with their dates, when
+   they exist. A real failure already showed the same outcome and is kept as supporting evidence, not as the record:
+   Dependabot's pull request #1 (`@types/node` 24.19.1 to 26.6.4),
+   [run 37503470626](https://github.com/melarclogistics/Melarc/actions/runs/37503470626) at `eef428d`, where `Static
+   checks` failed (its Typecheck step), `CI result` failed at "Require every mandatory job to have succeeded", and the
+   other four jobs succeeded. That pull request is the owner's to close (it needs a Node 26 decision that the pinned
+   Node 24.21.0 does not make).
+3. **The branch rule. Done 7 October 2026.** `main` requires the check `CI result`, with GitHub Actions as its source,
+   and **nobody bypasses it, the owner included** (the Product Owner's decision). The owner applied it in "Melarc
+   ruleset" (id 24650051; Settings, Rules, Rulesets), which at first was saved with enforcement `disabled` and no
+   required check, and was corrected the same day. Proven from outside on 7 October: the rules endpoint
+   (`/repos/melarclogistics/Melarc/rules/branches/main`) lists `required_status_checks` with the context `CI result`
+   and `integration_id` 15368 (GitHub Actions), beside `deletion` and `non_fast_forward` (no deleting `main`, no force
+   push); and Dependabot's pull request #1, whose `CI result` failed on `eef428d`, shows its merge button disabled
+   with "Merging is blocked due to failing merge requirements". The bypass list is not public: the owner's merge box
+   offered no way around the rule, which is consistent with an empty list, but nobody has yet confirmed the list itself
+   (open: the owner reads it in the ruleset's edit page and records it here). Consequence to
+   accept: with the check required and no bypass, GitHub refuses a direct push to `main`, so every change reaches it
+   through a pull request whose run succeeded.
+4. **A downloaded build verifies. Waived 7 October 2026 until release.** Download `melarc-build-<sha>-1` from the
+   passing run, unpack it at the root of a checkout of that commit and run `node scripts/ci-revision.ts verify
+   build-manifest.json`: it passes. Then the negative cases: change one byte of a file, add a file, and edit the manifest
+   to an empty file list; each is refused with a reason. `verify` checks contents only, so also check the run, the commit
+   and `source.ref` (`refs/heads/main`) yourself. Owner: Product Owner. Milestone: before any deployment uses the
+   artifact.
+5. **A clean supported setup from the committed instructions only. Waived 7 October 2026 until release.** On a clean
+   Windows machine and in WSL2 or Linux, follow DEVELOPMENT.md from clone to safe stop: `setup:env`, `infra:up` from
+   nothing, `infra:status`, `infra:check`, `db:bootstrap`, `db:migrate`, the API's `/readyz`, the Ops proxy, the tests,
+   `infra:stop`. In WSL2 run `pnpm run infra:check` first and record which of the two setups applied. Re-run the
+   machine-local Linux check (`.\tmp\linux-check.cmd`), which now ends its database step with `infra:check` and has not
+   been run since. Owner: Product Owner. Milestone: before the first Staging deployment, and before a second developer
+   or a CI-like machine is relied on.
+6. **The disposable reset, waived 7 October 2026 until release**: `db:reset` and `down --volumes`, only in a deliberately
+   disposable environment (a clean machine or a throwaway Docker volume), never against a database that holds data you
+   want. Owner and milestone as item 5.
+7. **The latest suites on the final commit. Waived 7 October 2026 for the Linux part.** `pnpm test`, `pnpm run test:db`,
+   `pnpm run test:browser` and `pnpm run test:e2e`, with the tests that Windows skips accounted for by a Linux, WSL2 or
+   CI run: five API process tests, one under `test:db`, one harness test and the symlink test in
+   `package-source.test.ts`. On Windows on 7 October, on the uncommitted tree: root 1179 passed and 2 skipped, API 1563
+   passed and 5 skipped, api-client 250, harness 191 passed and 1 skipped, Ops 220 when run alone (in a full forced
+   `pnpm test` 11 of its 23 files could not start a Vitest worker, with no failed assertion, at 5 to 25 percent CPU and
+   without the stray process earlier runs blamed: the flake recurs and is not yet explained); `test:db`, `test:e2e` and
+   `test:browser` were not run that day (the database was down), their last counts being those of 6 October above.
+   Owner: Product Owner. Milestone: the Linux log reading and the Linux run by the first Staging deployment.
 8. **The recorded passes the design system requires before the first identity flow is accepted** (DESIGN_SYSTEM §14).
-   They gate that flow and not bootstrap acceptance (decided 6 October 2026):
+   They gate that flow and not bootstrap acceptance (decided 6 October 2026), so **`SLICE-000`'s first Ops screen is
+   not accepted until they are recorded**:
    one keyboard-only pass and one screen-reader pass (a desktop screen reader with its usual browser, for example NVDA
    with Firefox or Chrome) of the showcase and the shell, with the versions used and what was done; a pass in Windows
    high-contrast mode; and Safari and Edge as products, and the previous major release of each browser, checked by hand.
