@@ -56,7 +56,7 @@ describe('I2: a stranded bootstrap administrator is not reissued a setup grant',
     expect(codes('reissueStaffCredentialSetup')).toContain('STATE_CONFLICT');
     expect(statuses('reissueStaffCredentialSetup')).toContain('409');
     expect(description('reissueStaffCredentialSetup')).toMatch(
-      /A bootstrap identity is refused with `STATE_CONFLICT`.*an address nobody verified.*resetStaffMfa/,
+      /A bootstrap identity is refused with `STATE_CONFLICT`.*an address nobody verified.*provisioning channel.*resetStaffMfa/,
     );
   });
 });
@@ -223,6 +223,14 @@ describe('I7 to I9: the refusals of the identity operations', () => {
     expect(statuses('resetStaffMfa')).toEqual(expect.arrayContaining(['409', '422']));
     expect(description('resetStaffMfa')).toMatch(
       /Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`.*other bootstrap Platform Admin is a valid actor.*only `PENDING`.*non-privileged identity.*are `STATE_CONFLICT`/,
+    );
+  });
+
+  // Break caught: a stranded bootstrap administrator (a password and a factor that is only PENDING) being left with no
+  // route at all, because the reset refuses it and the provisioning command stopped for another administrator's sake.
+  it('sends a stranded bootstrap administrator to the provisioning channel, not to the reset', () => {
+    expect(description('resetStaffMfa')).toMatch(
+      /only `PENDING`.*stranded bootstrap administrator.*provisioning channel/,
     );
   });
 
@@ -517,6 +525,51 @@ describe('I17: the canonical form of a work email', () => {
       /work email is read in its canonical form: trimmed, Unicode NFKC-normalised and lower-cased/,
     );
   });
+
+  // Break caught: a `format: email` on the schema, which refuses a padded or non-ASCII address before the server can
+  // trim and normalise it, so the canonical form could never be applied to what a caller really typed.
+  it.each([
+    ['StaffSignIn', 'email'],
+    ['StaffIdentityCreate', 'work_email'],
+    ['StaffIdentity', 'work_email'],
+  ] as const)('%s.%s carries no format of its own', (name, field) => {
+    expect(property(name, field).format).toBeUndefined();
+  });
+
+  it.each([
+    ['StaffSignIn', 'email'],
+    ['StaffIdentityCreate', 'work_email'],
+  ] as const)(
+    '%s.%s says the address is canonicalised first and its shape checked after',
+    (name, field) => {
+      expect(flat(property(name, field).description)).toMatch(
+        /canonicalised first and only then checked to be an email address.*`VALIDATION_FAILED`.*no `format: email`/,
+      );
+    },
+  );
+
+  // Break caught: the schema judging the raw text, so that a padded or upper-case address is refused with 400 where the
+  // decision is that it is trimmed and lower-cased.
+  it.each(['  Ada.Lovelace@Example.COM  ', 'ADA@EXAMPLE.COM', 'ａｄａ@example.com'])(
+    'lets the raw address %j through to be canonicalised',
+    (email) => {
+      expect(
+        validator.validateRequest(
+          'staffSignIn',
+          request({ body: { email, password: 'correct horse battery' } }),
+        ),
+      ).toEqual([]);
+      expect(
+        validator.validateRequest(
+          'createStaffIdentity',
+          request({
+            headers: { 'idempotency-key': 'key-1' },
+            body: { work_email: email, full_name: 'Ada Lovelace', role_bundle_id: UUID },
+          }),
+        ),
+      ).toEqual([]);
+    },
+  );
 });
 
 describe('I20: mechanical corrections', () => {

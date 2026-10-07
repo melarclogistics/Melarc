@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.75.0-identity-reads-and-lockout
- *   SHA-256 a17a8cc68cec9fba3c248bb8b7a9ab0ce9c0acb0979e5f3f9bb9aa89b6f2a2ed (of the contract, line endings normalized to LF)
+ *   SHA-256 ca476f42a7677008597d5e16a6d4d75338f16b7f2de30d4310aaeeab3d5cb1a1 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -3262,8 +3262,10 @@ export interface paths {
          *     factor and can still authenticate - no backup codes, no bypass codes, no support override.
          *
          *     **Refusals.** Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`; the other bootstrap
-         *     Platform Admin is a valid actor on a stranded one. A target whose factor is only `PENDING`
-         *     (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
+         *     Platform Admin is a valid actor, as is any Platform Admin. A target whose factor is only
+         *     `PENDING` (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
+         *     A stranded bootstrap administrator is in that state: it is resumed through the provisioning
+         *     channel and not through this operation (MIGRATION_AND_SEEDING.md 3.3a).
          *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
@@ -3309,8 +3311,9 @@ export interface paths {
          *
          *     **A bootstrap identity is refused with `STATE_CONFLICT`** (`409`): a fresh 30-minute grant would
          *     go to an address nobody verified, because the seeded Platform Admins never passed the approval
-         *     that makes a work email verified. A stranded bootstrap administrator is recovered by the other
-         *     Platform Admin with `resetStaffMfa`.
+         *     that makes a work email verified. A stranded bootstrap administrator is resumed through the
+         *     provisioning channel while it holds no `ACTIVE` factor, and by the other Platform Admin with
+         *     `resetStaffMfa` once it does (MIGRATION_AND_SEEDING.md 3.3a).
          *
          *     **Effect: the signed SetupGrant machine's own `-> PENDING` transition** ("System, or the
          *     authorising actor for an administrative reset" - state-machines.md 19), for the same
@@ -7598,11 +7601,13 @@ export interface components {
         };
         StaffSignIn: {
             /**
-             * Format: email
              * @description The staff member's work email. Compared in its canonical form: trimmed, Unicode
              *     NFKC-normalised and lower-cased as a whole address, with no dot or plus-tag folding. The
              *     same form decides uniqueness and keys the rate limit. The address is stored and displayed
              *     as entered.
+             *     The address is canonicalised first and only then checked to be an email address, which is
+             *     `VALIDATION_FAILED` (`400`) when it is not. This schema carries no `format: email`, because
+             *     that would refuse a padded or non-ASCII address before it could be canonicalised.
              */
             email: string;
             /**
@@ -9215,10 +9220,12 @@ export interface components {
          */
         StaffIdentityCreate: {
             /**
-             * Format: email
              * @description Compared in its canonical form: trimmed, Unicode NFKC-normalised and lower-cased as a whole
              *     address, with no dot or plus-tag folding. The same form decides uniqueness and keys the
              *     rate limit. The address is stored and displayed as entered.
+             *     The address is canonicalised first and only then checked to be an email address, which is
+             *     `VALIDATION_FAILED` (`400`) when it is not. This schema carries no `format: email`, because
+             *     that would refuse a padded or non-ASCII address before it could be canonicalised.
              */
             work_email: string;
             full_name: string;
@@ -9315,7 +9322,6 @@ export interface components {
             /** Format: uuid */
             id: string;
             /**
-             * Format: email
              * @description As entered. Compared in its canonical form: trimmed, Unicode NFKC-normalised and
              *     lower-cased as a whole address, with no dot or plus-tag folding. The same form decides
              *     uniqueness and keys the rate limit. The address is stored and displayed as entered.

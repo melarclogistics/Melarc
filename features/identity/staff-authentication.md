@@ -532,13 +532,13 @@ And none of these operations issues a session.
 ### `AC-SLICE-000-93` — An expired continuation grant is recovered by a provisioning mechanism no API operation or screen can invoke
 
 ```text
-Given either bootstrap Platform Admin, who set a password and whose MFA_ENROLMENT continuation grant expired with the factor still PENDING, while the other bootstrap Platform Admin does not yet hold an ACTIVE credential and an ACTIVE factor,
+Given either bootstrap Platform Admin, who set a password and whose MFA_ENROLMENT continuation grant expired with the factor still PENDING,
 When the provisioning-only resume command is run,
 Then a fresh MFA_REENROLMENT authorisation is delivered through the controlled provisioning channel and an enhanced audit record is written under the reserved system actor,
 And beginMfaReenrolment consumes it, supersedes the unusable PENDING factor and issues a new continuation grant,
 And no session is granted, the password is neither reset nor revealed and BOOTSTRAP_SETUP is not resurrected,
 And no API operation and no Ops Portal screen can invoke the command,
-And once the other bootstrap Platform Admin holds an ACTIVE credential and an ACTIVE factor the command refuses for this one (AC-SLICE-000-120).
+And once this identity holds an ACTIVE factor the command refuses for it (AC-SLICE-000-120).
 ```
 
 **Governs:** `MSC-DEC-272`, `MSC-DEC-440`, [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) · **Surface:** backend · **Test level:** integration
@@ -672,10 +672,12 @@ When the profile is read, another profile is created with ama.mensah@example.com
 Then the first is stored and displayed as entered,
 And the second is refused with WORK_EMAIL_IN_USE, because both are the same address in canonical form,
 And the third is accepted, because no dot or plus-tag folding is applied,
+And a profile created with the padded, mixed-case address ` Kofi.Boateng@Example.COM ` is not refused by the schema and is judged by its canonical form,
+And a value that is not an email address once it is canonicalised is refused with VALIDATION_FAILED,
 And the staff sign-in rate limit counts sign-ins that spell the first address either way in one bucket.
 ```
 
-**Governs:** [domain-model.md](../../contracts/domain-model.md) §6.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `WORK_EMAIL_IN_USE`
+**Governs:** [domain-model.md](../../contracts/domain-model.md) §6.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `WORK_EMAIL_IN_USE`, `VALIDATION_FAILED`
 
 ## 14. Open questions blocking this feature
 

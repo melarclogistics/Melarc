@@ -58,7 +58,7 @@ The rider path is not a channel at all — it is a **human verification step**. 
 
 **MFA loss is therefore a separate event with a different authority.** `resetStaffMfa`, held by `staff.mfa.reset`, **Platform Admin only**, mandatory reason, enhanced-audited: the old factor is revoked, every target session terminates with `MFA_RESET`, and a re-enrolment grant is issued to the target's own verified email — **never returned to the acting administrator**, who must not be able to complete someone else's enrolment.
 
-**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). **A Platform Admin cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`): another Platform Admin acts, which is why the product keeps two. A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. The `reason_code` is a code of the MFA-reset domain ([domain-model.md](../../contracts/domain-model.md) §3.9): `REASON_REQUIRED` when empty, `REASON_NOT_ACTIVE` when unknown, retired or from another domain.
+**What `resetStaffMfa` refuses** (Product decision, 6 October 2026). **A Platform Admin cannot reset their own factor** (`SELF_APPROVAL_FORBIDDEN`): another Platform Admin acts, which is why the product keeps two. A target whose factor is only `PENDING` has no `ACTIVE` factor to revoke, and a non-privileged identity has no MFA at all: both are `STATE_CONFLICT`. **The other bootstrap administrator is a valid actor**, as is any other Platform Admin. A stranded bootstrap administrator is resumed through the provisioning channel (§5.6). The `reason_code` is a code of the MFA-reset domain ([domain-model.md](../../contracts/domain-model.md) §3.9): `REASON_REQUIRED` when empty, `REASON_NOT_ACTIVE` when unknown, retired or from another domain.
 
 **There are no backup codes, bypass codes or support overrides.** Each would be a weaker secret that silently defeats the stronger one, which is the failure this section exists to prevent.
 
@@ -124,9 +124,9 @@ A self-service request made **less than `recovery_request_supersede_guard_second
 
 ### 5.6 A stranded bootstrap administrator
 
-An identity that is one of the two seeded bootstrap Platform Admins, holds a password and a `PENDING` factor, and whose continuation grant has lapsed is **stranded** ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.3a). Three rules (Product decision, 6 October 2026). **`reissueStaffCredentialSetup` refuses a bootstrap identity** (`STATE_CONFLICT`), because a fresh 30-minute grant would go to an address nobody verified. **The other Platform Admin uses `resetStaffMfa`.** **The provisioning-channel resume command stops working once the other bootstrap administrator holds an `ACTIVE` credential and an `ACTIVE` factor**, so it is never a standing way in.
+An identity that is one of the two seeded bootstrap Platform Admins, holds a password and a `PENDING` factor, and whose continuation grant has lapsed is **stranded** ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3.3a). Three rules (Product decision, 6 October 2026). **`reissueStaffCredentialSetup` refuses a bootstrap identity** (`STATE_CONFLICT`), because a fresh 30-minute grant would go to an address nobody verified. **The provisioning-channel resume command works for a stranded identity for as long as that identity itself holds no `ACTIVE` factor**, whether or not the other bootstrap administrator is ready, and it refuses by itself once the identity's factor is `ACTIVE` or the identity is offboarded, so it is never a standing way in. **The other Platform Admin uses `resetStaffMfa`** for an identity whose factor is `ACTIVE`, which a stranded identity's is not.
 
-**Unresolved Product Owner input.** `resetStaffMfa` refuses a target whose factor is only `PENDING` (§4.1), and that is exactly a stranded identity's state; so once the other administrator is ready, neither route reaches a stranded one. Which rule gives way — the `PENDING` refusal, or the resume command's stop — is not decided ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §7). The same state, reached by an ordinary privileged identity, has no route either.
+**Still open (Product Owner).** An ordinary privileged identity in the same state (a password, a `PENDING` factor, a lapsed enrolment grant) is not one of the seeded pair, so it has no provisioning command, and `resetStaffMfa` refuses a `PENDING`-only target (§4.1): no route reaches it. Whether `resetStaffMfa` accepts such a target when an approval verified its work email is not decided ([MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §7).
 
 ## 6. Entities — *pointer*
 
@@ -361,8 +361,9 @@ And an empty reason_code is refused with REASON_REQUIRED and a retired, unknown 
 Given the two bootstrap Platform Admins, A stranded with a password, a PENDING factor and a lapsed MFA_ENROLMENT grant, and B holding an ACTIVE credential and an ACTIVE factor,
 When B calls reissueStaffCredentialSetup naming A, and again naming a bootstrap identity that has not yet set a password,
 Then each is refused with STATE_CONFLICT and no grant is issued,
-And the provisioning-only resume command run for A refuses while B holds an ACTIVE credential and an ACTIVE factor,
-And the same command issues the fresh MFA_REENROLMENT authorisation while B does not,
+And the provisioning-only resume command run for A issues the fresh MFA_REENROLMENT authorisation, although B is authentication-ready,
+And once A holds an ACTIVE factor the same command refuses for A,
+And run for an identity that is not one of the two bootstrap identities it refuses,
 And no API operation and no screen can invoke the command.
 ```
 

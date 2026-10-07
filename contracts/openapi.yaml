@@ -4358,8 +4358,10 @@ paths:
         factor and can still authenticate - no backup codes, no bypass codes, no support override.
 
         **Refusals.** Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`; the other bootstrap
-        Platform Admin is a valid actor on a stranded one. A target whose factor is only `PENDING`
-        (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
+        Platform Admin is a valid actor, as is any Platform Admin. A target whose factor is only
+        `PENDING` (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
+        A stranded bootstrap administrator is in that state: it is resumed through the provisioning
+        channel and not through this operation (MIGRATION_AND_SEEDING.md 3.3a).
 
         **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
 
@@ -4410,8 +4412,9 @@ paths:
 
         **A bootstrap identity is refused with `STATE_CONFLICT`** (`409`): a fresh 30-minute grant would
         go to an address nobody verified, because the seeded Platform Admins never passed the approval
-        that makes a work email verified. A stranded bootstrap administrator is recovered by the other
-        Platform Admin with `resetStaffMfa`.
+        that makes a work email verified. A stranded bootstrap administrator is resumed through the
+        provisioning channel while it holds no `ACTIVE` factor, and by the other Platform Admin with
+        `resetStaffMfa` once it does (MIGRATION_AND_SEEDING.md 3.3a).
 
         **Effect: the signed SetupGrant machine's own `-> PENDING` transition** ("System, or the
         authorising actor for an administrative reset" - state-machines.md 19), for the same
@@ -9903,12 +9906,14 @@ components:
       properties:
         email:
           type: string
-          format: email
           description: |
             The staff member's work email. Compared in its canonical form: trimmed, Unicode
             NFKC-normalised and lower-cased as a whole address, with no dot or plus-tag folding. The
             same form decides uniqueness and keys the rate limit. The address is stored and displayed
             as entered.
+            The address is canonicalised first and only then checked to be an email address, which is
+            `VALIDATION_FAILED` (`400`) when it is not. This schema carries no `format: email`, because
+            that would refuse a padded or non-ASCII address before it could be canonicalised.
         password:
           type: string
           maxLength: 128
@@ -11936,11 +11941,13 @@ components:
       properties:
         work_email:
           type: string
-          format: email
           description: |
             Compared in its canonical form: trimmed, Unicode NFKC-normalised and lower-cased as a whole
             address, with no dot or plus-tag folding. The same form decides uniqueness and keys the
             rate limit. The address is stored and displayed as entered.
+            The address is canonicalised first and only then checked to be an email address, which is
+            `VALIDATION_FAILED` (`400`) when it is not. This schema carries no `format: email`, because
+            that would refuse a padded or non-ASCII address before it could be canonicalised.
         full_name: { type: string }
         phone: { type: string, description: E.164 }
         role_bundle_id: { type: string, format: uuid, description: 'An id returned by listAssignableStaffRoleBundles. One that names no bundle currently valid for human staff is VALIDATION_FAILED.' }
@@ -12038,7 +12045,6 @@ components:
         id: { type: string, format: uuid }
         work_email:
           type: string
-          format: email
           description: |
             As entered. Compared in its canonical form: trimmed, Unicode NFKC-normalised and
             lower-cased as a whole address, with no dot or plus-tag folding. The same form decides

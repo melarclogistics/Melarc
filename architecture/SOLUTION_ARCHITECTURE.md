@@ -210,7 +210,7 @@ PERSISTENT-TECHNICAL-TABLE: IdempotencyRecord
 | Staff sign-in| Normalized Staff identity|
 | Privileged MFA| MFA challenge / principal|
 | Vendor sign-in| Vendor account **and** registered device|
-| Rider challenge / sign-in| Rider **and** registered device|
+| Rider challenge / sign-in| Submitted phone number|
 | Recovery| Recovery principal|
 | Authenticated API| Active Session|
 

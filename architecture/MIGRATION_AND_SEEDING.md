@@ -85,25 +85,26 @@ The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a P
 | Operation| What it needs| Available to the stranded bootstrap admin?|
 |---|---|---|
 | `completeStaffCredentialSetup`| the **`BOOTSTRAP_SETUP`** secret| **No** — single-use, consumed at step 1|
-| `beginMfaReenrolment`| an **`MFA_REENROLMENT`** grant, issued only by `resetStaffMfa`| **Not by the stranded administrator** — `resetStaffMfa` is **Platform Admin only**, and a stranded bootstrap administrator cannot authenticate to use it. **The other bootstrap administrator is a valid actor for it** once authentication-ready (below); before then nobody can|
+| `beginMfaReenrolment`| an **`MFA_REENROLMENT`** grant, issued only by `resetStaffMfa`| **Not by the stranded administrator** — `resetStaffMfa` is **Platform Admin only**, and a stranded bootstrap administrator cannot authenticate to use it. **Nor by the other bootstrap administrator for a stranded one**: `resetStaffMfa` refuses a target whose factor is only `PENDING`, so the provisioning command (below) is the route|
 
 **The result was a permanently unusable environment, reached by thirty minutes passing** — in the one lifecycle whose entire purpose is to make an empty environment usable. Every mechanical check passed over it, because each operation existed and each grant resolved; what did not exist was a path between them.
 
-**`MSC-DEC-272` closes it with a provisioning-only mechanism.** Not an Ops Portal endpoint — a management or deployment action, on the same controlled channel that delivered the bootstrap secret. **Under `MSC-DEC-440` there are two bootstrap identities and either can be stranded, so the mechanism is unchanged except for the seventh condition below, and its conditions are evaluated for each identity on its own.**
+**`MSC-DEC-272` closes it with a provisioning-only mechanism.** Not an Ops Portal endpoint — a management or deployment action, on the same controlled channel that delivered the bootstrap secret. **Under `MSC-DEC-440` there are two bootstrap identities and either can be stranded, so the mechanism is unchanged, and its conditions are evaluated for each identity on its own.**
 
-**It runs only when all seven conditions hold:**
+**It runs only when all six conditions hold:**
 
 1. the target is **one of the two seeded bootstrap** Platform Admins;
 2. that identity is **not offboarded**;
 3. a **permanent password is already established**;
 4. **no `ACTIVE` `MfaFactor` exists**;
 5. **no privileged session can currently be issued**;
-6. bootstrap authentication setup remains **incomplete**;
-7. **the other bootstrap Platform Admin does not yet hold an `ACTIVE` credential and an `ACTIVE` `MfaFactor`** (decided 6 October 2026). Once it does, the ordinary `resetStaffMfa` is the way and this mechanism refuses, so it is never a standing way in.
+6. bootstrap authentication setup remains **incomplete**.
+
+**Nothing in these conditions depends on the other bootstrap administrator** (decided 6 October 2026). The command works for a stranded identity for as long as that identity itself holds no `ACTIVE` factor, whether or not the other administrator is ready, and it refuses by itself once the identity's factor is `ACTIVE`, so it is never a standing way in.
 
 **What it does:** revokes or supersedes stale `PENDING` factor state and grants, issues a fresh short-lived **`MFA_REENROLMENT`** authorisation, delivers it through the **controlled provisioning channel**, and writes an **enhanced** audit record under the reserved system actor.
 
-**That transport is the exception, and it is the only one.** `MFA_REENROLMENT` normally reaches the affected privileged principal by **verified work email**; here there may be no second Platform Admin able to initiate an ordinary reset — the other bootstrap administrator may not have completed setup — so the same channel that carried the bootstrap secret carries the re-enrolment authorisation. **Once the other bootstrap administrator is authentication-ready they reset a stranded one through the ordinary `resetStaffMfa`, and this mechanism then refuses** (decided 6 October 2026). That grant goes to the target's work email, which for a bootstrap identity was seeded and never accepted by an approval; the decision names the route and does not address that. **A gap between two decisions is recorded in §7 and not closed here**: `resetStaffMfa` refuses a target whose factor is only `PENDING` ([state-machines.md](../contracts/state-machines.md) §18), which is exactly a stranded identity's state, so once the other administrator is ready neither route reaches it. **The purpose is unchanged** — begin MFA re-enrolment — because purpose describes what a credential may authorise, not how it travels.
+**That transport is the exception, and it is the only one.** `MFA_REENROLMENT` normally reaches the affected privileged principal by **verified work email**; here a stranded identity's factor is only `PENDING`, which `resetStaffMfa` refuses, and its work email was seeded and never accepted by an approval, so an ordinary grant would go to an address nobody verified. The same channel that carried the bootstrap secret therefore carries the re-enrolment authorisation. **It does not wait for the other bootstrap administrator and does not stop for them** (decided 6 October 2026); the other administrator uses `resetStaffMfa` only for an identity whose factor is `ACTIVE`. **The purpose is unchanged** — begin MFA re-enrolment — because purpose describes what a credential may authorise, not how it travels.
 
 **`reissueStaffCredentialSetup` refuses a bootstrap identity** (`STATE_CONFLICT`; decided 6 October 2026). Once one administrator is authentication-ready they hold `staff.identity.approve`, and that operation's guard is a null credential — which the other identity has until step 1 — so it would issue a fresh 30-minute `STAFF_CREDENTIAL_SETUP` grant to an address nobody verified, beside the unconsumed `BOOTSTRAP_SETUP` secret. **It does not.** The unconsumed secret stays the only way in for an administrator who has not yet set a password.
 
@@ -116,7 +117,7 @@ The seed creates **exactly two** `StaffIdentity` records, each `ACTIVE` with a P
 
 The administrator then walks the ordinary path — `beginMfaReenrolment` → provisioning → `MFA_ENROLMENT` → **proven** code → `ACTIVE` factor → normal privileged sign-in.
 
-**It stops working as soon as it is no longer needed.** It refuses **for an identity** once the other bootstrap administrator holds an `ACTIVE` credential and an `ACTIVE` factor (the seventh condition), because `resetStaffMfa` then has an authority to run under; and in any case once **that** bootstrap identity is offboarded, which requires **two** proven non-bootstrap Platform Admins (§3.4). **A recovery mechanism that outlives its emergency is an attack surface.**
+**It stops working as soon as it is no longer needed.** It refuses **for an identity** the moment that identity holds an `ACTIVE` factor (conditions 4 and 6), and in any case once **that** bootstrap identity is offboarded, which requires **two** proven non-bootstrap Platform Admins (§3.4). **A recovery mechanism that outlives its emergency is an attack surface.**
 
 **The ordering now runs one way.** Nothing is asserted before the thing it asserts exists, and `mfa_enrolled` is derived from the factor rather than written by the seed.
 
@@ -294,8 +295,9 @@ GRANT SELECT, INSERT, UPDATE ON <t> TO melarc_api_runtime;   -- never ALL, never
 |---|---|
 | ~~Approval of the §3 bootstrap~~| **Approved 26 August**, `MSC-DEC-253`|
 | ~~Whether the bootstrap identity must be retired, and when~~| **`OQ-096`, closed by `MSC-DEC-255`**; for the pair, `MSC-DEC-440` — each identity is retired only after two non-bootstrap successors, and none is deleted|
-| ~~The stranded-continuation mechanism once the other bootstrap administrator is authentication-ready, and `reissueStaffCredentialSetup` aimed at a bootstrap identity (§3.3a)~~| **Decided 6 October 2026** — `reissueStaffCredentialSetup` refuses a bootstrap identity, the resume command stops once the other holds an `ACTIVE` credential and factor, and the other administrator uses `resetStaffMfa`|
-| **Open:** a stranded bootstrap administrator whose factor is only `PENDING` once the other administrator is ready — `resetStaffMfa` refuses that target and the resume command has stopped (§3.3a)| **Product Owner**|
+| ~~The stranded-continuation mechanism once the other bootstrap administrator is authentication-ready, and `reissueStaffCredentialSetup` aimed at a bootstrap identity (§3.3a)~~| **Decided 6 October 2026** — `reissueStaffCredentialSetup` refuses a bootstrap identity, and the resume command works for a stranded identity until that identity itself holds an `ACTIVE` factor, with no regard to the other administrator, who uses `resetStaffMfa` for an identity whose factor is `ACTIVE`|
+| ~~A stranded bootstrap administrator whose factor is only `PENDING` once the other administrator is ready~~| **Decided 6 October 2026** — the resume command keeps working for it (§3.3a)|
+| **Open:** an ordinary privileged identity, not one of the seeded pair, in the same state (a password, a `PENDING` factor, a lapsed enrolment grant): it has no provisioning command and `resetStaffMfa` refuses a `PENDING`-only target, so no route reaches it. Whether `resetStaffMfa` accepts such a target when an approval verified its work email is not decided| **Product Owner**|
 | ~~The two bootstrap identities' hub reach (§3.2)~~| **Decided 6 October 2026** — an explicit all-hub grant on each|
 | The seeded reasons of the six identity reason domains, and their wording (§4)| **Product Owner** — not supplied|
 | ~~An inventory of existing Melarc data~~| **CLOSED 5 September 2026, `MSC-DEC-375`** — Version 1 is greenfield; the inventory described a database that does not exist|
