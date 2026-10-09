@@ -120,7 +120,7 @@ Every record a vendor creates — a booking, a payer-arrangement edit, a handsha
 **Registering a second or third browser does not require rotating the shared secret** — and before this section was written, there was no path that did not. The two operations `requestAdditionalDeviceGrant` and `completeAdditionalDeviceEnrolment` close that gap.
 
 **`requestAdditionalDeviceGrant`** — called from an already-authenticated session:
-- Issues a **time-limited (`recovery_link_ttl_minutes` = 30 minutes), single-use OTP** to the account's registered recovery channel (phone or email).
+- Issues a **time-limited (`recovery_link_ttl_minutes` = 30 minutes), single-use OTP**, queued for delivery to the credential's `delivery_channel` — the phone or the email the approver chose — and to no other channel or address.
 - **Does not rotate the shared secret.**
 - **Does not terminate any live session** — the existing browser and its session remain active.
 - Creates a `SetupGrant` of purpose `VENDOR_DEVICE_ENROLMENT`, principal-bound and single-use.
@@ -144,7 +144,7 @@ Every record a vendor creates — a booking, a payer-arrangement edit, a handsha
 
 `MSC-DEC-431`, written at [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4a and §13.4b.
 
-- **Credential strength.** The shared secret is **12 to 128 characters, spaces permitted, no composition rule**, a constant of the contract. Sign-in has a ceiling of 128 and no floor.
+- **Credential strength.** The shared secret is **12 to 128 characters, spaces permitted, no composition rule**, counted in code points both as sent and after NFKC (both must hold), a constant of the contract. Sign-in has a ceiling of 128 and no floor.
 - **The order.** The schema; then the **registered browser** (absent, unknown or bound to another account: `INVALID_CREDENTIALS`, the secret **not examined**); then the account `ACTIVE`; then the lock; then the secret. **A failure counts only once the request has reached the secret** — which is why an attacker on an unregistered browser can neither guess the secret nor lock a team out, the outcome `MSC-DEC-431` exists to prevent.
 - **The lock** is set by the fifth consecutive failure and ends fifteen minutes later or when recovery completes. It is shared by every browser and every colleague, which §37.5 already accepts. A locked request from a registered browser is **told** (`CREDENTIAL_LOCKED`): it holds a browser registered to the account, so it could already attack the secret. **The lock ends no live session.**
 - **Rate limiting is separate and first**: a request refused by `RATE_LIMITED` is neither verified nor counted.
@@ -260,6 +260,7 @@ When more than ten sign-in requests arrive within a minute for that account and 
 Then further requests are refused with RATE_LIMITED,
 And the ceiling is 10 a minute, keyed on the Vendor account and its registered device and not on the network address,
 And a second registered browser of the same account has a bucket of its own,
+And device material that is absent, malformed or unknown shares one invalid-device partition of the account, so inventing cookie values gives no fresh bucket,
 And a refused request is neither verified nor counted toward the lockout.
 ```
 
@@ -270,7 +271,7 @@ And a refused request is neither verified nor counted toward the lockout.
 ```text
 Given a vendor account with an active session on browser A,
 When requestAdditionalDeviceGrant is called from browser A,
-Then a time-limited single-use OTP is sent to the registered recovery channel,
+Then a time-limited single-use OTP is queued for the credential's delivery_channel,
 And browser A's session remains active and unaffected,
 And when the OTP is consumed on browser B via completeAdditionalDeviceEnrolment,
 Then browser B receives a melarc_vendor_device credential,
@@ -342,7 +343,8 @@ When the secret is submitted at completeVendorCredentialSetup or completeCredent
 Then each is refused by the schema with VALIDATION_FAILED, naming the field and never echoing the value,
 And a 12-character secret and a 128-character secret containing spaces are accepted,
 And no composition rule applies,
-And vendorSignIn refuses a secret longer than 128 characters at the schema.
+And vendorSignIn refuses a secret longer than 128 characters at the schema,
+And the two bounds of SECURITY_DESIGN.md §13.4a both hold: four U+FB03 ligatures are refused by the schema and a value that normalises below 12 by the credential service.
 ```
 
 **Governs:** `MSC-DEC-431`, `MSC-DEC-263` · **Surface:** Melarc Vendor · **Test level:** contract · **Code:** `VALIDATION_FAILED`
@@ -392,7 +394,7 @@ And a stale ETag is refused with STATE_CONFLICT.
 ```text
 Given an ACTIVE vendor account whose VENDOR_CREDENTIAL_SETUP grant expired with the secret still null,
 When Senior Ops at the account's hub calls reissueVendorCredentialSetup with a reason_code and the ETag read with getVendorAccount,
-Then a fresh grant and the account_identifier are delivered to the credential's delivery_channel and an earlier pending grant is superseded,
+Then a fresh grant is issued and its message, carrying the account_identifier, is queued for the credential's delivery_channel (the provider is called later, by the delivery worker) and an earlier pending grant is superseded,
 And an account that already holds a secret is refused with STATE_CONFLICT,
 And an Ops Staff user, who does not hold vendor.organization.approve, is refused with PERMISSION_DENIED,
 And an existing account outside the actor's hubs is refused with HUB_SCOPE_VIOLATION and one that does not exist with NOT_FOUND, the scope being decided before the version is compared,

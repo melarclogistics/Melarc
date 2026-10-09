@@ -21,34 +21,56 @@ function response(overrides: Partial<ResponseParts> = {}): ResponseParts {
   return { status: 200, body: undefined, headers: {}, ...overrides };
 }
 
-/** Only the response headers of an answer: the body is another rule, and these tests are not about it. */
-const headerViolations = (operationId: string, headers: Record<string, unknown>) =>
+/**
+ * Only the response headers of an answer: the body is another rule, and these tests are not about it. The one
+ * operation whose cookies depend on whose answer it is, `completeCredentialRecovery`, is judged as a staff answer,
+ * which is owed none.
+ */
+const headerViolations = (operationId: string, headers: Record<string, unknown>, status = 200) =>
   validator
-    .validateResponse(operationId, response({ headers }))
+    .validateResponse(
+      operationId,
+      response({ status, headers }),
+      { headers: {} },
+      operationId === 'completeCredentialRecovery' ? { principalType: 'STAFF' } : undefined,
+    )
     .filter((violation) => violation.in === 'response-header');
 
 describe('Cache-Control: no-store (audit C-cache)', () => {
-  // The four answers whose description says the response is never to be cached: two retrieval authorizations
-  // (a bearer capability over stored evidence or a payment-ledger package) and two enrolment grants (a setup
-  // credential). Their header is declared once in the shared component and twice inline.
-  const NO_STORE_OPERATIONS = [
-    'createEvidenceRetrievalAuthorization',
-    'createAccountingExportRetrievalAuthorization',
-    'registerRiderDevice',
-    'reregisterRiderDevice',
+  // The answers that carry a raw credential or secret and so are never to be cached: two retrieval
+  // authorizations (a bearer capability over stored evidence or a payment-ledger package), the two rider
+  // enrolment grants, the three answers that put a secret in the body (an authenticator seed with its
+  // continuation grant, twice, and the rider's bearer credential) and the six that issue a session or a device
+  // credential in Set-Cookie (decision C-03, 8 October 2026). The header is declared once in the shared
+  // component and referenced from each. The status is the answer that carries the secret.
+  const NO_STORE: readonly (readonly [string, number])[] = [
+    ['createEvidenceRetrievalAuthorization', 200],
+    ['createAccountingExportRetrievalAuthorization', 200],
+    ['registerRiderDevice', 200],
+    ['reregisterRiderDevice', 200],
+    ['completeStaffCredentialSetup', 200],
+    ['beginMfaReenrolment', 200],
+    ['riderSignIn', 200],
+    ['staffSignIn', 200],
+    ['completeStaffMfaSignIn', 200],
+    ['vendorSignIn', 200],
+    ['completeVendorCredentialSetup', 200],
+    ['completeAdditionalDeviceEnrolment', 200],
+    ['completeCredentialRecovery', 204],
   ];
+  const NO_STORE_OPERATIONS = NO_STORE.map(([operationId]) => operationId);
 
   // Break caught: an answer carrying a capability or a setup credential being cacheable because the header was
   // missing. The header was declared as any string and not required, so none of these was a violation.
-  it.each(NO_STORE_OPERATIONS)('requires the header on %s', (operationId) => {
-    expect(headerViolations(operationId, {})).toEqual([
+  it.each(NO_STORE)('requires the header on %s', (operationId, status) => {
+    expect(headerViolations(operationId, {}, status)).toEqual([
       { in: 'response-header', pointer: 'cache-control', rule: 'required' },
     ]);
   });
 
   // Break caught: a header that is there and says something else. `public, max-age=3600` on a retrieval
   // authorization would let an intermediary keep a bearer capability.
-  it.each(NO_STORE_OPERATIONS)('refuses any value but no-store on %s', (operationId) => {
+  it.each(NO_STORE)('refuses any value but no-store on %s', (operationId, status) => {
     for (const value of [
       'public, max-age=3600',
       'no-cache',
@@ -57,19 +79,19 @@ describe('Cache-Control: no-store (audit C-cache)', () => {
       'no-store, public',
       '',
     ]) {
-      expect(headerViolations(operationId, { 'cache-control': value }), value).toEqual([
+      expect(headerViolations(operationId, { 'cache-control': value }, status), value).toEqual([
         { in: 'response-header', pointer: 'cache-control', rule: 'const' },
       ]);
     }
   });
 
-  it.each(NO_STORE_OPERATIONS)('accepts no-store on %s', (operationId) => {
-    expect(headerViolations(operationId, { 'cache-control': 'no-store' })).toEqual([]);
+  it.each(NO_STORE)('accepts no-store on %s', (operationId, status) => {
+    expect(headerViolations(operationId, { 'cache-control': 'no-store' }, status)).toEqual([]);
   });
 
   // Break caught: the rule spreading to cache policies it was not written for. Every other response keeps whatever
   // it has: nothing else declares a Cache-Control header, and none of them is made to.
-  it('is declared on those four responses and no other', () => {
+  it('is declared on those responses and no other', () => {
     const declaring: string[] = [];
     for (const [path, item] of Object.entries(CONTRACT.paths as JsonObject)) {
       if (!isJsonObject(item)) continue;

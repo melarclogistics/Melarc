@@ -191,7 +191,19 @@ function compareNode(expected: NormSchema, actual: NormSchema, at: string, out: 
   for (const keyword of ['allOf', 'oneOf', 'anyOf'] as const) {
     const contractBranches = expected[keyword] ?? [];
     const codeBranches = actual[keyword] ?? [];
-    if (!same(contractBranches, codeBranches)) {
+    const [contractBranch] = contractBranches;
+    const [codeBranch] = codeBranches;
+    if (
+      keyword === 'allOf' &&
+      contractBranch !== undefined &&
+      codeBranch !== undefined &&
+      contractBranches.length === 1 &&
+      codeBranches.length === 1
+    ) {
+      // A wrapper that holds one record and only closes it (the ordinary session projection) must not hide the
+      // field that differs: each side has one branch, so the branches are compared as the records they are.
+      compareNode(contractBranch, codeBranch, at, out);
+    } else if (!same(contractBranches, codeBranches)) {
       out.push({
         code: 'SCHEMA_COMPOSITION',
         at,

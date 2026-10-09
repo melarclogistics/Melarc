@@ -109,7 +109,7 @@ This exists as its own feature because **the second factor is a gate on obtainin
 
 `MSC-DEC-431`, written at [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4a and §13.4b. **The values were always set; the mechanism and the rule for what counts were not.**
 
-- **Credential strength.** A staff password, and the bootstrap administrator's password, is **12 to 128 characters, spaces permitted, with no composition rule** — no mandatory case, digit or symbol. The bound is a constant of the contract, not a setting. Sign-in itself has a ceiling of 128 and no floor, so a short guess is simply a wrong password.
+- **Credential strength.** A staff password, and the bootstrap administrator's password, is **12 to 128 characters, spaces permitted, with no composition rule** — no mandatory case, digit or symbol — counted in code points **both as sent and after NFKC normalisation, and both must hold** (SECURITY_DESIGN.md §13.4a). The bound is a constant of the contract, not a setting. Sign-in itself has a ceiling of 128 and no floor, so a short guess is simply a wrong password.
 - **The order.** The schema; then the identity is resolved (an unknown, ineligible or credential-less one gets a dummy hash verification and `INVALID_CREDENTIALS`); then, if the credential is locked, the answer is `INVALID_CREDENTIALS` **after one dummy hash verification whose result is discarded**, so a locked answer is no faster than a wrong one; then the password. **A failure counts only once the request has reached the password**, which for staff has no earlier gate.
 - **The lock.** The fifth consecutive failure sets `locked_until` fifteen minutes ahead. A request inside the lock is neither verified nor counted and does not extend it. At the first attempt after it the count is zero. The count also resets on a complete sign-in and when a credential is set or recovered — `completeStaffCredentialSetup` and `completeCredentialRecovery`.
 - **Silent at the password, announced at the second factor.** A caller who has proved nothing cannot be told a lock exists: that would let anyone learn which addresses are real staff by locking one. A Senior Ops or Platform Admin who holds a live MFA challenge **has** proved the password, so is told `CREDENTIAL_LOCKED`.
@@ -162,7 +162,7 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 
 ## 11. Audit events — *pointer*
 
-[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.session.authority_revoked` and `auth.csrf.rejected`.** The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE` for staff — and **never a password, a code or a token**.
+[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.session.authority_revoked` and `auth.csrf.rejected`.** The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `MFA_ENROLMENT_REQUIRED` for staff — and **never a password, a code or a token**.
 
 **This section cited `auth.mfa.elevated` until 23 August — an event that no longer exists.** `MSC-DEC-228` withdrew elevation on 21 August and `audit.md` renamed the code to `auth.mfa.completed`, which records a second factor accepted **at sign-in**. The stale name survived because a suffix-abbreviated list is not checkable: nothing could compare it to the catalogue.
 
@@ -242,15 +242,20 @@ And no response distinguishes which of them occurred.
 ### `AC-SLICE-000-05` — Authorization tests permissions, never role names
 
 ```text
-Given a Senior Ops user whose bundle has had a permission removed by configuration,
-When the user signs in again, in a session created after the edit, and attempts the action that permission gated,
-Then it is refused,
+Given a Senior Ops user with a live session, and a bundle that has had a permission removed or its scope or tier narrowed by the invalidation primitive (a seed or migration in this slice),
+When the user's next request arrives,
+Then every session issued from that bundle has been ended in the same transaction as the change, with AUTHORITY_CHANGED, and the request is refused with SESSION_INVALID,
+And a session created after the change carries the reduced snapshot, so the action that permission gated is refused there with PERMISSION_DENIED,
+And an addition or widening applies only to sessions issued afterwards, and a change to a name alone ends nothing,
+And a mutation that checks its authority after the revocation does not proceed, while one already authorised may finish,
 And the refusal required no code change to take effect,
-And a session created before the edit keeps the snapshot it was issued with, so the same action still succeeds there until that session ends or is ended with revokeSession,
+And an addition or widening raises the bundle revision and ends no session, so every existing snapshot is retained, while a reduction raises the reduction floor and ends every session recorded below it,
+And for the compiled Vendor or Rider policy that a release reduces, the minimum revision is raised and the active sessions below it are ended in one transaction, an instance running the older code then refuses issuance and every authenticated request of that type with the operational failure, reports itself not ready and terminates no session, a session below the floor that such an instance committed is refused SESSION_INVALID and terminated by a current instance at its next request, and a session of a newer revision than the instance is refused by that instance with the same failure and stays ACTIVE, with no compatibility exception,
+And these races are held by the lock protocol of SECURITY_DESIGN 13.10a under the runtime login (an acceptance obligation of the task that builds them, run on real PostgreSQL),
 And no code path anywhere tests the string SENIOR_OPS.
 ```
 
-**Governs:** §11.1, `MSC-DEC-133` · **Surface:** Melarc Ops · **Test level:** integration · **Code:** `PERMISSION_DENIED`
+**Governs:** §11.1, `MSC-DEC-133`, [permission-enforcement.md](permission-enforcement.md) §5.5 · **Surface:** Melarc Ops · **Test level:** integration · **Code:** `PERMISSION_DENIED`, `SESSION_INVALID`
 
 ### `AC-SLICE-000-06` — The bundle is snapshotted at session issue
 
@@ -378,7 +383,8 @@ And no session is issued at any point.
 ```text
 Given an Ops Staff identity and the staff sign-in limit of 10 a minute,
 When more than ten sign-in requests for it arrive within the minute,
-Then the excess requests are refused with RATE_LIMITED, and a correct password among them is not examined,
+Then the excess requests are refused with RATE_LIMITED, and a correct password among them is not examined and no hash is computed for them,
+And a request refused because no hash slot is free (SECURITY_DESIGN.md §13.4c) is answered the same way, verified by nothing and counted nowhere,
 And a refused request adds nothing to the failed-attempt count, so only the fifth wrong password that was verified sets a lock,
 And the limit is keyed on the canonical form of the email the request carries ([domain-model.md](../../contracts/domain-model.md) §6.8), whether or not it matches a staff identity, and not on the network address, so RATE_LIMITED never tells a caller that an address is real.
 ```
@@ -457,7 +463,9 @@ When the password is submitted at completeStaffCredentialSetup or completeCreden
 Then each is refused by the schema with VALIDATION_FAILED, naming the field and never echoing the value, and the grant or token is not consumed,
 And a 12-character password of lower-case letters only is accepted,
 And a 128-character passphrase containing spaces is accepted,
-And staffSignIn refuses a 129-character password at the schema, while a short wrong password at staffSignIn is INVALID_CREDENTIALS.
+And staffSignIn refuses a 129-character password at the schema, while a short wrong password at staffSignIn is INVALID_CREDENTIALS,
+And four U+FB03 ligatures (4 code points as sent, 12 after NFKC) are refused by the schema, a value of 12 or more code points as sent that normalises below 12 is refused by the credential service with VALIDATION_FAILED, and a lone surrogate is refused without being echoed,
+And at staffSignIn a password that passes the schema but expands past 128 after NFKC is answered INVALID_CREDENTIALS, is not hashed and is not counted.
 ```
 
 **Governs:** `MSC-DEC-431`, `MSC-DEC-263` · **Surface:** Melarc Ops · **Test level:** contract · **Code:** `VALIDATION_FAILED`
@@ -480,7 +488,7 @@ And the winner's password is the one that verifies.
 ```text
 Given an ACTIVE staff identity whose STAFF_CREDENTIAL_SETUP grant expired unused,
 When Senior Ops or Platform Admin calls reissueStaffCredentialSetup with a reason code and the ETag read with getStaffIdentity,
-Then a fresh grant is delivered to the identity's work email and an earlier pending grant is superseded and refused at completeStaffCredentialSetup with SETUP_GRANT_INVALID,
+Then a fresh grant is queued for delivery to the identity's work email and an earlier pending grant is superseded and refused at completeStaffCredentialSetup with SETUP_GRANT_INVALID,
 And an identity that already holds a credential is refused with STATE_CONFLICT,
 And an empty reason_code is refused with REASON_REQUIRED,
 And a Senior Ops caller for an identity whose bundle is privileged is refused with INSUFFICIENT_AUTHORITY.
@@ -488,15 +496,16 @@ And a Senior Ops caller for an identity whose bundle is privileged is refused wi
 
 **Governs:** `MSC-DEC-247`, `MSC-DEC-248` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `STATE_CONFLICT`, `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`
 
-### `AC-SLICE-000-90` — A refused delivery rolls the approval back
+### `AC-SLICE-000-90` — An approval whose message cannot be queued rolls back, and a later provider failure does not
 
 ```text
-Given a staff identity in PENDING_APPROVAL and a delivery channel that refuses the message,
+Given a staff identity in PENDING_APPROVAL and a deployment whose email delivery channel is not available (no provider is configured),
 When a different Senior Ops user calls approveStaffIdentity,
 Then the answer is CREDENTIAL_DELIVERY_FAILED,
-And the identity is still PENDING_APPROVAL, no grant exists and no auth.setup_grant.issued was recorded,
-And when the channel accepts, a second call succeeds and issues exactly one grant,
-And the raw token appears in no log, no row and no audit event.
+And the identity is still PENDING_APPROVAL, no grant and no delivery job exist and no auth.setup_grant.issued was recorded,
+And once the channel is available, a second call succeeds in one transaction that records the approval, the grant (its hash only), the encrypted delivery job and the audit event, and issues exactly one grant,
+And a provider that later rejects or times out the message changes none of that: the job retries the same link on the bounded schedule and then fails terminally, counted and alerted, and the approval stands with its grant redeemable until it expires and re-issuable by reissueStaffCredentialSetup,
+And the raw token appears in no log, no audit event and no row other than the delivery job's encrypted payload.
 ```
 
 **Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.9a, `MSC-DEC-247` · **Surface:** backend · **Test level:** integration · **Code:** `CREDENTIAL_DELIVERY_FAILED`
@@ -508,6 +517,7 @@ Given an unknown email, a wrong password, a suspended identity, a locked identit
 When each is submitted,
 Then the four password-step cases receive the one INVALID_CREDENTIALS answer and the code receives MFA_PROOF_INVALID,
 And each writes auth.session.failed with the factor the request had reached and one cause from the catalogue's closed set — UNKNOWN_PRINCIPAL, INELIGIBLE_PRINCIPAL, WRONG_PASSWORD, LOCKED_OUT or WRONG_MFA_CODE,
+And a privileged identity with no ACTIVE factor, stopped at the second step, writes auth.session.failed with the cause MFA_ENROLMENT_REQUIRED at the MFA_CODE factor, no auth.mfa.failed and no lockout count,
 And no record holds a password, a code or a token.
 ```
 
@@ -618,7 +628,7 @@ When a different Senior Ops user rejects the privileged one, and then rejects th
 Then the first is refused with INSUFFICIENT_AUTHORITY and stays PENDING_APPROVAL,
 And the second becomes REJECTED, terminal and still queryable, with approved_by naming the rejecting user,
 And a Platform Admin other than the maker rejects the privileged one, which becomes REJECTED,
-And the maker rejecting their own profile is refused with SELF_APPROVAL_FORBIDDEN, an empty reason_code with REASON_REQUIRED and a retired or unknown one with REASON_NOT_ACTIVE,
+And the maker rejecting their own profile is refused with SELF_APPROVAL_FORBIDDEN, an empty reason_code with REASON_REQUIRED and a retired, unknown or not-permitted-for-this-operation one with REASON_NOT_ACTIVE,
 And an Ops Staff user is refused with PERMISSION_DENIED,
 And a new profile naming a rejected profile's work email is accepted, while a profile that is not rejected still answers WORK_EMAIL_IN_USE.
 ```
@@ -632,7 +642,7 @@ Given a Senior Ops identity that is ACTIVE with an established password and no A
 When the correct email and password are submitted at staffSignIn and the challenge it returns is completed at completeStaffMfaSignIn with any code,
 Then staffSignIn answers 202 with an MfaChallenge, exactly as for an enrolled identity,
 And completeStaffMfaSignIn answers 403 MFA_ENROLMENT_REQUIRED, a code that operation declares, and issues no session and no cookie,
-And that attempt adds nothing to the identity's failed-attempt count, so any number of them lock nothing,
+And that attempt adds nothing to the identity's failed-attempt count, so any number of them lock nothing, and it is audited with the cause MFA_ENROLMENT_REQUIRED,
 And the identity still cannot hold a session until a factor is proven.
 ```
 
@@ -651,7 +661,7 @@ And a code already used is refused again inside its window with MFA_PROOF_INVALI
 
 **Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.5 · **Surface:** Melarc Ops · **Test level:** contract · **Code:** `VALIDATION_FAILED`, `MFA_PROOF_INVALID`
 
-### `AC-SLICE-000-127` — The session cookies end with the browser and the vendor device credential lasts 400 days
+### `AC-SLICE-000-127` — The session cookies carry no lifetime of their own and the vendor device credential lasts 400 days
 
 ```text
 Given a successful Ops Portal sign-in and a successful Vendor PWA sign-in,
@@ -659,10 +669,12 @@ When the Set-Cookie fields of each response are inspected,
 Then melarc_session and melarc_csrf carry the Secure attribute and neither Max-Age nor Expires,
 And the session ends only by the absolute timeout, the idle timeout, sign-out or revocation,
 And on the vendor sign-in melarc_vendor_device is set with Max-Age=34560000 and the Secure attribute, as the same credential the browser presented, which renews its lifetime without rotating its value or registering a browser,
-And the browser tests record, for each engine they run in, whether a Secure cookie set on http://127.0.0.1 is stored.
+And on the trusted HTTPS test origin, in each supported engine, the cookies are stored host-only with the Path, SameSite and HttpOnly attributes the contract declares for each, the session credential is rotated at sign-in, the cookies are sent on the protected next request, ended by sign-out with Max-Age=0 and by revocation, and clearing the session cookies never deletes melarc_vendor_device,
+And a session cookie surviving browser restoration is not a signed-in session once the server has ended it, and the interface never promises that closing the browser signs the person out,
+And the behaviour of each engine on plain http://127.0.0.1 is recorded as a diagnostic only, and an engine that is missing is reported blocked.
 ```
 
-**Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2 · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** e2e
+**Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2 · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** e2e. The Vendor PWA half is verified at API level until that client exists
 
 ### `AC-SLICE-000-129` — A work email has one canonical form
 

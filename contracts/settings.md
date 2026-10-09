@@ -186,7 +186,7 @@ The specification distinguishes four conditions that a single "value" column wou
 
 **All six now carry values**. §11.2 deferred *“low-level password/PIN, factor, token, lockout, expiry, device-identifier, and session mechanics”* to security architecture, and that deferral is now discharged: the **structure** was fixed here and the **figures** arrived on 23 August. Every one is Platform Admin launch configuration under `MSC-DEC-217`, so a figure that proves wrong in practice is a settings change rather than a release — which is what made setting them before operating data reasonable.
 
-**Credential length is not a setting, deliberately.** The 12 to 128 character bounds on staff passwords, the bootstrap password and Vendor shared secrets and the six-digit rider PIN are constants of the contract, enforced by the request schemas, so no administrator can weaken them at runtime and no key exists to be left unset.
+**Credential length is not a setting, deliberately.** The 12 to 128 character bounds on staff passwords, the bootstrap password and Vendor shared secrets — counted in code points both as sent and after NFKC, and both must hold ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §13.4a) — and the six-digit rider PIN are constants of the contract, enforced by the request schemas and the credential service, so no administrator can weaken them at runtime and no key exists to be left unset.
 
 ### 7.7 Platform — security operations
 
@@ -218,7 +218,18 @@ The specification distinguishes four conditions that a single "value" column wou
 
 **These eight keys closed `OQ-077` on 27 August, and `OQ-067` stayed open for another nine days.** `OQ-077` recorded that the rate-limit figures had **no keys at all** and stated why the keys were not simply invented: *"how many buckets the limits need is a design choice rather than a value."* `MSC-DEC-285` made that choice; **`MSC-DEC-371` supplied the figures on 5 September and closed `OQ-067`.**
 
-**The credential setup and recovery bucket, and who is in it** (Product decision, 6 October 2026). Seven operations declare `RATE_LIMITED` and belonged to none of the six buckets: `completeStaffCredentialSetup`, `completeMfaEnrolment`, `beginMfaReenrolment`, `completeVendorCredentialSetup`, `completeAdditionalDeviceEnrolment`, `completeRiderDeviceEnrolment` and `requestAdditionalDeviceGrant`. **They join `rate_limit_recovery`: no seventh bucket is created and no figure changes.** Each is counted under the key its request carries — **the setup grant** it presents, or the recovery token — taken from the request whether or not the server can resolve it ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §13.4b).
+**How each bucket is keyed** (Product decision, 8 October 2026; where the state lives and what happens at capacity is [SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §14.12). Every key is formed from what the request carries, namespaced by bucket and purpose and digested, never from whether the server could resolve it:
+
+| Bucket| Key|
+|---|---|
+| `rate_limit_staff_signin`| The canonical submitted work email, known or unknown|
+| `rate_limit_privileged_mfa`| The bounded challenge reference, bound to its principal. An invalid or unknown reference still meets the coarse admission limits|
+| `rate_limit_vendor_signin`| The canonical submitted account identifier **and** the identity of the device credential **where it is valid**. Device material that is absent, malformed or unknown shares the account's single *invalid-device* partition, so inventing cookie values buys no fresh bucket|
+| `rate_limit_rider_challenge`| The canonical submitted phone number, for the challenge request and the sign-in that follows|
+| `rate_limit_recovery`| The principal type plus the canonical submitted identifier, resolvable or not; and for the operations below, the purpose-qualified digest of the bounded grant or token presented|
+| `rate_limit_authenticated_api`| The active Session, with the two sub-ceilings inside it|
+
+**The credential setup and recovery bucket, and who is in it** (Product decision, 6 October 2026). Seven operations declare `RATE_LIMITED` and belonged to none of the six buckets: `completeStaffCredentialSetup`, `completeMfaEnrolment`, `beginMfaReenrolment`, `completeVendorCredentialSetup`, `completeAdditionalDeviceEnrolment`, `completeRiderDeviceEnrolment` and `requestAdditionalDeviceGrant`. **They join `rate_limit_recovery`: no seventh bucket is created and no figure changes.** Each is counted under the key its request carries — **the setup grant** it presents, or the recovery token — taken from the request whether or not the server can resolve it ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §13.4b); `requestAdditionalDeviceGrant`, which presents neither, is counted under **the authenticated vendor account** (decided 8 October 2026), in addition to the authenticated API ceiling.
 
 | Operation| Counted under|
 |---|---|
@@ -230,9 +241,9 @@ The specification distinguishes four conditions that a single "value" column wou
 | `completeVendorCredentialSetup`| The `VENDOR_CREDENTIAL_SETUP` grant presented|
 | `completeAdditionalDeviceEnrolment`| The `VENDOR_DEVICE_ENROLMENT` grant presented|
 | `completeRiderDeviceEnrolment`| The `RIDER_DEVICE_ENROLMENT` or `RIDER_DEVICE_REREGISTRATION` grant presented|
-| `requestAdditionalDeviceGrant`| **Open** — it presents no grant, being the act that creates one (§9)|
+| `requestAdditionalDeviceGrant`| The authenticated vendor account, because it presents no grant, being the act that creates one|
 
-**A caller chooses the grant or token it presents, so every made-up value is a fresh key.** A **per-address ceiling at the edge** bounds the cost of attacker-chosen keys. It is a deployment control and not a bucket, a key or a setting ([DEPLOYMENT_AND_ENVIRONMENTS.md](../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.2), and its value has not been supplied (§9). **The rider challenge and sign-in bucket is keyed on the submitted phone number** (decided 6 October 2026), whether or not it matches a rider.
+**A caller chooses the grant or token it presents, so every made-up value is a fresh key.** A **per-address ceiling at the edge** bounds the cost of attacker-chosen keys. It is a deployment control and not a bucket, a key or a setting ([DEPLOYMENT_AND_ENVIRONMENTS.md](../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.2), and its value is a measurement deliverable that has not been supplied (§9). **The rider challenge and sign-in bucket is keyed on the submitted phone number** (decided 6 October 2026), whether or not it matches a rider. **The transport ceilings and the hash admission are not settings either** (Product decision, 8 October 2026): body size, header and request deadlines, admission concurrency and hash slots are engineering configuration measured on a recorded machine ([DEPLOYMENT_AND_ENVIRONMENTS.md](../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.5), and the six buckets and their figures above are untouched by them.
 
 ### 7.6 Retired — must not govern
 
@@ -277,8 +288,8 @@ Current unresolved inputs are listed below. Their historical question identifier
 | `evidence_upload_max_bytes` | Upload size ceiling | Complete the evidence-upload validation configuration before production use |
 | `evidence_upload_allowed_mime_types` | Allowed MIME set | Complete file-signature/type validation before production use |
 | `accounting_export_file_retention_days` | Export-package retention duration | Generation refuses with `EXPORT_RETENTION_NOT_CONFIGURED` while unset |
-| `requestAdditionalDeviceGrant` rate-limit key | The decision keys the credential setup and recovery bucket by the setup grant or recovery token a request presents, and this operation presents neither: it is the authenticated act that creates a grant | Name its key; the operation is counted in the bucket but its key is unset |
-| Per-address ceiling at the edge | The value, and whether it covers every operation that takes a grant or token or only some. A deployment input (`DEPLOYMENT_AND_ENVIRONMENTS.md` §12.2) | Do not invent a figure; the ceiling is not configured |
+| Maximum number of hubs one session can carry (the length of `authorized_hubs`, and of the hub authority a principal can be given) | A value measured by the capacity task on a recorded machine, then added to the contract by a deliberate change | Do not invent a figure; until it is recorded the list is finite but unbounded in the schema, and a principal is never given a silently truncated list |
+| Per-address ceiling at the edge, and the transport and hash-admission capacity values | The values, measured by the benchmark task on a recorded machine and supplied with the shared-network (NAT) consequence recorded, and whether the edge ceiling covers every operation that takes a grant or token or only some. A deployment input (`DEPLOYMENT_AND_ENVIRONMENTS.md` §12.2) | Do not invent a figure; the ceiling is not configured, and external authentication exposure waits for it |
 
 `unpaid_return_storage_grace_days` is 14 and `unclaimed_adjustment_grace_days` is 90. These are resolved values in §7.1, not outstanding questions. Production configuration and maker-checker rules still apply.
 

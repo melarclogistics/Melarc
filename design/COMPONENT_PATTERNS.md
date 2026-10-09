@@ -979,8 +979,9 @@ That logic belongs in domain/application behavior and presentation adapters.
 
 UI components render the resulting state.
 
-Permissions and navigation entries are never inferred from a role name. Where the signed-in navigation entries come
-from is an open contract question (DESIGN_SYSTEM §22).
+Permissions and navigation entries are never inferred from a role name. The signed-in navigation entries come from
+the `Session` resource's permission hints and the implemented route definitions, never for a feature that is not
+built (DESIGN_SYSTEM §22; decided 8 October 2026).
 
 ### 24.1 Formatting and identity
 
@@ -1171,6 +1172,11 @@ the generic copy is used and no wording is invented here.
 Copy belongs with the feature or presentation layer. A message about permission or approval names the permission or the
 deciding capability, never a role ([surfaces/ops-portal.md](../surfaces/ops-portal.md) §7, §8).
 
+Copy is keyed by **operation, context and error code**, field errors included, in one place per surface: one global
+message per code is often not enough (a `VALIDATION_FAILED` on a password field and on a reason select say different
+things). An implementation may propose the copy; the Product Owner reviews the composed screens and not each phrasing
+constant (decided 8 October 2026).
+
 ### 33.1 The nine interface states
 
 The nine states are required by [surfaces/ops-portal.md](../surfaces/ops-portal.md) §8, which owns each requirement.
@@ -1310,6 +1316,7 @@ It simply records patterns intentionally **not** built during the initial founda
 | DropdownMenu | first real menu requirement |
 | Drawer | first real side-panel workflow |
 | Date/Time control | first date/time entry requirement |
+| QrCode (one-time credential display) | the rider device-enrolment screen: a small, reviewed, exactly pinned encoder drawing inline SVG under the content-security policy (no data URI), shown from memory only and cleared on navigation, expiry and completion, never rendered as text; proven by decoding the rendered output with an independent test-only decoder (`SECURITY_DESIGN.md` §13.6, `surfaces/ops-portal.md`) |
 | DataGrid | only if table requirements exceed a simpler table pattern |
 
 ---
