@@ -46,6 +46,24 @@ function checkout(extra: Record<string, string> = {}, withExamples = true): stri
 
 const read = (root: string, path: string): string => readFileSync(join(root, path), 'utf8');
 
+/** The settings of the real API example that hold key material, in the order its text lists them (parseEnv does not keep it). */
+const KEY_SETTINGS = [
+  ...examples[`${API_ENV}.example`].matchAll(/^(KEY_[A-Z0-9_]+_MATERIAL)=/gm),
+].map((match) => match[1] ?? '');
+
+/** One complete API settings file, as setup would write it, with the runtime password of the database file. */
+function completeApiEnv(password: string): string {
+  return examples[`${API_ENV}.example`]
+    .replace(
+      /^DATABASE_URL=.*$/m,
+      () => `DATABASE_URL=postgres://melarc_api_runtime:${password}@127.0.0.1:5432/melarc_dev`,
+    )
+    .replaceAll(
+      /^(KEY_[A-Z0-9_]+_MATERIAL=1:)CHANGE_ME$/gm,
+      (_match, assignment: string) => `${assignment}${'K'.repeat(43)}`,
+    );
+}
+
 /** A source of passwords that are different every time and recognizable in a failure. */
 function counter(): () => string {
   let next = 0;
@@ -136,16 +154,18 @@ describe('on a checkout with neither file', () => {
     );
   });
 
-  it("changes nothing else in the API's example: only the DATABASE_URL line differs", () => {
+  it("changes nothing else in the API's example: only the DATABASE_URL line and the key placeholders differ", () => {
     const root = checkout();
     setupLocalEnv(root, { random: counter() });
     const before = examples[`${API_ENV}.example`].split('\n');
     const after = read(root, API_ENV).split('\n');
     assert.equal(after.length, before.length);
     const differing = before.flatMap((line, index) => (line === after[index] ? [] : [index]));
-    assert.equal(differing.length, 1);
-    assert.match(before[differing[0] ?? 0] ?? '', /^DATABASE_URL=/);
-    assert.match(after[differing[0] ?? 0] ?? '', /^DATABASE_URL=/);
+    assert.equal(differing.length, 1 + KEY_SETTINGS.length);
+    for (const index of differing) {
+      assert.match(before[index] ?? '', /^(DATABASE_URL|KEY_[A-Z0-9_]+_MATERIAL)=/);
+      assert.equal((before[index] ?? '').split('=')[0], (after[index] ?? '').split('=')[0]);
+    }
   });
 
   // Break caught: a secrets file readable by other users of a shared machine. The bits themselves can be read
@@ -390,8 +410,7 @@ describe('when the files already exist', () => {
 });
 
 describe('notes about an API file that does not match', () => {
-  const apiWith = (password: string): string =>
-    `DATABASE_URL=postgres://melarc_api_runtime:${password}@127.0.0.1:5432/melarc_dev\n`;
+  const apiWith = completeApiEnv;
 
   it('says nothing when its password is the runtime password', () => {
     const root = checkout({ [PG_ENV]: pgEnvText(), [API_ENV]: apiWith('runtimepw') });
@@ -426,9 +445,111 @@ describe('notes about an API file that does not match', () => {
     for (const text of ['DATABASE_URL=not a url\n', 'HTTP_PORT=3000\n', 'DATABASE_URL=\n']) {
       const root = checkout({ [PG_ENV]: pgEnvText(), [API_ENV]: text });
       const { notes } = setupLocalEnv(root);
-      assert.equal(notes.length, 1, text);
-      assert.match(notes[0] ?? '', /DATABASE_URL/);
+      assert.match(notes[0] ?? '', /no DATABASE_URL that can be read/, text);
     }
+  });
+});
+
+describe('key material', () => {
+  const KEY_VALUE = /^1:[A-Za-z0-9_-]{43}$/;
+  const keysIn = (root: string): string[] => {
+    const api = parseEnv(read(root, API_ENV));
+    return KEY_SETTINGS.map((name) => api[name] ?? '');
+  };
+  /** Runs setup on a checkout and returns it. */
+  const prepared = (root: string): string => {
+    setupLocalEnv(root, { random: counter() });
+    return root;
+  };
+
+  // Break caught: a placeholder left in the file the API reads, so the API refuses to start on a fresh checkout.
+  it('puts a key in place of every key placeholder, in the form the API reads, and leaves no placeholder', () => {
+    const root = prepared(checkout());
+    assert.equal(KEY_SETTINGS.length, 5);
+    for (const value of keysIn(root)) {
+      assert.match(value, KEY_VALUE);
+      const key = value.slice(2);
+      assert.equal(Buffer.from(key, 'base64url').length, 32);
+      assert.equal(Buffer.from(key, 'base64url').toString('base64url'), key);
+    }
+    // The example's comments name the placeholder; what matters is that no setting still holds it.
+    for (const [name, value] of Object.entries(parseEnv(read(root, API_ENV)))) {
+      assert.ok(!(value ?? '').includes('CHANGE_ME'), `${name} still holds the placeholder`);
+    }
+  });
+
+  // Break caught: one key serving two purposes, which the design forbids and the API refuses at start.
+  it('gives each purpose a key of its own', () => {
+    assert.equal(new Set(keysIn(prepared(checkout()))).size, KEY_SETTINGS.length);
+  });
+
+  // Break caught: a predictable key, such as the same generator seeded the same way on every checkout.
+  it('uses real randomness by default: a different key on each checkout', () => {
+    const first = keysIn(prepared(checkout()));
+    const second = keysIn(prepared(checkout()));
+    assert.equal(new Set([...first, ...second]).size, 2 * KEY_SETTINGS.length);
+  });
+
+  it('takes its keys from the source it is given, in the order the example lists them', () => {
+    const root = checkout();
+    let next = 0;
+    setupLocalEnv(root, {
+      random: counter(),
+      randomKey: () => `key${String((next += 1))}`,
+    });
+    assert.deepEqual(
+      keysIn(root),
+      KEY_SETTINGS.map((_name, index) => `1:key${String(index + 1)}`),
+    );
+  });
+
+  // Break caught: a key in the console, a terminal log or a CI log.
+  it('never prints a key, on the first run or the second', () => {
+    const root = checkout();
+    const lines: string[] = [];
+    runSetupEnv(root, (line) => lines.push(line), counter());
+    runSetupEnv(root, (line) => lines.push(line), counter());
+    for (const value of keysIn(root)) {
+      assert.ok(!lines.join('\n').includes(value.slice(2)), 'a key must not be printed');
+    }
+  });
+
+  it('refuses an API example that no longer has a key placeholder to fill in', () => {
+    const root = checkout({
+      [`${API_ENV}.example`]:
+        'DATABASE_URL=postgres://melarc_api_runtime:CHANGE_ME@127.0.0.1:5432/melarc_dev\n',
+    });
+    assert.throws(() => setupLocalEnv(root, { random: counter() }), /key placeholder/);
+    // Nothing is half written: neither the database file nor the API file.
+    assert.throws(() => read(root, PG_ENV), { code: 'ENOENT' });
+    assert.throws(() => read(root, API_ENV), { code: 'ENOENT' });
+  });
+
+  // Break caught: a file written before a setting existed, left alone as every existing file is, so that the API
+  // refuses to start and nothing says why.
+  it('names the settings an existing API file lacks, and never a value', () => {
+    const old =
+      'DATABASE_URL=postgres://melarc_api_runtime:runtimepw@127.0.0.1:5432/melarc_dev\nHTTP_PORT=3999\n';
+    const root = checkout({ [PG_ENV]: pgEnvText(), [API_ENV]: old });
+    const { notes } = setupLocalEnv(root);
+    const lacking = notes.find((note) => note.includes('lacks')) ?? '';
+    for (const name of [...KEY_SETTINGS, 'OPS_ORIGIN', 'VENDOR_ORIGIN', 'KEY_CUSTODY']) {
+      assert.match(lacking, new RegExp(name));
+    }
+    assert.ok(
+      !/ DATABASE_URL,|HTTP_PORT,/.test(lacking),
+      'a setting it has is not reported as lacking',
+    );
+    assert.ok(
+      !lacking.includes('runtimepw') && !lacking.includes('3999'),
+      'a note must not carry a value',
+    );
+    assert.equal(read(root, API_ENV), old);
+  });
+
+  it('says nothing about settings when the existing file has them all', () => {
+    const root = checkout({ [PG_ENV]: pgEnvText(), [API_ENV]: completeApiEnv('runtimepw') });
+    assert.deepEqual(setupLocalEnv(root).notes, []);
   });
 });
 

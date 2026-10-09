@@ -51,11 +51,16 @@ This creates two git-ignored files from their committed examples and prints no s
 
 - `infrastructure/postgres/.env`: random, throwaway passwords for the database's three identities (the cluster
   superuser, the migration identity and the API's runtime identity), the host and the port.
-- `apps/api/.env`: the API's settings, with `DATABASE_URL` using the runtime identity and the same password.
+- `apps/api/.env`: the API's settings, with `DATABASE_URL` using the runtime identity and the same password, and a
+  fresh random key for each of the five key purposes (`totp_seed`, `credential_delivery`, `idempotent_replay`,
+  `limiter_digest`, `password_pepper`). These keys are throwaway local substitutes, not KMS-backed custody: nothing
+  they protect is real, and production refuses to start on them.
 
 It never overwrites a file, so it is safe to run again. If an existing `apps/api/.env` has no readable `DATABASE_URL`
-(an older copy of the example) or its password no longer matches the database settings, it says so by name; delete that
-file and run the command again to have it rebuilt. The passwords are only ever used on your machine.
+(an older copy of the example), lacks a setting the API now requires, or its password no longer matches the database
+settings, it says so by name (the settings it lacks are listed, never a value); delete that file and run the command
+again to have it rebuilt. **A `.env` made before the key settings existed lacks them, and the API refuses to start until
+it is rebuilt or they are added.** The passwords are only ever used on your machine.
 
 ## 3. Start the database
 

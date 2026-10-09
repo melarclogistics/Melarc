@@ -1,6 +1,9 @@
+import { randomBytes } from 'node:crypto';
+
 /**
- * Settings a test may add or change, but never these: they are what make a run local, sandboxed and safe.
- * Exported so that its test can try every one of them.
+ * Settings a test may add or change, but never these: they are what make a run local, sandboxed and safe. Which adapters run
+ * is among them: a run uses the PostgreSQL limiter, the capture sink and the substitute verifier, and no test can select
+ * another. Exported so that its test can try every one of them.
  */
 export const PROTECTED_KEYS: readonly string[] = [
   'APP_ENV',
@@ -8,7 +11,34 @@ export const PROTECTED_KEYS: readonly string[] = [
   'DATABASE_URL',
   'DATABASE_MIGRATION_URL',
   'MELARC_E2E_CAPTURE_FILE',
+  'KEY_CUSTODY',
+  'RATE_LIMITER',
+  'DELIVERY_EMAIL_ADAPTER',
+  'DELIVERY_SMS_ADAPTER',
+  'ATTESTATION_VERIFIER',
 ];
+
+/** The key purposes of SECURITY_DESIGN.md section 14.9, as the API names their settings. A test compares this with the API's example. */
+const KEY_SETTINGS: readonly string[] = [
+  'TOTP_SEED',
+  'CREDENTIAL_DELIVERY',
+  'IDEMPOTENT_REPLAY',
+  'LIMITER_DIGEST',
+  'PASSWORD_PEPPER',
+];
+
+/**
+ * Throwaway key material for one run: a fresh random key for each purpose (32 bytes as 43 unpadded base64url characters),
+ * all different, held in memory for the life of the process it is given to and written nowhere. It protects nothing real.
+ */
+function runKeys(): Record<string, string> {
+  const keys: Record<string, string> = {};
+  for (const purpose of KEY_SETTINGS) {
+    keys[`KEY_${purpose}_MATERIAL`] = `1:${randomBytes(32).toString('base64url')}`;
+    keys[`KEY_${purpose}_ACTIVE_VERSION`] = '1';
+  }
+  return keys;
+}
 
 export interface ApiEnvironmentOptions {
   readonly port: number;
@@ -40,6 +70,15 @@ export function apiEnvironment(options: ApiEnvironmentOptions): Record<string, s
     SHUTDOWN_DRAIN_DELAY_MS: '0',
     DATABASE_URL: options.runtimeUrl,
     DATABASE_POOL_MAX: '3',
+    // The surfaces are not served by this run; the settings are required and judged at start, and nothing reads them yet.
+    OPS_ORIGIN: 'http://127.0.0.1:4173',
+    VENDOR_ORIGIN: 'http://127.0.0.1:4174',
+    RATE_LIMITER: 'postgres',
+    KEY_CUSTODY: 'local',
+    ...runKeys(),
+    DELIVERY_EMAIL_ADAPTER: 'capture',
+    DELIVERY_SMS_ADAPTER: 'capture',
+    ATTESTATION_VERIFIER: 'substitute',
     MELARC_E2E_CAPTURE_FILE: options.captureFile,
     ...options.extra,
   };

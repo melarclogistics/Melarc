@@ -4,6 +4,9 @@ import { parseEnv } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
+import { randomKey } from '../../test-support/config-env.js';
+import { OPTIONAL_KEYS } from './config-settings.js';
+import { KEY_PURPOSES, keyEnvName } from './key-material.js';
 import { API_RUNTIME_ROLE, CONFIG_KEYS, loadConfig } from './load-config.js';
 
 const exampleText = readFileSync(resolve(import.meta.dirname, '../../../.env.example'), 'utf8');
@@ -27,6 +30,7 @@ const PLACEHOLDER = 'CHANGE_ME';
 type Form = RegExp | { readonly url: { readonly user: string } };
 
 const LOOPBACK = /^(127(\.\d{1,3}){3}|localhost|::1)$/;
+const LOCAL_ORIGIN = /^http:\/\/(127(\.\d{1,3}){3}|localhost):\d{1,5}$/;
 
 const API_FORMS: Readonly<Record<string, Form>> = {
   NODE_ENV: /^(development|test|production)$/,
@@ -38,6 +42,33 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   DATABASE_POOL_MAX: /^\d{1,3}$/,
   SHUTDOWN_TIMEOUT_MS: /^\d{1,6}$/,
   SHUTDOWN_DRAIN_DELAY_MS: /^\d{1,5}$/,
+  // A local origin only: a tracked example never names a deployed host.
+  OPS_ORIGIN: LOCAL_ORIGIN,
+  VENDOR_ORIGIN: LOCAL_ORIGIN,
+  HTTP_TRUST_PROXY: /^off$/,
+  HTTP_BODY_LIMIT_BYTES: /^\d{1,7}$/,
+  HTTP_HEADER_TIMEOUT_MS: /^\d{1,6}$/,
+  HTTP_BODY_TIMEOUT_MS: /^\d{1,6}$/,
+  HTTP_ADMISSION_TIMEOUT_MS: /^\d{1,5}$/,
+  HTTP_ADMISSION_CONCURRENCY: /^\d{1,5}$/,
+  DATABASE_ACQUIRE_TIMEOUT_MS: /^\d{1,5}$/,
+  DATABASE_LOCK_TIMEOUT_MS: /^\d{1,5}$/,
+  DATABASE_STATEMENT_TIMEOUT_MS: /^\d{1,6}$/,
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: /^\d{1,6}$/,
+  DATABASE_TRANSACTION_TIMEOUT_MS: /^\d{1,6}$/,
+  DATABASE_POOL_MAX_WAITERS: /^\d{1,5}$/,
+  RATE_LIMITER: /^(postgres|memory)$/,
+  KEY_CUSTODY: /^local$/,
+  // A key is only ever the placeholder in a tracked file: `setup:env` writes the real one into the untracked .env.
+  ...Object.fromEntries(
+    KEY_PURPOSES.flatMap((purpose) => [
+      [keyEnvName(purpose, 'MATERIAL'), new RegExp(`^1:${PLACEHOLDER}$`)],
+      [keyEnvName(purpose, 'ACTIVE_VERSION'), /^1$/],
+    ]),
+  ),
+  DELIVERY_EMAIL_ADAPTER: /^(capture|provider)$/,
+  DELIVERY_SMS_ADAPTER: /^(capture|provider)$/,
+  ATTESTATION_VERIFIER: /^(substitute|service)$/,
 };
 
 const POSTGRES_FORMS: Readonly<Record<string, Form>> = {
@@ -115,21 +146,52 @@ function problemsWith(text: string, forms: Readonly<Record<string, Form>>): stri
 }
 
 describe('apps/api/.env.example', () => {
+  /** The example with each key placeholder replaced by a fresh key, as `setup:env` does when it writes the untracked .env. */
+  function withGeneratedKeys(
+    values: Readonly<Record<string, string | undefined>>,
+  ): Record<string, string | undefined> {
+    return Object.fromEntries(
+      Object.entries(values).map(([name, value]) => [
+        name,
+        value === `1:${PLACEHOLDER}` ? `1:${randomKey()}` : value,
+      ]),
+    );
+  }
+
   // Break caught: an example that does not actually start the API, so the first thing a new developer
-  // copies fails.
-  it('is a configuration the API accepts', () => {
-    expect(loadConfig(example).ok).toBe(true);
+  // copies fails. It carries the placeholder where a key goes, so it is judged as `setup:env` leaves it.
+  it('is a configuration the API accepts, once the key placeholders are replaced', () => {
+    expect(loadConfig(withGeneratedKeys(example)).ok).toBe(true);
   });
 
-  // Break caught: a configuration key added to the code and never documented.
+  // Break caught: the example passing as it stands, with the placeholder as a key, which would mean the loader accepts it.
+  it('is not a configuration the API accepts while a key is still the placeholder', () => {
+    const result = loadConfig(example);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.map((problem) => problem.key).toSorted()).toEqual(
+        KEY_PURPOSES.map((purpose) => keyEnvName(purpose, 'MATERIAL')).toSorted(),
+      );
+    }
+  });
+
+  // Break caught: a configuration key added to the code and never documented. A required key is an assignment; an optional
+  // one, which cannot be set beside the choice that leaves it unused, is a commented example line.
   it('documents every key the configuration reads, and no other', () => {
-    expect(Object.keys(example).toSorted()).toEqual([...CONFIG_KEYS].toSorted());
+    const commented = [...exampleText.matchAll(/^# ([A-Z][A-Z0-9_]*)=/gm)].map(
+      (match) => match[1] ?? '',
+    );
+
+    expect(commented.toSorted()).toEqual([...OPTIONAL_KEYS].toSorted());
+    expect([...Object.keys(example), ...commented].toSorted()).toEqual([...CONFIG_KEYS].toSorted());
   });
 
-  // Break caught: a real credential committed in the example, since .env.example is tracked by git.
+  // Break caught: a real credential committed in the example, since .env.example is tracked by git. The values are scanned,
+  // not the names: the names of key material and of a caller secret legitimately say "key" and "secret".
   it('holds no secret-looking value', () => {
     for (const [name, value] of Object.entries(example)) {
-      expect(`${name}=${value ?? ''}`).not.toMatch(/password|secret|token|key|credential/i);
+      expect(value ?? '', name).not.toMatch(/password|secret|token|key|credential/i);
     }
   });
 
@@ -240,6 +302,24 @@ describe('the rule that refuses a credential in an example', () => {
     expect(problemsWith(replaced, POSTGRES_FORMS)).toEqual([
       'MELARC_PG_ADMIN_PASSWORD has a value outside the form allowed for it',
     ]);
+  });
+
+  // Break caught: a developer pasting the key `setup:env` generated for their own .env back into the tracked example, which
+  // would publish key material that protects real records.
+  it('refuses a real key where the example holds the key placeholder, without quoting it', () => {
+    const key = randomKey();
+    const problems = problemsWith(exampleWith('KEY_TOTP_SEED_MATERIAL', `1:${key}`), API_FORMS);
+
+    expect(problems).toEqual([
+      'KEY_TOTP_SEED_MATERIAL has a value outside the form allowed for it',
+    ]);
+    expect(problems.join('\n')).not.toContain(key);
+  });
+
+  it('refuses a deployed origin in the tracked example', () => {
+    expect(
+      problemsWith(exampleWith('OPS_ORIGIN', 'https://ops.melarc.example'), API_FORMS),
+    ).toEqual(['OPS_ORIGIN has a value outside the form allowed for it']);
   });
 
   // Break caught: the forms drifting from the example, so that a setting dropped from the example keeps a

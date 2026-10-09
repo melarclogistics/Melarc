@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 
+import { validEnv } from '../../src/test-support/config-env.js';
+
 const API_ROOT = resolve(import.meta.dirname, '../..');
 export const MAIN = resolve(API_ROOT, 'dist/main.js');
 export const OPENAPI_COMMAND = resolve(API_ROOT, 'dist/tools/generate-openapi.js');
@@ -83,6 +85,21 @@ export async function freePort(): Promise<number> {
     }),
   );
   return port;
+}
+
+/** The four settings every API process test names for itself, so that a test about one of them can leave it out. */
+const NAMED_BY_TESTS: readonly string[] = ['NODE_ENV', 'APP_ENV', 'HTTP_PORT', 'DATABASE_URL'];
+
+/**
+ * What the API needs to start beyond what a test names: the origins and the key material, which no test about something else
+ * should have to repeat. Added only when the script is the API itself (never to a database tool), and a test's own value
+ * always wins. The four settings the tests name are never defaulted here, so "APP_ENV is missing" is still a test one can write.
+ */
+export function apiSettings(script: string, env: Record<string, string>): Record<string, string> {
+  if (script !== MAIN && script !== SHUTDOWN_FIXTURE) return env;
+  const defaults = validEnv();
+  for (const name of NAMED_BY_TESTS) Reflect.deleteProperty(defaults, name);
+  return { ...defaults, ...env };
 }
 
 /** Only what a test passes, plus what Windows needs before network code will start at all. */
@@ -316,7 +333,7 @@ export function start(
   env: Record<string, string>,
   args: string[] = [],
 ): RunningProcess {
-  return startCommand(process.execPath, [script, ...args], env);
+  return startCommand(process.execPath, [script, ...args], apiSettings(script, env));
 }
 
 /** Runs a script that is expected to finish by itself, and fails clearly, killing it, if it does not. */

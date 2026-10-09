@@ -46,10 +46,13 @@ const PORT_NAMES = [
 ] as const;
 
 /**
- * The files in `platform/` allowed to implement a port, each added by the task that builds that adapter (S0.2 onward). S0.1
- * adds none: an adapter, inert or otherwise, is not part of it.
+ * The files in `platform/` allowed to implement a port, each added by the task that builds that adapter. S0.1 added none. S0.2
+ * adds the one file of inert describe adapters, which `adapterRefusals` keeps out of any environment but a local run. The next
+ * adapter, a real one, is added here by the task that builds it, and a review sees the line.
  */
-const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [];
+const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
+  'platform/auth/describe/describe-ports.adapter.ts',
+];
 
 /**
  * The composition root: the files that may import an adapter, because they are where an adapter is bound to its token. It is a
@@ -895,15 +898,28 @@ export const x = Argon2Hasher;`;
   });
 
   describe('the application as it is', () => {
-    it('has no adapter file and no class that implements a port in platform/', () => {
+    it('has no adapter file but the listed ones, and no class that implements a port anywhere else', () => {
       const files = sourceFiles();
 
       expect(
         files.filter((source) => source.path.endsWith('.adapter.ts')).map((source) => source.path),
-      ).toEqual([]);
+      ).toEqual([...ALLOWED_PORT_IMPLEMENTATIONS]);
       expect(
         findPortImplementationViolations(realModel(), PORT_NAMES, ALLOWED_PORT_IMPLEMENTATIONS),
       ).toEqual([]);
+    }, 30_000);
+
+    // Break caught: the checker not seeing the describe adapters at all, so the allow-list would be permitting nothing and the
+    // rule would be passing because it is blind.
+    it('sees every port implemented in the listed file, and only there, when the list is empty', () => {
+      const found = findPortImplementationViolations(realModel(), PORT_NAMES, []);
+
+      expect(found).toHaveLength(PORT_NAMES.length);
+      for (const name of PORT_NAMES) {
+        expect(found).toContain(
+          `${ALLOWED_PORT_IMPLEMENTATIONS[0] ?? ''} implements the port ${name} inside platform/; a port has no adapter there until the task that builds it lists the file`,
+        );
+      }
     }, 30_000);
 
     it('imports no adapter outside the composition root', () => {

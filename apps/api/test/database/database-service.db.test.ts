@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { INERT_DEADLINES } from '../../src/platform/config/inert-config.js';
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
 import { createPool } from '../../src/platform/database/database.module.js';
 import { DatabaseService } from '../../src/platform/database/database.service.js';
@@ -43,7 +44,7 @@ interface Built {
 }
 
 function build(url: string, poolMax = 1): Built {
-  const pool = createPool({ url, poolMax });
+  const pool = createPool({ url, poolMax, deadlines: INERT_DEADLINES });
   const logs = new CapturedLogs();
   const shutdown = new ShutdownRegistry();
   const readiness = new ReadinessRegistry();

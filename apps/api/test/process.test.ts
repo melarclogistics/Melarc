@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { deployedEnv, randomKey, validEnv } from '../src/test-support/config-env.js';
 import {
   DEADLINES,
   freePort,
@@ -14,6 +15,7 @@ import {
   requireBuild,
   run,
   start,
+  startCommand,
   UNREACHABLE_DATABASE_URL,
   type RunningProcess,
 } from './support/api-process.js';
@@ -158,6 +160,9 @@ describe('startup refusals', () => {
       APP_ENV: 'production',
       HTTP_PORT: String(port),
       DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      // https, as a deployment has, so that the only thing wrong is the mode.
+      OPS_ORIGIN: 'https://ops.melarc.example',
+      VENDOR_ORIGIN: 'https://vendor.melarc.example',
     });
 
     expect(result.code).toBe(1);
@@ -326,5 +331,128 @@ describe('the OpenAPI generation command', () => {
       { method: 'GET', path: '/readyz' },
     ]);
     expect(existsSync(join(outDir, 'openapi.generated.json'))).toBe(true);
+  });
+});
+
+describe('startup refusals for the settings S0.2 adds', () => {
+  /** A deployment that sets every real adapter and still has no production key custody to name. */
+  const productionEnv = (port: number, overrides: Record<string, string | undefined> = {}) =>
+    deployedEnv('production', {
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      DELIVERY_EMAIL_ADAPTER: 'provider',
+      DELIVERY_EMAIL_ENDPOINT: 'https://email.provider.example/v1',
+      DELIVERY_EMAIL_TIMEOUT_MS: '5000',
+      DELIVERY_SMS_ADAPTER: 'provider',
+      DELIVERY_SMS_ENDPOINT: 'https://sms.provider.example/v1',
+      DELIVERY_SMS_TIMEOUT_MS: '5000',
+      ATTESTATION_VERIFIER: 'service',
+      ATTESTATION_VERIFIER_URL: 'https://verifier.internal.example',
+      ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+      ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+      ...overrides,
+    });
+
+  const secretsIn = (env: Record<string, string>): string[] =>
+    Object.entries(env)
+      .filter(([name]) => /_MATERIAL$|CALLER_SECRET$/.test(name))
+      .flatMap(([, value]) => value.split(',').map((entry) => entry.slice(entry.indexOf(':') + 1)));
+
+  // The proof of DEPLOYMENT_AND_ENVIRONMENTS.md section 12.3 that matters: the real binary, in production, with everything else
+  // real, refuses the local key substitute, exits 1, listens on nothing and prints no key.
+  it('refuses to start in production on the local key custody, and says so without a key', async () => {
+    const port = await freePort();
+    const env = productionEnv(port);
+    const result = await run(MAIN, env);
+
+    expect(result.code).toBe(1);
+    expect(records(result.stderr)[0]).toMatchObject({
+      level: 'fatal',
+      problems: [{ key: 'KEY_CUSTODY', problem: 'invalid' }],
+    });
+    await expect(nothingListening(port)).rejects.toThrow();
+    const secrets = secretsIn(env);
+    expect(secrets).toHaveLength(6);
+    for (const secret of secrets) {
+      expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
+    }
+  });
+
+  // Break caught: a production start that boots with a test adapter selected, which would run credential delivery or
+  // attestation on a stand-in.
+  it.each([
+    [
+      'the capture delivery adapter',
+      {
+        DELIVERY_SMS_ADAPTER: 'capture',
+        DELIVERY_SMS_ENDPOINT: undefined,
+        DELIVERY_SMS_TIMEOUT_MS: undefined,
+      },
+      'DELIVERY_SMS_ADAPTER',
+    ],
+    ['the in-memory limiter', { RATE_LIMITER: 'memory' }, 'RATE_LIMITER'],
+  ])(
+    'refuses to start in production with %s, beside the key custody',
+    async (_label, change, key) => {
+      const port = await freePort();
+      const result = await run(MAIN, productionEnv(port, change));
+
+      expect(result.code).toBe(1);
+      const fatal = records(result.stderr)[0] as { problems: { key: string }[] };
+      expect(fatal.problems.map((problem) => problem.key).toSorted()).toEqual(
+        [key, 'KEY_CUSTODY'].toSorted(),
+      );
+      await expect(nothingListening(port)).rejects.toThrow();
+    },
+  );
+
+  // Break caught: a production start with a key absent, which the design refuses rather than boots degraded.
+  it('refuses to start with a key absent, names the setting, and listens on nothing', async () => {
+    const port = await freePort();
+    const env = validEnv({
+      NODE_ENV: 'production',
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      KEY_PASSWORD_PEPPER_MATERIAL: undefined,
+    });
+    // startCommand adds nothing to the environment it is given, so the key really is absent.
+    const result = await startCommand(process.execPath, [MAIN], env).waitForExit(
+      DEADLINES.finish,
+      `did not finish within ${String(DEADLINES.finish)} ms`,
+    );
+
+    expect(result.code).toBe(1);
+    expect(records(result.stderr)[0]).toMatchObject({
+      level: 'fatal',
+      problems: [{ key: 'KEY_PASSWORD_PEPPER_MATERIAL', problem: 'missing' }],
+    });
+    await expect(nothingListening(port)).rejects.toThrow();
+  });
+
+  // Break caught: a key or a caller secret carried out by the one line the API writes when it is live, or by a request.
+  it('starts with every setting and writes no key or caller secret anywhere', async () => {
+    const port = await freePort();
+    const baseUrl = `http://127.0.0.1:${String(port)}`;
+    const env = validEnv({
+      NODE_ENV: 'production',
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      ATTESTATION_VERIFIER: 'service',
+      ATTESTATION_VERIFIER_URL: 'http://127.0.0.1:9100',
+      ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+      ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+      KEY_TOTP_SEED_MATERIAL: `1:${randomKey()},2:${randomKey()}`,
+      KEY_TOTP_SEED_ACTIVE_VERSION: '2',
+    });
+    const running = startCommand(process.execPath, [MAIN], env);
+    await running.waitUntilLive(baseUrl);
+    expect((await bounded(`${baseUrl}/livez`)).status).toBe(200);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+
+    const secrets = secretsIn(env);
+    expect(secrets).toHaveLength(7);
+    for (const secret of secrets) {
+      expect(`${running.stdout}${running.stderr}`).not.toContain(secret);
+    }
   });
 });

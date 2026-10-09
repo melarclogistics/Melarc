@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { INERT_DEADLINES } from '../../src/platform/config/inert-config.js';
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
 import { ReadinessRegistry } from '../../src/platform/health/readiness.registry.js';
 import { ShutdownRegistry } from '../../src/platform/lifecycle/shutdown.registry.js';
@@ -45,7 +46,11 @@ beforeAll(async () => {
   await seedNotes(database);
   // One connection and no more, so that every transaction below is on the same physical connection. A test
   // that gets a fresh connection each time proves nothing, and would pass against a session-wide setting.
-  pool = createPool({ url: database.urlFor(API_RUNTIME_ROLE), poolMax: 1 });
+  pool = createPool({
+    url: database.urlFor(API_RUNTIME_ROLE),
+    poolMax: 1,
+    deadlines: INERT_DEADLINES,
+  });
   service = new DatabaseService(
     pool,
     new CapturedLogs().logger,
@@ -244,7 +249,11 @@ describe('two requests at the same time', () => {
   // Break caught: contexts shared between concurrent requests, so one reads with the other's authority.
   // Each sets its context, and neither reads until both have set theirs.
   it('each see their own rows, on different connections', async () => {
-    const wide = createPool({ url: database.urlFor(API_RUNTIME_ROLE), poolMax: 2 });
+    const wide = createPool({
+      url: database.urlFor(API_RUNTIME_ROLE),
+      poolMax: 2,
+      deadlines: INERT_DEADLINES,
+    });
     const concurrent = new DatabaseService(
       wide,
       new CapturedLogs().logger,

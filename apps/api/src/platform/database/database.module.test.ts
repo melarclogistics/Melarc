@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { appWith, startTestApp, TEST_CONFIG, type TestApp } from '../../test-support/test-app.js';
+import { INERT_DEADLINES } from '../config/inert-config.js';
 import type { AppConfig, DatabaseConfig } from '../config/load-config.js';
 import { gracefulShutdown } from '../lifecycle/graceful-shutdown.js';
 import { DATABASE_POOL } from '../platform.tokens.js';
@@ -14,6 +15,7 @@ import { PostgresUrlError } from './postgres-url.js';
 const UNREACHABLE_DATABASE: DatabaseConfig = {
   url: 'postgres://melarc_api_runtime:URL-PASSWORD-VALUE@127.0.0.1:1/melarc_unreachable',
   poolMax: 2,
+  deadlines: INERT_DEADLINES,
 };
 
 const UNREACHABLE: AppConfig = { ...TEST_CONFIG, database: UNREACHABLE_DATABASE };

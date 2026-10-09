@@ -1,7 +1,18 @@
-import { Global, Inject, Injectable, Module, type ModuleMetadata } from '@nestjs/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import net from 'node:net';
+
+import { Global, Inject, Injectable, Module, Scope, type ModuleMetadata } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from './app.module.js';
+import { DescribeAdapterBoundError } from './platform/auth/describe/describe-adapter.js';
+import { PortBindingError } from './platform/auth/describe/port-binding-check.js';
+import { DescribeAdapterInvokedError } from './platform/auth/describe/describe-adapter-error.js';
+import {
+  DESCRIBE_PORT_BINDINGS,
+  DescribeClock,
+  DescribeHasher,
+  DescribeMetrics,
+} from './platform/auth/describe/describe-ports.adapter.js';
 import {
   CLOCK,
   HASHER,
@@ -14,9 +25,14 @@ import {
   type Metrics,
   type PortBindings,
 } from './platform/auth/ports/index.js';
+import { AdapterRefusedError } from './platform/config/adapter-refusals.js';
+import { inertConfig } from './platform/config/inert-config.js';
+import type { KeyPurpose, PurposeKeys } from './platform/config/key-material.js';
 import type { AppConfig } from './platform/config/load-config.js';
+import { Secret } from './platform/config/secret.js';
 import { createLogger } from './platform/logging/create-logger.js';
 import { APP_CONFIG } from './platform/platform.tokens.js';
+import { randomKey } from './test-support/config-env.js';
 import { startTestApp, TEST_CONFIG, type TestApp } from './test-support/test-app.js';
 
 // Test-only compositions. Each adapter below is a small real implementation of its port, so what a booted application hands back
@@ -25,6 +41,32 @@ const INSTANT = new Date('2026-10-09T00:00:00.000Z');
 const FIXED: Clock = { now: () => INSTANT, monotonicMilliseconds: () => 42 };
 
 const built: string[] = [];
+
+/** The test configuration composed for real, where no adapter is bound until a binding is given. */
+const RUNTIME_CONFIG: AppConfig = { ...TEST_CONFIG, composition: 'runtime' };
+
+/** The describe adapter class a port resolves to, read from the table the composition root binds. */
+const DESCRIBE_CLASSES = Object.fromEntries(
+  PORTS.map((entry) => {
+    const key = entry.name.charAt(0).toLowerCase() + entry.name.slice(1);
+    const binding = DESCRIBE_PORT_BINDINGS[key as keyof PortBindings];
+    return [
+      entry.name,
+      binding !== undefined && 'useClass' in binding ? binding.useClass : undefined,
+    ];
+  }),
+) as Record<string, new () => object>;
+
+const runtimeKeys = (): Record<KeyPurpose, PurposeKeys> => {
+  const one = (): PurposeKeys => ({ activeVersion: 1, versions: { 1: new Secret(randomKey()) } });
+  return {
+    totp_seed: one(),
+    credential_delivery: one(),
+    idempotent_replay: one(),
+    limiter_digest: one(),
+    password_pepper: one(),
+  };
+};
 
 /** Built by the container from the platform's validated configuration. */
 @Injectable()
@@ -123,14 +165,32 @@ const resolve = <T>(token: symbol | (new (...parameters: never[]) => T)): T => {
 
 describe('the composition root binds adapters to the port tokens (S0.1)', () => {
   // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application.
-  it('binds no port while no adapter exists', async () => {
-    running = await startTestApp();
+  it('binds no port in the runtime composition while no real adapter exists', async () => {
+    running = await startTestApp({ config: RUNTIME_CONFIG });
 
     for (const entry of PORTS) {
       expect(() => resolve(entry.token), entry.name).toThrow();
     }
     expect(portProviders()).toEqual([]);
     expect(portProviders({})).toEqual([]);
+  });
+
+  // The exit condition of S0.2: the default test application resolves every port.
+  it('resolves every port, in the default test application, to its inert describe adapter', async () => {
+    running = await startTestApp();
+
+    for (const entry of PORTS) {
+      const adapter = resolve<object>(entry.token);
+      expect(adapter, entry.name).toBeInstanceOf(DESCRIBE_CLASSES[entry.name]);
+    }
+  });
+
+  // Break caught: a describe adapter that does real work when the application merely uses the port it was bound to.
+  it('has a resolved describe adapter fail by name when it is asked to run', async () => {
+    running = await startTestApp();
+
+    expect(() => resolve<Clock>(CLOCK).now()).toThrow(DescribeAdapterInvokedError);
+    expect(() => resolve<Clock>(CLOCK).now()).toThrow(/Clock\.now/);
   });
 
   // Break caught: a binding the root accepts but a platform service cannot reach, or one that needs the service to import it.
@@ -201,7 +261,7 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
   });
 
   // Break caught: one binding leaking onto another port's token, or binding one port binding them all.
-  it('binds only the ports it is given, each to its own adapter', async () => {
+  it('replaces only the ports it is given, each by its own adapter, and leaves the rest on their describe adapters', async () => {
     running = await boot(
       { clock: { useValue: FIXED }, metrics: { useExisting: SharedMetrics } },
       SharedMetricsModule,
@@ -209,33 +269,506 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
 
     expect(resolve<Clock>(CLOCK)).toBe(FIXED);
     expect(resolve<Metrics>(METRICS)).toBe(resolve(SharedMetrics));
+    expect(resolve<Hasher>(HASHER)).toBeInstanceOf(DescribeHasher);
+  });
+
+  // Break caught: an explicit undefined, which means "no binding", deleting the describe adapter it was laid over.
+  it('keeps the describe adapter of a port whose binding is explicitly undefined', async () => {
+    running = await boot({ clock: undefined });
+
+    expect(resolve<Clock>(CLOCK)).toBeInstanceOf(DescribeClock);
+  });
+
+  it('binds only the ports it is given in the runtime composition', async () => {
+    running = await startTestApp({
+      config: RUNTIME_CONFIG,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [AppModule.register({ ...options, ports: { clock: { useValue: FIXED } } })],
+      }),
+    });
+
+    expect(resolve<Clock>(CLOCK)).toBe(FIXED);
     expect(() => resolve(HASHER)).toThrow();
   });
 });
 
 describe('the root module exposes the port tokens and nothing else (S0.1)', () => {
   const options = { config: TEST_CONFIG, logger: createLogger({ config: TEST_CONFIG }) };
+  const runtime = { config: RUNTIME_CONFIG, logger: options.logger };
 
   // Break caught: the global root re-exporting the platform's providers or anything but the tokens it bound, which would widen
   // what every module can reach without importing it.
   it('is global, exports exactly the tokens it bound, and imports only the platform', () => {
     const module = AppModule.register({
-      ...options,
+      ...runtime,
       ports: { clock: { useValue: FIXED }, metrics: { useExisting: SharedMetrics } },
     });
 
     expect(module.global).toBe(true);
     expect(module.exports).toEqual([CLOCK, METRICS]);
-    expect(module.providers).toHaveLength(2);
+    // The two bindings and the check that no inert describe adapter was bound; the check is not exported.
+    expect(module.providers).toHaveLength(3);
     expect(module.imports).toHaveLength(1);
   });
 
-  it('exports nothing and provides nothing while no port is bound', () => {
-    const module = AppModule.register(options);
+  it('exports nothing and provides nothing in the runtime composition while no port is bound', () => {
+    const module = AppModule.register(runtime);
 
     expect(module.global).toBe(true);
     expect(module.exports).toEqual([]);
     expect(module.providers).toEqual([]);
+  });
+
+  // Break caught: the describe composition exporting more than the sixteen tokens, or fewer.
+  it('exports the sixteen port tokens and nothing else in the describe composition', () => {
+    const module = AppModule.register(options);
+
+    expect(module.global).toBe(true);
+    expect(module.exports).toEqual(PORTS.map((entry) => entry.token));
+    // The sixteen bindings and the check that each is a singleton; the check is not exported.
+    expect(module.providers).toHaveLength(PORTS.length + 1);
+    expect(module.imports).toHaveLength(1);
+  });
+});
+
+describe('the composition root refuses what its environment refuses (S0.2)', () => {
+  const refused = (config: AppConfig): AdapterRefusedError => {
+    try {
+      AppModule.register({ config, logger: createLogger({ config: TEST_CONFIG }) });
+    } catch (error) {
+      if (error instanceof AdapterRefusedError) return error;
+      throw error;
+    }
+    throw new Error('expected the configuration to be refused');
+  };
+
+  // Break caught (S0.2 exit condition): a describe adapter reachable in production, or in an environment that is not a local run.
+  it.each(['staging', 'production'] as const)(
+    'refuses the describe composition when APP_ENV is %s, naming the setting and no value',
+    (appEnv) => {
+      const error = refused(inertConfig({ appEnv, nodeEnv: 'production' }));
+
+      expect(error.problems.map((problem) => problem.key)).toContain('composition');
+      expect(error.name).toBe('AdapterRefusedError');
+      expect(error.message).toContain('composition');
+    },
+  );
+
+  it('refuses the describe key custody outside a local run', () => {
+    expect(
+      refused(
+        inertConfig({ appEnv: 'staging', nodeEnv: 'production', composition: 'runtime' }),
+      ).problems.map((problem) => problem.key),
+    ).toEqual(['KEY_CUSTODY']);
+  });
+
+  // Break caught: the guard applied to what the environment produced but not to a configuration built by hand, which is
+  // the only way to ask for the describe composition.
+  it('refuses a hand-built production configuration that selects a test adapter, however it was made', () => {
+    const config = inertConfig({
+      appEnv: 'production',
+      nodeEnv: 'production',
+      composition: 'runtime',
+      keys: { custody: 'local', purposes: runtimeKeys() },
+    });
+
+    expect(
+      refused(config)
+        .problems.map((problem) => problem.key)
+        .toSorted(),
+    ).toEqual([
+      'ATTESTATION_VERIFIER',
+      'DELIVERY_EMAIL_ADAPTER',
+      'DELIVERY_SMS_ADAPTER',
+      'KEY_CUSTODY',
+    ]);
+  });
+
+  it('accepts the describe composition in a local run', () => {
+    const logger = createLogger({ config: TEST_CONFIG });
+
+    expect(() => AppModule.register({ config: TEST_CONFIG, logger })).not.toThrow();
+  });
+});
+
+describe('the runtime composition refuses an inert describe adapter, however it is bound (S0.2)', () => {
+  const logger = createLogger({ config: TEST_CONFIG });
+  /** A subclass that overrides nothing: renaming or extending an inert adapter does not make it a real one. */
+  class RenamedClock extends DescribeClock {}
+  class RenamedHasher extends DescribeHasher {}
+  const ALIAS = Symbol('ALIAS');
+
+  @Global()
+  @Module({ providers: [{ provide: ALIAS, useClass: DescribeMetrics }], exports: [ALIAS] })
+  class AliasOfADescribeAdapterModule {}
+
+  const ports = (error: unknown): readonly string[] => {
+    if (error instanceof DescribeAdapterBoundError) return error.ports;
+    throw error instanceof Error ? error : new Error('expected a refusal');
+  };
+  /** The ports the container found to be an inert describe adapter when the application initialised. */
+  const resolvedToDescribe = (error: unknown): readonly string[] => {
+    if (error instanceof PortBindingError) return error.describeAdapters;
+    throw error instanceof Error ? error : new Error('expected a refusal');
+  };
+  const refusedAtRegister = (bindings: PortBindings): readonly string[] => {
+    try {
+      AppModule.register({ config: RUNTIME_CONFIG, logger, ports: bindings });
+    } catch (error) {
+      return ports(error);
+    }
+    throw new Error('expected the binding to be refused');
+  };
+  const bootRuntime = (bindings: PortBindings, ...extra: NonNullable<ModuleMetadata['imports']>) =>
+    startTestApp({
+      config: RUNTIME_CONFIG,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [AppModule.register({ ...options, ports: bindings }), ...extra],
+      }),
+    });
+
+  // Break caught: the composition judged by its mode only, so a describe adapter bound by hand into a runtime composition was
+  // accepted and answered a real request with its own failure.
+  it.each([
+    ['a class', { clock: { useClass: DescribeClock } }, ['Clock']],
+    ['a class that extends one', { clock: { useClass: RenamedClock } }, ['Clock']],
+    ['a ready instance', { hasher: { useValue: new DescribeHasher() } }, ['Hasher']],
+    [
+      'an instance of a class that extends one',
+      { hasher: { useValue: new RenamedHasher() } },
+      ['Hasher'],
+    ],
+    ['an alias of the class', { metrics: { useExisting: DescribeMetrics } }, ['Metrics']],
+  ] as const)('refuses %s when the root is registered', (_form, bindings, expected) => {
+    expect(refusedAtRegister(bindings as PortBindings)).toEqual(expected);
+  });
+
+  it('names every port it refuses, and only those', () => {
+    expect(
+      refusedAtRegister({
+        clock: { useValue: FIXED },
+        hasher: { useValue: new DescribeHasher() },
+        metrics: { useClass: DescribeMetrics },
+      }),
+    ).toEqual(['Hasher', 'Metrics']);
+  });
+
+  it('says nothing about a value: the message names ports and the way out', () => {
+    const message = new DescribeAdapterBoundError(['Clock']).message;
+
+    expect(message).toContain('Clock');
+    expect(message).toMatch(/bind the adapter that does the work/);
+    expect(new DescribeAdapterBoundError(['Clock']).name).toBe('DescribeAdapterBoundError');
+  });
+
+  // Break caught: only the forms that can be read before the container runs were judged, so a factory or an alias carried an
+  // inert adapter into a runtime application that then listened.
+  describe('when the application initialises', () => {
+    it('refuses a factory that returns one, before it listens', async () => {
+      const listen = vi.spyOn(net.Server.prototype, 'listen');
+
+      await expect(
+        bootRuntime({ hasher: { useFactory: () => new DescribeHasher() } }),
+      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Hasher');
+      expect(listen).not.toHaveBeenCalled();
+      listen.mockRestore();
+    });
+
+    it('refuses an asynchronous factory, a factory that extends one and a factory fed by another port', async () => {
+      await expect(
+        bootRuntime({ hasher: { useFactory: () => Promise.resolve(new RenamedHasher()) } }),
+      ).rejects.toThrow(PortBindingError);
+      await expect(
+        bootRuntime({
+          clock: { useValue: FIXED },
+          hasher: {
+            useFactory: (clock: Clock) => {
+              // The factory did receive the other port's adapter, so the refusal below is of what it returned.
+              expect(clock).toBe(FIXED);
+              return new DescribeHasher();
+            },
+            inject: [CLOCK],
+          },
+        }),
+      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Hasher');
+    });
+
+    it('refuses an alias of a token that another module provides as one', async () => {
+      await expect(
+        bootRuntime({ metrics: { useExisting: ALIAS } }, AliasOfADescribeAdapterModule),
+      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Metrics');
+    });
+
+    it('names each port that resolved to one, and not the ports that did not', async () => {
+      await expect(
+        bootRuntime({
+          clock: { useValue: FIXED },
+          hasher: { useFactory: () => new DescribeHasher() },
+          metrics: { useFactory: () => new DescribeMetrics() },
+        }),
+      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Hasher,Metrics');
+    });
+  });
+
+  // Break caught: the guard refusing what a local test legitimately binds, so every test that needs a double stops working.
+  describe('keeps legitimate local overrides working', () => {
+    it('accepts a ready instance, a class with dependencies, a factory and an alias that are not describe adapters', async () => {
+      running = await bootRuntime(
+        {
+          clock: { useClass: ConfiguredClock },
+          hasher: {
+            useFactory: (config: AppConfig, clock: Clock) => new FakeHasher(config, clock),
+            inject: [APP_CONFIG, CLOCK],
+          },
+          metrics: { useExisting: SharedMetrics },
+        },
+        SharedMetricsModule,
+      );
+
+      expect(resolve<Clock>(CLOCK)).toBeInstanceOf(ConfiguredClock);
+      expect(resolve<Hasher>(HASHER)).toBeInstanceOf(FakeHasher);
+      expect(resolve<Metrics>(METRICS)).toBe(resolve(SharedMetrics));
+    });
+
+    it('accepts a test double in the runtime composition for one port while the rest stay unbound', async () => {
+      running = await bootRuntime({ clock: { useValue: FIXED } });
+
+      expect(resolve<Clock>(CLOCK)).toBe(FIXED);
+      expect(() => resolve(HASHER)).toThrow();
+    });
+
+    it('leaves the describe composition free to bind describe adapters, by default and by name', async () => {
+      expect(() =>
+        AppModule.register({
+          config: TEST_CONFIG,
+          logger,
+          ports: { clock: { useClass: DescribeClock }, hasher: { useValue: new DescribeHasher() } },
+        }),
+      ).not.toThrow();
+
+      running = await boot({ metrics: { useFactory: () => new DescribeMetrics() } });
+      expect(resolve<Metrics>(METRICS)).toBeInstanceOf(DescribeMetrics);
+      expect(resolve<Clock>(CLOCK)).toBeInstanceOf(DescribeClock);
+    });
+  });
+});
+
+describe('every port binding is an application singleton (S0.2)', () => {
+  const SCOPED = Symbol('SCOPED');
+  const TRANSIENT = Symbol('TRANSIENT');
+
+  @Injectable({ scope: Scope.REQUEST })
+  class PerRequest {
+    readonly lifetime = 'request';
+  }
+
+  @Injectable({ scope: Scope.TRANSIENT })
+  class PerInjection {
+    readonly lifetime = 'transient';
+  }
+
+  /** A module that provides a request-scoped and a transient provider, visible everywhere like the other test modules. */
+  @Global()
+  @Module({
+    providers: [
+      { provide: SCOPED, useClass: PerRequest },
+      { provide: TRANSIENT, useClass: PerInjection },
+    ],
+    exports: [SCOPED, TRANSIENT],
+  })
+  class LifetimesModule {}
+
+  /** The request scope is in the class's metadata, and the binding says nothing about it. */
+  @Injectable({ scope: Scope.REQUEST })
+  class RequestScopedClock implements Clock {
+    now(): Date {
+      return INSTANT;
+    }
+    monotonicMilliseconds(): number {
+      return 1;
+    }
+  }
+
+  @Injectable({ scope: Scope.TRANSIENT })
+  class TransientClock implements Clock {
+    now(): Date {
+      return INSTANT;
+    }
+    monotonicMilliseconds(): number {
+      return 2;
+    }
+  }
+
+  /** Declared a singleton, but it injects a request-scoped provider, which makes it request-scoped by propagation. */
+  @Injectable()
+  class ClockNeedingARequest implements Clock {
+    constructor(@Inject(SCOPED) readonly request: unknown) {}
+    now(): Date {
+      return INSTANT;
+    }
+    monotonicMilliseconds(): number {
+      return 3;
+    }
+  }
+
+  /** A singleton that injects a transient provider: it is still one object for the whole application. */
+  @Injectable()
+  class ClockWithATransient implements Clock {
+    constructor(@Inject(TRANSIENT) readonly transient: unknown) {
+      built.push('ClockWithATransient');
+    }
+    now(): Date {
+      return INSTANT;
+    }
+    monotonicMilliseconds(): number {
+      return 4;
+    }
+  }
+
+  const bootRuntime = (bindings: PortBindings, ...extra: NonNullable<ModuleMetadata['imports']>) =>
+    startTestApp({
+      config: RUNTIME_CONFIG,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [AppModule.register({ ...options, ports: bindings }), ...extra],
+      }),
+    });
+  const notSingletons = (error: unknown): string => {
+    if (error instanceof PortBindingError) return error.notSingletons.join();
+    throw error instanceof Error ? error : new Error('expected a refusal');
+  };
+
+  // Break caught: a port bound with a lifetime of its own, which the check would then have had to skip, or which the root
+  // would have carried to a request without anyone being told.
+  describe('refuses a request or transient binding before it listens', () => {
+    const cases: [label: string, bindings: PortBindings, port: string][] = [
+      [
+        'a class whose metadata is request-scoped',
+        { clock: { useClass: RequestScopedClock } },
+        'Clock',
+      ],
+      ['a class whose metadata is transient', { clock: { useClass: TransientClock } }, 'Clock'],
+      [
+        'a class that injects a request-scoped provider',
+        { clock: { useClass: ClockNeedingARequest } },
+        'Clock',
+      ],
+      ['an alias of a request-scoped provider', { metrics: { useExisting: SCOPED } }, 'Metrics'],
+      [
+        'a factory that injects a request-scoped provider',
+        { hasher: { useFactory: () => new FakeHasher(TEST_CONFIG, FIXED), inject: [SCOPED] } },
+        'Hasher',
+      ],
+    ];
+
+    it.each(cases)('%s, in the runtime composition', async (_label, bindings, port) => {
+      const listen = vi.spyOn(net.Server.prototype, 'listen');
+
+      await expect(bootRuntime(bindings, LifetimesModule)).rejects.toSatisfy(
+        (error) => notSingletons(error) === port,
+      );
+      expect(listen).not.toHaveBeenCalled();
+      listen.mockRestore();
+    });
+
+    it.each(cases)('%s, in the describe composition', async (_label, bindings, port) => {
+      const listen = vi.spyOn(net.Server.prototype, 'listen');
+
+      await expect(boot(bindings, LifetimesModule)).rejects.toSatisfy(
+        (error) => notSingletons(error) === port,
+      );
+      expect(listen).not.toHaveBeenCalled();
+      listen.mockRestore();
+    });
+  });
+
+  // Break caught: the check injecting the ports it judges, so that one port which is request-scoped by propagation made the
+  // check itself request-scoped, never built at start, and let an inert adapter behind another port through.
+  it('does not let a scoped port stop another port from being checked', async () => {
+    await expect(
+      bootRuntime(
+        {
+          clock: { useClass: ClockNeedingARequest },
+          hasher: { useFactory: () => new DescribeHasher() },
+        },
+        LifetimesModule,
+      ),
+    ).rejects.toSatisfy(
+      (error) =>
+        error instanceof PortBindingError &&
+        error.notSingletons.join() === 'Clock' &&
+        error.describeAdapters.join() === 'Hasher',
+    );
+  });
+
+  it('still judges the other ports when a scoped one is an alias or a factory', async () => {
+    await expect(
+      bootRuntime(
+        {
+          metrics: { useExisting: SCOPED },
+          hasher: { useFactory: () => new DescribeHasher(), inject: [] },
+        },
+        LifetimesModule,
+      ),
+    ).rejects.toSatisfy(
+      (error) =>
+        error instanceof PortBindingError &&
+        error.notSingletons.join() === 'Metrics' &&
+        error.describeAdapters.join() === 'Hasher',
+    );
+  });
+
+  it('says what is wrong in terms of ports and lifetimes, and names no value', async () => {
+    const error = await bootRuntime({ clock: { useClass: RequestScopedClock } }).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+
+    expect(error).toBeInstanceOf(PortBindingError);
+    const { message, name } = error as PortBindingError;
+    expect(name).toBe('PortBindingError');
+    expect(message).toContain('Clock');
+    expect(message).toMatch(/not bound as application singletons/);
+    expect(message).not.toMatch(/describe adapter/);
+  });
+
+  // Break caught: the singleton rule rejecting what it should allow, so a normal adapter cannot be bound.
+  describe('still resolves the supported singleton bindings', () => {
+    it('resolves a class, a factory, a ready value and an alias to the one instance each', async () => {
+      running = await bootRuntime(
+        {
+          clock: { useClass: ConfiguredClock, scope: Scope.DEFAULT },
+          hasher: {
+            useFactory: (config: AppConfig, clock: Clock) => new FakeHasher(config, clock),
+            inject: [APP_CONFIG, CLOCK],
+            scope: Scope.DEFAULT,
+          },
+          metrics: { useExisting: SharedMetrics },
+        },
+        SharedMetricsModule,
+      );
+
+      expect(resolve<Clock>(CLOCK)).toBe(resolve<Clock>(CLOCK));
+      expect(resolve<Hasher>(HASHER)).toBe(resolve<Hasher>(HASHER));
+      expect(resolve<Metrics>(METRICS)).toBe(resolve(SharedMetrics));
+    });
+
+    it('allows a singleton to inject a transient provider and still be one object', async () => {
+      running = await bootRuntime({ clock: { useClass: ClockWithATransient } }, LifetimesModule);
+
+      expect(resolve<Clock>(CLOCK)).toBe(resolve<Clock>(CLOCK));
+      expect(built.filter((name) => name === 'ClockWithATransient')).toHaveLength(1);
+    });
+
+    it('resolves the describe composition with every port a singleton', async () => {
+      running = await startTestApp();
+
+      for (const entry of PORTS) {
+        expect(resolve<object>(entry.token), entry.name).toBe(resolve<object>(entry.token));
+      }
+    });
   });
 });
 
@@ -359,6 +892,30 @@ describe('portProviders keeps the port its own token and refuses a malformed bin
     expect(() => portProviders(malformed({ clock: binding }))).toThrow(
       new RegExp(`The binding for the port Clock gives a ${said}\\.`),
     );
+  });
+
+  // Break caught: a request or transient lifetime accepted for a security service that every request shares.
+  it.each([
+    ['a request-scoped class', { useClass: ConfiguredClock, scope: Scope.REQUEST }],
+    ['a transient class', { useClass: ConfiguredClock, scope: Scope.TRANSIENT }],
+    ['a request-scoped factory', { useFactory: () => FIXED, scope: Scope.REQUEST }],
+    ['a transient factory', { useFactory: () => FIXED, scope: Scope.TRANSIENT }],
+    ['a durable class', { useClass: ConfiguredClock, durable: true }],
+    ['a durable factory', { useFactory: () => FIXED, durable: true }],
+    ['a value that claims a request scope', { useValue: FIXED, scope: Scope.REQUEST }],
+  ])('refuses %s as not an application singleton', (_label, binding) => {
+    expect(() => portProviders(malformed({ clock: binding }))).toThrow(
+      /The binding for the port Clock must be an application singleton/,
+    );
+  });
+
+  it('accepts the default scope, spelled out, on a class and a factory', () => {
+    expect(
+      portProviders({
+        clock: { useClass: ConfiguredClock, scope: Scope.DEFAULT },
+        hasher: { useFactory: () => new FakeHasher(TEST_CONFIG, FIXED), scope: Scope.DEFAULT },
+      }),
+    ).toHaveLength(2);
   });
 
   it('refuses a key that is not a port, naming the ports', () => {

@@ -34,6 +34,8 @@ const SENSITIVE_SUBSTRINGS = [
   'totp',
   // The session credential is the `melarc_session` cookie, and a session id is as good as the credential.
   'session',
+  // Key material (S0.2): the `material` of a purpose, or `KEY_..._MATERIAL`. It holds no other sensitive word.
+  'material',
 ];
 
 /** Short words that count only as a whole key: they sit inside ordinary ones ("shipping", "footprint"). */

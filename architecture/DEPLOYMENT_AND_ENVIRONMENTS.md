@@ -318,6 +318,80 @@ This is what the B0.2 API skeleton (`apps/api`), its B0.4 database foundation an
 | `SHUTDOWN_DRAIN_DELAY_MS`| no| `0`| integer 0–60000, and less than `SHUTDOWN_TIMEOUT_MS`|
 | `DATABASE_URL`| yes| none| a `postgres://` or `postgresql://` URL naming a host, one database and the user `melarc_api_runtime`; any other user is refused. **No query string or fragment is accepted**, so no connection option (TLS included) can be set through the URL until a deployment specifies them; a URL with one is refused, never stripped|
 | `DATABASE_POOL_MAX`| no| `10`| integer 1–100|
+| `DATABASE_ACQUIRE_TIMEOUT_MS`| no| `5000`| integer 100–60000: the longest a caller waits for a pooled connection|
+| `DATABASE_LOCK_TIMEOUT_MS`| no| `2000`| integer 100–60000, and **less than** `DATABASE_STATEMENT_TIMEOUT_MS`|
+| `DATABASE_STATEMENT_TIMEOUT_MS`| no| `5000`| integer 100–120000, and **less than** `DATABASE_TRANSACTION_TIMEOUT_MS`|
+| `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS`| no| `5000`| integer 100–120000|
+| `DATABASE_TRANSACTION_TIMEOUT_MS`| no| `10000`| integer 100–300000|
+| `DATABASE_POOL_MAX_WAITERS`| no| `50`| integer 1–10000: the most callers allowed to wait for a connection at once|
+| `OPS_ORIGIN`| yes| none| an exact browser origin: `http` or `https`, a host and an optional port, **no** path, query, fragment or trailing slash; `https` unless `APP_ENV` is `local`|
+| `VENDOR_ORIGIN`| yes| none| an exact browser origin as above, **different from** `OPS_ORIGIN`|
+| `HTTP_TRUST_PROXY`| no| `off`| `off`, or up to 16 comma-separated trusted hops, each an IP address or an address with a prefix length of at least 1; never a count, `true`, a wildcard or a host name|
+| `HTTP_BODY_LIMIT_BYTES`| no| `102400`| integer 1024–1048576|
+| `HTTP_HEADER_TIMEOUT_MS`| no| `10000`| integer 1000–60000|
+| `HTTP_BODY_TIMEOUT_MS`| no| `10000`| integer 1000–120000|
+| `HTTP_ADMISSION_TIMEOUT_MS`| no| `2000`| integer 100–30000|
+| `HTTP_ADMISSION_CONCURRENCY`| no| `64`| integer 1–10000|
+| `RATE_LIMITER`| no| `postgres`| `postgres` or `memory`; `memory` only when `APP_ENV` is `local`|
+| `KEY_CUSTODY`| yes| none| `local`, the only custody built: key material from this environment, **a substitute that is not KMS-backed custody**; refused when `APP_ENV` is `production`|
+| `KEY_TOTP_SEED_MATERIAL`| yes| none| key material for the purpose `totp_seed`: one to eight comma-separated `<version>:<key>`; a key is 32 random bytes as 43 unpadded base64url characters, and no key repeats in any purpose or version|
+| `KEY_TOTP_SEED_ACTIVE_VERSION`| yes| none| integer 1–999999 naming a version listed in `KEY_TOTP_SEED_MATERIAL`|
+| `KEY_CREDENTIAL_DELIVERY_MATERIAL`| yes| none| as above, for the purpose `credential_delivery`|
+| `KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION`| yes| none| as above|
+| `KEY_IDEMPOTENT_REPLAY_MATERIAL`| yes| none| as above, for the purpose `idempotent_replay`|
+| `KEY_IDEMPOTENT_REPLAY_ACTIVE_VERSION`| yes| none| as above|
+| `KEY_LIMITER_DIGEST_MATERIAL`| yes| none| as above, for the purpose `limiter_digest`|
+| `KEY_LIMITER_DIGEST_ACTIVE_VERSION`| yes| none| as above|
+| `KEY_PASSWORD_PEPPER_MATERIAL`| yes| none| as above, for the purpose `password_pepper`|
+| `KEY_PASSWORD_PEPPER_ACTIVE_VERSION`| yes| none| as above|
+| `DELIVERY_EMAIL_ADAPTER`| no| `capture`| `capture` or `provider`; `capture` is refused when `APP_ENV` is `production`|
+| `DELIVERY_EMAIL_ENDPOINT`| no| none| an `https` URL (`http` only to a loopback host when `APP_ENV` is `local`) with no user information, query or fragment; **required with `provider`, absent with `capture`**|
+| `DELIVERY_EMAIL_TIMEOUT_MS`| no| none| integer 100–60000; required with `provider`, absent with `capture`|
+| `DELIVERY_SMS_ADAPTER`| no| `capture`| `capture` or `provider`; `capture` is refused when `APP_ENV` is `production`|
+| `DELIVERY_SMS_ENDPOINT`| no| none| as `DELIVERY_EMAIL_ENDPOINT`|
+| `DELIVERY_SMS_TIMEOUT_MS`| no| none| integer 100–60000; required with `provider`, absent with `capture`|
+| `ATTESTATION_VERIFIER`| no| `substitute`| `substitute` or `service`; `substitute` is refused when `APP_ENV` is `production`|
+| `ATTESTATION_VERIFIER_URL`| no| none| an endpoint as `DELIVERY_EMAIL_ENDPOINT`; required with `service`, absent with `substitute`|
+| `ATTESTATION_VERIFIER_TIMEOUT_MS`| no| none| integer 100–60000; required with `service`, absent with `substitute`|
+| `ATTESTATION_VERIFIER_CALLER_SECRET`| no| none| a 32-byte key as 43 base64url characters; required with `service` when the URL is not on a loopback host (SECURITY_DESIGN.md §15.2.3), absent with `substitute`|
+
+**What the settings added by the identity slice (S0.2) do, and do not do yet.** They are **validated at start and not yet read by the code that will enforce them**: the transport limits and deadlines by S0.20 (transport admission), the database deadlines by S0.6 (resource deadlines), the keys by S0.3 (cryptography and credential normalisation), the delivery timeouts by S0.18 (delivery worker process), and the verifier settings by S0.55 (the private JVM verifier service), S0.56 (trust data and policy) and their first caller, S0.57 (`completeRiderDeviceEnrolment`). A setting here is therefore a configuration the API accepts or refuses, not yet a limit it applies: **validation is not enforcement**, and no row, comment or test of S0.2 claims otherwise. The one limit in force on the transport today is the fixed 100 KiB the JSON body parser already applies, which does not read `HTTP_BODY_LIMIT_BYTES`. The attestation policy (trust roots, package name, signing digests, maximum trust-data age) is a separate set added with the verifier.
+
+**Deadlines: what each one bounds, and who enforces it.** Two different things are called a deadline. A **receipt limit** bounds how long the server waits for a *client* to send (the head, the body); an **execution budget** bounds how long the *application* takes once it has the request (a database wait, an outbound call). A receipt limit does not bound a handler, and nothing below claims it does.
+
+| Retained requirement| Setting| It bounds| It does not bound| Owning task| Applied today|
+|---|---|---|---|---|---|
+| Header receipt deadline ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §14.6; [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1)| `HTTP_HEADER_TIMEOUT_MS`| how long the server waits for a client to send the request head| a handler's execution| S0.20 (transport admission)| no|
+| Body receipt deadline (same)| `HTTP_BODY_TIMEOUT_MS`| how long the server waits for the body to arrive after the head| a handler's execution| S0.20 (transport admission)| no|
+| Admission deadline and concurrency (same)| `HTTP_ADMISSION_TIMEOUT_MS`, `HTTP_ADMISSION_CONCURRENCY`| how long a request waits for an admission slot, and how many are admitted at once| what an admitted request then does| S0.20 (transport admission)| no|
+| Body size (same)| `HTTP_BODY_LIMIT_BYTES`| the bytes received, chunked requests included| time| S0.20 (transport admission)| no: a fixed 100 KiB parser limit applies instead|
+| Pool acquisition and waiters (§14.6)| `DATABASE_ACQUIRE_TIMEOUT_MS`, `DATABASE_POOL_MAX_WAITERS`| the wait for a pooled connection, and how many callers may wait| the work done with the connection| S0.6 (resource deadlines)| no|
+| Lock wait, statement, idle in transaction and whole transaction (§14.6)| `DATABASE_LOCK_TIMEOUT_MS`, `DATABASE_STATEMENT_TIMEOUT_MS`, `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS`, `DATABASE_TRANSACTION_TIMEOUT_MS`| waiting and running inside the database| work outside the database, and the application's own computation| S0.6 (resource deadlines)| no: only their nesting is validated at start|
+| A call to a delivery provider, made outside any transaction (§13.9a)| `DELIVERY_EMAIL_TIMEOUT_MS`, `DELIVERY_SMS_TIMEOUT_MS`| that one call| anything but that call| S0.18 (delivery worker process)| no|
+| A call to the verifier service, made outside any transaction (§15.2.1)| `ATTESTATION_VERIFIER_TIMEOUT_MS`| that one call| anything but that call| S0.55 (the private JVM verifier service); first caller S0.57 (`completeRiderDeviceEnrolment`)| no|
+| The whole of a shutdown (B0.2, §12.5 below)| `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_DRAIN_DELAY_MS`| draining and closing at stop| a request while the process runs| in force since B0.2| yes|
+| A request's whole execution (§14.6 "request deadlines"; the plan's S0.6: "a request that exceeds a deadline answers the platform's generic operational failure")| none: no setting exists yet| the request's whole execution, once built| time spent inside the database only| S0.6 (resource deadlines) builds the shared execution-budget mechanism and chooses its setting; S0.20 (transport admission) integrates it into the request pipeline; not added in S0.2| no|
+
+**A receipt limit ends a slow sender; it does not stop a handler.** `HTTP_HEADER_TIMEOUT_MS` and `HTTP_BODY_TIMEOUT_MS` end a connection whose client is too slow to send. Once a request has been received they bound nothing that it goes on to do. Nothing in the API bounds a handler's execution today except the shutdown budget at stop. When the owning tasks apply them, the database deadlines will bound its time in the database, the provider and verifier timeouts will bound each outbound call, and the bounded hash admission of S0.16 (bounded hash admission) will bound how many hashes run at once and not how long a request takes. **The database timeouts alone do not bound a whole request**, and no setting bounds the whole of a handler's execution yet; this document does not say one does. That bound is the execution budget decided on 9 October 2026: S0.6 builds the shared mechanism, S0.20 integrates it into the request pipeline, and enforcing it means more than racing a response against a timer. On expiry it must cancel what can be cancelled, roll back the open transaction, discard a connection of uncertain state, and keep a late side effect from taking effect or record it (obligation OB-37 of the delivery plan). None of that is built in S0.2.
+
+**Provisional defaults, validated by configuration only.** Every default in the table that bounds a resource (`HTTP_BODY_LIMIT_BYTES`, the `HTTP_*_TIMEOUT_MS` and `HTTP_ADMISSION_CONCURRENCY`, and the `DATABASE_*` deadlines and `DATABASE_POOL_MAX_WAITERS`) is a **provisional default**: a number chosen so that a development or test run is bounded. The loader checks it against its stated bounds and, for the database deadlines, their nesting (`lock < statement < transaction`); `load-config.test.ts` proves exactly that and nothing about behaviour. No value has been measured, applied to a running server or database, or exercised under load, so none is yet qualified in the sense of the plan's engineering-parameter rule (section 3), and none is labelled development-qualified. **That obligation is unchanged and stays with the first consumer:** S0.6 (resource deadlines) for the database deadlines and waiters, S0.20 (transport admission) for the HTTP limits and deadlines, and S0.18 (delivery worker process) for the provider timeouts each choose a measured development or test value, record the environment (machine, Node and PostgreSQL versions) and the test that exercises it, and label it development-qualified, not production-qualified. S0.65 (benchmark and capacity) then calibrates all of them on a recorded machine and proposes release values for the owner's approval; no earlier task waits for it. `HTTP_BODY_LIMIT_BYTES` keeps the 100 KiB the body parser already applies.
+
+**What each environment refuses at start.** The checks run on the built configuration, so they hold for a configuration made by hand as for one made from the environment. They judge what is *selected*; a setting is applied only by the task that owns it (above).
+
+| Selected| `local`| `staging`| `production`|
+|---|---|---|---|
+| `KEY_CUSTODY=local` (the key substitute)| allowed| allowed, for controlled fixture acceptance| **refused**: no production custody is built yet, so a production start is refused until one is|
+| `DELIVERY_*_ADAPTER=capture`| allowed| allowed, for controlled fixture acceptance| **refused**|
+| `ATTESTATION_VERIFIER=substitute`| allowed| allowed, for controlled fixture acceptance| **refused**|
+| `RATE_LIMITER=memory`| allowed| **refused**| **refused**|
+| the describe composition (inert adapters, hand-built configuration only)| allowed| **refused**| **refused**|
+| any key, origin or required setting absent| refused| refused| refused|
+
+**What staging's permissions are for.** Staging may run the local key custody, the capture delivery adapter and the substitute attestation verifier so that the slice's walk (the delivery plan's gate SW) can be done there against fixtures under control. That is **controlled fixture acceptance and nothing more**. It is not real-provider evidence (a real provider is exercised only in the controlled window of §4.1), not real-secret evidence (the local custody is a substitute, not KMS-backed custody), and not release evidence (gate G3 of the delivery plan). It extends no waiver and defers nothing.
+
+**Production stays refused until managed key custody exists.** `KEY_CUSTODY=local` is the only custody built, and production refuses it, so no production start is possible yet. Building the managed custody, with a rotation proof for every key purpose and a recovery proof, is a **prerequisite of release gate G3** (obligation OB-36 of the delivery plan) and not a task of the identity slice. S0.2 does not implement it and does not weaken the refusal.
+
+**The runtime composition refuses an inert adapter too.** Outside a local run only the runtime composition is allowed, and it binds nothing until a real adapter is added. Whatever is bound is also judged: the runtime composition refuses a binding that is one of the inert describe adapters, however it is supplied (a class, a ready instance, a factory, an alias), at registration for the written forms and when the application initialises for all of them. It leaves any other adapter, a test double included, alone. This is a wiring check against a mis-built composition root; it is not a defence against code that is already running inside the application.
 
 `DATABASE_MIGRATION_URL` is **forbidden** in the API's environment: its presence, with any value, stops the API at start, so that migration credentials are never within reach of a request handler. Only the migration command reads it.
 
@@ -333,7 +407,7 @@ This is what the B0.2 API skeleton (`apps/api`), its B0.4 database foundation an
 
 **Browser-history fallback.** The Ops Portal routes with the browser history, so its host must answer a request for **a document route** with the surface's `index.html`: a deep link or a reload on an unknown path must not be a `404` from the host. The fallback applies to document requests only. **It never applies to `/api/...`, to `/livez` and `/readyz`, or to a missing asset:** those keep their own `404`, so that a stale or mistyped asset fails visibly instead of arriving as HTML. This states the behaviour a host must have; what serves the bundle is still the proposal in §12.1.
 
-**Decided 8 October 2026, not yet implemented.** *Trusted proxies*: `trust proxy` is off unless a deployment names its topology (§12.2). *Transport limits and deadlines*: identity mutations accept UTF-8 JSON and reject compressed request bodies, the body limit counts received bytes (chunked requests included), and header, body and admission deadlines and admission concurrency are configured, validated at start and measured on a recorded machine — they are engineering configuration, not product settings (§12.5 below and [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1 own the rules; [SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.4c covers hash admission). Future upload limits are their own rule. *Still not implemented*: today only the framework's default body limit applies and the API trusts no proxy. The variables the identity slice adds are listed in the table above as their tasks land.
+**Decided 8 October 2026, not yet implemented.** *Trusted proxies*: `trust proxy` is off unless a deployment names its topology (§12.2). *Transport limits and deadlines*: identity mutations accept UTF-8 JSON and reject compressed request bodies, the body limit counts received bytes (chunked requests included), and header, body and admission deadlines and admission concurrency are configured, validated at start and measured on a recorded machine — they are engineering configuration, not product settings (§12.5 below and [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1 own the rules; [SECURITY_DESIGN.md](SECURITY_DESIGN.md) §13.4c covers hash admission). Future upload limits are their own rule. *Still not enforced*: today only the framework's default body limit applies and the API trusts no proxy. The settings that will carry these rules (`HTTP_TRUST_PROXY`, `HTTP_BODY_LIMIT_BYTES`, the header, body and admission deadlines and the admission concurrency) are now in the table above and validated at start (S0.2), which is configuration validation and not enforcement; the task that reads and applies them is S0.20 (transport admission). The variables the identity slice adds are listed in the table above as their tasks land.
 
 ## 13. Production access, deployment identity and the backup plane
 
