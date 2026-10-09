@@ -7,7 +7,7 @@ The specifications and engineering foundation of the Melarc logistics platform: 
 1. [Development Execution Plan](delivery/DEVELOPMENT_EXECUTION_PLAN.md): how work is done, the technical direction and the bootstrap roadmap. Read all of it before any task.
 2. [Bootstrap B0 Runbook](delivery/planning/BOOTSTRAP_B0_RUNBOOK.md): the selected bootstrap task. Its "Carried forward" notes say what each finished task did not do.
 3. Product work starts only once bootstrap is accepted ([runbook §5](delivery/planning/BOOTSTRAP_B0_RUNBOOK.md#5-product-development-handoff)): [Implementation Plan](delivery/IMPLEMENTATION_PLAN.md), then the slice it names ([delivery/slices/](delivery/slices/SLICE-000.md); the first is `SLICE-000`, whose owner decisions of 8 October 2026 are in [SLICE-000-FINAL-DECISIONS.md](delivery/planning/SLICE-000-FINAL-DECISIONS.md) and whose ordered tasks are in [SLICE-000-IMPLEMENTATION-PLAN.md](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md)).
-4. Resuming SLICE-000 work: read the [session handoff](delivery/planning/SLICE-000-SESSION-HANDOFF.md) first. It says where the work stands, which batch is authorised next, and the testing policy.
+4. Resuming SLICE-000 work: read the plan's [current position](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#12-current-position) first. It says what is done, what evidence is still owed and which task awaits authorization; the plan's [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps) is how to test.
 5. Running the code: [Developer setup](DEVELOPMENT.md).
 
 ## Working rules

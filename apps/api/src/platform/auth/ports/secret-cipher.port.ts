@@ -3,8 +3,14 @@ import type { PortDescriptor } from './port-descriptor.js';
 /** What a sealed value is for. Each purpose has its own versioned key, so one key's exposure opens nothing else. */
 export type CipherPurpose = 'TOTP_SEED' | 'DELIVERY_PAYLOAD' | 'REPLAY_SECRET';
 
-/** An AES-GCM envelope: the ciphertext with the version of the key that made it and the nonce, all that is stored. */
+/**
+ * An AES-GCM envelope: the ciphertext with the version of its layout, the version of the key that made it and the nonce, all that
+ * is stored. A persistence task stores `envelopeVersion` beside the other three, so that a reader selects the layout from the
+ * record and never by trial.
+ */
 export interface SealedSecret {
+  /** The layout of the envelope and of its authenticated data. Only the layouts the adapter supports can be opened. */
+  readonly envelopeVersion: number;
   readonly keyVersion: number;
   readonly nonce: Uint8Array;
   readonly ciphertext: Uint8Array;
@@ -36,7 +42,8 @@ export const SECRET_CIPHER_DESCRIPTOR: PortDescriptor<SecretCipher> = {
   operations: {
     seal: {
       inputs: 'the purpose, the plaintext and the authenticated data that ties it to its row',
-      outputs: 'a sealed envelope: the key version, the nonce and the ciphertext',
+      outputs:
+        'a sealed envelope: the envelope version, the key version, the nonce and the ciphertext',
       outcomes: 'none',
       raises: ['PURPOSE_KEY_ABSENT'],
       transaction: 'independent',
@@ -45,7 +52,12 @@ export const SECRET_CIPHER_DESCRIPTOR: PortDescriptor<SecretCipher> = {
       inputs: 'the purpose, the sealed envelope and the authenticated data it was sealed with',
       outputs: 'the plaintext',
       outcomes: 'none',
-      raises: ['PURPOSE_KEY_ABSENT', 'KEY_VERSION_UNKNOWN', 'AUTHENTICATION_FAILED'],
+      raises: [
+        'PURPOSE_KEY_ABSENT',
+        'ENVELOPE_VERSION_UNSUPPORTED',
+        'KEY_VERSION_UNKNOWN',
+        'AUTHENTICATION_FAILED',
+      ],
       transaction: 'independent',
     },
   },

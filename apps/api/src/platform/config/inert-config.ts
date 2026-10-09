@@ -1,3 +1,4 @@
+import { DEVELOPMENT_QUALIFIED_ARGON2ID } from '../auth/crypto/argon2-parameters.js';
 import { ENGINEERING_DEFAULTS } from './config-settings.js';
 import type { AppConfig, DatabaseDeadlines, HttpConfig } from './load-config.js';
 import { linkTemplates } from './origins.js';
@@ -44,6 +45,10 @@ export function inertConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     origins: ORIGINS,
     links: Object.freeze({ ops: Object.freeze(LINKS.ops), vendor: Object.freeze(LINKS.vendor) }),
     keys: Object.freeze({ custody: 'describe' }),
+    credentialHashing: Object.freeze({
+      profile: DEVELOPMENT_QUALIFIED_ARGON2ID,
+      acceptedProfiles: Object.freeze([]),
+    }),
     adapters: Object.freeze({
       limiter: 'postgres',
       delivery: Object.freeze({

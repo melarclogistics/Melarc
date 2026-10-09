@@ -1,3 +1,4 @@
+import { ARGON2ID_DEPLOYED_FLOOR, isBelowDeployedFloor } from '../auth/crypto/argon2-parameters.js';
 import { EXPECTED } from './config-settings.js';
 import type { AppConfig, ConfigProblem } from './load-config.js';
 
@@ -43,6 +44,16 @@ export function adapterRefusals(config: AppConfig): ConfigProblem[] {
   }
   if (deployed && config.adapters.limiter === 'memory')
     refuse('RATE_LIMITER', EXPECTED.RATE_LIMITER);
+  // A deployed environment writes credential hashes at no less than the floor (a local run may use a cheaper profile in an explicit
+  // test composition). The floor is on what is written: older profiles that may still be verified are not judged by it.
+  if (deployed && isBelowDeployedFloor(config.credentialHashing.profile)) {
+    if (config.credentialHashing.profile.memoryKiB < ARGON2ID_DEPLOYED_FLOOR.memoryKiB) {
+      refuse('ARGON2_MEMORY_KIB', EXPECTED.ARGON2_MEMORY_KIB);
+    }
+    if (config.credentialHashing.profile.passes < ARGON2ID_DEPLOYED_FLOOR.passes) {
+      refuse('ARGON2_PASSES', EXPECTED.ARGON2_PASSES);
+    }
+  }
   if (deployed && config.composition === 'describe') {
     refuse(
       'composition',

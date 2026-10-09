@@ -33,9 +33,18 @@ Avoid *Implement SLICE-000*, *Build identity* and *Finish the backend*. A coding
 | Precondition **P0**| **Satisfied by that checkpoint commit.** Every task below reads the reconciled documents|
 | Separate commit| `12ba443` (runbook-only, closes B-05 items 2 and 3) sits on `docs/close-b05-item-2`, a child of `9c34b69`, unmerged. It touches no file this plan relies on|
 | Contract| 172 operations, of which the slice builds **38**; **126** criteria `AC-SLICE-000-nn`; 175 schemas; 19 Ops Portal routes|
-| Verification of the P0 state (9 October 2026, Windows)| Uncached (`TURBO_FORCE=true`). All exit 0: `format:check`, `lint`, `typecheck`, `build`, `contract:check` (0 operations compared: that proves the checking machinery and says nothing about future identity conformance), `api-client:check` (after `api-client:generate` from contract 5.77), `db:check`, `pnpm test` (root 1179 passed and 2 skipped, API 1699 passed and 5 skipped, Ops 220, api-client 250, harness 191 passed and 1 skipped) and `pnpm run test:browser` over Chromium, Firefox and WebKit (74 passed, 1 skipped: WebKit cannot emulate forced colours); `pnpm audit --audit-level high` exits 0 and reports one moderate advisory (GHSA-67mh-4wv8-2f99, `esbuild` 0.18.20 through `drizzle-kit`, a development tool; analysed in the handoff, not changed here). The pinned wording tests prove wording only; seven deliberate breaks of the contract and documents were each caught by the new I24 tests. **Not run:** `test:db` and `test:e2e` (PostgreSQL was not reachable; it is the developer's to start with `pnpm run infra:up`); every Linux-only test (five API process tests, one `test:db` test, one harness test, the symlink test, the POSIX-mode test), which need Linux, WSL2 or CI; and every Slice-000 task|
+| Verification of the P0 state (9 October 2026, Windows)| Uncached (`TURBO_FORCE=true`). All exit 0: `format:check`, `lint`, `typecheck`, `build`, `contract:check` (0 operations compared: that proves the checking machinery and says nothing about future identity conformance), `api-client:check` (after `api-client:generate` from contract 5.77), `db:check`, `pnpm test` (root 1179 passed and 2 skipped, API 1699 passed and 5 skipped, Ops 220, api-client 250, harness 191 passed and 1 skipped) and `pnpm run test:browser` over Chromium, Firefox and WebKit (74 passed, 1 skipped: WebKit cannot emulate forced colours); `pnpm audit --audit-level high` exits 0 and reports one moderate advisory (GHSA-67mh-4wv8-2f99, `esbuild` 0.18.20 through `drizzle-kit`, a development tool; open for the owner, see [§1.2](#12-current-position), not changed here). The pinned wording tests prove wording only; seven deliberate breaks of the contract and documents were each caught by the new I24 tests. **Not run:** `test:db` and `test:e2e` (PostgreSQL was not reachable; it is the developer's to start with `pnpm run infra:up`); every Linux-only test (five API process tests, one `test:db` test, one harness test, the symlink test, the POSIX-mode test), which need Linux, WSL2 or CI; and every Slice-000 task|
 | The R4 audit| `MELARC_R4_PLAN_AUDIT_2026-10-09.md`, supplied by the owner and held outside the repository (not in the archive). This plan was corrected against it the same day; [§10](#10-owner-resolutions--the-status-of-every-item) gives the status of every item it raised|
 | The R4 correction review| `MELARC_R4_CORRECTION_REVIEW_2026-10-09.md` was **not available** to the follow-up pass (searched in the owner's Downloads, Desktop and Documents, `E:/Projects`, the repository and the session files). The pass followed the five directions of the owner's prompt, which name C-01 to C-04; any finding of that review beyond them is unknown to this plan|
+
+### 1.2 Current position
+
+The one place that says where the work stands. Git holds the history and the code the detail; update this section when a task closes.
+
+- **Done:** S0.1 (ports and the composition root), S0.2 (configuration, key material, the describe composition) and S0.3 (cryptography, the credential rule, the `ARGON2_*` settings). S0.3's adapters exist and are tested, and **none is bound in the runtime composition yet** (OB-38). Evidence reached: *fixture/platform verified*; S0.3's gate B D E passed on Windows.
+- **Evidence still owed:** every Linux, WSL2 or CI run that Windows skips (OB-24, OB-25, OB-26: none has run); the checks S0.3 handed to later tasks ([§7.4](#74-carried-from-s03)); the Product Owner's confirmation of the deployed Argon2id floor (OB-42); and the stage gates, the next being Gate 1 at S0.10.
+- **Next:** S0.4, Database context, capabilities and the closed `db` handle (Needs S0.1 and S0.2, both done; Run B D). **It awaits the owner's authorization.** Nothing in this section authorizes a commit, a push or a dependency change.
+- **Open owner items:** the 7 October finding about this development machine (do not create the local test CA of S0.23, the custody files of S0.30 or real credentials on it until the owner resolves it); the esbuild advisory GHSA-67mh-4wv8-2f99 (moderate; patched from 0.25.0; reached only through the latest `drizzle-kit`; no override applied); and the owner-unconfirmed items of [§10](#10-owner-resolutions--the-status-of-every-item).
 
 ## 2. What exists today, and what is future behaviour
 
@@ -129,6 +138,8 @@ These hold for every block of [§5](#5-the-tasks) without being repeated there.
 
 `pnpm test` alone is **never** the gate for a task that lists D, W, E, L or J. Turbo caches `test`: a verifying run uses `TURBO_FORCE=true pnpm test`.
 
+**Testing cadence.** While a task is edited: the tests of the files being changed and the affected `format:check`, `lint` and `typecheck`, not the whole suite after each edit. At the end of a task or batch: the commands of its run codes, **once, uncached, on the final state**, with every skip and every unrun check reported exactly. At a stage boundary: the full gates (B, and D, W, E, L, J where the stage's blocks list them). No routine mutation campaign and no routine repeat runs: break the real tree only to prove a guard that is new or whose logic changed, and restore each file by hash. A mandatory gate is never waived silently; an instruction that conflicts with one is reported as a conflict.
+
 **Dependencies, gates and evidence classes.** A task starts when everything it **Needs** is done; no task waits for its own gate. Three things are kept apart. A **task's exit criteria** are its *Evidence*. A **gate** is the recorded exit check of the last mandatory task of a stage; later tasks depend on it by naming that task in their Needs. **Independent owner evidence** (S0.28 and S0.61) can be produced at any time and certifies no task. Evidence that the owner has permitted to follow local acceptance is **deferred, listed on S0.70 and never reported as passed** ([§7.2](#72-release-gates--not-acceptance-of-this-slices-code)). A package or tool that is not already approved is a stop condition, not a decision.
 
 **Subtasks.** A parent task too large for one hand-off names suffix subtasks (S0.3a, S0.3b and so on) with their own *Also needs*, *Run* and evidence. Parent IDs never change. A parent keeps its operations, criteria and gate, and a subtask's fixture proof never completes the parent's real-operation criterion.
@@ -157,8 +168,8 @@ Eight stages and eight gates. **A gate is the recorded exit check of a stage's l
 | | **Stage 1 — Foundations**| | |
 | [S0.1](#s01--ports-placement-and-the-composition-root)| Ports, placement and the composition root| P0| B|
 | [S0.2](#s02--configuration-key-material-and-the-describe-composition)| Configuration, key material and the describe composition| S0.1| B D E|
-| [S0.3](#s03--cryptography-and-credential-normalisation)| Cryptography and credential normalisation| S0.2| B|
-| S0.3a| ↳ Qualify `crypto.argon2` on the pinned Node, then `Hasher`, the credential rule and the email canonical form| parent's| B|
+| [S0.3](#s03--cryptography-and-credential-normalisation)| Cryptography and credential normalisation| S0.2| B D E|
+| S0.3a| ↳ Qualify `crypto.argon2` on the pinned Node, then `Hasher`, the credential rule and the email canonical form| parent's| B D E|
 | S0.3b| ↳ `TokenService` (tokens, SHA-256 at rest, constant-time compare) and `randomUUIDv7`| parent's| B|
 | S0.3c| ↳ `TotpVerifier` (RFC 6238, injected UTC clock, replay-step tracking)| parent's| B|
 | S0.3d| ↳ `SecretCipher` (AES-GCM, purpose-separated keys, key version, rotation)| parent's| B|
@@ -319,7 +330,7 @@ No product route is added. The stage ends at **Gate 1** (S0.10): a real applicat
 | | |
 |---|---|
 | **Needs**| S0.2 |
-| **Run**| B |
+| **Run**| B D E |
 | **Operations**| none |
 | **Criteria**| none |
 
@@ -327,14 +338,14 @@ No product route is added. The stage ends at **Gate 1** (S0.10): a real applicat
 
 | Subtask| Delivers| Also needs| Run| Evidence it reaches|
 |---|---|---|---|---|
-| S0.3a| Qualify `crypto.argon2` on the pinned Node, then `Hasher`, the credential rule and the email canonical form| none| B| fixture/platform verified|
+| S0.3a| Qualify `crypto.argon2` on the pinned Node, then `Hasher`, the credential rule and the email canonical form| none| B D E| fixture/platform verified|
 | S0.3b| `TokenService` (tokens, SHA-256 at rest, constant-time compare) and `randomUUIDv7`| none| B| fixture/platform verified|
 | S0.3c| `TotpVerifier` (RFC 6238, injected UTC clock, replay-step tracking)| none| B| fixture/platform verified|
 | S0.3d| `SecretCipher` (AES-GCM, purpose-separated keys, key version, rotation)| none| B| fixture/platform verified|
 
 **Builds on.** Nothing: production code uses `randomUUID` for the request id and one SHA-256 for migration history, and `TestClock` exists only in the harness. `dependency-policy.test.ts` allows exact versions only and no install scripts, so the Argon2id implementation is **qualified first**: Node's built-in `crypto.argon2`, which [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4c names, is checked to exist on the pinned Node 24.21.0 and measured before any package is proposed (a new package is a stop condition).
 **Newly builds.** The `Hasher` adapter (asynchronous Argon2id, versioned pepper, parameters from configuration), `TokenService` (high-entropy tokens, SHA-256 at rest, constant-time compare), `TotpVerifier` (RFC 6238, injected UTC wall clock, replay-step tracking), `SecretCipher` (AES-GCM envelopes with purpose-separated keys, key version and authenticated data), `randomUUIDv7`; the **credential rule** of [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4a (NFKC, raw and normalised bounds of 12 to 128 code points, lone surrogates rejected, never trimmed or case-folded) and the **work-email canonical form** (trim, NFKC, whole-address lower case, no dot or plus folding).
-**Files.** `src/platform/auth/crypto/*`, `src/platform/auth/credentials/*` and their tests; a single-hash benchmark script under `apps/api/src/tools/`.
+**Files.** `src/platform/auth/crypto/*`, `src/platform/auth/credentials/*` and their tests; a single-hash benchmark script under `apps/api/src/tools/`; and, for the Argon2id profile "from configuration" (settings `ARGON2_*`, validated at start, with a floor for deployed environments), `platform/config/*`, `.env.example`, the harness environment where it needs one and the DEPLOYMENT configuration table (corrected on review, 9 October 2026: the deliverable names configuration, so the files that carry a setting are this task's, and the run codes are those of a task that changes configuration). The `SealedSecret` port carries the envelope version.
 **Evidence.** Published known-answer vectors (RFC 6238, Argon2id), key-rotation tests (old version decrypts, new version encrypts), the U+FB03 arithmetic of the 12/128 bounds, security-matrix Families V8 to V10. *Fixture/platform verified*.
 **Does not.** Claim production Argon2id parameters. S0.3a chooses and records a development-qualified cost from a measurement on the development machine (environment recorded); S0.65 proposes the deployment values for the owner.
 **Stop if.** A published vector disagrees with the library.
@@ -392,7 +403,7 @@ No product route is added. The stage ends at **Gate 1** (S0.10): a real applicat
 
 **Builds on.** The shutdown budget and forced exit in `platform/lifecycle/`, `within-budget.ts`, and the pool of `database.module.ts`, which today sets a maximum, a 30-second idle timeout and a 5-second connect timeout and **nothing else**: no statement, lock or idle-in-transaction timeout and no waiter bound. `createApp` sets no request-size limit.
 **Newly builds.** Per-connection statement, lock and idle-in-transaction timeouts (lock inside statement inside transaction, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.6); bounded pool waiters; a connection whose state is uncertain is discarded; and the **shared execution-budget mechanism** ([§11.8](#118-deadline-ownership-and-the-execution-budget)): one per-request budget that the database layer and, through S0.20, the request pipeline both consume, so that database timeouts are not the only bound on a request. A request that exceeds its budget answers the platform's generic operational failure, **after** the mechanism has cancelled what can be cancelled, rolled back the open transaction, discarded a connection of uncertain state and made a late side effect impossible or recorded; racing a response against a timer is not enforcement. Concrete development and test values are chosen here, each recorded with its environment and the test that exercises it (development-qualified, not production-qualified); S0.65 proposes the deployment values.
-**Files.** `platform/database/database.module.ts`, `platform/config/*`, the budget mechanism under `platform/` (its place is chosen here), `.env.example`, and their tests. The HTTP header, body and admission limits are S0.20's and are not set here.
+**Files.** `platform/database/database.module.ts`, `platform/config/*`, the budget mechanism under `platform/` (its place is chosen here), `.env.example`, and their tests. The HTTP header, body and admission limits are S0.20's and are not set here. **The production `Clock` adapter is this task's** (assigned on the review of S0.3, 9 October 2026; `TestClock` is harness-only and no earlier task builds one): a `*.adapter.ts` file under `platform/auth/`, listed in `architecture.test.ts` and bound in the composition root before the deadline machinery needs it, providing the UTC wall clock and monotonic elapsed time. A persisted expiry decision keeps using the database's time (§3, "Time"), and the `TotpVerifier` and `randomUUIDv7` take their time from this port.
 **Evidence.** DB tests that hold a lock past the timeout and assert the failure and the connection's disposal; tests that expire a budget **mid-work** and assert the cancellation, the rollback, the disposal of the connection and that no side effect (a commit, an outbound call, an audit or delivery enqueue) takes effect after the caller was told the request failed. *Fixture/platform verified*.
 **Obligations carried.** Deadline relations at the deployed topology (G2); **OB-37**, the execution budget's cancellation, rollback and late-side-effect behaviour, proved here for the mechanism and in S0.20 for the pipeline.
 **Does not.** Choose production values; set an HTTP receipt or admission limit.
@@ -1779,6 +1790,19 @@ Each gate must exist before the exposure it names. **None blocks the local walk*
 
 From the runbook's [evidence still owed](BOOTSTRAP_B0_RUNBOOK.md#evidence-still-owed-audit-b-05): the **failure rehearsal** (item 2) is open; the downloaded-build check, the clean supported setup in WSL2 or Linux, the disposable reset and the Linux suite run (items 4 to 7) are **waived until release** and remain unproven; the accessibility passes (item 8) are S0.28. A waiver is not a proof. **A known hazard for every `B` and `D` run:** a Vitest worker that fails to start has recurred on the owner's Windows machine without an explanation; rerun the one project, report both outcomes and never raise a timeout to hide it.
 
+### 7.4 Carried from S0.3
+
+What S0.3 built is correct in isolation and is owed to the tasks that use it. The formats named here are persisted contracts: their owner is the header of the file that implements them, under `apps/api/src/platform/auth/crypto/`, and changing one after a record exists means re-hashing or re-sealing it.
+
+| ID| Kind| Obligation| Source| Built and proved by| Run| State|
+|---|---|---|---|---|---|---|
+| OB-38| Binding| Each S0.3 adapter (`Argon2Hasher`, `Sha256TokenService`, `Rfc6238TotpVerifier`, `AesGcmSecretCipher`) is bound in the runtime composition by the first task that consumes its port, from `config.keys`, `config.credentialHashing` and the `Clock`, and the S0.2 test "binds no port in the runtime composition while no real adapter exists" is changed deliberately| S0.3 review, 9 October 2026| The first task that consumes each port| B| Not done|
+| OB-39| Conventions| Every store of a session, grant, recovery token, CSRF token, device secret or attestation challenge hashes through `TokenService.hash` (the SHA-256 of the 32 decoded bytes), never the displayed text. Every store of a sealed value keeps `envelopeVersion` beside the key version, nonce and ciphertext, and builds its context with `sealedContext()` from the record and never from the request. Credential and email refusals are mapped from the returned results, and "is an email address" is checked after canonicalising (a zero-width space is not trimmed). A credential hash is rewritten only when the Hasher says so, which is forward-only| S0.3 review; [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4a, §14.9| S0.12, S0.17, S0.24, S0.29, S0.31, S0.32, S0.36, S0.51| D| Not done|
+| OB-40| Concurrency| The TOTP step is checked and recorded as one atomic conditional update on the factor, so that of two requests presenting one code exactly one is accepted; the verifier alone does not stop a concurrent replay| [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.5| S0.31, S0.33| D| Not done|
+| OB-41| Capacity| Hash admission budgets the **largest supported profile** (the write profile and `ARGON2_ACCEPTED_PROFILES`) against the libuv pool of 4 threads shared with other work. The cost difference between a real and a dummy verification while a cost migration is under way is assessed before any change of profile is enabled| [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.4b, §13.4c| S0.16, S0.65| D| Not done|
+| OB-42| Decision| The deployed Argon2id floor (19456 KiB and 2 passes, the OWASP minimum named at the S0.3 review and taken as the initial policy) is confirmed or changed| S0.3 review| The Product Owner| M| Open|
+| OB-43| Clock| The production `Clock` adapter (wall time and monotonic elapsed time; persisted expiry decisions keep using database time) is built and bound| S0.3 review| S0.6| B| Not built (assigned in the S0.6 block)|
+
 ## 8. Pinned tests and documents, and the task that edits each
 
 These say something that becomes untrue when the task named below lands. Edit them in that task, deliberately, and nowhere earlier.
@@ -1898,6 +1922,16 @@ The Product Owner approved the decisions below on 9 October 2026. Each fact has 
 - **Concrete values are qualified at their first use** (§3) and **calibrated in S0.65**, which proposes release values for the owner's approval. S0.2's numbers are provisional, configuration-validated defaults and nothing more.
 - **Accepted as written:** S0.2's provisional-default wording, and managed key custody (implementation, rotation proof, recovery proof) as a prerequisite of G3 (OB-36).
 - **Not implemented by S0.2:** any future deadline task. No execution-budget setting exists yet; S0.6 chooses it with its mechanism.
+
+### 11.9 The review of S0.3 (9 October 2026)
+
+The owner's review of S0.3 corrected it before it was committed. What the plan itself does with the decisions:
+
+- **The Argon2id profile comes from configuration.** `ARGON2_*` are settings validated at start, with a floor for deployed environments, so S0.3's files include `platform/config/*`, `.env.example` and the DEPLOYMENT table, and its run codes are B D E. The profile, its measurement and the floor are in [DEPLOYMENT_AND_ENVIRONMENTS.md](../../architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) §12.5; confirming the floor is OB-42.
+- **Verifying a hash and permitting its replacement are separate decisions.** A stored hash is derived only at a supported profile, and is rewritten only forward: a newer pepper at an unchanged cost, or a larger cost at the same lanes. A changed profile is never assumed to be a stronger one.
+- **The envelope version is stored** with every sealed value (the `SealedSecret` port carries it), before any record exists.
+- **The production `Clock` adapter is S0.6's**, not left unowned.
+- **The real-versus-dummy verification cost difference during a cost migration is documented, not hidden**, and is assessed before a migration is enabled (OB-41). Counting derivations proves their number and not equal work, and nothing sleeps or hashes twice to make branches look alike.
 
 ## 12. Old-to-new task numbers
 

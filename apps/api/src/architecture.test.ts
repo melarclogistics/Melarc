@@ -47,12 +47,26 @@ const PORT_NAMES = [
 
 /**
  * The files in `platform/` allowed to implement a port, each added by the task that builds that adapter. S0.1 added none. S0.2
- * adds the one file of inert describe adapters, which `adapterRefusals` keeps out of any environment but a local run. The next
- * adapter, a real one, is added here by the task that builds it, and a review sees the line.
+ * added the one file of inert describe adapters, which `adapterRefusals` keeps out of any environment but a local run. S0.3 adds
+ * the four cryptographic adapters (`Hasher`, `SecretCipher`, `TokenService`, `TotpVerifier`), one file each. The next adapter, a
+ * real one, is added here by the task that builds it, and a review sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
+  'platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts',
+  'platform/auth/crypto/argon2.hasher.adapter.ts',
+  'platform/auth/crypto/rfc6238.totp-verifier.adapter.ts',
+  'platform/auth/crypto/sha256.token-service.adapter.ts',
   'platform/auth/describe/describe-ports.adapter.ts',
 ];
+
+/** The port each real adapter above implements, so that a test can say what the checker must see in each file. */
+const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
+  ['platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts', 'SecretCipher'],
+  ['platform/auth/crypto/argon2.hasher.adapter.ts', 'Hasher'],
+  ['platform/auth/crypto/rfc6238.totp-verifier.adapter.ts', 'TotpVerifier'],
+  ['platform/auth/crypto/sha256.token-service.adapter.ts', 'TokenService'],
+];
+const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
 
 /**
  * The composition root: the files that may import an adapter, because they are where an adapter is bound to its token. It is a
@@ -909,17 +923,20 @@ export const x = Argon2Hasher;`;
       ).toEqual([]);
     }, 30_000);
 
-    // Break caught: the checker not seeing the describe adapters at all, so the allow-list would be permitting nothing and the
-    // rule would be passing because it is blind.
-    it('sees every port implemented in the listed file, and only there, when the list is empty', () => {
+    // Break caught: the checker not seeing the adapters at all, so the allow-list would be permitting nothing and the rule would
+    // be passing because it is blind. The describe file implements every port, and each real adapter implements the one port
+    // it is for, in the file that is listed for it and no other.
+    it('sees every port implemented in the listed files, and only there, when the list is empty', () => {
       const found = findPortImplementationViolations(realModel(), PORT_NAMES, []);
+      const said = (file: string, port: string) =>
+        `${file} implements the port ${port} inside platform/; a port has no adapter there until the task that builds it lists the file`;
 
-      expect(found).toHaveLength(PORT_NAMES.length);
-      for (const name of PORT_NAMES) {
-        expect(found).toContain(
-          `${ALLOWED_PORT_IMPLEMENTATIONS[0] ?? ''} implements the port ${name} inside platform/; a port has no adapter there until the task that builds it lists the file`,
-        );
-      }
+      expect(found).toHaveLength(PORT_NAMES.length + ADAPTED_PORTS.length);
+      for (const name of PORT_NAMES) expect(found).toContain(said(DESCRIBE_ADAPTERS, name));
+      for (const [file, port] of ADAPTED_PORTS) expect(found).toContain(said(file, port));
+      expect([...ADAPTED_PORTS.map(([file]) => file), DESCRIBE_ADAPTERS].sort()).toEqual(
+        [...ALLOWED_PORT_IMPLEMENTATIONS].sort(),
+      );
     }, 30_000);
 
     it('imports no adapter outside the composition root', () => {

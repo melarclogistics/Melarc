@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
+import { ARGON2ID_LIMITS } from '../auth/crypto/argon2-parameters.js';
 import { parsePostgresUrl } from '../database/postgres-url.js';
+import { parseAcceptedProfiles } from './credential-hashing.js';
 import { keyEnvName, parseKeyMaterial, perKeySetting } from './key-material.js';
 import { parseOrigin } from './origins.js';
 import { parseTrustProxy } from './trust-proxy.js';
@@ -43,6 +45,18 @@ export const ENGINEERING_DEFAULTS = {
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: '5000',
   DATABASE_TRANSACTION_TIMEOUT_MS: '10000',
   DATABASE_POOL_MAX_WAITERS: '50',
+} as const;
+
+/**
+ * The credential-hashing profile new hashes are written at (SECURITY_DESIGN.md §13.4): the development-qualified one, which
+ * `argon2-parameters.ts` records the measurement of and `credential-hashing.test.ts` ties these strings to. **Not
+ * production-qualified.** Unlike the resource defaults above it has been measured, on one development machine; S0.65 proposes the
+ * release profile. Staging and production refuse a profile below `ARGON2ID_DEPLOYED_FLOOR`.
+ */
+export const HASHING_DEFAULTS = {
+  ARGON2_MEMORY_KIB: '65536',
+  ARGON2_PASSES: '2',
+  ARGON2_PARALLELISM: '1',
 } as const;
 
 const ENDPOINT_TEXT =
@@ -88,6 +102,11 @@ export const EXPECTED = {
   RATE_LIMITER: `one of: ${LIMITERS.join(', ')}; memory only when APP_ENV is local`,
   KEY_CUSTODY: `one of: ${KEY_CUSTODIES.join(', ')}; the local substitute is refused when APP_ENV is production`,
   ...keyExpected,
+  ARGON2_MEMORY_KIB: `an integer from 8 to ${String(ARGON2ID_LIMITS.maxMemoryKiB)}, at least 8 and a multiple of 4 per lane (ARGON2_PARALLELISM); staging and production refuse less than 19456`,
+  ARGON2_PASSES: `an integer from 1 to ${String(ARGON2ID_LIMITS.maxPasses)}; staging and production refuse fewer than 2`,
+  ARGON2_PARALLELISM: `an integer from 1 to ${String(ARGON2ID_LIMITS.maxParallelism)}`,
+  ARGON2_ACCEPTED_PROFILES:
+    'absent, or one to eight comma-separated <memory KiB>:<passes>:<lanes> profiles, each valid as above, none repeated and none the write profile',
   DELIVERY_EMAIL_ADAPTER: `one of: ${DELIVERY_ADAPTERS.join(', ')}; capture is refused when APP_ENV is production`,
   DELIVERY_EMAIL_ENDPOINT: `${ENDPOINT_TEXT}; required with provider, absent with capture`,
   DELIVERY_EMAIL_TIMEOUT_MS:
@@ -108,6 +127,7 @@ export type ConfigKey = keyof typeof EXPECTED;
 
 /** Keys that mean "not set" when blank, because a copied template leaves them empty and their meaning is "absent". */
 export const OPTIONAL_KEYS: readonly ConfigKey[] = [
+  'ARGON2_ACCEPTED_PROFILES',
   'DELIVERY_EMAIL_ENDPOINT',
   'DELIVERY_EMAIL_TIMEOUT_MS',
   'DELIVERY_SMS_ENDPOINT',
@@ -178,6 +198,13 @@ export const envShape = {
   RATE_LIMITER: z.enum(LIMITERS).default('postgres'),
   KEY_CUSTODY: z.enum(KEY_CUSTODIES),
   ...keyShape,
+  ARGON2_MEMORY_KIB: integerBetween(8, ARGON2ID_LIMITS.maxMemoryKiB).default(65_536),
+  ARGON2_PASSES: integerBetween(1, ARGON2ID_LIMITS.maxPasses).default(2),
+  ARGON2_PARALLELISM: integerBetween(1, ARGON2ID_LIMITS.maxParallelism).default(1),
+  ARGON2_ACCEPTED_PROFILES: z
+    .string()
+    .refine((text) => parseAcceptedProfiles(text) !== undefined)
+    .optional(),
   DELIVERY_EMAIL_ADAPTER: z.enum(DELIVERY_ADAPTERS).default('capture'),
   DELIVERY_EMAIL_ENDPOINT: endpoint.optional(),
   DELIVERY_EMAIL_TIMEOUT_MS: integerBetween(100, 60_000).optional(),

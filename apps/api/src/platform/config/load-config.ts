@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { isValidArgon2idParameters, profileKey } from '../auth/crypto/argon2-parameters.js';
 import { adapterRefusals } from './adapter-refusals.js';
 import {
   APP_ENVS,
@@ -12,6 +13,7 @@ import {
   parseEndpoint,
   type ConfigKey,
 } from './config-settings.js';
+import { parseAcceptedProfiles, type CredentialHashingConfig } from './credential-hashing.js';
 import {
   KEY_PURPOSES,
   keyEnvName,
@@ -114,6 +116,12 @@ export interface AppConfig {
   /** Where setup and recovery links point, derived from the origins. */
   readonly links: LinkTemplates;
   readonly keys: KeyConfig;
+  /**
+   * The profile new credential hashes are written at, and the older profiles that stored hashes may still be verified at. Validated
+   * at start; the Hasher is given it by whoever binds it. Staging and production refuse a profile below the floor
+   * (`adapter-refusals.ts`).
+   */
+  readonly credentialHashing: CredentialHashingConfig;
   readonly adapters: AdaptersConfig;
   /**
    * Always present in a configuration that `loadConfig` returns, so the real API cannot start without
@@ -191,8 +199,32 @@ function relationProblems(env: ParsedEnv): ConfigProblem[] {
   }
 
   keyProblems(env, invalid);
+  hashingProblems(env, invalid);
   adapterProblems(env, invalid, missing);
   return problems;
+}
+
+/**
+ * The write profile is a cost the algorithm honours exactly (memory is a multiple of 4 KiB per lane and at least 8 per lane: a
+ * relation between two keys, reported against the memory), and the older profiles that may still be verified do not include it.
+ */
+function hashingProblems(env: ParsedEnv, invalid: (key: ConfigKey) => void): void {
+  const profile = {
+    memoryKiB: env.ARGON2_MEMORY_KIB,
+    passes: env.ARGON2_PASSES,
+    parallelism: env.ARGON2_PARALLELISM,
+  };
+  if (!isValidArgon2idParameters(profile)) {
+    invalid('ARGON2_MEMORY_KIB');
+    return;
+  }
+  const accepted =
+    env.ARGON2_ACCEPTED_PROFILES === undefined
+      ? []
+      : (parseAcceptedProfiles(env.ARGON2_ACCEPTED_PROFILES) ?? []);
+  if (accepted.some((older) => profileKey(older) === profileKey(profile))) {
+    invalid('ARGON2_ACCEPTED_PROFILES');
+  }
 }
 
 /** The active version is one the purpose holds, and no key is used twice anywhere (SECURITY_DESIGN.md §14.9). */
@@ -310,6 +342,21 @@ function keysFrom(values: ParsedEnv): KeyConfig {
   return Object.freeze({ custody: 'local', purposes: Object.freeze(purposes) });
 }
 
+function hashingFrom(values: ParsedEnv): CredentialHashingConfig {
+  const accepted =
+    values.ARGON2_ACCEPTED_PROFILES === undefined
+      ? []
+      : (parseAcceptedProfiles(values.ARGON2_ACCEPTED_PROFILES) ?? []);
+  return Object.freeze({
+    profile: Object.freeze({
+      memoryKiB: values.ARGON2_MEMORY_KIB,
+      passes: values.ARGON2_PASSES,
+      parallelism: values.ARGON2_PARALLELISM,
+    }),
+    acceptedProfiles: Object.freeze(accepted.map((older) => Object.freeze({ ...older }))),
+  });
+}
+
 function verifierFrom(values: ParsedEnv): VerifierConfig {
   const { ATTESTATION_VERIFIER_URL: url, ATTESTATION_VERIFIER_TIMEOUT_MS: timeoutMs } = values;
   if (values.ATTESTATION_VERIFIER !== 'service' || url === undefined || timeoutMs === undefined) {
@@ -370,6 +417,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
       vendor: Object.freeze(links.vendor),
     }),
     keys: keysFrom(values),
+    credentialHashing: hashingFrom(values),
     adapters: Object.freeze({
       limiter: values.RATE_LIMITER,
       delivery: Object.freeze({
