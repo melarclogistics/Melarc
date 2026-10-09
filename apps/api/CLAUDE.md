@@ -4,7 +4,8 @@ NestJS modular monolith. It holds the technical platform and no product route un
 
 ## Layout
 
-- `src/platform/`: technical infrastructure (config, contract, database, health, http, lifecycle, logging, openapi, routes). Its production files may import packages and each other, but no relative import may leave `src/platform/` (`src/architecture.test.ts` fails otherwise; test files are exempt).
+- `src/platform/`: technical infrastructure (auth, config, contract, database, health, http, lifecycle, logging, openapi, routes). Its production files may import packages and each other, but no relative import may leave `src/platform/` (`src/architecture.test.ts` fails otherwise; test files are exempt).
+- `src/platform/auth/ports/`: the ports `platform/auth` reaches domain data and I/O through ([architecture §5](../../architecture/SOLUTION_ARCHITECTURE.md#5-module-boundaries)), each an interface, a token and a descriptor. `src/app.module.ts` binds adapters to the tokens; an adapter (a `*.adapter.ts` file, or any file that implements a port) is imported only by the composition-root files `src/architecture.test.ts` lists, never by a module for being a module.
 - `src/<domain>/`: one module per permission domain, siblings of `platform/` ([architecture §5](../../architecture/SOLUTION_ARCHITECTURE.md#5-module-boundaries)). A new domain needs a Product Owner decision. Domains depend on platform, never the reverse.
 - `src/tools/`: command-line tools that run from `dist`. `migrations/`: the one canonical migration history (Drizzle). `test/`: process and database tests.
 

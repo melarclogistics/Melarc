@@ -543,6 +543,7 @@ Everything a credential-issuing operation needs exists, tested, before the first
 **Newly builds.** The `Metrics` adapter with **bounded labels** (an outcome class, never an identifier, address or token) and a test that fails when a label value is unbounded; the counters the specification names, for example `credential_recovery_requests_excluded_total{outcome}` ([OBSERVABILITY_AND_RECOVERY.md](../../architecture/OBSERVABILITY_AND_RECOVERY.md) §3). The private endpoint that serves them is S0.68.
 **Files.** `platform/metrics/*` and tests.
 **Evidence.** Unit tests on label cardinality and redaction. *Fixture/platform verified*.
+**Obligations carried.** **OB-35, from the S0.1 review (9 October 2026):** the `Metrics` port raises `LABEL_UNBOUNDED` in development and test only, to fail a test on a programming defect. This task must define, implement and test what production does with a sample whose label value is outside its bounded set, record the choice in this block and report it in its handoff for the Product Owner. It must not leave production behaviour implicit.
 **Does not.** Expose metrics publicly.
 **Stop if.** A required metric needs an identifier as a label.
 
@@ -1746,6 +1747,7 @@ The state stays *client/manual pending* until it exists: AC-15 and AC-18 on the 
 | OB-32| Rehearsal| The trust-data alert at its two thresholds, and the provider-failure and credential-delivery alerts on a failed message| [OBSERVABILITY_AND_RECOVERY.md](../../architecture/OBSERVABILITY_AND_RECOVERY.md) §3| S0.68| D| Not done|
 | OB-33| Offboarding and vendor termination| The offboarding transaction (SLICE-009) and the vendor rejection or termination transaction (SLICE-008) take the identity lock, end every outstanding recovery request and setup grant, cancel their jobs and end the sessions; the race of OB-15 is repeated against each real operation| [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) §4c| **SLICE-009** and **SLICE-008**, not this slice| D| Owed there|
 | OB-34| Reason administration| `upsertReasonDefinition` creates no row in, and changes nothing but `label` and `active` of, an identity reason domain; only a Platform Admin holding `settings.reason.manage` explicitly may, and a Senior Ops holder is `INSUFFICIENT_AUTHORITY`; a body carrying `permittedOperations` (not in `ReasonDefinitionWrite`) is `VALIDATION_FAILED`; each change writes `settings.reason.catalog_changed`| [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) §4c; [permissions.md](../../contracts/permissions.md) §7| **SLICE-013**, not this slice| D| Owed there|
+| OB-35| Metrics| What production does with a metric sample whose label value is outside its bounded set is defined, implemented and tested, and the choice recorded; `LABEL_UNBOUNDED` is the development and test validation only| S0.1 review, 9 October 2026; [OBSERVABILITY_AND_RECOVERY.md](../../architecture/OBSERVABILITY_AND_RECOVERY.md) §3| S0.15| B| Not built|
 
 ### 7.2 Release gates — not acceptance of this slice's code
 
