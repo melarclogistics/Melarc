@@ -9,7 +9,14 @@ import type { Logger } from 'pino';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DATABASE_POOL, LOGGER } from '../platform.tokens.js';
-import { toContextSettings, type SecurityContext } from './transaction-context.js';
+import { capabilityPermittedFor } from './capability-access.js';
+import { ROLE_POSTURE_SQL, rolePostureParameters, unsafeFlags } from './role-posture.js';
+import { registerExclusiveGate } from './transaction-gate.js';
+import {
+  SecurityContextError,
+  toContextSettings,
+  type SecurityContext,
+} from './transaction-context.js';
 
 /**
  * What the work inside a transaction receives: queries on the one connection the transaction holds. It cannot open
@@ -21,72 +28,15 @@ export type DatabaseTransaction = Omit<NodePgDatabase, 'transaction'>;
 const openTransaction = new AsyncLocalStorage<true>();
 
 /**
- * Facts about the role this connection runs as. A runtime identity may hold none of them
- * (SECURITY_DESIGN.md §14.6): superuser, BYPASSRLS, creating databases or roles, replication, owning the database
- * or owning a table, view, sequence or index, a predefined role (`pg_*`: each is power that no runtime identity
- * needs), or a `melarc.*` setting stored on the role or the database, which would be a security context that no
- * transaction set. Each makes row-level security either bypassable or removable by the connection, or the context
- * that it reads not the application's to decide. Not inspected yet: owning a schema or function, and CREATE on a schema or the database (the
- * "schema modification" of §14.6); provisioning and the migrations are what keep those from being granted.
- *
- * Owning includes owning through membership: a role that is a member of the owner has the owner's powers
- * (it can alter or drop a table's policies), so it counts as the owner. `pg_has_role(.., 'MEMBER')` is true
- * for the role itself and for any role it belongs to, directly or indirectly.
- */
-const ROLE_POSTURE_SQL = `
-  SELECT r.rolname AS role,
-         r.rolsuper, r.rolbypassrls, r.rolcreatedb, r.rolcreaterole, r.rolreplication,
-         EXISTS (SELECT 1 FROM pg_roles p
-                  WHERE p.rolname LIKE 'pg\\_%' AND p.rolname <> 'pg_database_owner'
-                    AND pg_has_role(r.oid, p.oid, 'MEMBER')) AS has_predefined_role,
-         EXISTS (SELECT 1 FROM pg_db_role_setting s, unnest(s.setconfig) AS setting
-                  WHERE s.setrole IN (r.oid, 0)
-                    AND s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
-                    AND setting LIKE 'melarc.%') AS has_stored_context,
-         EXISTS (SELECT 1 FROM pg_database d
-                  WHERE d.datname = current_database()
-                    AND pg_has_role(r.oid, d.datdba, 'MEMBER')) AS owns_database,
-         EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                  WHERE pg_has_role(r.oid, c.relowner, 'MEMBER')
-                    AND n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema') AS owns_objects
-    FROM pg_roles r
-   WHERE r.rolname = current_user`;
-
-interface RolePosture {
-  readonly role: string;
-  readonly rolsuper: boolean;
-  readonly rolbypassrls: boolean;
-  readonly rolcreatedb: boolean;
-  readonly rolcreaterole: boolean;
-  readonly rolreplication: boolean;
-  readonly has_predefined_role: boolean;
-  readonly has_stored_context: boolean;
-  readonly owns_database: boolean;
-  readonly owns_objects: boolean;
-}
-
-const UNSAFE_FLAGS = [
-  'rolsuper',
-  'rolbypassrls',
-  'rolcreatedb',
-  'rolcreaterole',
-  'rolreplication',
-  'has_predefined_role',
-  'has_stored_context',
-  'owns_database',
-  'owns_objects',
-] as const;
-
-/**
  * The API's one door to PostgreSQL: a lazily connecting pool, readiness, shutdown and transactions.
  *
  * Protected work belongs in `transactionWithContext`, which opens a transaction and sets the security
  * context transaction-locally, so it is discarded at commit or rollback and can never persist on a pooled
- * connection (SECURITY_DESIGN.md §14.1). There is deliberately no way to set session-level state.
+ * connection (SECURITY_DESIGN.md §14.1). There is deliberately no way to set session-level state, and the pool,
+ * the driver handle and a transaction without a context are not exposed.
  */
 @Injectable()
 export class DatabaseService {
-  readonly db: NodePgDatabase;
   private ended = false;
   private reportedUnsafeRole = false;
 
@@ -96,7 +46,6 @@ export class DatabaseService {
     shutdown: ShutdownRegistry,
     readiness: ReadinessRegistry,
   ) {
-    this.db = drizzle(pool);
     // An idle client can fail (the database restarting). Without a listener that is an uncaught exception.
     pool.on('error', (error) => {
       this.logger.error({ err: error }, 'idle database client error');
@@ -115,14 +64,10 @@ export class DatabaseService {
     readiness.register({ name: 'database', check: () => this.check() });
   }
 
-  /** A transaction with no principal context: protected tables answer nothing to it. */
-  transaction<T>(work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
-    return this.runInTransaction(work);
-  }
-
   /**
    * A transaction whose security context is set before the work runs. An invalid context is refused
-   * before a connection is taken, so nothing reaches the pool (§14.1b).
+   * before a connection is taken, so nothing reaches the pool (§14.1b). It is the only way in: there is no
+   * context-free transaction and no driver handle (S0.4c), so no protected statement runs without a validated context.
    */
   async transactionWithContext<T>(
     context: SecurityContext,
@@ -131,7 +76,19 @@ export class DatabaseService {
     const settings = toContextSettings(context);
     return this.runInTransaction(async (tx) => {
       const assignments = settings.map(([name, value]) => sql`set_config(${name}, ${value}, true)`);
-      await tx.execute(sql`select ${sql.join(assignments, sql`, `)}`);
+      // The role comes back from the statement that sets the context: it is what the database says this connection
+      // runs as, and a SYSTEM capability is opened only over the identity that holds its grants (§14.1b).
+      const applied = await tx.execute(
+        sql`select ${sql.join(assignments, sql`, `)}, current_user as database_role`,
+      );
+      const capability = context.taskCapability;
+      if (
+        context.principalType === 'SYSTEM' &&
+        (capability === undefined ||
+          !capabilityPermittedFor(capability, applied.rows[0]?.database_role as string | undefined))
+      ) {
+        throw new SecurityContextError(['taskCapability']);
+      }
       return work(tx);
     });
   }
@@ -157,21 +114,57 @@ export class DatabaseService {
 
     const client = await this.pool.connect();
     let open = true;
-    // Only `query` is what the transaction needs of a connection, and only while the transaction is open.
+    // Set while a piece of code holds the transaction exclusively (transaction-gate.ts): the scope probe, whose record is
+    // readable to its own statement only. While it is set the transaction's own handle sends nothing.
+    let holder: object | undefined;
+    const send = (...args: unknown[]) =>
+      (client.query as (...forwarded: unknown[]) => Promise<unknown>)(...args);
+    const ended = () =>
+      Promise.reject(new Error('The transaction has ended: its connection is no longer its own'));
+    // Only `query` is what the transaction needs of a connection, and only while the transaction is open and not held.
     const guarded = {
-      query: (...args: unknown[]) =>
-        open
-          ? (client.query as (...forwarded: unknown[]) => Promise<unknown>)(...args)
-          : Promise.reject(
-              new Error('The transaction has ended: its connection is no longer its own'),
+      query: (...args: unknown[]) => {
+        if (!open) return ended();
+        if (holder !== undefined) {
+          return Promise.reject(
+            new Error(
+              'A scope probe is running in this transaction: no other statement may use it until the probe ends',
             ),
+          );
+        }
+        return send(...args);
+      },
     };
     let destroyBecause: Error | undefined;
     let began = false;
     try {
       await client.query('begin');
       began = true;
-      const tx = drizzle(guarded as never);
+      const tx: DatabaseTransaction = drizzle(guarded as never);
+      registerExclusiveGate(tx, async (exclusiveWork) => {
+        if (holder !== undefined) {
+          throw new Error('A scope probe is already running in this transaction');
+        }
+        // Taken before anything is awaited, so that a statement issued after the call is issued while it is held.
+        const mine = {};
+        holder = mine;
+        const exclusive: DatabaseTransaction = drizzle({
+          query: (...args: unknown[]) => {
+            if (!open) return ended();
+            if (holder !== mine) {
+              return Promise.reject(
+                new Error('The scope probe has ended: this handle is no longer its own'),
+              );
+            }
+            return send(...args);
+          },
+        } as never);
+        try {
+          return await exclusiveWork(exclusive);
+        } finally {
+          holder = undefined;
+        }
+      });
       const result = await openTransaction.run(true, () => work(tx));
       await client.query('commit');
       return result;
@@ -206,12 +199,18 @@ export class DatabaseService {
    * timeout of its own: the readiness registry stops waiting for a slow check after its own deadline.
    */
   async check(): Promise<void> {
-    const result = await this.pool.query<RolePosture>(ROLE_POSTURE_SQL);
+    // The login the pool connects as, whichever it is: the API runtime, a worker or the provisioning identity. What a
+    // runtime login may not be or hold is role-posture.ts's to say, and the catalogue check asks the same question of the
+    // named logins, so the two agree.
+    const result = await this.pool.query<{ role: string } & Record<string, unknown>>(
+      ROLE_POSTURE_SQL,
+      rolePostureParameters(null),
+    );
     const posture = result.rows[0];
     if (posture === undefined)
       throw new Error('the connected database role could not be inspected');
 
-    const unsafe = UNSAFE_FLAGS.filter((flag) => posture[flag]);
+    const unsafe = unsafeFlags(posture);
     if (unsafe.length === 0) return;
     if (!this.reportedUnsafeRole) {
       this.reportedUnsafeRole = true;

@@ -8,6 +8,7 @@ import { CapturedLogs } from '../../test-support/captured-logs.js';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DatabaseService } from './database.service.js';
+import { POSTURE_FLAGS } from './role-posture.js';
 import {
   SecurityContextError,
   toContextSettings,
@@ -23,15 +24,7 @@ class FakePool extends EventEmitter {
 
 const SAFE_ROLE = {
   role: 'melarc_api_runtime',
-  rolsuper: false,
-  rolbypassrls: false,
-  rolcreatedb: false,
-  rolcreaterole: false,
-  rolreplication: false,
-  has_predefined_role: false,
-  has_stored_context: false,
-  owns_database: false,
-  owns_objects: false,
+  ...Object.fromEntries(POSTURE_FLAGS.map((flag) => [flag, false])),
 };
 
 function build() {
@@ -140,6 +133,20 @@ describe('DatabaseService: readiness', () => {
     ['a role with a stored security context', { has_stored_context: true }, 'has_stored_context'],
     ['the owner of the database', { owns_database: true }, 'owns_database'],
     ['the owner of objects', { owns_objects: true }, 'owns_objects'],
+    ['the owner of a schema', { owns_schema: true }, 'owns_schema'],
+    ['the owner of a function', { owns_function: true }, 'owns_function'],
+    [
+      'a role that can create in the database',
+      { can_create_in_database: true },
+      'can_create_in_database',
+    ],
+    ['a role that can create in a schema', { can_create_in_schema: true }, 'can_create_in_schema'],
+    ['a member of a role with a power', { member_of_unsafe_role: true }, 'member_of_unsafe_role'],
+    [
+      'a role that can execute a SECURITY DEFINER function',
+      { can_execute_definer: true },
+      'can_execute_definer',
+    ],
   ])('is never ready when connected as %s', async (_label, flags, flag) => {
     const { pool, readiness, logs } = build();
     pool.query.mockResolvedValue({ rows: [{ ...SAFE_ROLE, ...flags }] });
@@ -153,6 +160,35 @@ describe('DatabaseService: readiness', () => {
     expect(said).toHaveLength(1);
     // The flag is what the operator needs: which power the role has that a runtime identity may not.
     expect(said[0]).toMatchObject({ level: 'error', role: 'melarc_api_runtime', flags: [flag] });
+  });
+
+  // Break caught: an inspection that does not report a flag counted as a clean bill. A column lost from the query, or a
+  // null where a boolean belongs, is a role nobody checked, and it is refused and named.
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+  ])('is not ready when a flag is %s in what the inspection returns', async (_label, value) => {
+    const { pool, readiness, logs } = build();
+    pool.query.mockResolvedValue({ rows: [{ ...SAFE_ROLE, owns_function: value }] });
+
+    expect(await readiness.failing()).toEqual(['database']);
+    expect(
+      logs
+        .records()
+        .find((record) => record.msg === 'database role is not a safe runtime identity'),
+    ).toMatchObject({ flags: ['owns_function'] });
+  });
+
+  // Break caught: the connected login not being the one inspected. The check names no role of its own: it asks about
+  // the login the pool connects as.
+  it('inspects the connected login', async () => {
+    const { pool, readiness } = build();
+    pool.query.mockResolvedValue({ rows: [SAFE_ROLE] });
+
+    await readiness.failing();
+
+    const [, values] = pool.query.mock.calls[0] as [string, unknown[]];
+    expect(values[0]).toBeNull();
   });
 
   // Break caught: a query that finds no row for the connected role (it was dropped) counted as healthy.

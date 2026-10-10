@@ -8,7 +8,7 @@ import { CapturedLogs } from '../../test-support/captured-logs.js';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DatabaseService, type DatabaseTransaction } from './database.service.js';
-import type { SecurityContext } from './transaction-context.js';
+import { SecurityContextError, type SecurityContext } from './transaction-context.js';
 
 /** The part of a node-postgres Pool the service uses. */
 class FakePool extends EventEmitter {
@@ -37,8 +37,11 @@ const STAFF: SecurityContext = {
   correlationId: 'unit-test',
 };
 
-/** A connection that answers every statement, except the ones whose text matches `fail`. */
-function connection(fail?: { match: RegExp; error: Error }) {
+/**
+ * A connection that answers every statement, except the ones whose text matches `fail`. The statement that sets the
+ * context also reports the role the connection runs as, which is `role` (none, when it is left out).
+ */
+function connection(fail?: { match: RegExp; error: Error }, role?: string) {
   const statements: string[] = [];
   return {
     statements,
@@ -46,7 +49,9 @@ function connection(fail?: { match: RegExp; error: Error }) {
       const text = typeof query === 'string' ? query : query.text;
       statements.push(text);
       if (fail?.match.test(text) === true) return Promise.reject(fail.error);
-      return Promise.resolve({ rows: [], rowCount: 0, fields: [] });
+      const rows =
+        role !== undefined && text.includes('set_config') ? [{ database_role: role }] : [];
+      return Promise.resolve({ rows, rowCount: rows.length, fields: [] });
     }),
     release: vi.fn(),
   };
@@ -60,6 +65,116 @@ async function expectEnded(statement: Promise<unknown> | undefined): Promise<voi
     }) as unknown,
   });
 }
+
+const SYSTEM_AUTHENTICATION: SecurityContext = {
+  principalType: 'SYSTEM',
+  principalId: 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0',
+  surface: 'SYSTEM',
+  taskCapability: 'authentication',
+  correlationId: 'unit-test',
+};
+
+describe('DatabaseService: no door without a context (S0.4c)', () => {
+  // Break caught: the context-free `db` handle or `transaction()` coming back. Either runs a statement under no
+  // validated context, and a protected table answers nothing to it only because its policy happens to say so. The
+  // pool's driver handle and a transaction that takes no context are not part of what the service offers.
+  it('offers no db handle and no context-free transaction', () => {
+    const { service } = build();
+
+    expect('db' in service).toBe(false);
+    expect('transaction' in service).toBe(false);
+    expect(typeof (service as unknown as Record<string, unknown>).transactionWithContext).toBe(
+      'function',
+    );
+  });
+
+  // The same, for the compiler: a use of either does not type-check. The function is never called.
+  it('does not type-check a use of either', () => {
+    const { service } = build();
+    /* eslint-disable @typescript-eslint/no-unsafe-call -- a call that does not type-check is the point */
+    const uses = () => {
+      // @ts-expect-error the context-free handle is closed
+      const handle: unknown = service.db;
+      // @ts-expect-error a transaction with no context is closed
+      const transaction: unknown = service.transaction(() => Promise.resolve());
+      return [handle, transaction];
+    };
+    /* eslint-enable @typescript-eslint/no-unsafe-call */
+    expect(uses).toBeTypeOf('function');
+  });
+});
+
+describe('DatabaseService: a SYSTEM capability is opened over its own identity only (SECURITY_DESIGN.md §14.1b)', () => {
+  // Break caught: the capability check being skipped, so that a connection running as the API opens the seed
+  // capability, or any capability opens over any connection. The refusal comes before the work runs.
+  it('runs the work when the capability belongs to the connection’s identity', async () => {
+    const { pool, service } = build();
+    pool.connect.mockResolvedValue(connection(undefined, 'melarc_api_runtime'));
+    const work = vi.fn(() => Promise.resolve('done'));
+
+    await expect(service.transactionWithContext(SYSTEM_AUTHENTICATION, work)).resolves.toBe('done');
+    expect(work).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a capability held by another identity, before the work, and rolls the transaction back', async () => {
+    const { pool, service } = build();
+    const client = connection(undefined, 'melarc_api_runtime');
+    pool.connect.mockResolvedValue(client);
+    const work = vi.fn(() => Promise.resolve('done'));
+
+    const failure = await service
+      .transactionWithContext({ ...SYSTEM_AUTHENTICATION, taskCapability: 'seed' }, work)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SecurityContextError);
+    expect((failure as SecurityContextError).fields).toEqual(['taskCapability']);
+    expect(work).not.toHaveBeenCalled();
+    expect(client.statements.at(-1)).toMatch(/^rollback/i);
+    // Refusing a context is not a fault of the connection: it goes back to the pool as it was.
+    expect(client.release.mock.calls[0]?.[0]).toBeUndefined();
+  });
+
+  // Break caught: a connection that cannot say which role it runs as being trusted. Unknown is refused.
+  it.each([
+    ['reports no role', undefined],
+    ['reports an unrelated role', 'postgres'],
+    ['reports the owner', 'melarc_owner'],
+    ['reports the migration identity', 'melarc_migration_elevated'],
+  ])('refuses a SYSTEM context when the connection %s', async (_label, role) => {
+    const { pool, service } = build();
+    pool.connect.mockResolvedValue(connection(undefined, role));
+    const work = vi.fn(() => Promise.resolve('done'));
+
+    await expect(
+      service.transactionWithContext(SYSTEM_AUTHENTICATION, work),
+    ).rejects.toBeInstanceOf(SecurityContextError);
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  // Break caught: the identity check applying to business principals, who hold no capability and need no identity.
+  it('does not look at the role for a staff context', async () => {
+    const { pool, service } = build();
+    pool.connect.mockResolvedValue(connection(undefined, 'postgres'));
+
+    await expect(service.transactionWithContext(STAFF, () => Promise.resolve('ok'))).resolves.toBe(
+      'ok',
+    );
+  });
+
+  // Break caught: the role being read from a second statement, so that a change between the two is possible. It is
+  // reported by the statement that sets the context.
+  it('reads the role in the statement that sets the context', async () => {
+    const { pool, service } = build();
+    const client = connection(undefined, 'melarc_api_runtime');
+    pool.connect.mockResolvedValue(client);
+
+    await service.transactionWithContext(SYSTEM_AUTHENTICATION, () => Promise.resolve());
+
+    const setting = client.statements.filter((text) => text.includes('set_config'));
+    expect(setting).toHaveLength(1);
+    expect(setting[0]).toMatch(/current_user/);
+  });
+});
 
 describe('DatabaseService: the transaction owns its connection', () => {
   // Break caught: a transaction that cannot begin keeping its connection for ever. drizzle's own transaction
@@ -159,19 +274,12 @@ describe('DatabaseService: the transaction owns its connection', () => {
   // Break caught: a transaction opened inside another, which takes a second connection while the first is still
   // held. With as many requests as the pool has connections, every one of them waits for a connection that only
   // another of them can give back, and the API stops answering without a single error.
-  it.each([
-    ['a context transaction in a context transaction', 'context', 'context'],
-    ['a plain transaction in a context transaction', 'context', 'plain'],
-    ['a context transaction in a plain transaction', 'plain', 'context'],
-  ])('refuses %s, before it takes a second connection', async (_label, outer, inner) => {
+  it('refuses a context transaction in a context transaction, before it takes a second connection', async () => {
     const { pool, service } = build();
     pool.connect.mockResolvedValue(connection());
-    const run = (kind: string, work: () => Promise<unknown>) =>
-      kind === 'context' ? service.transactionWithContext(STAFF, work) : service.transaction(work);
+    const run = (work: () => Promise<unknown>) => service.transactionWithContext(STAFF, work);
 
-    await expect(run(outer, () => run(inner, () => Promise.resolve()))).rejects.toThrow(
-      /already open/,
-    );
+    await expect(run(() => run(() => Promise.resolve()))).rejects.toThrow(/already open/);
 
     expect(pool.connect).toHaveBeenCalledOnce();
   });

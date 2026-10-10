@@ -84,9 +84,12 @@ pnpm --filter @melarc/api run db:bootstrap
 pnpm --filter @melarc/api run db:migrate
 ```
 
-The database tools run from the build, so build first. `db:bootstrap` creates the three roles and the `melarc_dev`
-database; `db:migrate` applies the migrations in `apps/api/migrations` as the migration identity. Both are safe to
-repeat.
+The database tools run from the build, so build first. `db:bootstrap` creates the roles (the owner, the migration, API
+runtime, worker and provisioning identities, and the worker's capability role) and the `melarc_dev` database. The worker
+and provisioning logins take passwords derived from the administrator password, which is for this machine's cluster only,
+so they need no setting of their own. `db:migrate` applies the migrations in `apps/api/migrations` as the migration
+identity. Both are safe to repeat; run `db:bootstrap` before `db:migrate` after updating, because a migration grants to
+the roles it names.
 
 ## 5. Run the applications
 

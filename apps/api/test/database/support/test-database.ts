@@ -4,7 +4,12 @@ import pg from 'pg';
 
 import { API_RUNTIME_ROLE } from '../../../src/platform/config/load-config.js';
 import { postgresConnectionSettings } from '../../../src/platform/database/postgres-url.js';
+import {
+  PROVISIONING_ROLE,
+  WORKER_RUNTIME_ROLE,
+} from '../../../src/platform/database/technical-roles.js';
 import { readLocalPostgres, type LocalPostgres } from '../../../src/tools/database/local-env.js';
+import { localLoginPassword } from '../../../src/tools/database/local-logins.js';
 import {
   buildDatabaseUrl,
   connectLocalAdmin,
@@ -17,7 +22,12 @@ import { runMigrations, type MigrationResult } from '../../../src/tools/database
 import { MIGRATION_ROLE } from '../../../src/tools/database/safety.js';
 
 /** The identities a test connects as. `postgres` is the cluster administrator and is used to seed and inspect only. */
-export type Login = 'postgres' | typeof MIGRATION_ROLE | typeof API_RUNTIME_ROLE;
+export type Login =
+  | 'postgres'
+  | typeof MIGRATION_ROLE
+  | typeof API_RUNTIME_ROLE
+  | typeof WORKER_RUNTIME_ROLE
+  | typeof PROVISIONING_ROLE;
 
 /** A database made for one test file, with the roles provisioned and (by default) the migrations applied. */
 export interface TestDatabase {
@@ -50,6 +60,8 @@ export async function createTestDatabase(
     postgres: settings.adminPassword,
     [MIGRATION_ROLE]: settings.migrationPassword,
     [API_RUNTIME_ROLE]: settings.runtimePassword,
+    [WORKER_RUNTIME_ROLE]: localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE),
+    [PROVISIONING_ROLE]: localLoginPassword(settings.adminPassword, PROVISIONING_ROLE),
   };
   const database: TestDatabase = {
     name,

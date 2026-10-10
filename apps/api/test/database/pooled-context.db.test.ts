@@ -16,16 +16,21 @@ import {
   type SecurityContext,
 } from '../../src/platform/database/transaction-context.js';
 import { CapturedLogs } from '../../src/test-support/captured-logs.js';
+import { createScopeProbe } from '../../src/platform/database/scope-probe.js';
 import {
+  applyContextFixture,
   applyFixture,
   HUB_A,
   HUB_B,
   HUB_C,
+  RECORD_IN_HUB_B,
   RIDER_1,
   riderContext,
+  seedContextRecords,
   seedNotes,
   SEEDED_NOTES,
   staffContext,
+  systemContext,
   VENDOR_1,
   vendorContext,
 } from './support/rls-fixture.js';
@@ -35,6 +40,7 @@ import {
   withClient,
   type TestDatabase,
 } from './support/test-database.js';
+import { inUncontextedTransaction } from './support/uncontexted.js';
 
 let database: TestDatabase;
 let pool: pg.Pool;
@@ -43,7 +49,9 @@ let service: DatabaseService;
 beforeAll(async () => {
   database = await createTestDatabase();
   await applyFixture(database);
+  await applyContextFixture(database);
   await seedNotes(database);
+  await seedContextRecords(database);
   // One connection and no more, so that every transaction below is on the same physical connection. A test
   // that gets a fresh connection each time proves nothing, and would pass against a session-wide setting.
   pool = createPool({
@@ -73,10 +81,13 @@ interface Observation {
 
 const GUCS = [
   'principal_type',
+  'principal_id',
   'hub_scope_mode',
   'authorized_hub_ids',
   'vendor_organization_id',
   'rider_id',
+  'task_capability',
+  'scope_probe_id',
 ] as const;
 
 /** What a transaction sees: which connection it ran on, which rows it can read, what context it holds. */
@@ -97,7 +108,7 @@ async function observe(tx: DatabaseTransaction): Promise<Observation> {
 }
 
 const withContext = (context: SecurityContext) => service.transactionWithContext(context, observe);
-const withoutContext = () => service.transaction(observe);
+const withoutContext = () => inUncontextedTransaction(pool, observe);
 
 const bodiesOf = (hub: string, vendors: readonly string[] = []) =>
   SEEDED_NOTES.filter((n) => n.hub === hub && (vendors.length === 0 || vendors.includes(n.vendor)))
@@ -245,6 +256,106 @@ describe('a pooled connection reused across requests', () => {
   });
 });
 
+describe('a pooled connection and the settings of SecurityContext v2', () => {
+  const existingRecordHub = createScopeProbe({
+    hub_record: { schema: 'rls_fixture', table: 'hub_records' },
+  });
+
+  /** What a transaction sees of the tables whose policies read the v2 settings, and which connection it ran on. */
+  async function observeV2(tx: DatabaseTransaction) {
+    const backend = Number((await tx.execute(sql`select pg_backend_pid() as pid`)).rows[0]?.pid);
+    const systemRecords = (
+      await tx.execute(sql`select body from rls_fixture.system_records order by body`)
+    ).rows.map((row) => String(row.body));
+    const hubRecords = (
+      await tx.execute(sql`select body from rls_fixture.hub_records order by body`)
+    ).rows.map((row) => String(row.body));
+    return { backend, systemRecords, hubRecords, settings: (await observe(tx)).settings };
+  }
+
+  // Family A for the task capability. Break caught: a capability outliving the transaction that was given it, so the
+  // next request on the connection, staff or nobody, reaches the SYSTEM tables.
+  it('leaves no task capability for the request that follows a SYSTEM one', async () => {
+    const system = await service.transactionWithContext(systemContext('authentication'), observeV2);
+    const staff = await service.transactionWithContext(staffContext([HUB_A]), observeV2);
+    const nobody = await inUncontextedTransaction(pool, observeV2);
+
+    expect(system.systemRecords).toEqual(['system record one', 'system record two']);
+    expect(system.settings.task_capability).toBe('authentication');
+    expect(staff.systemRecords).toEqual([]);
+    expect(isUnset(staff.settings.task_capability)).toBe(true);
+    expect(nobody.systemRecords).toEqual([]);
+    expect(Object.values(nobody.settings).every(isUnset)).toBe(true);
+    expect(staff.backend).toBe(system.backend);
+    expect(nobody.backend).toBe(system.backend);
+  });
+
+  // Break caught: a rolled-back SYSTEM transaction leaving its capability behind.
+  it('leaves no task capability after a SYSTEM transaction rolls back', async () => {
+    let inside: Awaited<ReturnType<typeof observeV2>> | undefined;
+    await service
+      .transactionWithContext(systemContext('authentication'), async (tx) => {
+        inside = await observeV2(tx);
+        throw new Error('roll back');
+      })
+      .catch(() => undefined);
+    const after = await inUncontextedTransaction(pool, observeV2);
+
+    expect(inside?.systemRecords).toHaveLength(2);
+    expect(after.systemRecords).toEqual([]);
+    expect(isUnset(after.settings.task_capability)).toBe(true);
+    expect(after.backend).toBe(inside?.backend);
+  });
+
+  // Break caught: one SYSTEM capability's context reaching the next task's tables. The limiter's capability does not
+  // see what the authentication one does, one after the other on the same connection. (The seed capability is the
+  // provisioning identity's: the service refuses to open it over this connection, which is tested with the service.)
+  it('gives a different capability none of the previous one', async () => {
+    await service.transactionWithContext(systemContext('authentication'), observeV2);
+    const limiter = await service.transactionWithContext(systemContext('rate_limit'), observeV2);
+
+    expect(limiter.systemRecords).toEqual([]);
+    expect(limiter.settings.task_capability).toBe('rate_limit');
+  });
+
+  // Break caught: a vendor request that follows a SYSTEM one inheriting its reach.
+  it('shows a vendor nothing of what a SYSTEM request saw', async () => {
+    await service.transactionWithContext(systemContext('authentication'), observeV2);
+    const vendor = await service.transactionWithContext(vendorContext(VENDOR_1), observeV2);
+
+    expect(vendor.systemRecords).toEqual([]);
+    expect(isUnset(vendor.settings.task_capability)).toBe(true);
+  });
+
+  // Family A for the scope probe. Break caught: the probe id outliving the transaction that set it, which would keep
+  // one record of another hub visible to every request that follows on the connection.
+  it('leaves no scope probe id after a transaction that probed, committed or rolled back', async () => {
+    const committed = await service.transactionWithContext(staffContext([HUB_A]), (tx) =>
+      existingRecordHub(tx, 'hub_record', RECORD_IN_HUB_B),
+    );
+    const afterCommit = await service.transactionWithContext(staffContext([HUB_A]), observeV2);
+
+    await service
+      .transactionWithContext(staffContext([HUB_A]), async (tx) => {
+        await tx.execute(sql`select set_config('melarc.scope_probe_id', ${RECORD_IN_HUB_B}, true)`);
+        throw new Error('roll back with the probe id set');
+      })
+      .catch(() => undefined);
+    const afterRollback = await service.transactionWithContext(staffContext([HUB_A]), observeV2);
+
+    expect(committed).toBe(HUB_B);
+    for (const seen of [afterCommit, afterRollback]) {
+      expect(seen.hubRecords).toEqual(['record in hub A']);
+      expect(isUnset(seen.settings.scope_probe_id)).toBe(true);
+    }
+    expect(afterRollback.backend).toBe(afterCommit.backend);
+  });
+
+  it('has still used one physical connection', () => {
+    expect(pool.totalCount).toBe(1);
+  });
+});
+
 describe('two requests at the same time', () => {
   // Break caught: contexts shared between concurrent requests, so one reads with the other's authority.
   // Each sets its context, and neither reads until both have set theirs.
@@ -323,9 +434,9 @@ describe('writing under a context', () => {
   // Break caught: a no-context write succeeding, which would let a request that failed to establish its
   // principal write anywhere.
   it('refuses any write without a context', async () => {
-    const failure = await service
-      .transaction((tx) => tx.execute(note(HUB_A, 'no-context')))
-      .catch((error: unknown) => error);
+    const failure = await inUncontextedTransaction(pool, (tx) =>
+      tx.execute(note(HUB_A, 'no-context')),
+    ).catch((error: unknown) => error);
 
     expect(codeOf(failure)).toBe('42501');
     expect(await countAsAdmin('no-context')).toBe(0);

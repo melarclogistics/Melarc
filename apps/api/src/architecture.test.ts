@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { PORTS } from './platform/auth/ports/index.js';
+import { CAPABILITY_ACCESS } from './platform/database/capability-access.js';
+import {
+  findCapabilityOpenerViolations,
+  findDatabaseDoorViolations,
+  findScopeProbeWriterViolations,
+} from './test-support/database-door.js';
 import {
   findPlatformBoundaryViolations,
   type SourceFile,
@@ -942,5 +948,168 @@ export const x = Argon2Hasher;`;
     it('imports no adapter outside the composition root', () => {
       expect(findAdapterImportViolations(realModel(), PORT_NAMES, COMPOSITION_ROOT)).toEqual([]);
     }, 30_000);
+  });
+});
+
+describe('the database door (S0.4)', () => {
+  const file = (path: string, text: string): SourceFile => ({ path, text });
+
+  describe('where a SYSTEM capability is opened (capability-access.ts; registry §5.2 "opened only by")', () => {
+    const check = (files: SourceFile[]) => findCapabilityOpenerViolations(files, CAPABILITY_ACCESS);
+
+    // Break caught: the rule so strict that the place the registry names cannot open its own capability.
+    it('accepts a capability opened where the matrix says', () => {
+      expect(
+        check([
+          file(
+            'platform/auth/staff/sign-in.service.ts',
+            "const c = { taskCapability: 'authentication' };",
+          ),
+          file('tools/bootstrap/bootstrap.ts', 'const c = { taskCapability: "bootstrap" };'),
+          file('tools/seed/seed.ts', 'const c = { taskCapability: `seed` };'),
+          file('platform/delivery/worker/run.ts', "{ taskCapability:\n 'credential_delivery' }"),
+          file('platform/limiter/limiter.ts', "{ taskCapability : 'rate_limit' }"),
+        ]),
+      ).toEqual([]);
+    });
+
+    // Break caught: a capability opened by a file the matrix does not name, which is how a label escapes the
+    // composition root it was granted to (the API asserting `seed`, a domain module asserting `authentication`).
+    it('refuses a capability opened outside the places listed for it', () => {
+      expect(
+        check([
+          file('staff/staff.service.ts', "{ taskCapability: 'authentication' }"),
+          file('platform/auth/sign-in.ts', "{ taskCapability: 'seed' }"),
+          file('tools/seed/seed.ts', "{ taskCapability: 'bootstrap' }"),
+        ]),
+      ).toEqual([
+        "staff/staff.service.ts opens the capability 'authentication', which the access matrix allows only under platform/auth/",
+        "platform/auth/sign-in.ts opens the capability 'seed', which the access matrix allows only under platform/database/seed/, tools/seed/, tools/fixtures/",
+        "tools/seed/seed.ts opens the capability 'bootstrap', which the access matrix allows only under tools/bootstrap/",
+      ]);
+    });
+
+    // Break caught: a label outside the closed list, in source, which the context validation refuses at run time and
+    // this refuses at review.
+    it('refuses a capability that is not in the closed list', () => {
+      expect(check([file('platform/auth/x.ts', "{ taskCapability: 'admin' }")])).toEqual([
+        "platform/auth/x.ts opens the capability 'admin', which is not in the closed list",
+      ]);
+    });
+
+    // Tests build contexts of every kind on purpose; the matrix is about production code.
+    it('does not read tests or test support', () => {
+      expect(
+        check([
+          file('platform/database/x.test.ts', "{ taskCapability: 'seed' }"),
+          file('test-support/context.ts', "{ taskCapability: 'seed' }"),
+        ]),
+      ).toEqual([]);
+    });
+
+    // Break caught: the type, a parameter name or a comparison being read as opening a capability.
+    it('does not read a type annotation, a comparison or a value held in a variable', () => {
+      expect(
+        check([
+          file(
+            'platform/auth/y.ts',
+            "interface C { taskCapability?: TaskCapability }\nif (context.taskCapability === 'seed') {}\nconst c = { taskCapability: chosen };",
+          ),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findCapabilityOpenerViolations(sourceFiles(), CAPABILITY_ACCESS)).toEqual([]);
+    });
+  });
+
+  describe('who writes melarc.scope_probe_id (SECURITY_DESIGN.md §14.1: existingRecordHub, and nothing else)', () => {
+    // Break caught: a second writer of the probe id, which would make "set only by existingRecordHub" a sentence.
+    it('refuses the setting named in a string anywhere but scope-probe.ts', () => {
+      const text =
+        "await tx.execute(sql`select set_config('melarc.scope_probe_id', ${id}, true)`);";
+      expect(findScopeProbeWriterViolations([file('staff/staff.service.ts', text)])).toEqual([
+        "staff/staff.service.ts names the setting 'melarc.scope_probe_id'; only platform/database/scope-probe.ts may write it",
+      ]);
+      expect(
+        findScopeProbeWriterViolations([
+          file('platform/database/transaction-context.ts', "add('scope_probe_id', x);"),
+        ]),
+      ).toEqual([
+        "platform/database/transaction-context.ts names the setting 'scope_probe_id'; only platform/database/scope-probe.ts may write it",
+      ]);
+    });
+
+    it('accepts scope-probe.ts, tests, and a mention that is not a setting name', () => {
+      expect(
+        findScopeProbeWriterViolations([
+          file('platform/database/scope-probe.ts', "set_config('melarc.scope_probe_id', '', true)"),
+          file('platform/database/scope-probe.test.ts', "'melarc.scope_probe_id'"),
+          file(
+            'platform/database/transaction-context.ts',
+            '// `melarc.scope_probe_id` is deliberately not a field',
+          ),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findScopeProbeWriterViolations(sourceFiles())).toEqual([]);
+    });
+  });
+
+  describe('the pool and the driver stay behind DatabaseService (S0.4c)', () => {
+    // Break caught: a second door to PostgreSQL. The context-free `db` handle and `transaction()` are closed so that
+    // every protected query runs under a validated context; code that took the pool or built its own drizzle
+    // instance would walk round that.
+    it.each([
+      ["import pg from 'pg';"],
+      ["import { Pool } from 'pg';"],
+      ["import type { PoolClient } from 'pg';"],
+      ["import { drizzle } from 'drizzle-orm/node-postgres';"],
+      ["const pool = await import('pg');"],
+      ['constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}'],
+    ])('refuses %s outside platform/database/', (text) => {
+      expect(findDatabaseDoorViolations([file('staff/staff.repository.ts', text)])).toHaveLength(1);
+      expect(findDatabaseDoorViolations([file('platform/auth/x.ts', text)])).toHaveLength(1);
+    });
+
+    it('accepts the database module itself, the command-line tools, test support and tests', () => {
+      const text =
+        "import pg from 'pg';\nimport { drizzle } from 'drizzle-orm/node-postgres';\nDATABASE_POOL;";
+      expect(
+        findDatabaseDoorViolations([
+          file('platform/database/database.service.ts', text),
+          file('tools/database/run-migrations.ts', text),
+          file('test-support/x.ts', text),
+          file('staff/x.test.ts', text),
+          file('platform/platform.tokens.ts', 'export const DATABASE_POOL = Symbol();'),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('accepts a query builder that does not connect, and names the file when it refuses', () => {
+      expect(
+        findDatabaseDoorViolations([file('staff/x.ts', "import { sql } from 'drizzle-orm';")]),
+      ).toEqual([]);
+      expect(findDatabaseDoorViolations([file('staff/x.ts', "import pg from 'pg';")])).toEqual([
+        'staff/x.ts reaches PostgreSQL other than through DatabaseService (pg, drizzle-orm/node-postgres or DATABASE_POOL)',
+      ]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findDatabaseDoorViolations(sourceFiles())).toEqual([]);
+    });
+
+    // Break caught: the harness entry point (test/support/e2e-main.mjs, outside src/ and never built into dist) going
+    // back through the service's pool. It wrote with `db.$client`, which is the door S0.4c closed: it now builds a pool
+    // of its own, as the runtime identity, and the service neither offers its own nor is asked for it.
+    it('keeps the harness entry point off the service’s pool and driver handle', () => {
+      const entry = readFileSync(join(sourceRoot, '..', 'test', 'support', 'e2e-main.mjs'), 'utf8');
+
+      expect(entry).not.toMatch(/\.\$client|\.db\b|DatabaseService/);
+      expect(entry).toMatch(/createPool\(/);
+    });
   });
 });

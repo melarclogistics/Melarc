@@ -10,6 +10,11 @@
 //   GET  /api/v1/e2e/notes/:id   reads it back
 //   POST /api/v1/e2e/outbound    tries to reach an external provider, to show the sandbox refuses it
 //
+// The notes routes use a pool of this file's own, connected as the same runtime identity from the same
+// configuration. The API's database service offers no driver handle and no transaction without a security context
+// (S0.4c), so the harness does not reach into it; the table has no row-level security and is retired with the
+// technical journey.
+//
 // usage: node --import <outbound-guard.mjs> e2e-main.mjs      (configuration comes from the environment)
 import 'reflect-metadata';
 
@@ -31,12 +36,16 @@ import { AppModule } from '../../dist/app.module.js';
 import { createApp } from '../../dist/create-app.js';
 import { loadConfig } from '../../dist/platform/config/load-config.js';
 import { reportConfigProblems } from '../../dist/platform/config/report-config-problems.js';
-import { DatabaseService } from '../../dist/platform/database/database.service.js';
+import { createPool } from '../../dist/platform/database/database.module.js';
 import { installFaultHandlers } from '../../dist/platform/lifecycle/fault-handlers.js';
 import { listenAndMarkReady } from '../../dist/platform/lifecycle/listen-and-mark-ready.js';
+import { ShutdownRegistry } from '../../dist/platform/lifecycle/shutdown.registry.js';
 import { installProcessShutdown } from '../../dist/platform/lifecycle/shutdown-handlers.js';
 import { LOGGER } from '../../dist/platform/platform.tokens.js';
 import { TechnicalEndpoint } from '../../dist/platform/routes/access-declaration.js';
+
+/** The token the notes pool is provided under. */
+const E2E_POOL = Symbol('E2E_POOL');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -49,8 +58,8 @@ const present = (row) => ({
 
 /** The routes that exist only here. Decorators are applied by hand: this file is plain JavaScript. */
 class E2eController {
-  constructor(database) {
-    this.database = database;
+  constructor(pool) {
+    this.pool = pool;
   }
 
   async create(body) {
@@ -60,8 +69,8 @@ class E2eController {
       throw new BadRequestException();
     if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) throw new BadRequestException();
 
-    // The API's own pool, so the row is written by the identity the API really connects as.
-    const result = await this.database.db.$client.query(
+    // A pool of this file's own, as the runtime identity the API connects as, so the row is written by it.
+    const result = await this.pool.query(
       'insert into e2e_harness.notes (id, note, noted_at) values ($1, $2, $3) returning id, note, noted_at, written_by',
       [id, note, at],
     );
@@ -70,7 +79,7 @@ class E2eController {
 
   async read(id) {
     if (!UUID.test(id)) throw new BadRequestException();
-    const result = await this.database.db.$client.query(
+    const result = await this.pool.query(
       'select id, note, noted_at, written_by from e2e_harness.notes where id = $1',
       [id],
     );
@@ -92,7 +101,7 @@ class E2eController {
 }
 
 Controller('e2e')(E2eController);
-Inject(DatabaseService)(E2eController, undefined, 0);
+Inject(E2E_POOL)(E2eController, undefined, 0);
 
 function route(name, decorators, parameters = []) {
   const descriptor = Object.getOwnPropertyDescriptor(E2eController.prototype, name);
@@ -111,13 +120,28 @@ if (!loaded.ok) {
   process.exit(1);
 }
 const { config } = loaded;
+if (config.database === undefined) {
+  process.stderr.write('the harness needs DATABASE_URL: the notes routes write to the database\n');
+  process.exit(1);
+}
+// Connects lazily, on first use, like the API's own pool.
+const notesPool = createPool(config.database);
 
 const app = await createApp({
   config,
   // Added to the application module's own metadata, so these are Nest routes like any other and the startup
   // check that every route is declared still runs.
-  rootModule: (options) => ({ ...AppModule.register(options), controllers: [E2eController] }),
+  rootModule: (options) => {
+    const root = AppModule.register(options);
+    return {
+      ...root,
+      controllers: [E2eController],
+      providers: [...(root.providers ?? []), { provide: E2E_POOL, useValue: notesPool }],
+    };
+  },
 });
+// Closed with the rest on shutdown, so the pool does not outlive the process's clean exit.
+app.get(ShutdownRegistry).register({ name: 'e2e-notes-pool', close: () => notesPool.end() });
 const logger = app.get(LOGGER);
 installFaultHandlers(logger, {
   on: (event, listener) => process.on(event, listener),

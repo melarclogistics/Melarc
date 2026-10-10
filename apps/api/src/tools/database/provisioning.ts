@@ -2,10 +2,16 @@ import pg from 'pg';
 
 import { API_RUNTIME_ROLE } from '../../platform/config/load-config.js';
 import {
+  PROVISIONING_ROLE,
+  WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_RUNTIME_ROLE,
+} from '../../platform/database/technical-roles.js';
+import {
   postgresConnectionSettings,
   PostgresUrlError,
 } from '../../platform/database/postgres-url.js';
 import type { LocalPostgres } from './local-env.js';
+import { localLoginPassword } from './local-logins.js';
 import {
   assertDisposableName,
   assertLocalHost,
@@ -126,9 +132,24 @@ async function roleExists(client: SqlClient, name: string): Promise<boolean> {
 }
 
 /**
- * Creates the three roles, or brings existing ones back to the intended shape, and sets their passwords.
- * Safe to repeat. Credentials are distinct: the migration role may create objects and run as the owner;
- * the runtime role owns nothing, bypasses nothing and is not a member of the owner.
+ * The roles that log in to an application database, each with the one process it is for. The migration identity is
+ * the privileged one and is bounded by its lifetime (SECURITY_DESIGN.md §14.17a); the others own nothing, bypass nothing
+ * and are members of nothing.
+ */
+export const LOGIN_ROLES = [
+  MIGRATION_ROLE,
+  API_RUNTIME_ROLE,
+  WORKER_RUNTIME_ROLE,
+  PROVISIONING_ROLE,
+] as const;
+
+/**
+ * Creates the roles, or brings existing ones back to the intended shape, and sets their passwords. Safe to repeat.
+ * Credentials are distinct: the migration role may create objects and run as the owner; every other login owns
+ * nothing, bypasses nothing and is a member of nothing, and the worker's capability role is a grant set that nothing
+ * logs in as and nobody is given by default (a task puts it in front of its process; see technical-roles.ts). The
+ * worker and provisioning logins have no setting of their own: their passwords are derived (local-logins.ts), which is
+ * for this machine's cluster only.
  */
 export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres): Promise<void> {
   assertLocalHost(admin.host);
@@ -138,6 +159,17 @@ export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres)
       { name: OWNER_ROLE, login: 'NOLOGIN', password: undefined },
       { name: MIGRATION_ROLE, login: 'LOGIN', password: settings.migrationPassword },
       { name: API_RUNTIME_ROLE, login: 'LOGIN', password: settings.runtimePassword },
+      {
+        name: WORKER_RUNTIME_ROLE,
+        login: 'LOGIN',
+        password: localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE),
+      },
+      { name: WORKER_CREDENTIAL_DELIVERY_ROLE, login: 'NOLOGIN', password: undefined },
+      {
+        name: PROVISIONING_ROLE,
+        login: 'LOGIN',
+        password: localLoginPassword(settings.adminPassword, PROVISIONING_ROLE),
+      },
     ];
     for (const role of roles) {
       const verb = (await roleExists(client, role.name)) ? 'ALTER' : 'CREATE';
@@ -154,16 +186,26 @@ export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres)
       MIGRATION_ROLE,
     );
 
+    // Only the migration identity is a member of anything (of the owner, above). A membership any other role of ours
+    // has acquired, of the owner, of the migration identity, of a predefined role or of one another, is taken away.
     const { rows: memberships } = await client.query(
-      `select 1
+      `select granted.rolname as granted, member.rolname as member
          from pg_auth_members m
          join pg_roles member on member.oid = m.member
          join pg_roles granted on granted.oid = m.roleid
-        where member.rolname = $1 and granted.rolname = $2`,
-      [API_RUNTIME_ROLE, OWNER_ROLE],
+        where member.rolname = any($1)`,
+      [
+        [
+          API_RUNTIME_ROLE,
+          WORKER_RUNTIME_ROLE,
+          WORKER_CREDENTIAL_DELIVERY_ROLE,
+          PROVISIONING_ROLE,
+          OWNER_ROLE,
+        ],
+      ],
     );
-    if (memberships.length > 0) {
-      await runFormatted(client, 'REVOKE %I FROM %I', OWNER_ROLE, API_RUNTIME_ROLE);
+    for (const row of memberships) {
+      await runFormatted(client, 'REVOKE %I FROM %I', String(row.granted), String(row.member));
     }
   });
 }
@@ -180,15 +222,14 @@ async function disposableMarker(
   return { exists: row !== undefined, marked: row?.comment === DISPOSABLE_MARKER };
 }
 
-/** Shuts a database to every role but the two that may connect to it. Safe to repeat. */
+/** Shuts a database to every role but the four logins that may connect to it. Safe to repeat. */
 async function restrictConnections(client: SqlClient, name: string): Promise<void> {
   await runFormatted(client, 'REVOKE ALL ON DATABASE %I FROM PUBLIC', name);
   await runFormatted(
     client,
-    'GRANT CONNECT ON DATABASE %I TO %I, %I',
+    'GRANT CONNECT ON DATABASE %I TO %I, %I, %I, %I',
     name,
-    MIGRATION_ROLE,
-    API_RUNTIME_ROLE,
+    ...LOGIN_ROLES,
   );
 }
 

@@ -8,6 +8,20 @@
       "when": 1791151798402,
       "tag": "0000_database_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791584646221,
+      "tag": "0001_security_context_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791586392618,
+      "tag": "0002_technical_identity_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,12 @@
+import { isTaskCapability, type TaskCapability } from './task-capabilities.js';
+
 /**
  * The security context of a database transaction (SECURITY_DESIGN.md §14.1). Row-level security reads it
  * from transaction-local settings named `melarc.*`; this file is the one place that decides what may be
  * written to them. Only validated values are ever turned into a setting (§14.1b).
+ *
+ * `melarc.scope_probe_id` is deliberately not a field here: it is set by `existingRecordHub` (scope-probe.ts) and by
+ * nothing else, so a context that carries one is refused.
  */
 export const PRINCIPAL_TYPES = ['STAFF', 'RIDER', 'VENDOR', 'SYSTEM'] as const;
 export const SURFACES = ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID', 'SYSTEM'] as const;
@@ -11,12 +16,29 @@ export type PrincipalType = (typeof PRINCIPAL_TYPES)[number];
 export type Surface = (typeof SURFACES)[number];
 export type HubScopeMode = (typeof HUB_SCOPE_MODES)[number];
 
+/**
+ * The one surface each principal type works through. The three authentication models never mix and the surface
+ * is what the audit records, so a pairing the table does not list is refused: a staff context cannot present as
+ * the Rider app, nor a vendor as the Ops Portal.
+ */
+export const SURFACE_OF_PRINCIPAL: Readonly<Record<PrincipalType, Surface>> = {
+  STAFF: 'OPS_PORTAL',
+  VENDOR: 'VENDOR_PWA',
+  RIDER: 'RIDER_ANDROID',
+  SYSTEM: 'SYSTEM',
+};
+
 export interface SecurityContext {
   readonly principalType: PrincipalType;
   readonly principalId: string;
   /** Present where the principal has a Session. */
   readonly sessionId?: string;
   readonly surface: Surface;
+  /**
+   * `SYSTEM` only, and required there: the one capability the task works under (data-scope-registry.md §5.2). Every
+   * `SYSTEM` branch of a policy tests it, and the grants of the technical identity decide what it reaches.
+   */
+  readonly taskCapability?: TaskCapability;
   /** The permission key of the grant authorizing this operation. */
   readonly authorizationKey?: string;
   /** Resolved from that grant, never from the Session as a whole. `ALL` is never inferred. */
@@ -51,7 +73,8 @@ const CORRELATION_ID = /^\P{Cc}{1,128}$/u;
 const isOneOf = <T extends string>(values: readonly T[], value: unknown): value is T =>
   typeof value === 'string' && (values as readonly string[]).includes(value);
 
-const isUuid = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
+export const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && UUID.test(value);
 
 /**
  * Validates a context and returns the settings to apply, in a fixed order. Throws, naming the invalid
@@ -78,8 +101,25 @@ export function toContextSettings(context: unknown): ContextSetting[] {
     else invalid.push('sessionId');
   }
 
-  if (isOneOf(SURFACES, given.surface)) add('surface', given.surface);
-  else invalid.push('surface');
+  if (!isOneOf(SURFACES, given.surface)) invalid.push('surface');
+  else if (
+    isOneOf(PRINCIPAL_TYPES, principalType) &&
+    SURFACE_OF_PRINCIPAL[principalType] !== given.surface
+  ) {
+    invalid.push('surface');
+  } else add('surface', given.surface);
+
+  // Present exactly when the principal is SYSTEM (§14.1b), so that no SYSTEM branch is ever true for a business
+  // principal. A principal type that is itself invalid is reported once, as that.
+  if (principalType === 'SYSTEM') {
+    if (isTaskCapability(given.taskCapability)) add('task_capability', given.taskCapability);
+    else invalid.push('taskCapability');
+  } else if (given.taskCapability !== undefined && isOneOf(PRINCIPAL_TYPES, principalType)) {
+    invalid.push('taskCapability');
+  }
+
+  // Set by existingRecordHub and by nothing else (§14.1b): never part of a context, whatever it holds.
+  if (given.scopeProbeId !== undefined) invalid.push('scopeProbeId');
 
   if (given.authorizationKey !== undefined) {
     if (typeof given.authorizationKey === 'string' && PERMISSION_KEY.test(given.authorizationKey)) {

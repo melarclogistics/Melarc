@@ -1,6 +1,17 @@
 import type pg from 'pg';
 
+import {
+  ROLE_POSTURE_SQL,
+  rolePostureParameters,
+  unsafeFlags,
+} from '../../platform/database/role-posture.js';
+import {
+  RUNTIME_LOGIN_ROLES,
+  WORKER_CREDENTIAL_DELIVERY_ROLE,
+} from '../../platform/database/technical-roles.js';
 import { OWNER_ROLE } from './provisioning.js';
+import { scopeProbePolicyProblem, type PolicyCommand } from './scope-probe-rule.js';
+import { systemBranchProblems } from './system-branch.js';
 
 /**
  * What must be true of every object the migrations leave in a database, read from the catalogue and not from the
@@ -12,7 +23,7 @@ import { OWNER_ROLE } from './provisioning.js';
  * against a freshly migrated database by the database tests, and it reports; it changes nothing.
  *
  * Not covered, because the design does not say it: who may DELETE or TRUNCATE (each table's own rules), views, and
- * what a policy decides.
+ * what a policy decides, except that a SYSTEM branch of a policy must name one task capability.
  */
 
 /** Schemas the migrations do not own. `drizzle` holds the journal table the migrator itself creates. */
@@ -99,6 +110,52 @@ const CHECKS: readonly { readonly what: string; readonly sql: string }[] = [
   },
 ];
 
+/**
+ * `SYSTEM` alone is never a condition (SECURITY_DESIGN.md §14.1; Family E, `GBT-E7`). The expressions are read as
+ * `pg_get_expr` prints them, which is what the database holds whichever way the migration wrote the policy, and
+ * judged by the rule the migration lint applies to the migration's own text (system-branch.ts).
+ */
+const SYSTEM_BRANCH_CHECK =
+  'a SYSTEM branch of a policy does not require its capability, or the scope probe predicate is in a policy that is not FOR SELECT';
+
+/** `pg_policy.polcmd` as the command a policy is for. */
+const POLICY_COMMANDS: Readonly<Record<string, PolicyCommand>> = {
+  '*': 'all',
+  r: 'select',
+  a: 'insert',
+  w: 'update',
+  d: 'delete',
+};
+
+const POLICY_EXPRESSIONS = `
+  select p.polname, n.nspname, c.relname, p.polcmd::text as command,
+         pg_get_expr(p.polqual, p.polrelid) as using_expression,
+         pg_get_expr(p.polwithcheck, p.polrelid) as check_expression
+    from pg_policy p join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace
+   where ${NOT_OURS}
+   order by n.nspname, c.relname, p.polname`;
+
+/**
+ * The technical roles (SECURITY_DESIGN.md §14.6, §14.17): each running login, and the worker's capability role, is asked
+ * the question the readiness check asks of its own login, and the roles that are grant sets and not logins cannot log in.
+ * A role that is missing is a finding, because provisioning creates every one of them before any migration runs.
+ */
+const TECHNICAL_ROLE_CHECKS = [
+  'a technical role is missing, or a grant-set role can log in',
+  'a technical login has a power a runtime identity may not',
+] as const;
+
+const GRANT_SET_ROLES = [OWNER_ROLE, WORKER_CREDENTIAL_DELIVERY_ROLE];
+
+interface PolicyExpressions {
+  readonly polname: string;
+  readonly nspname: string;
+  readonly relname: string;
+  readonly command: string;
+  readonly using_expression: string | null;
+  readonly check_expression: string | null;
+}
+
 /** What is wrong with the database, one line each; empty when every invariant holds. */
 export async function catalogViolations(client: Pick<pg.Client, 'query'>): Promise<string[]> {
   const violations: string[] = [];
@@ -110,8 +167,62 @@ export async function catalogViolations(client: Pick<pg.Client, 'query'>): Promi
     );
     for (const row of rows) violations.push(Object.values(row)[0] ?? check.what);
   }
+
+  violations.push(...(await technicalRoleViolations(client)));
+
+  const policies = await client.query<PolicyExpressions>(POLICY_EXPRESSIONS);
+  for (const policy of policies.rows) {
+    const where = `policy ${policy.polname} on ${policy.nspname}.${policy.relname}`;
+    for (const expression of [policy.using_expression, policy.check_expression]) {
+      for (const problem of systemBranchProblems(expression ?? '')) {
+        violations.push(`${where}: ${problem}`);
+      }
+    }
+    // A command this reader does not know is not read as SELECT.
+    const probeProblem = scopeProbePolicyProblem(POLICY_COMMANDS[policy.command], [
+      policy.using_expression,
+      policy.check_expression,
+    ]);
+    if (probeProblem !== undefined) violations.push(`${where}: ${probeProblem}`);
+  }
+  return violations;
+}
+
+async function technicalRoleViolations(client: Pick<pg.Client, 'query'>): Promise<string[]> {
+  const violations: string[] = [];
+  const { rows } = await client.query<{ rolname: string; rolcanlogin: boolean }>(
+    'select rolname, rolcanlogin from pg_roles where rolname = any($1)',
+    [[...GRANT_SET_ROLES, ...RUNTIME_LOGIN_ROLES]],
+  );
+  const found = new Map(rows.map((row) => [row.rolname, row.rolcanlogin]));
+  for (const role of [...GRANT_SET_ROLES, ...RUNTIME_LOGIN_ROLES]) {
+    if (!found.has(role)) violations.push(`role ${role} does not exist`);
+  }
+  for (const role of GRANT_SET_ROLES) {
+    if (found.get(role) === true) violations.push(`role ${role} can log in; it is a grant set`);
+  }
+
+  for (const role of [...RUNTIME_LOGIN_ROLES, WORKER_CREDENTIAL_DELIVERY_ROLE]) {
+    if (!found.has(role)) continue;
+    const posture = await client.query<Record<string, unknown>>(
+      ROLE_POSTURE_SQL,
+      rolePostureParameters(role),
+    );
+    const row = posture.rows[0];
+    if (row === undefined) {
+      violations.push(`role ${role} could not be inspected`);
+      continue;
+    }
+    for (const flag of unsafeFlags(row)) {
+      violations.push(`role ${role} is not a safe runtime identity: ${flag}`);
+    }
+  }
   return violations;
 }
 
 /** What each check looks for, so a test can prove that each of them can fire. */
-export const CATALOG_CHECKS: readonly string[] = CHECKS.map((check) => check.what);
+export const CATALOG_CHECKS: readonly string[] = [
+  ...CHECKS.map((check) => check.what),
+  SYSTEM_BRANCH_CHECK,
+  ...TECHNICAL_ROLE_CHECKS,
+];

@@ -1,3 +1,4 @@
+import type { TaskCapability } from '../../../src/platform/database/task-capabilities.js';
 import type { SecurityContext } from '../../../src/platform/database/transaction-context.js';
 import { MIGRATION_ROLE } from '../../../src/tools/database/safety.js';
 import { withClient, type TestDatabase } from './test-database.js';
@@ -45,6 +46,111 @@ CREATE POLICY notes_scope ON rls_fixture.notes
 
 -- allow-delete: the pooled-context tests prove that row-level security governs DELETE as well as reads and writes
 GRANT SELECT, INSERT, UPDATE, DELETE ON rls_fixture.notes TO melarc_api_runtime;
+`;
+
+/**
+ * The tables the SecurityContext v2 tests need, applied after `FIXTURE_SQL`. They are fixtures like it: owned by
+ * melarc_owner, forced row-level security, policies that decide on the context and never on the connecting role.
+ *
+ *  - `hub_records` is the hub template of SECURITY_DESIGN.md §14.4b: one policy for every command with the ordinary
+ *    predicates (the old row in USING, the new row in WITH CHECK), and a second policy FOR SELECT that carries the scope
+ *    probe and nothing else. PostgreSQL ORs permissive policies per command, so the probe widens a read of one record and
+ *    no other command: UPDATE, DELETE, a locking read and an upsert are judged by the ordinary policy alone. The probe
+ *    predicate is never in a FOR ALL policy, whose USING would also decide which rows an UPDATE or a DELETE may touch.
+ *  - `owned_records` is the shape of an idempotency record: the row belongs to one principal.
+ *  - `system_records` is reached by a SYSTEM context under the `authentication` capability and by nothing else.
+ *  - `seeded_records` is a table only a seed writes: its policy admits the `seed` capability, and the runtime role
+ *    holds no write grant on it, so asserting the label reaches nothing (GBT-E6).
+ */
+export const CONTEXT_FIXTURE_SQL = `
+CREATE TABLE rls_fixture.hub_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  responsible_hub_id uuid NOT NULL,
+  vendor_organization_id uuid,
+  body text NOT NULL
+);
+ALTER TABLE rls_fixture.hub_records OWNER TO melarc_owner;
+ALTER TABLE rls_fixture.hub_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rls_fixture.hub_records FORCE ROW LEVEL SECURITY;
+CREATE POLICY hub_records_scope ON rls_fixture.hub_records
+  USING (
+    CASE melarc.principal_type()
+      WHEN 'STAFF' THEN melarc.hub_scope_mode() = 'ALL'
+        OR responsible_hub_id = ANY (melarc.authorized_hub_ids())
+      WHEN 'VENDOR' THEN vendor_organization_id = melarc.current_vendor_organization_id()
+      ELSE false
+    END
+  )
+  WITH CHECK (
+    CASE melarc.principal_type()
+      WHEN 'STAFF' THEN melarc.hub_scope_mode() = 'ALL'
+        OR responsible_hub_id = ANY (melarc.authorized_hub_ids())
+      WHEN 'VENDOR' THEN vendor_organization_id = melarc.current_vendor_organization_id()
+      ELSE false
+    END
+  );
+CREATE POLICY hub_records_probe ON rls_fixture.hub_records FOR SELECT
+  USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id());
+-- allow-delete: the tests prove that the probe cannot authorize a DELETE, which needs the grant to be exercised
+GRANT SELECT, INSERT, UPDATE, DELETE ON rls_fixture.hub_records TO melarc_api_runtime;
+
+CREATE TABLE rls_fixture.owned_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  principal_type text NOT NULL,
+  principal_id uuid NOT NULL,
+  body text NOT NULL
+);
+ALTER TABLE rls_fixture.owned_records OWNER TO melarc_owner;
+ALTER TABLE rls_fixture.owned_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rls_fixture.owned_records FORCE ROW LEVEL SECURITY;
+CREATE POLICY owned_records_scope ON rls_fixture.owned_records
+  USING (principal_id = melarc.current_principal_id() AND principal_type = melarc.principal_type())
+  WITH CHECK (principal_id = melarc.current_principal_id() AND principal_type = melarc.principal_type());
+GRANT SELECT, INSERT, UPDATE ON rls_fixture.owned_records TO melarc_api_runtime;
+
+CREATE TABLE rls_fixture.system_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  body text NOT NULL
+);
+ALTER TABLE rls_fixture.system_records OWNER TO melarc_owner;
+ALTER TABLE rls_fixture.system_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rls_fixture.system_records FORCE ROW LEVEL SECURITY;
+CREATE POLICY system_records_scope ON rls_fixture.system_records
+  USING (
+    CASE melarc.principal_type()
+      WHEN 'SYSTEM' THEN melarc.task_capability() = 'authentication'
+      ELSE false
+    END
+  )
+  WITH CHECK (
+    CASE melarc.principal_type()
+      WHEN 'SYSTEM' THEN melarc.task_capability() = 'authentication'
+      ELSE false
+    END
+  );
+GRANT SELECT, INSERT, UPDATE ON rls_fixture.system_records TO melarc_api_runtime;
+
+CREATE TABLE rls_fixture.seeded_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  body text NOT NULL
+);
+ALTER TABLE rls_fixture.seeded_records OWNER TO melarc_owner;
+ALTER TABLE rls_fixture.seeded_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rls_fixture.seeded_records FORCE ROW LEVEL SECURITY;
+CREATE POLICY seeded_records_scope ON rls_fixture.seeded_records
+  USING (
+    CASE melarc.principal_type()
+      WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed'
+      ELSE false
+    END
+  )
+  WITH CHECK (
+    CASE melarc.principal_type()
+      WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed'
+      ELSE false
+    END
+  );
+GRANT SELECT ON rls_fixture.seeded_records TO melarc_api_runtime;
 `;
 
 export const HUB_A = '11111111-1111-4111-8111-111111111111';
@@ -102,4 +208,44 @@ export function vendorContext(vendorOrganizationId: string): SecurityContext {
 
 export function riderContext(riderId: string): SecurityContext {
   return { ...base, principalType: 'RIDER', surface: 'RIDER_ANDROID', riderId };
+}
+
+/** A SYSTEM context working under one capability. */
+export function systemContext(taskCapability: TaskCapability): SecurityContext {
+  return { ...base, principalType: 'SYSTEM', surface: 'SYSTEM', taskCapability };
+}
+
+/** The principal every context above carries, and a second one, for the rows `owned_records` holds. */
+export const PRINCIPAL_1 = PRINCIPAL;
+export const PRINCIPAL_2 = 'c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1';
+
+/** Two rows of `hub_records`, one in each hub, with known ids so that the scope probe can name them. */
+export const RECORD_IN_HUB_A = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1a1';
+export const RECORD_IN_HUB_B = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1b1';
+/** A well-formed identifier that no row has. */
+export const NO_SUCH_RECORD = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1ff';
+
+/** Applies `CONTEXT_FIXTURE_SQL` as the migration identity. `applyFixture` must have run first. */
+export async function applyContextFixture(database: TestDatabase): Promise<void> {
+  await withClient(database.urlFor(MIGRATION_ROLE), (client) => client.query(CONTEXT_FIXTURE_SQL));
+}
+
+/** Inserts the rows of the context fixture as the cluster administrator: seeding is not under test. */
+export async function seedContextRecords(database: TestDatabase): Promise<void> {
+  await withClient(database.urlFor('postgres'), async (client) => {
+    await client.query(
+      `insert into rls_fixture.hub_records (id, responsible_hub_id, vendor_organization_id, body)
+       values ($1, $2, $3, 'record in hub A'), ($4, $5, $6, 'record in hub B')`,
+      [RECORD_IN_HUB_A, HUB_A, VENDOR_1, RECORD_IN_HUB_B, HUB_B, VENDOR_2],
+    );
+    await client.query(
+      `insert into rls_fixture.owned_records (principal_type, principal_id, body)
+       values ('STAFF', $1, 'owned by principal 1'), ('STAFF', $2, 'owned by principal 2')`,
+      [PRINCIPAL_1, PRINCIPAL_2],
+    );
+    await client.query(
+      "insert into rls_fixture.system_records (body) values ('system record one'), ('system record two')",
+    );
+    await client.query("insert into rls_fixture.seeded_records (body) values ('seeded row')");
+  });
 }

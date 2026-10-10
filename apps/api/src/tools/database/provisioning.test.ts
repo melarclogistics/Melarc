@@ -393,9 +393,9 @@ describe('createDisposableDatabase: the statements it sends', () => {
 
   // Break caught: a database left open to PUBLIC. PostgreSQL lets every role connect to a new database until
   // that is revoked, so without the REVOKE any role on the server, including one with no business in a test
-  // database, could connect; the grant that follows names the only two roles that may. The order matters
+  // database, could connect; the grant that follows names the only four login roles that may. The order matters
   // too: the revoke must come before the grant, or it would take the grant away again.
-  it('creates it, marks it, shuts it to PUBLIC and opens it to the two login roles only, in that order', async () => {
+  it('creates it, marks it, shuts it to PUBLIC and opens it to the four login roles only, in that order', async () => {
     const { admin, changes } = serverAdmin({ exists: false });
 
     await createDisposableDatabase(admin, NAME);
@@ -404,7 +404,7 @@ describe('createDisposableDatabase: the statements it sends', () => {
       `CREATE DATABASE "${NAME}" OWNER "melarc_owner" TEMPLATE template0`,
       `COMMENT ON DATABASE "${NAME}" IS 'melarc:disposable'`,
       `REVOKE ALL ON DATABASE "${NAME}" FROM PUBLIC`,
-      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime"`,
+      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime", "melarc_worker_runtime", "melarc_provisioning"`,
     ]);
   });
 
@@ -425,7 +425,7 @@ describe('createDisposableDatabase: the statements it sends', () => {
   });
 
   // Break caught: running it again changing a database that is already there beyond what it must: it is not
-  // created or marked again, and it is shut to everyone but the two roles again, because an earlier run may have
+  // created or marked again, and it is shut to everyone but the four login roles again, because an earlier run may have
   // ended between the mark and the revoke, and a database open to every role on the server is not found out.
   it('only shuts a database that is already there and marked to the other roles again', async () => {
     const { admin, changes } = serverAdmin();
@@ -434,7 +434,7 @@ describe('createDisposableDatabase: the statements it sends', () => {
 
     expect(changes()).toEqual([
       `REVOKE ALL ON DATABASE "${NAME}" FROM PUBLIC`,
-      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime"`,
+      `GRANT CONNECT ON DATABASE "${NAME}" TO "melarc_migration_elevated", "melarc_api_runtime", "melarc_worker_runtime", "melarc_provisioning"`,
     ]);
   });
 
@@ -444,7 +444,7 @@ describe('createDisposableDatabase: the statements it sends', () => {
   it.each([
     ['marking it', /^COMMENT ON/],
     ['shutting it to PUBLIC', /^REVOKE ALL/],
-    ['opening it to the two roles', /^GRANT CONNECT/],
+    ['opening it to the four login roles', /^GRANT CONNECT/],
   ])(
     'drops the database it created when %s fails, and says what failed',
     async (_label, failOn) => {

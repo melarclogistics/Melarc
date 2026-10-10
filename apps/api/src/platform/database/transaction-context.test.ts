@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { TASK_CAPABILITIES } from './task-capabilities.js';
 import { SecurityContextError, toContextSettings } from './transaction-context.js';
 
 const PRINCIPAL = '3f2c1d9e-8a7b-4c6d-9e5f-1a2b3c4d5e6f';
@@ -18,6 +19,14 @@ const STAFF = {
   hubScopeMode: 'SET',
   authorizedHubIds: [HUB_A, HUB_B],
   correlationId: 'req-1',
+};
+
+const SYSTEM = {
+  principalType: 'SYSTEM',
+  principalId: PRINCIPAL,
+  surface: 'SYSTEM',
+  taskCapability: 'authentication',
+  correlationId: 'job-7',
 };
 
 /** The fields a rejected context names, or a failure if it was accepted. */
@@ -70,20 +79,32 @@ describe('toContextSettings: accepted contexts', () => {
     ).toContainEqual(['melarc.rider_id', RIDER]);
   });
 
-  // Break caught: a SYSTEM principal being refused, or one that needs a hub or a session it does not have.
-  it('accepts a SYSTEM context with no session and no hub', () => {
+  // Break caught: a SYSTEM principal being refused, or one that needs a hub or a session it does not have; or the
+  // capability it works under not reaching the database, where every SYSTEM branch of a policy tests it.
+  it('accepts a SYSTEM context with a task capability, no session and no hub', () => {
     expect(
       toContextSettings({
         principalType: 'SYSTEM',
         principalId: PRINCIPAL,
         surface: 'SYSTEM',
+        taskCapability: 'authentication',
         correlationId: 'job-7',
       }),
     ).toEqual([
       ['melarc.principal_type', 'SYSTEM'],
       ['melarc.principal_id', PRINCIPAL],
       ['melarc.surface', 'SYSTEM'],
+      ['melarc.task_capability', 'authentication'],
       ['melarc.correlation_id', 'job-7'],
+    ]);
+  });
+
+  // Break caught: a capability of the registry's closed list being refused (SECURITY_DESIGN.md §14.1b;
+  // data-scope-registry.md §5.2), or the list drifting from the registry without a test noticing.
+  it.each(TASK_CAPABILITIES)('accepts the %s capability for a SYSTEM context', (taskCapability) => {
+    expect(toContextSettings({ ...SYSTEM, taskCapability })).toContainEqual([
+      'melarc.task_capability',
+      taskCapability,
     ]);
   });
 
@@ -293,5 +314,147 @@ describe('toContextSettings: refused contexts', () => {
   // Break caught: a caller passing something that is not an object being treated as an empty, valid context.
   it.each([[null], [undefined], ['STAFF'], [42], [[]]])('refuses %j as a whole', (context) => {
     expect(rejectedFields(context)).toEqual(['context']);
+  });
+});
+
+describe('toContextSettings: the task capability (SecurityContext v2)', () => {
+  // Break caught: a SYSTEM context with no capability reaching the database, where "SYSTEM" alone must open
+  // nothing (SECURITY_DESIGN.md §14.1: no SYSTEM branch is ever true without one).
+  it('requires a task capability for a SYSTEM context', () => {
+    expect(rejectedFields({ ...SYSTEM, taskCapability: undefined })).toEqual(['taskCapability']);
+  });
+
+  // Break caught: a value outside the closed list being written, which a typo or an attacker-chosen string would
+  // turn into a label no policy tests but one a future branch might. Capitals, padding and other registries'
+  // spellings are not the capability.
+  it.each([
+    ['an unknown capability', 'admin'],
+    ['a capability in capitals', 'AUTHENTICATION'],
+    ['a capability with padding', ' authentication'],
+    ['a worker capability that is not yet in the closed list', 'worker:notification'],
+    ['an empty capability', ''],
+    ['the placeholder the accessor returns for none', 'NONE'],
+    ['an injection attempt', "seed'; drop table x; --"],
+  ])('refuses %s', (_label, taskCapability) => {
+    expect(rejectedFields({ ...SYSTEM, taskCapability })).toEqual(['taskCapability']);
+  });
+
+  // Break caught: a business principal carrying a capability, which would make a label available to a branch it
+  // must never reach. The capability is present exactly when the principal is SYSTEM.
+  it.each([
+    ['a staff', STAFF],
+    [
+      'a vendor',
+      {
+        principalType: 'VENDOR',
+        principalId: PRINCIPAL,
+        surface: 'VENDOR_PWA',
+        vendorOrganizationId: VENDOR,
+        correlationId: 'r',
+      },
+    ],
+    [
+      'a rider',
+      {
+        principalType: 'RIDER',
+        principalId: PRINCIPAL,
+        surface: 'RIDER_ANDROID',
+        riderId: RIDER,
+        correlationId: 'r',
+      },
+    ],
+  ])('refuses a capability on %s principal', (_label, context) => {
+    expect(rejectedFields({ ...context, taskCapability: 'authentication' })).toEqual([
+      'taskCapability',
+    ]);
+  });
+
+  // Break caught: a capability that is not a string being coerced into one.
+  it.each([[42], [['seed']], [{ name: 'seed' }], [true]])(
+    'refuses %j as a capability',
+    (taskCapability) => {
+      expect(rejectedFields({ ...SYSTEM, taskCapability })).toEqual(['taskCapability']);
+    },
+  );
+});
+
+describe('toContextSettings: the scope probe belongs to existingRecordHub alone', () => {
+  // Break caught: the probe id arriving with a context. It is set by one repository function and never from a
+  // request (§14.1b), so a context that carries one, however well formed, is refused.
+  it('refuses a context that carries a scope probe id', () => {
+    expect(rejectedFields({ ...STAFF, scopeProbeId: HUB_A })).toEqual(['scopeProbeId']);
+  });
+
+  it('refuses a probe id on a SYSTEM context too', () => {
+    expect(rejectedFields({ ...SYSTEM, scopeProbeId: HUB_A })).toEqual(['scopeProbeId']);
+  });
+
+  // Break caught: a blank or null probe being read as "not given" and quietly accepted, which a later change that
+  // reads the field would then turn into a way in.
+  it.each([[null], ['']])('refuses even an empty probe id: %j', (value) => {
+    expect(rejectedFields({ ...STAFF, scopeProbeId: value })).toEqual(['scopeProbeId']);
+  });
+
+  it('never writes the setting', () => {
+    expect(toContextSettings(STAFF).map(([name]) => name)).not.toContain('melarc.scope_probe_id');
+  });
+});
+
+describe('toContextSettings: the principal and its surface', () => {
+  // Break caught: the pairing check missing, so a staff session could present as the Rider app and a vendor as the
+  // Ops Portal. The three authentication models never mix (SECURITY_DESIGN.md §14.8 and the permissions surface
+  // gate), and the surface in the context is what the audit records.
+  it.each([
+    ['STAFF', 'OPS_PORTAL'],
+    ['VENDOR', 'VENDOR_PWA'],
+    ['RIDER', 'RIDER_ANDROID'],
+    ['SYSTEM', 'SYSTEM'],
+  ] as const)('accepts %s on %s', (principalType, surface) => {
+    const context = {
+      principalType,
+      principalId: PRINCIPAL,
+      surface,
+      correlationId: 'r',
+      ...(principalType === 'VENDOR' ? { vendorOrganizationId: VENDOR } : {}),
+      ...(principalType === 'RIDER' ? { riderId: RIDER } : {}),
+      ...(principalType === 'SYSTEM' ? { taskCapability: 'authentication' } : {}),
+    };
+    expect(toContextSettings(context)).toContainEqual(['melarc.surface', surface]);
+  });
+
+  it.each([
+    ['STAFF', 'VENDOR_PWA'],
+    ['STAFF', 'RIDER_ANDROID'],
+    ['STAFF', 'SYSTEM'],
+    ['VENDOR', 'OPS_PORTAL'],
+    ['VENDOR', 'RIDER_ANDROID'],
+    ['VENDOR', 'SYSTEM'],
+    ['RIDER', 'OPS_PORTAL'],
+    ['RIDER', 'VENDOR_PWA'],
+    ['RIDER', 'SYSTEM'],
+    ['SYSTEM', 'OPS_PORTAL'],
+    ['SYSTEM', 'VENDOR_PWA'],
+    ['SYSTEM', 'RIDER_ANDROID'],
+  ] as const)('refuses %s on %s, and names the surface', (principalType, surface) => {
+    const context = {
+      principalType,
+      principalId: PRINCIPAL,
+      surface,
+      correlationId: 'r',
+      ...(principalType === 'VENDOR' ? { vendorOrganizationId: VENDOR } : {}),
+      ...(principalType === 'RIDER' ? { riderId: RIDER } : {}),
+      ...(principalType === 'SYSTEM' ? { taskCapability: 'authentication' } : {}),
+    };
+    expect(rejectedFields(context)).toEqual(['surface']);
+  });
+
+  // Break caught: a pairing failure hiding that the principal type itself is invalid, or a second error being
+  // added for a surface that is merely unknown.
+  it('reports an unknown surface once, and not a second time as a pairing failure', () => {
+    expect(rejectedFields({ ...STAFF, surface: 'ADMIN_CONSOLE' })).toEqual(['surface']);
+  });
+
+  it('does not judge the pairing of an unknown principal type', () => {
+    expect(rejectedFields({ ...STAFF, principalType: 'ADMIN' })).toEqual(['principalType']);
   });
 });

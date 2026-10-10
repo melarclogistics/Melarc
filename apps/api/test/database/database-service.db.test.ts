@@ -13,10 +13,11 @@ import { ShutdownRegistry } from '../../src/platform/lifecycle/shutdown.registry
 import { CapturedLogs } from '../../src/test-support/captured-logs.js';
 import { buildDatabaseUrl, OWNER_ROLE } from '../../src/tools/database/provisioning.js';
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
-import { applyFixture } from './support/rls-fixture.js';
+import { applyFixture, staffContext } from './support/rls-fixture.js';
 import {
   createTestDatabase,
   scalar,
+  sqlState,
   withClient,
   type TestDatabase,
 } from './support/test-database.js';
@@ -171,6 +172,144 @@ describe('a connection that is not a safe runtime identity', () => {
         undo: 'alter database %DATABASE% reset melarc.principal_type',
       },
     ],
+    // The posture checks of S0.5 (SECURITY_DESIGN.md §14.6, GBT-J16): each is something the role has been given, and the
+    // check names it. The role is dropped with `drop owned by`, which removes what it was given or came to own.
+    [
+      'a role with CREATE on a schema',
+      '',
+      false,
+      'can_create_in_schema',
+      { apply: 'grant create on schema melarc to %ROLE%' },
+    ],
+    [
+      'a role with CREATE on the database',
+      '',
+      false,
+      'can_create_in_database',
+      { apply: 'grant create on database %DATABASE% to %ROLE%' },
+    ],
+    [
+      'a role that owns a schema',
+      '',
+      false,
+      'owns_schema',
+      { apply: 'create schema probe_schema_%ROLE% authorization %ROLE%' },
+    ],
+    [
+      'a role that owns a function',
+      '',
+      false,
+      'owns_function',
+      {
+        apply: `grant create on schema public to %ROLE%;
+                create function public.probe_fn_%ROLE%() returns int language sql as 'select 1';
+                alter function public.probe_fn_%ROLE%() owner to %ROLE%;`,
+      },
+    ],
+    [
+      'a role that is a member of a role with a power',
+      '',
+      false,
+      'member_of_unsafe_role',
+      {
+        apply: 'create role %ROLE%_helper nologin createrole; grant %ROLE%_helper to %ROLE%;',
+        undo: 'drop role %ROLE%_helper',
+      },
+    ],
+    [
+      'a role that is a member of a role that can log in',
+      '',
+      false,
+      'member_of_unsafe_role',
+      {
+        apply: 'create role %ROLE%_login login; grant %ROLE%_login to %ROLE%;',
+        undo: 'drop role %ROLE%_login',
+      },
+    ],
+    [
+      'a role that can execute a SECURITY DEFINER function it was not granted by a reviewed migration',
+      '',
+      false,
+      'can_execute_definer',
+      {
+        apply: `create function public.probe_definer_%ROLE%() returns int language sql security definer
+                  set search_path = pg_catalog as 'select 1';
+                revoke all on function public.probe_definer_%ROLE%() from public;
+                grant execute on function public.probe_definer_%ROLE%() to %ROLE%;`,
+        undo: 'drop function public.probe_definer_%ROLE%()',
+      },
+    ],
+    // Privileges reachable by switching role (review of S0.4 and S0.5). A membership granted WITH INHERIT FALSE, SET TRUE gives
+    // the member none of the role's privileges as they stand, and lets it become the role with SET ROLE and have them all.
+    // Each case is a login that holds nothing itself and can switch into a role that holds the privilege; the role is a
+    // plain NOLOGIN grant set with no attribute, so only the reachable privilege can make it unsafe.
+    [
+      'a role that can switch into a role that can create in a schema',
+      '',
+      false,
+      'can_create_in_schema',
+      {
+        apply: `create role %ROLE%_grant nologin;
+                grant create on schema public to %ROLE%_grant;
+                grant %ROLE%_grant to %ROLE% with inherit false, set true;`,
+        undo: 'drop owned by %ROLE%_grant; drop role %ROLE%_grant',
+      },
+    ],
+    [
+      'a role that can switch into a role that can create in the database',
+      '',
+      false,
+      'can_create_in_database',
+      {
+        apply: `create role %ROLE%_grant nologin;
+                grant create on database %DATABASE% to %ROLE%_grant;
+                grant %ROLE%_grant to %ROLE% with inherit false, set true;`,
+        undo: 'drop owned by %ROLE%_grant; drop role %ROLE%_grant',
+      },
+    ],
+    [
+      'a role that can switch into a role that can execute a SECURITY DEFINER function',
+      '',
+      false,
+      'can_execute_definer',
+      {
+        apply: `create role %ROLE%_grant nologin;
+                create function public.probe_set_%ROLE%() returns int language sql security definer
+                  set search_path = pg_catalog as 'select 1';
+                revoke all on function public.probe_set_%ROLE%() from public;
+                grant execute on function public.probe_set_%ROLE%() to %ROLE%_grant;
+                grant %ROLE%_grant to %ROLE% with inherit false, set true;`,
+        undo: 'drop function public.probe_set_%ROLE%(); drop owned by %ROLE%_grant; drop role %ROLE%_grant',
+      },
+    ],
+    [
+      'a role that reaches a role that can create in a schema through another, switching at each step',
+      '',
+      false,
+      'can_create_in_schema',
+      {
+        apply: `create role %ROLE%_mid nologin;
+                create role %ROLE%_leaf nologin;
+                grant create on schema public to %ROLE%_leaf;
+                grant %ROLE%_leaf to %ROLE%_mid with inherit false, set true;
+                grant %ROLE%_mid to %ROLE% with inherit false, set true;`,
+        undo: 'drop owned by %ROLE%_leaf; drop role %ROLE%_leaf; drop role %ROLE%_mid',
+      },
+    ],
+    [
+      'a role that inherits a role that can create in a schema through one that it can only switch into',
+      '',
+      false,
+      'can_create_in_schema',
+      {
+        apply: `create role %ROLE%_mid nologin;
+                create role %ROLE%_leaf nologin;
+                grant create on schema public to %ROLE%_leaf;
+                grant %ROLE%_leaf to %ROLE%_mid with inherit true, set false;
+                grant %ROLE%_mid to %ROLE% with inherit false, set true;`,
+        undo: 'drop owned by %ROLE%_leaf; drop role %ROLE%_leaf; drop role %ROLE%_mid',
+      },
+    ],
   ])('refuses %s', async (_label, attributes, memberOfOwner, flag, setup) => {
     const probe = await roleWith(attributes, memberOfOwner, setup);
     const { service, logs, shutdown } = build(probe.url);
@@ -183,6 +322,56 @@ describe('a connection that is not a safe runtime identity', () => {
       expect(record).toMatchObject({ role: probe.name });
       expect(record?.flags).toContain(flag);
       expect(logs.text()).not.toContain(probe.url);
+    } finally {
+      await shutdown.closeAll();
+      await probe.drop();
+    }
+  });
+
+  // The route is real, which is why the checks above are not pedantry: a login with a membership that it does not inherit
+  // cannot create a table, and the same login can once it has switched into the role. The posture check refuses it either way.
+  it('is refused for a privilege it can only reach by switching role, which it really can', async () => {
+    const probe = await roleWith('', false, {
+      apply: `create role %ROLE%_grant nologin;
+              grant create on schema public to %ROLE%_grant;
+              grant %ROLE%_grant to %ROLE% with inherit false, set true;`,
+      undo: 'drop owned by %ROLE%_grant; drop role %ROLE%_grant',
+    });
+    const { service, logs, shutdown } = build(probe.url);
+    try {
+      // Asked first, before the login has made anything: once it has created a table as the other role, owning it would be a
+      // finding of its own and would hide whether the privilege was seen.
+      await expect(service.check()).rejects.toThrow('not a safe runtime identity');
+      expect(
+        logs.records().find((r) => r.msg === 'database role is not a safe runtime identity')?.flags,
+      ).toEqual(['can_create_in_schema']);
+
+      await withClient(probe.url, async (client) => {
+        expect(await sqlState(client, 'create table public.reached (id int)')).toBe('42501');
+        await client.query(`set role ${probe.name}_grant`);
+        expect(await sqlState(client, 'create table public.reached (id int)')).toBeUndefined();
+      });
+    } finally {
+      await shutdown.closeAll();
+      await probe.drop();
+    }
+  });
+
+  // Control: a grant-set role that holds nothing is not a finding, however the membership is granted. Without this the
+  // checks above could pass by refusing every login that can switch into any role.
+  it.each([
+    ['inherited', 'with inherit true, set false'],
+    ['switched into', 'with inherit false, set true'],
+    ['both', 'with inherit true, set true'],
+  ])('accepts a login that has a harmless grant-set role, %s', async (_how, options) => {
+    const probe = await roleWith('', false, {
+      apply: `create role %ROLE%_harmless nologin;
+              grant %ROLE%_harmless to %ROLE% ${options};`,
+      undo: 'drop role %ROLE%_harmless',
+    });
+    const { service, shutdown } = build(probe.url);
+    try {
+      await expect(service.check()).resolves.toBeUndefined();
     } finally {
       await shutdown.closeAll();
       await probe.drop();
@@ -265,7 +454,7 @@ describe('a connection that the server ends during a transaction', () => {
         );
 
       await expect(
-        service.transaction(async (tx) => {
+        service.transactionWithContext(staffContext([]), async (tx) => {
           const pid = (await tx.execute(sql`select pg_backend_pid() as pid`)).rows[0]?.pid;
           expect(pid).toEqual(expect.any(Number));
           if (moment === 'between') {
