@@ -11,7 +11,7 @@ import {
 } from '../../platform/database/technical-roles.js';
 import { OWNER_ROLE } from './provisioning.js';
 import { scopeProbePolicyProblem, type PolicyCommand } from './scope-probe-rule.js';
-import { systemBranchProblems } from './system-branch.js';
+import { policyProblems } from './system-branch.js';
 
 /**
  * What must be true of every object the migrations leave in a database, read from the catalogue and not from the
@@ -111,12 +111,14 @@ const CHECKS: readonly { readonly what: string; readonly sql: string }[] = [
 ];
 
 /**
- * `SYSTEM` alone is never a condition (SECURITY_DESIGN.md §14.1; Family E, `GBT-E7`). The expressions are read as
- * `pg_get_expr` prints them, which is what the database holds whichever way the migration wrote the policy, and
- * judged by the rule the migration lint applies to the migration's own text (system-branch.ts).
+ * A policy expression is the supported structure, `SYSTEM` alone is never a condition, and the scope probe predicate is read-only
+ * (SECURITY_DESIGN.md §14.1, §14.4, §14.4b; Family E, `GBT-E7`). The expressions are read as `pg_get_expr` prints them, which is
+ * what the database holds whichever way the migration wrote the policy, and judged by the rule the migration lint applies to the
+ * migration's own text (system-branch.ts): an expression that is not the principal CASE, or the scope probe policy FOR SELECT,
+ * is a finding whether or not it names `SYSTEM`.
  */
 const SYSTEM_BRANCH_CHECK =
-  'a SYSTEM branch of a policy does not require its capability, or the scope probe predicate is in a policy that is not FOR SELECT';
+  'a policy expression is not the supported principal CASE (or the scope probe policy FOR SELECT), a SYSTEM branch of a policy does not require its capability, or the scope probe predicate is in a policy that is not FOR SELECT';
 
 /** `pg_policy.polcmd` as the command a policy is for. */
 const POLICY_COMMANDS: Readonly<Record<string, PolicyCommand>> = {
@@ -173,13 +175,18 @@ export async function catalogViolations(client: Pick<pg.Client, 'query'>): Promi
   const policies = await client.query<PolicyExpressions>(POLICY_EXPRESSIONS);
   for (const policy of policies.rows) {
     const where = `policy ${policy.polname} on ${policy.nspname}.${policy.relname}`;
-    for (const expression of [policy.using_expression, policy.check_expression]) {
-      for (const problem of systemBranchProblems(expression ?? '')) {
-        violations.push(`${where}: ${problem}`);
-      }
-    }
     // A command this reader does not know is not read as SELECT.
-    const probeProblem = scopeProbePolicyProblem(POLICY_COMMANDS[policy.command], [
+    const command = POLICY_COMMANDS[policy.command];
+    // Every clause that is present is judged, for the command the policy is for: an expression that is not the supported
+    // structure is a finding whether or not it names SYSTEM.
+    for (const problem of policyProblems({
+      command,
+      using: policy.using_expression,
+      check: policy.check_expression,
+    })) {
+      violations.push(`${where}: ${problem}`);
+    }
+    const probeProblem = scopeProbePolicyProblem(command, [
       policy.using_expression,
       policy.check_expression,
     ]);

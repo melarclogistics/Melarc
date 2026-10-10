@@ -1,3 +1,5 @@
+import { PROVISIONING_ROLE } from './technical-roles.js';
+
 /**
  * What a runtime login may not be or hold (SECURITY_DESIGN.md §14.6, "What the API's posture check inspects"), asked of
  * the catalogue. One query serves the readiness check of the connected login (`DatabaseService.check`) and the catalogue
@@ -18,7 +20,7 @@
  *   it creates, it would own;
  * - `EXECUTE` on a `SECURITY DEFINER` function that an approved migration did not grant it (`can_execute_definer`): such
  *   a function runs with its owner's powers. `APPROVED_DEFINER_EXECUTE` lists the grants a reviewed migration made, per
- *   role, as `schema.function`; it is empty because no such function exists, and adding to it is a reviewed change.
+ *   role, as `schema.function`; adding to it is a reviewed change.
  *
  * A privilege counts when the login holds it, when it inherits it, **and when it can acquire it by becoming a role it is a
  * member of**. A membership granted `WITH INHERIT FALSE, SET TRUE` gives the member none of the role's privileges as they
@@ -53,8 +55,15 @@ export const POSTURE_FLAGS = [
 
 export type PostureFlag = (typeof POSTURE_FLAGS)[number];
 
-/** The `SECURITY DEFINER` functions each role may execute, as `schema.function`, because a reviewed migration granted it. */
-export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {};
+/**
+ * The `SECURITY DEFINER` functions each role may execute, as `schema.function`, because a reviewed migration granted it. Today that
+ * is the provisioning login and the two seed functions of migration 0005 (the initialization of the reference data, once, and the
+ * test-only reason fixtures): they are the only way that login writes the reference tables, and it holds no privilege on the tables.
+ * The API runtime and the workers are on no line, so EXECUTE on either function, or on any other definer, is a finding for them.
+ */
+export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {
+  [PROVISIONING_ROLE]: ['melarc.initialize_reference_data', 'melarc.add_reason_fixtures'],
+};
 
 /** Schemas that are the server's own and not ours to inspect. */
 const OUR_SCHEMA = `n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'`;

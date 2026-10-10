@@ -17,6 +17,7 @@
     "db:check": "drizzle-kit check",
     "db:bootstrap": "node dist/tools/db-bootstrap.js",
     "db:migrate": "node dist/tools/db-migrate.js",
+    "db:seed": "node dist/tools/db-seed.js",
     "db:reset": "node dist/tools/db-reset.js",
     "db:orphans": "node dist/tools/db-orphans.js"
   },

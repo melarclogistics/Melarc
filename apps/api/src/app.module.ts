@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 
+import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import { DESCRIBE_PORT_BINDINGS } from './platform/auth/describe/describe-ports.adapter.js';
 import {
   assertNoDescribeAdapterWritten,
@@ -19,6 +20,13 @@ export interface AppModuleOptions extends PlatformModuleOptions {
   readonly ports?: PortBindings;
 }
 
+/**
+ * The real adapters the runtime composition binds itself, whatever the options say: the production `Clock` (S0.6), which the
+ * deadline machinery of the database layer reads. Every other port is bound by the first task that consumes it (OB-38), by adding
+ * its binding here. `options.ports` still replaces any of them, which is how a test supplies a clock it controls.
+ */
+const RUNTIME_PORT_BINDINGS: PortBindings = { clock: { useClass: SystemClock } };
+
 /** `base` with every defined binding of `over` laid on it. An explicit `undefined` means no binding and replaces nothing. */
 function overlay(base: PortBindings, over: PortBindings = {}): PortBindings {
   // What arrives may not be what the compiler promised, so each value is read as unknown before it is judged.
@@ -35,7 +43,8 @@ function overlay(base: PortBindings, over: PortBindings = {}): PortBindings {
  *
  * **Two compositions.** When the configuration selects `describe` (the OpenAPI generator, the contract check, the default test
  * application) every port resolves to an inert describe adapter, so the application can be built and described with no
- * database, provider or key. When it selects `runtime` nothing is bound until a task adds a real adapter. The configuration
+ * database, provider or key. When it selects `runtime` only the production `Clock` is bound (`RUNTIME_PORT_BINDINGS`), and every
+ * other port stays unbound until the first task that consumes it adds its real adapter. The configuration
  * is checked first: an environment that refuses what the configuration selects (the describe composition outside a local
  * run, a test adapter in production) stops the application here, whichever way the configuration was made. **The bindings
  * are checked too, not only the mode:** the runtime composition refuses an inert describe adapter however it is supplied
@@ -61,7 +70,9 @@ export class AppModule {
   static register(options: AppModuleOptions): DynamicModule {
     assertAdaptersAllowed(options.config);
     const describing = options.config.composition === 'describe';
-    const bound = portProviders(overlay(describing ? DESCRIBE_PORT_BINDINGS : {}, options.ports));
+    const bound = portProviders(
+      overlay(describing ? DESCRIBE_PORT_BINDINGS : RUNTIME_PORT_BINDINGS, options.ports),
+    );
     // The describe composition binds inert adapters on purpose; the runtime composition must not end up with one, so the
     // bindings it was given are judged here. Both compositions require every port to be an application singleton. What the
     // container made of the bindings (an alias, a factory, a dependency) is judged once it has built them, when the

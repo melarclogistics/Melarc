@@ -22,6 +22,27 @@
       "when": 1791586392618,
       "tag": "0002_technical_identity_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791597926121,
+      "tag": "0003_reference_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791599908779,
+      "tag": "0004_seed_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791609251273,
+      "tag": "0005_seed_initialization",
+      "breakpoints": true
     }
   ]
 }

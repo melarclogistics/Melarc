@@ -45,6 +45,7 @@ export const ENGINEERING_DEFAULTS = {
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: '5000',
   DATABASE_TRANSACTION_TIMEOUT_MS: '10000',
   DATABASE_POOL_MAX_WAITERS: '50',
+  REQUEST_EXECUTION_BUDGET_MS: '15000',
 } as const;
 
 /**
@@ -88,6 +89,7 @@ export const EXPECTED = {
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: 'an integer from 100 to 120000',
   DATABASE_TRANSACTION_TIMEOUT_MS: 'an integer from 100 to 300000',
   DATABASE_POOL_MAX_WAITERS: 'an integer from 1 to 10000',
+  REQUEST_EXECUTION_BUDGET_MS: 'an integer from 1000 to 300000',
   OPS_ORIGIN:
     'an exact browser origin: http or https, a host and an optional port, with no path, query, fragment or trailing slash; https unless APP_ENV is local',
   VENDOR_ORIGIN:
@@ -184,6 +186,7 @@ export const envShape = {
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: integerBetween(100, 120_000).default(5_000),
   DATABASE_TRANSACTION_TIMEOUT_MS: integerBetween(100, 300_000).default(10_000),
   DATABASE_POOL_MAX_WAITERS: integerBetween(1, 10_000).default(50),
+  REQUEST_EXECUTION_BUDGET_MS: integerBetween(1_000, 300_000).default(15_000),
   OPS_ORIGIN: z.string().refine((text) => parseOrigin(text) !== undefined),
   VENDOR_ORIGIN: z.string().refine((text) => parseOrigin(text) !== undefined),
   HTTP_TRUST_PROXY: z

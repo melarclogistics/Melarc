@@ -57,7 +57,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON rls_fixture.notes TO melarc_api_runtime;
  *    probe and nothing else. PostgreSQL ORs permissive policies per command, so the probe widens a read of one record and
  *    no other command: UPDATE, DELETE, a locking read and an upsert are judged by the ordinary policy alone. The probe
  *    predicate is never in a FOR ALL policy, whose USING would also decide which rows an UPDATE or a DELETE may touch.
- *  - `owned_records` is the shape of an idempotency record: the row belongs to one principal.
+ *  - `owned_records` is the shape of an idempotency record: the row belongs to one principal. Its policy is the principal CASE like
+ *    every other (a human principal sees the rows it owns, any other context, SYSTEM included, sees none): the catalogue check
+ *    refuses an ordinary policy that is not that CASE, so a fixture is held to it too.
  *  - `system_records` is reached by a SYSTEM context under the `authentication` capability and by nothing else.
  *  - `seeded_records` is a table only a seed writes: its policy admits the `seed` capability, and the runtime role
  *    holds no write grant on it, so asserting the label reaches nothing (GBT-E6).
@@ -104,8 +106,22 @@ ALTER TABLE rls_fixture.owned_records OWNER TO melarc_owner;
 ALTER TABLE rls_fixture.owned_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rls_fixture.owned_records FORCE ROW LEVEL SECURITY;
 CREATE POLICY owned_records_scope ON rls_fixture.owned_records
-  USING (principal_id = melarc.current_principal_id() AND principal_type = melarc.principal_type())
-  WITH CHECK (principal_id = melarc.current_principal_id() AND principal_type = melarc.principal_type());
+  USING (
+    CASE melarc.principal_type()
+      WHEN 'STAFF' THEN principal_id = melarc.current_principal_id() AND principal_type = 'STAFF'
+      WHEN 'VENDOR' THEN principal_id = melarc.current_principal_id() AND principal_type = 'VENDOR'
+      WHEN 'RIDER' THEN principal_id = melarc.current_principal_id() AND principal_type = 'RIDER'
+      ELSE false
+    END
+  )
+  WITH CHECK (
+    CASE melarc.principal_type()
+      WHEN 'STAFF' THEN principal_id = melarc.current_principal_id() AND principal_type = 'STAFF'
+      WHEN 'VENDOR' THEN principal_id = melarc.current_principal_id() AND principal_type = 'VENDOR'
+      WHEN 'RIDER' THEN principal_id = melarc.current_principal_id() AND principal_type = 'RIDER'
+      ELSE false
+    END
+  );
 GRANT SELECT, INSERT, UPDATE ON rls_fixture.owned_records TO melarc_api_runtime;
 
 CREATE TABLE rls_fixture.system_records (

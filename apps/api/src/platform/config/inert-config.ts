@@ -1,6 +1,6 @@
 import { DEVELOPMENT_QUALIFIED_ARGON2ID } from '../auth/crypto/argon2-parameters.js';
 import { ENGINEERING_DEFAULTS } from './config-settings.js';
-import type { AppConfig, DatabaseDeadlines, HttpConfig } from './load-config.js';
+import type { AppConfig, DatabaseDeadlines, ExecutionConfig, HttpConfig } from './load-config.js';
 import { linkTemplates } from './origins.js';
 
 const ORIGINS = Object.freeze({ ops: 'http://127.0.0.1:5173', vendor: 'http://127.0.0.1:5174' });
@@ -28,6 +28,11 @@ export const INERT_DEADLINES: DatabaseDeadlines = Object.freeze({
   maxWaiters: Number(ENGINEERING_DEFAULTS.DATABASE_POOL_MAX_WAITERS),
 });
 
+/** The request budget of a run that serves nothing: the development default. */
+export const INERT_EXECUTION: ExecutionConfig = Object.freeze({
+  requestBudgetMs: Number(ENGINEERING_DEFAULTS.REQUEST_EXECUTION_BUDGET_MS),
+});
+
 /**
  * A configuration for code that builds the application without running it: the tools that describe it to itself, and tests. It
  * holds fixed values and reads nothing from the environment, holds no key material (the custody is `describe`), has no
@@ -42,6 +47,7 @@ export function inertConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     http: INERT_HTTP,
     logLevel: 'silent',
     shutdown: Object.freeze({ timeoutMs: 15_000, drainDelayMs: 0 }),
+    execution: INERT_EXECUTION,
     origins: ORIGINS,
     links: Object.freeze({ ops: Object.freeze(LINKS.ops), vendor: Object.freeze(LINKS.vendor) }),
     keys: Object.freeze({ custody: 'describe' }),

@@ -342,7 +342,7 @@ export function lintMigrationSql(sql: string): string[] {
           `policy ${unquote(policy[1] ?? '')} on ${normaliseTable(policy[2] ?? '')}: ${probeProblem}`,
         );
       }
-      for (const problem of policyClauseProblems(statement)) {
+      for (const problem of policyClauseProblems(statement, command)) {
         problems.push(
           `policy ${unquote(policy[1] ?? '')} on ${normaliseTable(policy[2] ?? '')}: ${problem}`,
         );

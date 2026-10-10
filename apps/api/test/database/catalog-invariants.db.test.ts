@@ -302,6 +302,68 @@ describe('the catalogue invariants', () => {
            using (case melarc.principal_type() when 'STAFF' then false else true end);`,
         /policy open_else on public\.system_else: the ELSE of the principal CASE must be false/,
       ],
+      // F03: an expression that is not the principal CASE is a finding whether or not it names SYSTEM. Each of the first three
+      // names no SYSTEM, admits a SYSTEM context under any capability, and used to pass.
+      [
+        'a policy that is the literal true',
+        `create table public.open_true (id int); alter table public.open_true owner to ${OWNER_ROLE};
+         alter table public.open_true enable row level security; alter table public.open_true force row level security;
+         create policy everyone on public.open_true using (true);`,
+        /policy everyone on public\.open_true: is not a supported policy expression/,
+      ],
+      [
+        'a policy that excludes one principal type and admits the rest',
+        `create table public.open_not_vendor (id int); alter table public.open_not_vendor owner to ${OWNER_ROLE};
+         alter table public.open_not_vendor enable row level security; alter table public.open_not_vendor force row level security;
+         create policy not_vendor on public.open_not_vendor using (melarc.principal_type() <> 'VENDOR');`,
+        /policy not_vendor on public\.open_not_vendor: is not a supported policy expression/,
+      ],
+      [
+        'a policy that excludes a list of principal types and admits the rest',
+        `create table public.open_not_in (id int); alter table public.open_not_in owner to ${OWNER_ROLE};
+         alter table public.open_not_in enable row level security; alter table public.open_not_in force row level security;
+         create policy not_in on public.open_not_in using (melarc.principal_type() not in ('VENDOR', 'RIDER'));`,
+        /policy not_in on public\.open_not_in: is not a supported policy expression/,
+      ],
+      [
+        'a policy whose WITH CHECK is unsupported beside a USING that is the principal CASE',
+        `create table public.open_check (id int); alter table public.open_check owner to ${OWNER_ROLE};
+         alter table public.open_check enable row level security; alter table public.open_check force row level security;
+         create policy check_open on public.open_check for update
+           using (case melarc.principal_type() when 'STAFF' then true else false end)
+           with check (melarc.principal_type() <> 'VENDOR');`,
+        /policy check_open on public\.open_check: is not a supported policy expression/,
+      ],
+      [
+        'a second permissive policy beside a safe one',
+        `create table public.open_second (id int); alter table public.open_second owner to ${OWNER_ROLE};
+         alter table public.open_second enable row level security; alter table public.open_second force row level security;
+         create policy safe on public.open_second using (case melarc.principal_type() when 'STAFF' then true else false end);
+         create policy extra on public.open_second for select using (true);`,
+        /policy extra on public\.open_second: is not a supported policy expression/,
+      ],
+      [
+        'a policy with an arm for NONE, which is what a missing context reads as',
+        `create table public.open_none (id int); alter table public.open_none owner to ${OWNER_ROLE};
+         alter table public.open_none enable row level security; alter table public.open_none force row level security;
+         create policy none_arm on public.open_none using (case melarc.principal_type() when 'NONE' then true else false end);`,
+        /policy none_arm on public\.open_none: the principal CASE has an arm for 'NONE', which is not a principal type/,
+      ],
+      [
+        'a scope probe policy without the staff guard',
+        `create table public.probe_open (id uuid); alter table public.probe_open owner to ${OWNER_ROLE};
+         alter table public.probe_open enable row level security; alter table public.probe_open force row level security;
+         create policy probe_any on public.probe_open for select using (id = melarc.scope_probe_id());`,
+        /policy probe_any on public\.probe_open: is not a supported policy expression/,
+      ],
+      [
+        'a scope probe policy whose guard admits every type but one',
+        `create table public.probe_not (id uuid); alter table public.probe_not owner to ${OWNER_ROLE};
+         alter table public.probe_not enable row level security; alter table public.probe_not force row level security;
+         create policy probe_not_vendor on public.probe_not for select
+           using (melarc.principal_type() <> 'VENDOR' and id = melarc.scope_probe_id());`,
+        /policy probe_not_vendor on public\.probe_not: is not a supported policy expression/,
+      ],
     ];
 
     it.each(cases)('%s', async (_label, statement, expected) => {
@@ -374,7 +436,7 @@ describe('the catalogue invariants', () => {
   });
 
   // Break caught: the check refusing the shape the design prescribes. The fixture policies of the SecurityContext v2
-  // tests, which carry SYSTEM arms that each name one capability and a STAFF branch with the probe disjunct, pass.
+  // tests pass: the principal CASE with SYSTEM arms that each name one capability, and the scope probe policy FOR SELECT.
   it('accept the SYSTEM arms of the context fixture, read as pg_get_expr prints them', async () => {
     // The fixture is written as a migration would be, and the lint reads it the same way: the probe policy is FOR SELECT.
     expect(lintMigrationSql(FIXTURE_SQL)).toEqual([]);
@@ -408,7 +470,7 @@ describe('the catalogue invariants', () => {
         'ALTER TABLE public."widgets" OWNER TO melarc_owner;',
         'ALTER TABLE public."widgets" ENABLE ROW LEVEL SECURITY;',
         'ALTER TABLE public."widgets" FORCE ROW LEVEL SECURITY;',
-        'CREATE POLICY widgets_by_hub ON public."widgets" USING (hub_id = ANY (melarc.authorized_hub_ids()));',
+        'CREATE POLICY widgets_by_hub ON public."widgets" USING (CASE melarc.principal_type() WHEN \'STAFF\' THEN hub_id = ANY (melarc.authorized_hub_ids()) ELSE false END);',
         'GRANT SELECT, INSERT, UPDATE ON public."widgets" TO melarc_api_runtime;',
       ].join(`\n--> statement-breakpoint\n`);
       writeFileSync(join(folder, '0002_widgets.sql'), sqlText);

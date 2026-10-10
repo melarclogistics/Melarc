@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CapturedLogs } from '../../test-support/captured-logs.js';
+import { FakeConnection, commandTagOf, testRuntime } from '../../test-support/fake-pg.js';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DatabaseService } from './database.service.js';
@@ -27,12 +28,27 @@ const SAFE_ROLE = {
   ...Object.fromEntries(POSTURE_FLAGS.map((flag) => [flag, false])),
 };
 
+/** The readiness probe takes a connection from the pool: this makes that connection answer with `answer`, or fail with it. */
+function posture(pool: FakePool, answer: unknown) {
+  const connection = new FakeConnection();
+  if (answer instanceof Error) connection.query.mockRejectedValue(answer);
+  else connection.query.mockResolvedValue(answer);
+  pool.connect.mockResolvedValue(connection);
+  return connection;
+}
+
 function build() {
   const pool = new FakePool();
   const logs = new CapturedLogs();
   const shutdown = new ShutdownRegistry();
   const readiness = new ReadinessRegistry();
-  const service = new DatabaseService(pool as unknown as Pool, logs.logger, shutdown, readiness);
+  const service = new DatabaseService(
+    pool as unknown as Pool,
+    logs.logger,
+    shutdown,
+    readiness,
+    testRuntime(),
+  );
   return { pool, logs, shutdown, readiness, service };
 }
 
@@ -107,16 +123,17 @@ describe('DatabaseService: readiness', () => {
   // Break caught: a database that is not checked at all, so the instance is "ready" while it cannot serve.
   it('registers a readiness check named database', async () => {
     const { pool, readiness } = build();
-    pool.query.mockResolvedValue({ rows: [SAFE_ROLE] });
+    const connection = posture(pool, { rows: [SAFE_ROLE] });
 
     expect(await readiness.failing()).toEqual([]);
-    expect(pool.query).toHaveBeenCalledOnce();
+    expect(connection.query).toHaveBeenCalledOnce();
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
   // Break caught: an unreachable database reported ready, or the failure escaping as an exception.
   it('is not ready when the database cannot be reached', async () => {
     const { pool, readiness } = build();
-    pool.query.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:5432'));
+    posture(pool, new Error('connect ECONNREFUSED 127.0.0.1:5432'));
 
     expect(await readiness.failing()).toEqual(['database']);
   });
@@ -149,7 +166,7 @@ describe('DatabaseService: readiness', () => {
     ],
   ])('is never ready when connected as %s', async (_label, flags, flag) => {
     const { pool, readiness, logs } = build();
-    pool.query.mockResolvedValue({ rows: [{ ...SAFE_ROLE, ...flags }] });
+    posture(pool, { rows: [{ ...SAFE_ROLE, ...flags }] });
 
     expect(await readiness.failing()).toEqual(['database']);
     expect(await readiness.failing()).toEqual(['database']);
@@ -169,7 +186,7 @@ describe('DatabaseService: readiness', () => {
     ['null', null],
   ])('is not ready when a flag is %s in what the inspection returns', async (_label, value) => {
     const { pool, readiness, logs } = build();
-    pool.query.mockResolvedValue({ rows: [{ ...SAFE_ROLE, owns_function: value }] });
+    posture(pool, { rows: [{ ...SAFE_ROLE, owns_function: value }] });
 
     expect(await readiness.failing()).toEqual(['database']);
     expect(
@@ -183,22 +200,26 @@ describe('DatabaseService: readiness', () => {
   // the login the pool connects as.
   it('inspects the connected login', async () => {
     const { pool, readiness } = build();
-    pool.query.mockResolvedValue({ rows: [SAFE_ROLE] });
+    const connection = posture(pool, { rows: [SAFE_ROLE] });
 
     await readiness.failing();
 
-    const [, values] = pool.query.mock.calls[0] as [string, unknown[]];
+    const [, values] = connection.query.mock.calls[0] as unknown as [string, unknown[]];
     expect(values[0]).toBeNull();
   });
 
   // Break caught: a query that finds no row for the connected role (it was dropped) counted as healthy.
   it('is not ready when the connected role cannot be inspected', async () => {
     const { pool, readiness } = build();
-    pool.query.mockResolvedValue({ rows: [] });
+    posture(pool, { rows: [] });
 
     expect(await readiness.failing()).toEqual(['database']);
   });
 });
+
+/** The statement that sets the security context. BEGIN also carries a `set_config` (the server's transaction bound): not this one. */
+const isContextStatement = (text: string): boolean =>
+  text.includes('set_config') && !/^begin/i.test(text);
 
 describe('DatabaseService: transactions with a security context', () => {
   // Break caught: an invalid context opening a transaction. It must be refused before any connection is
@@ -229,13 +250,14 @@ describe('DatabaseService: transactions with a security context', () => {
   /** A connection that records every statement it is sent, in order. */
   function recordingClient() {
     const statements: string[] = [];
-    const client = {
+    const client = Object.assign(new EventEmitter(), {
       query: vi.fn((query: string | { text: string }) => {
         statements.push(typeof query === 'string' ? query : query.text);
-        return Promise.resolve({ rows: [], rowCount: 0, fields: [] });
+        const text = typeof query === 'string' ? query : query.text;
+        return Promise.resolve({ rows: [], rowCount: 0, fields: [], command: commandTagOf(text) });
       }),
       release: vi.fn(),
-    };
+    });
     return { client, statements };
   }
 
@@ -253,7 +275,7 @@ describe('DatabaseService: transactions with a security context', () => {
     });
 
     const began = statements.findIndex((text) => /^begin/i.test(text));
-    const context = statements.findIndex((text) => text.includes('set_config'));
+    const context = statements.findIndex(isContextStatement);
     const work = statements.findIndex((text) => text.includes('as work'));
     expect(began).toBeGreaterThanOrEqual(0);
     expect(context).toBeGreaterThan(began);
@@ -273,7 +295,7 @@ describe('DatabaseService: transactions with a security context', () => {
 
     await service.transactionWithContext(STAFF, () => Promise.resolve());
 
-    const context = statements.find((text) => text.includes('set_config')) ?? '';
+    const context = statements.find(isContextStatement) ?? '';
     for (const value of [PRINCIPAL, HUB, 'STAFF', 'OPS_PORTAL', 'unit-test']) {
       expect(context).not.toContain(value);
     }

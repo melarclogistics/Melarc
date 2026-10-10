@@ -34,6 +34,7 @@ import {
   VENDOR_1,
   vendorContext,
 } from './support/rls-fixture.js';
+import { databaseRuntime } from './support/runtime.js';
 import {
   createTestDatabase,
   scalar,
@@ -64,6 +65,7 @@ beforeAll(async () => {
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
+    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1),
   );
 });
 
@@ -370,6 +372,7 @@ describe('two requests at the same time', () => {
       new CapturedLogs().logger,
       new ShutdownRegistry(),
       new ReadinessRegistry(),
+      databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 2),
     );
     try {
       let arrived = 0;

@@ -106,9 +106,18 @@ describe('the invariants the matrix keeps (SECURITY_DESIGN.md §14.1, §14.17b; 
     expect(deleters).toEqual(['rate_limit:RateLimitAdmission']);
   });
 
-  // Break caught: seed gaining a way to change what it seeded. It inserts into an empty set and refuses otherwise.
-  it('lets seed insert and nothing else', () => {
-    for (const entry of CAPABILITY_ACCESS.seed.tables) expect(entry.statements).toEqual(['INSERT']);
+  // Break caught: seed gaining a way to change or to read what it seeded. It inserts into an empty set and refuses otherwise; the
+  // count that decides is made inside the database function (migration 0005) and the identity itself reads nothing, so every table
+  // of the capability is insert only, and the restriction says by what.
+  it('lets seed insert and nothing else, the seven reference tables by the initialization function only', () => {
+    for (const entry of CAPABILITY_ACCESS.seed.tables) {
+      expect(entry.statements, entry.table).toEqual(['INSERT']);
+      if (entry.table !== 'RiderIdentity') {
+        expect(entry.restriction, entry.table).toMatch(/melarc\.initialize_reference_data/);
+        expect(entry.restriction, entry.table).toMatch(/holds no privilege/);
+      }
+    }
+    expect(CAPABILITY_ACCESS.seed.lookups).toMatch(/^No lookup: the identity holds no privilege/);
   });
 
   // Break caught: the authentication capability reaching a business table (GBT-E5). Its tables are the identity,

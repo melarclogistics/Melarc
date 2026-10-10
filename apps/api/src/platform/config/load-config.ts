@@ -46,6 +46,15 @@ export interface DatabaseDeadlines {
   readonly maxWaiters: number;
 }
 
+/**
+ * The per-request execution budget (plan section 11.8): the longest one request may run once it has been received and admitted,
+ * database work and everything else included. The database layer consumes it now; S0.20 wraps every request in one. It is not
+ * an HTTP receipt limit (those end a slow sender) and not a database timeout (those bound waiting inside the database).
+ */
+export interface ExecutionConfig {
+  readonly requestBudgetMs: number;
+}
+
 export interface DatabaseConfig {
   /** Connects as the runtime identity. Carries the password, so it is never logged or echoed. */
   readonly url: string;
@@ -112,6 +121,7 @@ export interface AppConfig {
   readonly http: HttpConfig;
   readonly logLevel: (typeof LOG_LEVELS)[number];
   readonly shutdown: { readonly timeoutMs: number; readonly drainDelayMs: number };
+  readonly execution: ExecutionConfig;
   readonly origins: OriginsConfig;
   /** Where setup and recovery links point, derived from the origins. */
   readonly links: LinkTemplates;
@@ -150,12 +160,15 @@ export const CONFIG_KEYS: readonly string[] = KEYS;
 
 /**
  * Variables that must not be present at all. The migration identity exists for the deployment window
- * only (MIGRATION_AND_SEEDING.md §5.1) and is never a runtime identity (SECURITY_DESIGN.md §14.17a), so
- * an API environment that carries its connection is refused, whether or not anything would use it.
+ * only (MIGRATION_AND_SEEDING.md §5.1) and is never a runtime identity (SECURITY_DESIGN.md §14.17a), and the provisioning
+ * identity that runs the seed is "a login outside the API's and every worker's configuration" (§14.17), so an API
+ * environment that carries either connection is refused, whether or not anything would use it.
  */
 const FORBIDDEN_KEYS = {
   DATABASE_MIGRATION_URL:
     'absent: migration credentials must never be present in the API environment',
+  DATABASE_SEED_URL:
+    'absent: provisioning credentials must never be present in the API environment',
 } as const;
 
 const envSchema = z.object(envShape);
@@ -411,6 +424,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
       timeoutMs: values.SHUTDOWN_TIMEOUT_MS,
       drainDelayMs: values.SHUTDOWN_DRAIN_DELAY_MS,
     }),
+    execution: Object.freeze({ requestBudgetMs: values.REQUEST_EXECUTION_BUDGET_MS }),
     origins,
     links: Object.freeze({
       ops: Object.freeze(links.ops),

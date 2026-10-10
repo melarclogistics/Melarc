@@ -52,11 +52,26 @@ export async function startTestApp(
         ...(options.contractSource === undefined ? {} : { contractSource: options.contractSource }),
       }),
   });
-  if (options.allowUnsoundRoutes === true) {
-    await app.listen(0, '127.0.0.1');
-    app.get(LifecycleService).markReady();
-  } else {
-    await listenAndMarkReady(app, { host: '127.0.0.1', port: 0 });
+  try {
+    if (options.allowUnsoundRoutes === true) {
+      await app.listen(0, '127.0.0.1');
+      app.get(LifecycleService).markReady();
+    } else {
+      await listenAndMarkReady(app, { host: '127.0.0.1', port: 0 });
+    }
+  } catch (failure) {
+    // It did not finish starting (a route was refused, the listener could not open): what it built is closed before the failure is
+    // reported, so a refusal a test expects does not leave an application running behind it.
+    try {
+      await app.close();
+    } catch (closing) {
+      throw new AggregateError(
+        [failure, closing],
+        'The application failed to start, and closing it failed too',
+        { cause: closing },
+      );
+    }
+    throw failure;
   }
   const { port } = app.getHttpServer().address() as AddressInfo;
   let stopped = false;

@@ -57,6 +57,7 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: /^\d{1,6}$/,
   DATABASE_TRANSACTION_TIMEOUT_MS: /^\d{1,6}$/,
   DATABASE_POOL_MAX_WAITERS: /^\d{1,5}$/,
+  REQUEST_EXECUTION_BUDGET_MS: /^\d{1,6}$/,
   RATE_LIMITER: /^(postgres|memory)$/,
   KEY_CUSTODY: /^local$/,
   // A key is only ever the placeholder in a tracked file: `setup:env` writes the real one into the untracked .env.

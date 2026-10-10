@@ -96,6 +96,13 @@ describe('the database module', () => {
         password: 'URL-PASSWORD-VALUE',
         max: 2,
       });
+      // Every connection starts with the server's time bounds (S0.6), and takes at most the acquire timeout to be made.
+      expect(pool.options).toMatchObject({
+        statement_timeout: INERT_DEADLINES.statementTimeoutMs,
+        lock_timeout: INERT_DEADLINES.lockTimeoutMs,
+        idle_in_transaction_session_timeout: INERT_DEADLINES.idleInTransactionTimeoutMs,
+        connectionTimeoutMillis: INERT_DEADLINES.acquireTimeoutMs,
+      });
       expect(pool.options).not.toHaveProperty('connectionString');
     } finally {
       await pool.end();

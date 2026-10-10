@@ -5,6 +5,10 @@ import { isTaskCapability, type TaskCapability } from './task-capabilities.js';
  * from transaction-local settings named `melarc.*`; this file is the one place that decides what may be
  * written to them. Only validated values are ever turned into a setting (§14.1b).
  *
+ * These settings are the transaction's configuration, not data, so they may precede the policy locks of SECURITY_DESIGN.md §13.10a:
+ * `DatabaseService` marks the point where the context has been applied, and `acquirePolicyLocks` (policy-lock/) takes the locks as
+ * the first thing after it and refuses any other statement before it (S0.7).
+ *
  * `melarc.scope_probe_id` is deliberately not a field here: it is set by `existingRecordHub` (scope-probe.ts) and by
  * nothing else, so a context that carries one is refused.
  */

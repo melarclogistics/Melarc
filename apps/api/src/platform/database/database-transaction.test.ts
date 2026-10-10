@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CapturedLogs } from '../../test-support/captured-logs.js';
+import { FakeConnection, serverError, testRuntime } from '../../test-support/fake-pg.js';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DatabaseService, type DatabaseTransaction } from './database.service.js';
@@ -24,6 +25,7 @@ function build() {
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
+    testRuntime(),
   );
   return { pool, service };
 }
@@ -42,19 +44,10 @@ const STAFF: SecurityContext = {
  * context also reports the role the connection runs as, which is `role` (none, when it is left out).
  */
 function connection(fail?: { match: RegExp; error: Error }, role?: string) {
-  const statements: string[] = [];
-  return {
-    statements,
-    query: vi.fn((query: string | { text: string }) => {
-      const text = typeof query === 'string' ? query : query.text;
-      statements.push(text);
-      if (fail?.match.test(text) === true) return Promise.reject(fail.error);
-      const rows =
-        role !== undefined && text.includes('set_config') ? [{ database_role: role }] : [];
-      return Promise.resolve({ rows, rowCount: rows.length, fields: [] });
-    }),
-    release: vi.fn(),
-  };
+  return new FakeConnection({
+    ...(fail === undefined ? {} : { fail }),
+    ...(role === undefined ? {} : { role }),
+  });
 }
 
 /** drizzle wraps what a connection throws in its own error, with the connection's error as the cause. */
@@ -170,7 +163,9 @@ describe('DatabaseService: a SYSTEM capability is opened over its own identity o
 
     await service.transactionWithContext(SYSTEM_AUTHENTICATION, () => Promise.resolve());
 
-    const setting = client.statements.filter((text) => text.includes('set_config'));
+    const setting = client.statements.filter(
+      (text) => text.includes('set_config') && !/^begin/i.test(text),
+    );
     expect(setting).toHaveLength(1);
     expect(setting[0]).toMatch(/current_user/);
   });
@@ -213,15 +208,18 @@ describe('DatabaseService: the transaction owns its connection', () => {
   // goes back to the pool.
   it('rolls back and reports the failure when the commit fails', async () => {
     const { pool, service } = build();
-    const client = connection({ match: /^commit/i, error: new Error('could not serialize') });
+    const refusal = serverError('40001', 'could not serialize access');
+    const client = connection({ match: /^commit/i, error: refusal });
     pool.connect.mockResolvedValue(client);
 
-    await expect(
-      service.transactionWithContext(STAFF, () => Promise.resolve('done')),
-    ).rejects.toThrow('could not serialize');
+    await expect(service.transactionWithContext(STAFF, () => Promise.resolve('done'))).rejects.toBe(
+      refusal,
+    );
 
     expect(client.statements.at(-1)).toMatch(/^rollback/i);
     expect(client.release).toHaveBeenCalledOnce();
+    // A connection that failed to commit is not put back in the pool.
+    expect(client.release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
   });
 
   it('gives the connection back, healthy, when everything went well', async () => {
@@ -269,6 +267,60 @@ describe('DatabaseService: the transaction owns its connection', () => {
       .catch(() => undefined);
 
     await expectEnded(kept?.execute(sql`select 1`));
+  });
+
+  // Break caught: the transaction object staying usable while the failed transaction is being rolled back (up to the disposal bound
+  // of a second connection that does not answer). A statement a floating continuation sends then queues behind the rollback and runs
+  // with no transaction and no context on a connection that, if the rollback worked, goes back to the pool: a `set_config` of the
+  // session would stay on it.
+  it('refuses a statement sent while a failed transaction is being rolled back', async () => {
+    const { pool, service } = build();
+    const client = connection();
+    client.hang(/^rollback$/);
+    pool.connect.mockResolvedValue(client);
+    let kept: DatabaseTransaction | undefined;
+
+    const running = service
+      .transactionWithContext(STAFF, (tx) => {
+        kept = tx;
+        return Promise.reject(new Error('work failed'));
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() => {
+      expect(client.pending.some((each) => each.text === 'rollback')).toBe(true);
+    });
+    const statementsDuringTheRollback = client.statements.length;
+
+    await expectEnded(kept?.execute(sql`select set_config('session.leak', 'x', false)`));
+
+    expect(client.statements).toHaveLength(statementsDuringTheRollback);
+    client.resolvePending();
+    expect(await running).toMatchObject({ message: 'work failed' });
+  });
+
+  // Break caught: the same window on the way to a commit. The work has returned and COMMIT is in flight; a statement sent now
+  // would queue behind it and run in autocommit on the connection, outside the transaction the work was given.
+  it('refuses a statement sent while the commit is in flight', async () => {
+    const { pool, service } = build();
+    const client = connection();
+    client.hang(/^commit$/);
+    pool.connect.mockResolvedValue(client);
+    let kept: DatabaseTransaction | undefined;
+
+    const running = service.transactionWithContext(STAFF, (tx) => {
+      kept = tx;
+      return Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(client.pending.some((each) => each.text === 'commit')).toBe(true);
+    });
+    const statementsDuringTheCommit = client.statements.length;
+
+    await expectEnded(kept?.execute(sql`select set_config('session.leak', 'x', false)`));
+
+    expect(client.statements).toHaveLength(statementsDuringTheCommit);
+    client.resolvePending();
+    await running;
   });
 
   // Break caught: a transaction opened inside another, which takes a second connection while the first is still

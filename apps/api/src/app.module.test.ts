@@ -4,6 +4,7 @@ import { Global, Inject, Injectable, Module, Scope, type ModuleMetadata } from '
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from './app.module.js';
+import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import { DescribeAdapterBoundError } from './platform/auth/describe/describe-adapter.js';
 import { PortBindingError } from './platform/auth/describe/port-binding-check.js';
 import { DescribeAdapterInvokedError } from './platform/auth/describe/describe-adapter-error.js';
@@ -164,15 +165,37 @@ const resolve = <T>(token: symbol | (new (...parameters: never[]) => T)): T => {
 };
 
 describe('the composition root binds adapters to the port tokens (S0.1)', () => {
-  // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application.
-  it('binds no port in the runtime composition while no real adapter exists', async () => {
+  // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application. The
+  // runtime composition binds the production Clock (S0.6, which needs it for its deadlines) and nothing else: each other port is
+  // bound by the first task that consumes it (OB-38). This pin changed deliberately at S0.6.
+  it('binds only the production Clock in the runtime composition while no other real adapter is bound', async () => {
     running = await startTestApp({ config: RUNTIME_CONFIG });
 
-    for (const entry of PORTS) {
+    for (const entry of PORTS.filter((port) => port.name !== 'Clock')) {
       expect(() => resolve(entry.token), entry.name).toThrow();
     }
+    const clock = resolve<Clock>(CLOCK);
+    expect(clock).toBeInstanceOf(SystemClock);
+    expect(Number.isFinite(clock.monotonicMilliseconds())).toBe(true);
+    expect(Math.abs(clock.now().getTime() - Date.now())).toBeLessThan(5_000);
     expect(portProviders()).toEqual([]);
     expect(portProviders({})).toEqual([]);
+  });
+
+  // Break caught: the production Clock reaching the describe composition, where every port must stay inert so that building the
+  // application to describe it reads no time and does no work.
+  it('keeps the describe Clock in the describe composition', async () => {
+    running = await startTestApp();
+
+    expect(resolve<Clock>(CLOCK)).toBeInstanceOf(DescribeClock);
+  });
+
+  // Break caught: the binding being a transient or a request-scoped one: it is the application's one clock, shared by every
+  // deadline, and the container's own record says so.
+  it('binds the production Clock as an application singleton', async () => {
+    running = await startTestApp({ config: RUNTIME_CONFIG });
+
+    expect(resolve<Clock>(CLOCK)).toBe(resolve<Clock>(CLOCK));
   });
 
   // The exit condition of S0.2: the default test application resolves every port.
@@ -312,12 +335,13 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     expect(module.imports).toHaveLength(1);
   });
 
-  it('exports nothing and provides nothing in the runtime composition while no port is bound', () => {
+  // Changed deliberately at S0.6: the runtime composition binds the production Clock itself, and exports that one token.
+  it('exports the Clock token and nothing else in the runtime composition', () => {
     const module = AppModule.register(runtime);
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([]);
-    expect(module.providers).toEqual([]);
+    expect(module.exports).toEqual([CLOCK]);
+    expect(module.providers).toHaveLength(2);
   });
 
   // Break caught: the describe composition exporting more than the sixteen tokens, or fewer.

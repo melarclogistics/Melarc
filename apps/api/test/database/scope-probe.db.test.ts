@@ -34,6 +34,7 @@ import {
   vendorContext,
   VENDOR_1,
 } from './support/rls-fixture.js';
+import { databaseRuntime } from './support/runtime.js';
 import {
   clientFor,
   createTestDatabase,
@@ -67,6 +68,7 @@ beforeAll(async () => {
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
+    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1),
   );
 });
 

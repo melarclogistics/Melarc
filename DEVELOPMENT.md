@@ -91,6 +91,18 @@ so they need no setting of their own. `db:migrate` applies the migrations in `ap
 identity. Both are safe to repeat; run `db:bootstrap` before `db:migrate` after updating, because a migration grants to
 the roles it names.
 
+```text
+pnpm --filter @melarc/api run db:seed
+```
+
+`db:seed` fills the migrated, empty `melarc_dev` with the reference data (the permission catalogue, the confirmed role
+bundles and their grants, the two fixed Vendor and Rider policies, the settings with an approved value, the hub and the
+twelve identity reasons) as the provisioning login, in one transaction, by a database function that only that login may run
+(the login holds no privilege on those tables, so nothing else of it can add to them). The database, not the command, refuses
+to run it twice: it refuses a database that already holds any of it, and changes nothing. `db:seed --fixtures` adds the test-only fixtures and refuses in production.
+For another database set `DATABASE_SEED_URL` (the provisioning login) and `APP_ENV`; the API refuses to start with either
+`DATABASE_SEED_URL` or `DATABASE_MIGRATION_URL` in its environment. `db:reset` (section 8) returns the database to migrated and empty, which allows a new seed.
+
 ## 5. Run the applications
 
 In two terminals:

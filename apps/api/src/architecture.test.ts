@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import { PORTS } from './platform/auth/ports/index.js';
 import { CAPABILITY_ACCESS } from './platform/database/capability-access.js';
+import { findAdvisoryLockViolations } from './test-support/advisory-locks.js';
+import { findOwnClockViolations } from './test-support/budget-time.js';
 import {
   findCapabilityOpenerViolations,
   findDatabaseDoorViolations,
@@ -54,10 +56,12 @@ const PORT_NAMES = [
 /**
  * The files in `platform/` allowed to implement a port, each added by the task that builds that adapter. S0.1 added none. S0.2
  * added the one file of inert describe adapters, which `adapterRefusals` keeps out of any environment but a local run. S0.3 adds
- * the four cryptographic adapters (`Hasher`, `SecretCipher`, `TokenService`, `TotpVerifier`), one file each. The next adapter, a
- * real one, is added here by the task that builds it, and a review sees the line.
+ * the four cryptographic adapters (`Hasher`, `SecretCipher`, `TokenService`, `TotpVerifier`), one file each. S0.6 adds the
+ * production `Clock`, the first adapter the composition root binds itself. The next adapter, a real one, is added here by the
+ * task that builds it, and a review sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
+  'platform/auth/clock/system.clock.adapter.ts',
   'platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts',
   'platform/auth/crypto/argon2.hasher.adapter.ts',
   'platform/auth/crypto/rfc6238.totp-verifier.adapter.ts',
@@ -67,6 +71,7 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
 
 /** The port each real adapter above implements, so that a test can say what the checker must see in each file. */
 const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
+  ['platform/auth/clock/system.clock.adapter.ts', 'Clock'],
   ['platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts', 'SecretCipher'],
   ['platform/auth/crypto/argon2.hasher.adapter.ts', 'Hasher'],
   ['platform/auth/crypto/rfc6238.totp-verifier.adapter.ts', 'TotpVerifier'],
@@ -79,7 +84,7 @@ const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
  * list, not a pattern. A file is not the composition root for being a module; a task that adds an adapter lists the one module
  * file that provides it here, so every widening of this list is a reviewed line of this file.
  */
-const COMPOSITION_ROOT: readonly string[] = ['app.module.ts'];
+const COMPOSITION_ROOT: readonly string[] = ['app.module.ts', 'tools/seed/seed-runtime.ts'];
 
 /**
  * The only operations described as `independent`: safe local work, in process, with no database connection, no I/O and no lock.
@@ -595,8 +600,9 @@ describe('the ports of platform/auth (S0.1)', () => {
     const IMPORT =
       "import { Argon2Hasher } from './crypto/argon2.hasher.adapter.js';\nexport const x = Argon2Hasher;";
 
-    it('names the composition root explicitly, and it is the application module alone', () => {
-      expect(COMPOSITION_ROOT).toEqual(['app.module.ts']);
+    // S0.9 added the second: the `db:seed` process binds the production clock for the seed's database service, in a file of its own.
+    it('names the composition root explicitly: the application module and the seed process wiring', () => {
+      expect(COMPOSITION_ROOT).toEqual(['app.module.ts', 'tools/seed/seed-runtime.ts']);
     });
 
     it.each([
@@ -1110,6 +1116,143 @@ describe('the database door (S0.4)', () => {
 
       expect(entry).not.toMatch(/\.\$client|\.db\b|DatabaseService/);
       expect(entry).toMatch(/createPool\(/);
+    });
+  });
+
+  describe('elapsed time is read from the Clock and from nothing else (S0.6)', () => {
+    // Break caught: a budget, a wait or a deadline measured on the wall clock (which a correction can move by hours) or on a
+    // clock a test cannot control. The monotonic reading of the injected Clock is the only elapsed time there.
+    it.each([
+      ['Date.now()', 'const started = Date.now();'],
+      ['performance.now()', 'const started = performance.now();'],
+      ['new Date()', 'const started = new Date();'],
+      ['Date.now (spaced)', 'const started = Date.now ( );'],
+    ])('refuses %s in the database layer and the budget', (_label, text) => {
+      expect(findOwnClockViolations([file('platform/database/x.ts', text)])).toHaveLength(1);
+      expect(findOwnClockViolations([file('platform/execution/x.ts', text)])).toHaveLength(1);
+    });
+
+    it('names the file and what it read', () => {
+      expect(
+        findOwnClockViolations([
+          file('platform/execution/execution-budget.ts', 'const t = Date.now();'),
+        ]),
+      ).toEqual([
+        "platform/execution/execution-budget.ts reads the clock itself (Date.now()); elapsed time here is the injected Clock's monotonic reading",
+      ]);
+    });
+
+    it('accepts the Clock, timers, comments that name a clock, tests and the adapter that is the clock', () => {
+      expect(
+        findOwnClockViolations([
+          file('platform/execution/a.ts', 'const t = clock.monotonicMilliseconds();'),
+          file('platform/database/b.ts', 'const timer = setTimeout(() => undefined, 5);'),
+          file(
+            'platform/database/c.ts',
+            ['// not performance.now()', '/* nor Date.now() */', 'const x = 1;'].join('\n'),
+          ),
+          file('platform/database/d.test.ts', 'const t = Date.now();'),
+          file('test-support/e.ts', 'const t = new Date();'),
+          file('platform/auth/clock/system.clock.adapter.ts', 'return performance.now();'),
+          file('platform/lifecycle/shutdown.registry.ts', 'const t = performance.now();'),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findOwnClockViolations(sourceFiles())).toEqual([]);
+    });
+  });
+
+  describe('advisory locks are transaction-scoped and live in policy-lock/ (S0.7)', () => {
+    const file = (path: string, text: string): SourceFile => ({ path, text });
+
+    // Break caught: a session-level advisory lock in application code. On a pooled connection it outlives the transaction and
+    // the request, and the next request that reuses the connection holds a lock it never took (SECURITY_DESIGN.md §13.10a).
+    it.each([
+      ['pg_advisory_lock', 'await tx.execute(sql`select pg_advisory_lock(1, 2)`);'],
+      ['pg_advisory_lock_shared', 'sql`select pg_advisory_lock_shared(1, 2)`'],
+      ['pg_advisory_unlock', 'sql`select pg_advisory_unlock(1, 2)`'],
+      ['pg_advisory_unlock_all', 'sql`select pg_advisory_unlock_all()`'],
+      ['pg_advisory_unlock_shared', 'sql`select pg_advisory_unlock_shared(1, 2)`'],
+    ])('refuses %s in application code', (_name, text) => {
+      expect(findAdvisoryLockViolations([file('platform/auth/x.ts', text)])).toHaveLength(1);
+      expect(findAdvisoryLockViolations([file('staff/x.ts', text)])).toHaveLength(1);
+      expect(
+        findAdvisoryLockViolations([file('platform/database/policy-lock/x.ts', text)]),
+      ).toHaveLength(1);
+    });
+
+    // Break caught: a `pg_try_` call, which returns false instead of waiting. In a loop with no bound it spins on the database;
+    // a bounded use is added to the allow-list with its bound.
+    it.each([
+      ['pg_try_advisory_lock', 'sql`select pg_try_advisory_lock(1, 2)`'],
+      ['pg_try_advisory_xact_lock', 'sql`select pg_try_advisory_xact_lock(1, 2)`'],
+      ['pg_try_advisory_xact_lock_shared', 'sql`select pg_try_advisory_xact_lock_shared(1, 2)`'],
+    ])('refuses %s anywhere in application code', (_name, text) => {
+      expect(
+        findAdvisoryLockViolations([file('platform/database/policy-lock/x.ts', text)]),
+      ).toHaveLength(1);
+      expect(findAdvisoryLockViolations([file('staff/x.ts', text)])).toHaveLength(1);
+    });
+
+    // Break caught: a second use of advisory locks, with a class of its own in the code that uses it, where the test that no two
+    // classes share a value cannot see it. Every use goes through policy-lock/ (or an allow-listed file).
+    it.each([
+      ['pg_advisory_xact_lock', 'sql`select pg_advisory_xact_lock(1, 2)`'],
+      ['pg_advisory_xact_lock_shared', 'sql`select pg_advisory_xact_lock_shared(1, 2)`'],
+    ])('refuses %s outside platform/database/policy-lock/', (_name, text) => {
+      expect(findAdvisoryLockViolations([file('staff/staff.repository.ts', text)])).toEqual([
+        'staff/staff.repository.ts calls an advisory lock function; advisory locks live in platform/database/policy-lock/ and take a class from lock-keys.ts',
+      ]);
+    });
+
+    // Break caught: a tool taking a class of its own for a transaction-scoped lock, where the test of the classes cannot see it.
+    it('refuses the transaction-scoped functions and try-locks in a command-line tool', () => {
+      expect(
+        findAdvisoryLockViolations([
+          file('tools/database/x.ts', "client.query('select pg_advisory_xact_lock(1, 2)')"),
+        ]),
+      ).toHaveLength(1);
+      expect(
+        findAdvisoryLockViolations([
+          file('tools/database/x.ts', "client.query('select pg_try_advisory_lock(1)')"),
+        ]),
+      ).toHaveLength(1);
+    });
+
+    it('accepts the transaction-scoped functions in policy-lock/, the session-level ones in the command-line tools, tests and test support', () => {
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'platform/database/policy-lock/acquire.ts',
+            'sql`select pg_advisory_xact_lock_shared(1, 2)`',
+          ),
+          // A tool owns the one connection it locks on; the session-level functions are right there.
+          file('tools/database/run-migrations.ts', "client.query('select pg_advisory_lock(1)')"),
+          file('staff/x.test.ts', 'sql`select pg_advisory_lock(1, 2)`'),
+          file('test-support/x.ts', 'sql`select pg_try_advisory_lock(1, 2)`'),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('ignores a comment that names a function', () => {
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'staff/x.ts',
+            [
+              '// pg_advisory_lock is forbidden here',
+              '/* nor pg_try_advisory_lock */',
+              'const x = 1;',
+            ].join('\n'),
+          ),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findAdvisoryLockViolations(sourceFiles())).toEqual([]);
     });
   });
 });

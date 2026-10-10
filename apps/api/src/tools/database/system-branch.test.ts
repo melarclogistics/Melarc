@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { policyClauseProblems, systemBranchProblems } from './system-branch.js';
+import { policyClauseProblems, policyExpressionProblems, policyProblems } from './system-branch.js';
+
+/** The expression of a USING clause of an ordinary policy (one for ALL), as the reader judges it. */
+const systemBranchProblems = (expression: string): string[] =>
+  policyExpressionProblems(expression, { command: 'all', clause: 'using' });
 
 /** Expressions as `pg_get_expr` prints them, and as a migration spells them: both must be read the same way. */
 describe('systemBranchProblems: a SYSTEM branch that names exactly one capability (GBT-E7)', () => {
@@ -31,10 +35,9 @@ describe('systemBranchProblems: a SYSTEM branch that names exactly one capabilit
       `CASE melarc.principal_type() WHEN 'SYSTEM' THEN responsible_hub_id = melarc.outbox_hub_id() AND melarc.outbox_task_permits('order') ELSE false END`,
     ],
     [
-      'an expression with no SYSTEM in it',
+      'a principal CASE with no SYSTEM in it',
       `CASE melarc.principal_type() WHEN 'STAFF' THEN true ELSE false END`,
     ],
-    ['an empty expression', ''],
   ])('accepts %s', (_label, expression) => {
     expect(systemBranchProblems(expression)).toEqual([]);
   });
@@ -425,6 +428,254 @@ describe('systemBranchProblems: nothing inside a disjunction is mandatory', () =
   });
 });
 
+/**
+ * An expression that is not the principal CASE is refused, whether or not it names SYSTEM (correction F03). The reader used to
+ * pass any expression that did not name SYSTEM as "not a SYSTEM branch", and each of the first three below admits a SYSTEM
+ * context (and every other principal but the one it excludes) without a capability test. Ordinary policies are the one CASE on
+ * the principal type of SECURITY_DESIGN.md §14.4; the only other expression accepted is the named exception below.
+ */
+describe('policyExpressionProblems: an expression that is not the principal CASE is refused (F03)', () => {
+  // Break caught: the reproduction of F03. Each of these named no SYSTEM, so the reader said nothing; each admits a SYSTEM context.
+  it.each([
+    ['a literal true', 'true'],
+    ['a literal true in parentheses', '(true)'],
+    ['an inequality on the principal type', `melarc.principal_type() <> 'VENDOR'`],
+    ['an inequality as pg_get_expr prints it', `(melarc.principal_type() <> 'VENDOR'::text)`],
+    ['NOT IN a list', `melarc.principal_type() NOT IN ('VENDOR', 'RIDER')`],
+    [
+      'NOT IN as pg_get_expr prints it',
+      `(melarc.principal_type() <> ALL (ARRAY['VENDOR'::text, 'RIDER'::text]))`,
+    ],
+    ['a negated equality', `NOT (melarc.principal_type() = 'VENDOR')`],
+    ['a hub test with no principal type in it', `hub_id = ANY (melarc.authorized_hub_ids())`],
+    ['a call on its own', `to_regclass('x') IS NULL`],
+    ['a column test', 'id IS NOT NULL'],
+    ['a literal false', 'false'],
+    ['an empty expression', ''],
+    [
+      'a searched CASE, which is not the CASE on the accessor',
+      `CASE WHEN melarc.principal_type() = 'STAFF' THEN true ELSE false END`,
+    ],
+    ['a CASE on another call', `CASE melarc.surface() WHEN 'OPS_PORTAL' THEN true ELSE false END`],
+    [
+      'the principal CASE ORed with true, which names no SYSTEM',
+      `(CASE melarc.principal_type() WHEN 'STAFF' THEN a ELSE false END) OR true`,
+    ],
+    [
+      'the principal CASE ANDed with another condition',
+      `(CASE melarc.principal_type() WHEN 'STAFF' THEN a ELSE false END) AND b`,
+    ],
+    [
+      'a NOT around the principal CASE',
+      `NOT (CASE melarc.principal_type() WHEN 'STAFF' THEN a ELSE false END)`,
+    ],
+    [
+      'two principal CASEs joined by AND',
+      `(CASE melarc.principal_type() WHEN 'STAFF' THEN a ELSE false END) AND (CASE melarc.principal_type() WHEN 'VENDOR' THEN b ELSE false END)`,
+    ],
+    [
+      'a principal CASE with a trailing condition inside the parentheses',
+      `CASE melarc.principal_type() WHEN 'STAFF' THEN a ELSE false END = true`,
+    ],
+  ])('refuses %s', (_label, expression) => {
+    expect(systemBranchProblems(expression)).toEqual([
+      expect.stringMatching(/not a supported policy expression/),
+    ]);
+  });
+
+  // The expression that does name SYSTEM keeps the message it had: the SYSTEM literal outside an arm is the sharper finding.
+  it('still says that SYSTEM is named outside an arm, for an expression that names it', () => {
+    expect(systemBranchProblems(`melarc.principal_type() <> 'SYSTEM'`).join('\n')).toMatch(
+      /outside a WHEN arm/,
+    );
+  });
+
+  // Break caught: an arm for a "principal type" that no context carries. `NONE` is what a missing context reads as, so an arm
+  // for it admits a context that was never established.
+  it.each(['NONE', 'ADMIN', 'staff', ''])(
+    'refuses an arm for %j, which is not one of the four principal types',
+    (literal) => {
+      const expression = `CASE melarc.principal_type() WHEN '${literal}' THEN true ELSE false END`;
+      expect(systemBranchProblems(expression).join('\n')).toMatch(/not a principal type/);
+    },
+  );
+
+  // Break caught: the supported forms refused. The CASE may name any of the four types, in any order, with or without a SYSTEM
+  // arm and with or without an ELSE; a type it does not name is denied by the ELSE.
+  it.each([
+    [
+      'the three human principals and no SYSTEM arm',
+      `CASE melarc.principal_type() WHEN 'STAFF' THEN a WHEN 'VENDOR' THEN b WHEN 'RIDER' THEN c ELSE false END`,
+    ],
+    ['one arm and an ELSE', `CASE melarc.principal_type() WHEN 'RIDER' THEN c ELSE false END`],
+    ['one arm and no ELSE', `CASE melarc.principal_type() WHEN 'VENDOR' THEN b END`],
+    [
+      'all four, in another order, as pg_get_expr prints it',
+      `CASE melarc.principal_type() WHEN 'SYSTEM'::text THEN (melarc.task_capability() = 'seed'::text) WHEN 'RIDER'::text THEN false WHEN 'VENDOR'::text THEN (vendor_organization_id = melarc.current_vendor_organization_id()) WHEN 'STAFF'::text THEN ((melarc.hub_scope_mode() = 'ALL'::text) OR (responsible_hub_id = ANY (melarc.authorized_hub_ids()))) ELSE false END`,
+    ],
+    [
+      'an arm that is true for a principal',
+      `CASE melarc.principal_type() WHEN 'STAFF' THEN true END`,
+    ],
+    [
+      'the principal CASE in parentheses',
+      `((CASE melarc.principal_type() WHEN 'STAFF' THEN hub_id IS NOT NULL ELSE false END))`,
+    ],
+  ])('accepts %s', (_label, expression) => {
+    expect(systemBranchProblems(expression)).toEqual([]);
+  });
+});
+
+/**
+ * The named exception (SECURITY_DESIGN.md §14.4b): the scope probe policy, generated by the policy template, is a policy FOR
+ * SELECT whose USING is exactly the staff guard and the probe comparison. It is accepted by its own check, in that one place, and
+ * nothing else that mentions the probe is: not the probe alone, not another guard, not a policy for any other command.
+ */
+describe('policyExpressionProblems: the scope probe policy is the one named exception (F03)', () => {
+  const probe = `melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id()`;
+  const forSelect = { command: 'select', clause: 'using' } as const;
+
+  it.each([
+    ['as a migration writes it', probe],
+    [
+      'with the conjuncts the other way round',
+      `id = melarc.scope_probe_id() AND melarc.principal_type() = 'STAFF'`,
+    ],
+    [
+      'with both comparisons written the other way round',
+      `'STAFF' = melarc.principal_type() AND melarc.scope_probe_id() = id`,
+    ],
+    [
+      'as pg_get_expr prints it',
+      `((melarc.principal_type() = 'STAFF'::text) AND (id = melarc.scope_probe_id()))`,
+    ],
+    [
+      'with a qualified column',
+      `melarc.principal_type() = 'STAFF' AND orders.id = melarc.scope_probe_id()`,
+    ],
+  ])(
+    'accepts the staff-guarded probe %s in the USING of a policy FOR SELECT',
+    (_label, expression) => {
+      expect(policyExpressionProblems(expression, forSelect)).toEqual([]);
+    },
+  );
+
+  // Break caught: the exception widened into "any expression that mentions the probe", or into any expression that is a guard
+  // and something else.
+  it.each([
+    ['no guard', `id = melarc.scope_probe_id()`],
+    [
+      'a guard that excludes one type and admits the rest',
+      `melarc.principal_type() <> 'VENDOR' AND id = melarc.scope_probe_id()`,
+    ],
+    ['a guard on SYSTEM', `melarc.principal_type() = 'SYSTEM' AND id = melarc.scope_probe_id()`],
+    [
+      'a guard on a list',
+      `melarc.principal_type() IN ('STAFF', 'SYSTEM') AND id = melarc.scope_probe_id()`,
+    ],
+    [
+      'an OR instead of an AND',
+      `melarc.principal_type() = 'STAFF' OR id = melarc.scope_probe_id()`,
+    ],
+    [
+      'the whole ORed with true',
+      `(melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id()) OR true`,
+    ],
+    [
+      'a third conjunct',
+      `melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id() AND hub_id IS NOT NULL`,
+    ],
+    [
+      'a probe that compares something else',
+      `melarc.principal_type() = 'STAFF' AND id = melarc.current_principal_id()`,
+    ],
+    ['a probe compared with a literal', `melarc.principal_type() = 'STAFF' AND id = 'x'`],
+    ['a probe inequality', `melarc.principal_type() = 'STAFF' AND id <> melarc.scope_probe_id()`],
+    [
+      'a keyword where the column is',
+      `melarc.principal_type() = 'STAFF' AND true = melarc.scope_probe_id()`,
+    ],
+    ['the guard twice', `melarc.principal_type() = 'STAFF' AND melarc.principal_type() = 'STAFF'`],
+    ['only the guard', `melarc.principal_type() = 'STAFF'`],
+    [
+      'a guard on the probe call itself',
+      `melarc.scope_probe_id() = 'STAFF' AND id = melarc.scope_probe_id()`,
+    ],
+  ])('refuses %s', (_label, expression) => {
+    expect(policyExpressionProblems(expression, forSelect).join('\n')).toMatch(
+      /not a supported policy expression|outside a WHEN arm/,
+    );
+  });
+
+  // The command and the clause are part of the exception: the same text is refused anywhere else.
+  it.each([
+    ['a policy for ALL', { command: 'all', clause: 'using' }],
+    ['a policy for UPDATE', { command: 'update', clause: 'using' }],
+    ['a policy for DELETE', { command: 'delete', clause: 'using' }],
+    ['the check of a policy for INSERT', { command: 'insert', clause: 'check' }],
+    ['a policy whose command is not shown', { command: undefined, clause: 'using' }],
+    ['the WITH CHECK of a policy for SELECT', { command: 'select', clause: 'check' }],
+    ['the WITH CHECK of a policy for ALL', { command: 'all', clause: 'check' }],
+  ] as const)('does not accept the probe in %s', (_label, where) => {
+    expect(policyExpressionProblems(probe, where).join('\n')).toMatch(
+      /not a supported policy expression/,
+    );
+  });
+});
+
+/**
+ * Every clause that is present is judged, for the command it belongs to: USING for SELECT and DELETE, WITH CHECK for INSERT, both
+ * for UPDATE and ALL. A clause that is absent admits nothing (a policy with no expression for a command adds no permission), so it
+ * is not a finding.
+ */
+describe('policyProblems: each clause of a policy is judged for its command (F03)', () => {
+  const good = `CASE melarc.principal_type() WHEN 'STAFF' THEN hub_id = ANY (melarc.authorized_hub_ids()) ELSE false END`;
+  const bad = `melarc.principal_type() <> 'VENDOR'`;
+  const UNSUPPORTED = /not a supported policy expression/;
+
+  it.each(['select', 'delete', 'all', 'update'] as const)(
+    'judges the USING of a policy for %s',
+    (command) => {
+      expect(policyProblems({ command, using: good, check: null })).toEqual([]);
+      expect(policyProblems({ command, using: bad, check: null }).join('\n')).toMatch(UNSUPPORTED);
+    },
+  );
+
+  it('judges the WITH CHECK of a policy for INSERT', () => {
+    expect(policyProblems({ command: 'insert', using: null, check: good })).toEqual([]);
+    expect(policyProblems({ command: 'insert', using: null, check: bad }).join('\n')).toMatch(
+      UNSUPPORTED,
+    );
+  });
+
+  // Break caught: a policy judged by its USING alone, so that an unsafe WITH CHECK beside a safe USING (or the other way
+  // round) admits a write, or a read, that the safe clause was meant to refuse.
+  it.each(['update', 'all'] as const)(
+    'judges both clauses of a policy for %s, one at a time',
+    (command) => {
+      expect(policyProblems({ command, using: good, check: good })).toEqual([]);
+      expect(policyProblems({ command, using: good, check: bad })).toHaveLength(1);
+      expect(policyProblems({ command, using: bad, check: good })).toHaveLength(1);
+      expect(policyProblems({ command, using: bad, check: bad })).toHaveLength(2);
+    },
+  );
+
+  it('does not find a clause that is absent', () => {
+    expect(policyProblems({ command: 'select', using: null, check: null })).toEqual([]);
+    expect(policyProblems({ command: 'all', using: good, check: null })).toEqual([]);
+  });
+
+  it('applies the scope probe exception to the USING of a policy for SELECT only', () => {
+    const probe = `melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id()`;
+    expect(policyProblems({ command: 'select', using: probe, check: null })).toEqual([]);
+    for (const command of ['all', 'update', 'delete', undefined] as const) {
+      expect(policyProblems({ command, using: probe, check: null }).join('\n')).toMatch(
+        UNSUPPORTED,
+      );
+    }
+  });
+});
+
 describe('policyClauseProblems: the clauses of a CREATE POLICY statement', () => {
   const policy = (clauses: string) => `CREATE POLICY p ON melarc.orders ${clauses}`;
   const bypass = `(CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed' ELSE false END) OR true`;
@@ -433,28 +684,51 @@ describe('policyClauseProblems: the clauses of a CREATE POLICY statement', () =>
   // Break caught: the clauses of a statement being read as one expression, so that USING and WITH CHECK together look like
   // a structure that is not a single CASE, or a bypass in one is hidden by the other.
   it('judges USING and WITH CHECK each as an expression of its own', () => {
-    expect(policyClauseProblems(policy(`USING (${good}) WITH CHECK (${good})`))).toEqual([]);
+    expect(policyClauseProblems(policy(`USING (${good}) WITH CHECK (${good})`), 'all')).toEqual([]);
     expect(
-      policyClauseProblems(policy(`FOR ALL USING (${good}) WITH CHECK (${bypass})`)),
+      policyClauseProblems(policy(`FOR ALL USING (${good}) WITH CHECK (${bypass})`), 'all'),
     ).toHaveLength(1);
-    expect(policyClauseProblems(policy(`USING (${bypass}) WITH CHECK (${good})`))).toHaveLength(1);
-    expect(policyClauseProblems(policy(`USING (${bypass}) WITH CHECK (${bypass})`))).toHaveLength(
-      2,
-    );
+    expect(
+      policyClauseProblems(policy(`USING (${bypass}) WITH CHECK (${good})`), 'all'),
+    ).toHaveLength(1);
+    expect(
+      policyClauseProblems(policy(`USING (${bypass}) WITH CHECK (${bypass})`), 'all'),
+    ).toHaveLength(2);
   });
 
   it('reads the clauses of a statement with other words around them', () => {
     expect(
       policyClauseProblems(
-        policy(
-          `AS PERMISSIVE FOR UPDATE USING (hub_id = ANY (melarc.authorized_hub_ids())) WITH CHECK (${bypass})`,
-        ),
+        policy(`AS PERMISSIVE FOR UPDATE USING (${good}) WITH CHECK (${bypass})`),
+        'update',
       ),
     ).toHaveLength(1);
   });
 
   it('finds nothing in a statement with no clause, and does not read the rest of a statement as a clause', () => {
-    expect(policyClauseProblems('ALTER POLICY p ON melarc.orders RENAME TO q')).toEqual([]);
-    expect(policyClauseProblems(`${policy('USING (true)')} -- 'SYSTEM' x`)).toEqual([]);
+    expect(policyClauseProblems('ALTER POLICY p ON melarc.orders RENAME TO q', undefined)).toEqual(
+      [],
+    );
+    expect(policyClauseProblems(`${policy(`USING (${good})`)} -- 'SYSTEM' x`, 'all')).toEqual([]);
+  });
+
+  // Break caught: the unsupported expressions passing a migration. Each is a USING that names no SYSTEM.
+  it.each([
+    ['true', 'true'],
+    ['an inequality', `melarc.principal_type() <> 'VENDOR'`],
+    ['NOT IN', `melarc.principal_type() NOT IN ('VENDOR', 'RIDER')`],
+  ])('refuses %s in the USING of a CREATE POLICY, and in its WITH CHECK', (_label, expression) => {
+    expect(policyClauseProblems(policy(`USING (${expression})`), 'all')).toHaveLength(1);
+    expect(policyClauseProblems(policy(`WITH CHECK (${expression})`), 'all')).toHaveLength(1);
+    expect(
+      policyClauseProblems(policy(`USING (${expression}) WITH CHECK (${expression})`), 'all'),
+    ).toHaveLength(2);
+  });
+
+  it('accepts the probe policy FOR SELECT, and refuses its text under any other command', () => {
+    const probe = `FOR SELECT USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id())`;
+    expect(policyClauseProblems(policy(probe), 'select')).toEqual([]);
+    expect(policyClauseProblems(policy(probe), 'all')).toHaveLength(1);
+    expect(policyClauseProblems(policy(probe), undefined)).toHaveLength(1);
   });
 });

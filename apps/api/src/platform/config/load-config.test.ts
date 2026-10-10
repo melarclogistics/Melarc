@@ -55,6 +55,7 @@ describe('loadConfig: accepted environments', () => {
       DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: '3000',
       DATABASE_TRANSACTION_TIMEOUT_MS: '12000',
       DATABASE_POOL_MAX_WAITERS: '30',
+      REQUEST_EXECUTION_BUDGET_MS: '20000',
       HTTP_TRUST_PROXY: '10.0.0.0/8,192.168.1.5',
       HTTP_BODY_LIMIT_BYTES: '65536',
       HTTP_HEADER_TIMEOUT_MS: '8000',
@@ -94,6 +95,7 @@ describe('loadConfig: accepted environments', () => {
           maxWaiters: 30,
         },
       },
+      execution: { requestBudgetMs: 20000 },
       origins: { ops: 'https://ops.melarc.example', vendor: 'https://vendor.melarc.example' },
       adapters: {
         limiter: 'postgres',
@@ -182,6 +184,7 @@ describe('loadConfig: accepted environments', () => {
           maxWaiters: Number(ENGINEERING_DEFAULTS.DATABASE_POOL_MAX_WAITERS),
         },
       },
+      execution: { requestBudgetMs: Number(ENGINEERING_DEFAULTS.REQUEST_EXECUTION_BUDGET_MS) },
       adapters: {
         limiter: 'postgres',
         delivery: { email: { kind: 'capture' }, sms: { kind: 'capture' } },
@@ -332,6 +335,11 @@ describe('loadConfig: refused environments', () => {
     ['DATABASE_TRANSACTION_TIMEOUT_MS', '300001'],
     ['DATABASE_POOL_MAX_WAITERS', '0'],
     ['DATABASE_POOL_MAX_WAITERS', '10001'],
+    ['REQUEST_EXECUTION_BUDGET_MS', '999'],
+    ['REQUEST_EXECUTION_BUDGET_MS', '300001'],
+    ['REQUEST_EXECUTION_BUDGET_MS', '15.5'],
+    ['REQUEST_EXECUTION_BUDGET_MS', 'soon'],
+    ['REQUEST_EXECUTION_BUDGET_MS', ''],
     ['HTTP_BODY_LIMIT_BYTES', '1023'],
     ['HTTP_BODY_LIMIT_BYTES', '1048577'],
     ['HTTP_HEADER_TIMEOUT_MS', '999'],
@@ -401,6 +409,8 @@ describe('loadConfig: refused environments', () => {
     ['DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS', '120000'],
     ['DATABASE_POOL_MAX_WAITERS', '1'],
     ['DATABASE_POOL_MAX_WAITERS', '10000'],
+    ['REQUEST_EXECUTION_BUDGET_MS', '1000'],
+    ['REQUEST_EXECUTION_BUDGET_MS', '300000'],
     ['HTTP_BODY_LIMIT_BYTES', '1024'],
     ['HTTP_BODY_LIMIT_BYTES', '1048576'],
     ['HTTP_HEADER_TIMEOUT_MS', '1000'],
@@ -478,6 +488,21 @@ describe('loadConfig: refused environments', () => {
     expect(problemsFor(env)).toEqual([
       expect.objectContaining({ key: 'DATABASE_MIGRATION_URL', problem: 'invalid' }),
     ]);
+  });
+
+  // Break caught: the provisioning login's credential in the API's environment. The seed runs as that login, which is "outside the
+  // API's and every worker's configuration" (SECURITY_DESIGN.md section 14.17): one config change from being the runtime connection.
+  it('refuses an environment that carries the seed database URL', () => {
+    const env = validEnv({
+      DATABASE_SEED_URL: 'postgres://melarc_provisioning:x@127.0.0.1/melarc_dev',
+    });
+    expect(problemsFor(env)).toEqual([
+      expect.objectContaining({ key: 'DATABASE_SEED_URL', problem: 'invalid' }),
+    ]);
+  });
+
+  it('accepts an empty seed database URL as absent', () => {
+    expect(loadConfig(validEnv({ DATABASE_SEED_URL: '' })).ok).toBe(true);
   });
 
   // Break caught: the migration URL going unreported when another key is wrong too, so the operator fixes the one

@@ -21,6 +21,7 @@ import {
   seedContextRecords,
   seedNotes,
 } from './support/rls-fixture.js';
+import { databaseRuntime } from './support/runtime.js';
 import {
   clientFor,
   createTestDatabase,
@@ -90,6 +91,7 @@ describe.each(LOGINS)('the login %s', (login) => {
       new CapturedLogs().logger,
       shutdown,
       new ReadinessRegistry(),
+      databaseRuntime(database.urlFor(login), 1),
     );
     try {
       await expect(service.check()).resolves.toBeUndefined();

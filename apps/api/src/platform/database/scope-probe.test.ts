@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CapturedLogs } from '../../test-support/captured-logs.js';
+import { commandTagOf, testRuntime } from '../../test-support/fake-pg.js';
 import { ReadinessRegistry } from '../health/readiness.registry.js';
 import { ShutdownRegistry } from '../lifecycle/shutdown.registry.js';
 import { DatabaseService, type DatabaseTransaction } from './database.service.js';
@@ -42,7 +43,7 @@ type Answer = unknown[] | Error;
  */
 function harness(answer?: (statement: Sent) => Answer | undefined) {
   const sent: Sent[] = [];
-  const client = {
+  const client = Object.assign(new EventEmitter(), {
     // The driver adapter sends the configuration and the bound values as two arguments.
     query: vi.fn((query: string | { text: string }, values?: unknown[]) => {
       const statement: Sent = {
@@ -51,7 +52,7 @@ function harness(answer?: (statement: Sent) => Answer | undefined) {
       };
       sent.push(statement);
       let rows: Answer = [];
-      if (/^(begin|commit|rollback)$/i.test(statement.text)) rows = [];
+      if (/^(begin|commit|rollback)\b/i.test(statement.text)) rows = [];
       else if (statement.text.includes('current_user')) rows = [{ database_role: 'x' }];
       else if (statement.text.includes("set_config('melarc.scope_probe_id', case"))
         rows = [{ probe: statement.values[0] }];
@@ -61,10 +62,15 @@ function harness(answer?: (statement: Sent) => Answer | undefined) {
       if (given !== undefined) rows = given;
       return rows instanceof Error
         ? Promise.reject(rows)
-        : Promise.resolve({ rows, rowCount: rows.length, fields: [] });
+        : Promise.resolve({
+            rows,
+            rowCount: rows.length,
+            fields: [],
+            command: commandTagOf(statement.text),
+          });
     }),
     release: vi.fn(),
-  };
+  });
   const pool = Object.assign(new EventEmitter(), {
     query: vi.fn(),
     connect: vi.fn(() => Promise.resolve(client)),
@@ -75,12 +81,13 @@ function harness(answer?: (statement: Sent) => Answer | undefined) {
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
+    testRuntime(),
   );
   const run = <T>(work: (tx: DatabaseTransaction) => Promise<T>) =>
     service.transactionWithContext(STAFF, work);
   /** The statements of the probe and anything else that was sent inside the transaction, without its own set-up. */
   const inside = () =>
-    sent.filter((statement) => !/^(begin|commit|rollback)$/i.test(statement.text)).slice(1);
+    sent.filter((statement) => !/^(begin|commit|rollback)\b/i.test(statement.text)).slice(1);
   return { run, sent, inside, client };
 }
 

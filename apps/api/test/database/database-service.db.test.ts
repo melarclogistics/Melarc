@@ -14,6 +14,7 @@ import { CapturedLogs } from '../../src/test-support/captured-logs.js';
 import { buildDatabaseUrl, OWNER_ROLE } from '../../src/tools/database/provisioning.js';
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
 import { applyFixture, staffContext } from './support/rls-fixture.js';
+import { databaseRuntime } from './support/runtime.js';
 import {
   createTestDatabase,
   scalar,
@@ -50,7 +51,13 @@ function build(url: string, poolMax = 1): Built {
   const shutdown = new ShutdownRegistry();
   const readiness = new ReadinessRegistry();
   return {
-    service: new DatabaseService(pool, logs.logger, shutdown, readiness),
+    service: new DatabaseService(
+      pool,
+      logs.logger,
+      shutdown,
+      readiness,
+      databaseRuntime(url, poolMax),
+    ),
     pool,
     logs,
     shutdown,

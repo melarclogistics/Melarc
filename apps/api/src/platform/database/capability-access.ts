@@ -9,7 +9,7 @@ import { API_RUNTIME_ROLE, PROVISIONING_ROLE, WORKER_RUNTIME_ROLE } from './tech
  * The registry owns the rules and this is their machine-readable form. A test reads the registry and fails when the
  * capabilities, their identities or their tables disagree, so a change is made in both in one change. The statements
  * and restrictions are kept as the registry words them: they say what the grants of the table's own migration must
- * be, and a catalogue check against them can only exist once the tables do (S0.8 onward).
+ * be, and the grants of the tables that exist are checked against them and the registry by `src/test-support/registry-grants.ts` (S0.8 onward).
  *
  * A capability is a label and not an identity. What stops code that already runs as the API from asserting one is the
  * grant set: the label is usable only against the tables listed here and only with the DML granted to the identity
@@ -135,7 +135,7 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
           'FixedPermissionPolicy',
         ],
         ['INSERT'],
-        'INSERT into an empty set',
+        'INSERT into an empty set, once, and only inside melarc.initialize_reference_data (migration 0005): the identity holds no privilege on these tables, and the function refuses unless all seven are empty',
       ),
       ...on(
         ['RiderIdentity'],
@@ -143,7 +143,8 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
         'the non-production demonstration fixture of MIGRATION_AND_SEEDING.md §4a: Local and Staging only',
       ),
     ],
-    lookups: 'No lookup',
+    lookups:
+      'No lookup: the identity holds no privilege on the tables it seeds. The emptiness check is a count inside the initialization function, which returns the number of rows it inserted and nothing read',
     returns: 'Refuses when its target is not empty; production refuses the fixtures',
   },
   credential_delivery: {

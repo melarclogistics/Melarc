@@ -16,6 +16,9 @@ ALTER TABLE melarc.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE melarc.orders FORCE ROW LEVEL SECURITY;
 `;
 
+/** An ordinary policy expression, for the tests of other rules to hold their policies in: the principal CASE of §14.4. */
+const SUPPORTED = "CASE melarc.principal_type() WHEN 'STAFF' THEN true ELSE false END";
+
 describe('lintMigrationSql', () => {
   // Break caught: the lint rejecting a migration that does everything required, which would block every
   // product slice's first table.
@@ -118,9 +121,9 @@ describe('lintMigrationSql', () => {
   // Break caught: a policy bound to a role. Policies decide on the request context alone, never on which
   // database role connected (SECURITY_DESIGN.md section 14.2).
   it('refuses a policy that names a role', () => {
-    const named = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT TO melarc_api_runtime USING (true);`;
+    const named = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT TO melarc_api_runtime USING (${SUPPORTED});`;
     expect(lintMigrationSql(named)).toEqual([expect.stringContaining('policy p')]);
-    const unbound = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT USING (to_regclass('x') IS NULL);`;
+    const unbound = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT USING (${SUPPORTED});`;
     expect(lintMigrationSql(unbound)).toEqual([]);
   });
 });
@@ -314,23 +317,46 @@ describe('lintMigrationSql: the scope probe predicate is read-only (review of S0
     ['a policy FOR INSERT', `FOR INSERT WITH CHECK (${probe})`],
   ])('refuses the predicate in %s', (_label, clauses) => {
     const problems = lintMigrationSql(policy(clauses));
-    expect(problems).toEqual([expect.stringContaining('belongs in a policy FOR SELECT only')]);
+    // The probe rule says it first. The expression is also not the supported structure outside a policy FOR SELECT, and the
+    // structure rule says so too: each rule holds on its own.
+    expect(problems[0]).toContain('belongs in a policy FOR SELECT only');
     expect(problems[0]).toContain('policy probe on melarc.orders');
+    expect(problems.slice(1).join('\n')).toMatch(/not a supported policy expression/);
   });
 
   // Break caught: ALTER POLICY, which does not show its command, being the way the predicate gets into an ordinary policy.
   it('refuses the predicate in an ALTER POLICY, which does not show the command', () => {
-    expect(lintMigrationSql(policy(`USING (${probe})`, 'ALTER'))).toEqual([
-      expect.stringContaining('belongs in a policy FOR SELECT only'),
-    ]);
+    const problems = lintMigrationSql(policy(`USING (${probe})`, 'ALTER'));
+    expect(problems[0]).toContain('belongs in a policy FOR SELECT only');
+    expect(problems.slice(1).join('\n')).toMatch(/not a supported policy expression/);
   });
 
   it('does not read the name in a comment or a string', () => {
     expect(
       lintMigrationSql(
-        `${PROTECTED}\n-- melarc.scope_probe_id() is for SELECT\nCREATE POLICY p ON melarc.orders USING (note = 'melarc.scope_probe_id()');`,
+        `${PROTECTED}\n-- melarc.scope_probe_id() is for SELECT\nCREATE POLICY p ON melarc.orders USING (CASE melarc.principal_type() WHEN 'STAFF' THEN note = 'melarc.scope_probe_id()' ELSE false END);`,
       ),
     ).toEqual([]);
+  });
+
+  // Break caught (F03): the exception widened from the scope probe policy to anything that mentions the probe.
+  it.each([
+    ['the probe with no staff guard', `FOR SELECT USING (id = melarc.scope_probe_id())`],
+    [
+      'a guard that excludes one type and admits the rest',
+      `FOR SELECT USING (melarc.principal_type() <> 'VENDOR' AND id = melarc.scope_probe_id())`,
+    ],
+    [
+      'the guard and the probe ORed',
+      `FOR SELECT USING (melarc.principal_type() = 'STAFF' OR id = melarc.scope_probe_id())`,
+    ],
+    [
+      'a third condition',
+      `FOR SELECT USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id() AND true)`,
+    ],
+  ])('refuses %s, even in a policy FOR SELECT', (_label, clauses) => {
+    const problems = lintMigrationSql(policy(clauses));
+    expect(problems).toEqual([expect.stringMatching(/not a supported policy expression/)]);
   });
 });
 
@@ -534,9 +560,7 @@ ALTER TABLE melarc.orders OWNER TO melarc_owner, ENABLE ROW LEVEL SECURITY, FORC
       [],
     );
     expect(
-      lintMigrationSql(
-        `${PROTECTED}\nALTER POLICY p ON melarc.orders USING (to_regclass('x') IS NULL);`,
-      ),
+      lintMigrationSql(`${PROTECTED}\nALTER POLICY p ON melarc.orders USING (${SUPPORTED});`),
     ).toEqual([]);
   });
 
@@ -647,6 +671,80 @@ describe('lintMigrationSql: statements that remove data', () => {
     "INSERT INTO melarc.notes VALUES ('ON DELETE CASCADE and TRUNCATE are only words here');",
   ])('allows %s', (statement) => {
     expect(lintMigrationSql(statement)).toEqual([]);
+  });
+});
+
+/**
+ * An ordinary policy is the principal CASE, and an expression that is not is refused whether or not it names SYSTEM (correction
+ * F03). The first three admit a SYSTEM context under any capability and name no SYSTEM, so the lint used to say nothing.
+ */
+describe('lintMigrationSql: nothing but the principal CASE (or the scope probe policy) is passed (F03)', () => {
+  const policy = (clauses: string, verb = 'CREATE') =>
+    `${PROTECTED}\n${verb} POLICY p ON melarc.orders ${clauses};`;
+  const UNSUPPORTED = /not a supported policy expression/;
+
+  // Break caught: the reproduction of F03. Each expression is a whole USING or WITH CHECK; each admits SYSTEM and names no SYSTEM.
+  it.each([
+    ['a literal true', 'true'],
+    ['an inequality on the principal type', "melarc.principal_type() <> 'VENDOR'"],
+    ['NOT IN a list', "melarc.principal_type() NOT IN ('VENDOR', 'RIDER')"],
+  ])(
+    'refuses %s as the USING, the WITH CHECK or both clauses of a policy',
+    (_label, expression) => {
+      const using = lintMigrationSql(policy(`USING (${expression})`));
+      expect(using).toEqual([expect.stringMatching(UNSUPPORTED)]);
+      expect(using[0]).toContain('policy p on melarc.orders');
+      expect(lintMigrationSql(policy(`FOR INSERT WITH CHECK (${expression})`))).toEqual([
+        expect.stringMatching(UNSUPPORTED),
+      ]);
+      expect(
+        lintMigrationSql(policy(`USING (${expression}) WITH CHECK (${expression})`)),
+      ).toHaveLength(2);
+    },
+  );
+
+  // Break caught: a policy judged alone, so that a second permissive policy beside a safe one admits what the safe one refuses
+  // (PostgreSQL ORs the permissive policies that apply).
+  it('refuses a second permissive policy that admits what the first refuses', () => {
+    const sql = `${PROTECTED}\nCREATE POLICY safe ON melarc.orders USING (${SUPPORTED});\n--> statement-breakpoint\nCREATE POLICY open ON melarc.orders FOR SELECT USING (true);`;
+    const problems = lintMigrationSql(sql);
+    expect(problems).toEqual([expect.stringMatching(UNSUPPORTED)]);
+    expect(problems[0]).toContain('policy open on melarc.orders');
+  });
+
+  // Break caught: ALTER POLICY, which can replace a supported expression with one that admits everyone.
+  it('refuses ALTER POLICY that replaces the expression with an unsupported one', () => {
+    expect(lintMigrationSql(policy('USING (true)', 'ALTER'))).toEqual([
+      expect.stringMatching(UNSUPPORTED),
+    ]);
+    expect(lintMigrationSql(policy(`USING (${SUPPORTED})`, 'ALTER'))).toEqual([]);
+  });
+
+  // Break caught: the supported forms refused, which would block the policy template of the next slice.
+  it.each([
+    ['one policy for every command', `USING (${SUPPORTED}) WITH CHECK (${SUPPORTED})`],
+    ['a policy for SELECT', `FOR SELECT USING (${SUPPORTED})`],
+    ['a policy for INSERT', `FOR INSERT WITH CHECK (${SUPPORTED})`],
+    ['a policy for UPDATE', `FOR UPDATE USING (${SUPPORTED}) WITH CHECK (${SUPPORTED})`],
+    ['a policy for DELETE', `FOR DELETE USING (${SUPPORTED})`],
+    [
+      'the three human principals and nothing for SYSTEM',
+      "USING (CASE melarc.principal_type() WHEN 'STAFF' THEN a WHEN 'VENDOR' THEN b WHEN 'RIDER' THEN c ELSE false END)",
+    ],
+    [
+      'the scope probe policy FOR SELECT',
+      "FOR SELECT USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id())",
+    ],
+  ])('accepts %s', (_label, clauses) => {
+    expect(lintMigrationSql(policy(clauses))).toEqual([]);
+  });
+
+  // Break caught: the arm for the principal that is not one, which admits a context that was never established.
+  it('refuses an arm for NONE', () => {
+    const problems = lintMigrationSql(
+      policy("USING (CASE melarc.principal_type() WHEN 'NONE' THEN true ELSE false END)"),
+    );
+    expect(problems).toEqual([expect.stringContaining('not a principal type')]);
   });
 });
 

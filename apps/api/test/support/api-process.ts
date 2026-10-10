@@ -14,6 +14,7 @@ export const E2E_DATABASE = resolve(API_ROOT, 'dist/tools/e2e-database.js');
 export const DB_BOOTSTRAP = resolve(API_ROOT, 'dist/tools/db-bootstrap.js');
 export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
+export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
 /** A test-only entry point: the real application plus something that refuses to shut down. */
 export const SHUTDOWN_FIXTURE = resolve(API_ROOT, 'test/support/shutdown-fixture.mjs');
@@ -60,6 +61,7 @@ export function requireBuild(): void {
     DB_BOOTSTRAP,
     DB_MIGRATE,
     DB_RESET,
+    DB_SEED,
     DB_ORPHANS,
     BUILT_SHUTDOWN_HANDLERS,
   ]) {
