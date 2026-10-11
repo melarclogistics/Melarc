@@ -4,6 +4,12 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
+import {
+  PROVISIONING_ROLE,
+  WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_RUNTIME_ROLE,
+} from '../../src/platform/database/technical-roles.js';
+import { localLoginPassword } from '../../src/tools/database/local-logins.js';
 import { readLocalPostgres } from '../../src/tools/database/local-env.js';
 import {
   buildDatabaseUrl,
@@ -20,7 +26,16 @@ import { MIGRATION_ROLE, UnsafeTargetError } from '../../src/tools/database/safe
 import { clientFor, scalar, withClient } from './support/test-database.js';
 
 const settings = readLocalPostgres();
-const ROLES = [OWNER_ROLE, MIGRATION_ROLE, API_RUNTIME_ROLE];
+const ROLES = [
+  OWNER_ROLE,
+  MIGRATION_ROLE,
+  API_RUNTIME_ROLE,
+  WORKER_RUNTIME_ROLE,
+  WORKER_CREDENTIAL_DELIVERY_ROLE,
+  PROVISIONING_ROLE,
+];
+const workerPassword = localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE);
+const provisioningPassword = localLoginPassword(settings.adminPassword, PROVISIONING_ROLE);
 const suffix = () => randomBytes(4).toString('hex');
 
 let admin: LocalAdmin;
@@ -86,8 +101,9 @@ describe('the cluster', () => {
 });
 
 describe('provisionRoles', () => {
-  // Break caught: a role created with a privilege it must not have, or a login role that is not one.
-  it('creates the owner without login and the other two with login, none privileged', async () => {
+  // Break caught: a role created with a privilege it must not have, or a login role that is not one. The owner and
+  // the worker's capability role are grant sets and cannot log in.
+  it('creates the owner and the capability role without login and the others with login, none privileged', async () => {
     const { rows } = await admin.client.query(
       `select rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls, rolreplication
          from pg_roles where rolname = any($1) order by rolname`,
@@ -104,12 +120,18 @@ describe('provisionRoles', () => {
       { rolname: API_RUNTIME_ROLE, rolcanlogin: true, ...none },
       { rolname: MIGRATION_ROLE, rolcanlogin: true, ...none },
       { rolname: OWNER_ROLE, rolcanlogin: false, ...none },
+      { rolname: PROVISIONING_ROLE, rolcanlogin: true, ...none },
+      { rolname: WORKER_CREDENTIAL_DELIVERY_ROLE, rolcanlogin: false, ...none },
+      { rolname: WORKER_RUNTIME_ROLE, rolcanlogin: true, ...none },
     ]);
   });
 
   // Break caught: the runtime role being able to become the owner, which is the owner's power over every
-  // table and policy; and the migration role being unable to, which would leave its objects owned by it.
-  it('lets the migration role act as the owner, and gives the runtime role no membership at all', async () => {
+  // table and policy; and the migration role being unable to, which would leave its objects owned by it. The one other
+  // membership is the delivery worker's: provisioning puts the capability role of the one task that process runs in front of
+  // its login (S0.18, OB-50), so that it inherits the grants of that capability and cannot SET ROLE to it. No other login
+  // holds a membership, and a capability that no task has put in front of a process is granted to nobody (GBT-Y5, GBT-Y9).
+  it('lets the migration role act as the owner, gives the delivery worker its capability and no other role a membership at all', async () => {
     const { rows } = await admin.client.query(
       `select granted.rolname as granted, member.rolname as member,
               m.inherit_option, m.set_option, m.admin_option
@@ -128,6 +150,13 @@ describe('provisionRoles', () => {
         set_option: true,
         admin_option: false,
       },
+      {
+        granted: WORKER_CREDENTIAL_DELIVERY_ROLE,
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
+        admin_option: false,
+      },
     ]);
   });
 
@@ -136,10 +165,19 @@ describe('provisionRoles', () => {
   it('authenticates each login role with its own password only, and refuses the owner', async () => {
     expect(await loginOutcome(MIGRATION_ROLE, settings.migrationPassword)).toBe('connected');
     expect(await loginOutcome(API_RUNTIME_ROLE, settings.runtimePassword)).toBe('connected');
+    expect(await loginOutcome(WORKER_RUNTIME_ROLE, workerPassword)).toBe('connected');
+    expect(await loginOutcome(PROVISIONING_ROLE, provisioningPassword)).toBe('connected');
 
     expect(await loginOutcome(MIGRATION_ROLE, settings.runtimePassword)).toBe('28P01');
     expect(await loginOutcome(API_RUNTIME_ROLE, settings.migrationPassword)).toBe('28P01');
     expect(await loginOutcome(API_RUNTIME_ROLE, settings.adminPassword)).toBe('28P01');
+    // The two further logins have credentials of their own: none of the others opens them, and theirs open no other.
+    expect(await loginOutcome(WORKER_RUNTIME_ROLE, provisioningPassword)).toBe('28P01');
+    expect(await loginOutcome(PROVISIONING_ROLE, workerPassword)).toBe('28P01');
+    expect(await loginOutcome(WORKER_RUNTIME_ROLE, settings.runtimePassword)).toBe('28P01');
+    expect(await loginOutcome(PROVISIONING_ROLE, settings.migrationPassword)).toBe('28P01');
+    expect(await loginOutcome(API_RUNTIME_ROLE, workerPassword)).toBe('28P01');
+    expect(await loginOutcome(MIGRATION_ROLE, provisioningPassword)).toBe('28P01');
 
     // The owner has no password and no login. Which of the two codes the server reports first does not
     // matter; that it is refused with a server error, for every password it could be given, does. (An empty
@@ -147,6 +185,12 @@ describe('provisionRoles', () => {
     // That the server accepts no connection without a password is the pg_hba test above.)
     for (const password of [settings.migrationPassword, settings.runtimePassword]) {
       expect(['28000', '28P01']).toContain(await loginOutcome(OWNER_ROLE, password));
+    }
+    // The capability role is a grant set and cannot log in either.
+    for (const password of [workerPassword, provisioningPassword]) {
+      expect(['28000', '28P01']).toContain(
+        await loginOutcome(WORKER_CREDENTIAL_DELIVERY_ROLE, password),
+      );
     }
   });
 
@@ -168,7 +212,7 @@ describe('provisionRoles', () => {
       'select count(*) from pg_roles where rolname = any($1)',
       [ROLES],
     );
-    expect(Number(count)).toBe(3);
+    expect(Number(count)).toBe(ROLES.length);
     expect(await loginOutcome(API_RUNTIME_ROLE, settings.runtimePassword)).toBe('connected');
   });
 
@@ -188,6 +232,52 @@ describe('provisionRoles', () => {
     expect(rows).toEqual([
       { rolcreatedb: false, rolcreaterole: false, rolbypassrls: false, member_of_owner: false },
     ]);
+  });
+
+  // Break caught: provisioning that corrects the runtime role and leaves the others as they drifted. A worker or
+  // provisioning login that was made a member of the owner, of the capability role, of the migration identity or of a
+  // predefined role by hand is put back, and so is a privilege it was given.
+  it('puts the worker and provisioning logins back to the intended shape too', async () => {
+    for (const role of [WORKER_RUNTIME_ROLE, PROVISIONING_ROLE]) {
+      await admin.client.query(`alter role ${role} createdb createrole bypassrls replication`);
+      await admin.client.query(`grant ${OWNER_ROLE} to ${role}`);
+      await admin.client.query(`grant ${MIGRATION_ROLE} to ${role}`);
+      await admin.client.query(`grant pg_read_all_data to ${role}`);
+    }
+    await admin.client.query(`grant ${WORKER_CREDENTIAL_DELIVERY_ROLE} to ${PROVISIONING_ROLE}`);
+    // The worker's capability membership drifted to the wider form, which would let the login SET ROLE to it.
+    await admin.client.query(
+      `grant ${WORKER_CREDENTIAL_DELIVERY_ROLE} to ${WORKER_RUNTIME_ROLE} with inherit false, set true`,
+    );
+
+    await provisionRoles(admin, settings);
+
+    const { rows } = await admin.client.query(
+      `select r.rolname, r.rolcreatedb, r.rolcreaterole, r.rolbypassrls, r.rolreplication,
+              (select count(*) from pg_auth_members m where m.member = r.oid)::int as memberships
+         from pg_roles r where r.rolname = any($1) order by r.rolname`,
+      [[WORKER_RUNTIME_ROLE, PROVISIONING_ROLE]],
+    );
+    const none = {
+      rolcreatedb: false,
+      rolcreaterole: false,
+      rolbypassrls: false,
+      rolreplication: false,
+    };
+    expect(rows).toEqual([
+      { rolname: PROVISIONING_ROLE, ...none, memberships: 0 },
+      // The one membership the worker has is its capability, and in the form that inherits and cannot SET ROLE.
+      { rolname: WORKER_RUNTIME_ROLE, ...none, memberships: 1 },
+    ]);
+    const { rows: capability } = await admin.client.query(
+      `select m.inherit_option, m.set_option, m.admin_option
+         from pg_auth_members m
+         join pg_roles granted on granted.oid = m.roleid
+         join pg_roles member on member.oid = m.member
+        where granted.rolname = $1 and member.rolname = $2`,
+      [WORKER_CREDENTIAL_DELIVERY_ROLE, WORKER_RUNTIME_ROLE],
+    );
+    expect(capability).toEqual([{ inherit_option: true, set_option: false, admin_option: false }]);
   });
 
   // Break caught: a password that cannot be changed, so a leaked credential cannot be rotated away.
@@ -230,9 +320,10 @@ describe('disposable databases', () => {
     ) === 1;
 
   // Break caught: a database owned by the wrong role, unmarked (so it can never be dropped), or open to
-  // everyone. Only the migration and the runtime roles may connect; a stranger is refused (assert the
-  // refusal, not the ACL).
-  it('creates a database owned by the owner, marked, and open to the two login roles only', async () => {
+  // everyone. Only the four login roles may connect (the migration identity, the API runtime, the worker base and
+  // the provisioning identity); a stranger, the owner and the capability role are refused (assert the refusal, not
+  // the ACL).
+  it('creates a database owned by the owner, marked, and open to the four login roles only', async () => {
     const name = await make();
 
     const { rows } = await admin.client.query(
@@ -249,6 +340,11 @@ describe('disposable databases', () => {
 
     expect(await loginOutcome(MIGRATION_ROLE, settings.migrationPassword, name)).toBe('connected');
     expect(await loginOutcome(API_RUNTIME_ROLE, settings.runtimePassword, name)).toBe('connected');
+    expect(await loginOutcome(WORKER_RUNTIME_ROLE, workerPassword, name)).toBe('connected');
+    expect(await loginOutcome(PROVISIONING_ROLE, provisioningPassword, name)).toBe('connected');
+    expect(await loginOutcome(WORKER_CREDENTIAL_DELIVERY_ROLE, workerPassword, name)).not.toBe(
+      'connected',
+    );
 
     const stranger = `melarc_stranger_${suffix()}`;
     const password = `pw-${suffix()}`;

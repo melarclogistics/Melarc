@@ -116,6 +116,10 @@ function written(): JsonObject {
           },
         },
         Session: {
+          allOf: [{ $ref: '#/components/schemas/SessionRecord' }],
+          unevaluatedProperties: false,
+        },
+        SessionRecord: {
           type: 'object',
           required: ['id', 'principal_type', 'state', 'expires_at'],
           properties: {
@@ -176,7 +180,7 @@ function driftAfter(edit: (document: JsonEditor) => void): Finding[] {
 }
 
 const GET = ['paths', '/auth/sessions', 'get'] as const;
-const SESSION = ['components', 'schemas', 'Session'] as const;
+const SESSION = ['components', 'schemas', 'SessionRecord'] as const;
 const summary = (findings: readonly Finding[]) =>
   findings.map((finding) => [finding.code, finding.at] as const);
 

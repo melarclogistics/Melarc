@@ -90,9 +90,9 @@ Create a shared package only when it has a real consumer. Do not create empty ar
 
 ### Backend
 
-Use TypeScript, NestJS, Drizzle and PostgreSQL.
+Use TypeScript, NestJS, Drizzle and PostgreSQL. **One bounded exception** (8 October 2026): Android key attestation is verified by Google's Kotlin library in a small private JVM service behind the `RiderDeviceAttestationVerifier` port, because a custom verifier is the riskier choice ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §15.2.3). It holds no database credential and is not a second application.
 
-Keep Version 1 as a modular monolith. Domain modules may depend on platform services; platform infrastructure must not depend on business-domain modules.
+Keep Version 1 as a modular monolith. Domain modules may depend on platform services; platform infrastructure must not depend on business-domain modules. The credential-delivery worker is the same codebase started as a separate process ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §13.9a).
 
 Separate:
 

@@ -1,14 +1,10 @@
+import { inertConfig } from '../platform/config/inert-config.js';
 import type { AppConfig } from '../platform/config/load-config.js';
 
 /**
  * The configuration for tools that describe the application to itself (the OpenAPI generator and the
  * contract check). It starts the application without listening and without a database, needs no environment,
- * and so can run anywhere, including CI, and never needs a live dependency.
+ * holds no key material, and binds the inert describe adapters, which never connect, deliver or read a secret. It can
+ * therefore run anywhere, including CI, and never needs a live dependency.
  */
-export const DESCRIBE_CONFIG: AppConfig = Object.freeze({
-  nodeEnv: 'development',
-  appEnv: 'local',
-  http: Object.freeze({ host: '127.0.0.1', port: 1 }),
-  logLevel: 'silent',
-  shutdown: Object.freeze({ timeoutMs: 15_000, drainDelayMs: 0 }),
-});
+export const DESCRIBE_CONFIG: AppConfig = inertConfig();

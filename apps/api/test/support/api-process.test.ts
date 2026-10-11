@@ -7,7 +7,16 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import vitestConfig from '../../vitest.config.js';
-import { DEADLINES, freePort, killAll, run, start, startCommand } from './api-process.js';
+import {
+  apiSettings,
+  DEADLINES,
+  freePort,
+  killAll,
+  MAIN,
+  run,
+  start,
+  startCommand,
+} from './api-process.js';
 
 const scratch: string[] = [];
 const servers: Server[] = [];
@@ -222,4 +231,38 @@ describe('the process helpers', () => {
       expect(finished.stdout).toContain('bye');
     },
   );
+});
+
+describe('apiSettings', () => {
+  // Break caught: a process test about something else having to repeat sixteen settings, or the API failing to start in it.
+  it('gives the API the settings a test did not name, and never one a test named', () => {
+    const named = { NODE_ENV: 'production', APP_ENV: 'local', HTTP_PORT: '1', DATABASE_URL: 'x' };
+    const given = apiSettings(MAIN, { ...named, OPS_ORIGIN: 'http://127.0.0.1:9' });
+
+    expect(given).toMatchObject({ ...named, OPS_ORIGIN: 'http://127.0.0.1:9' });
+    expect(Object.keys(given)).toEqual(
+      expect.arrayContaining(['VENDOR_ORIGIN', 'KEY_CUSTODY', 'KEY_TOTP_SEED_MATERIAL']),
+    );
+    expect(Object.keys(given).filter((name) => name.startsWith('KEY_'))).toHaveLength(11);
+  });
+
+  // Break caught: a test that means to leave APP_ENV out being given one, so "missing" could never be proved.
+  it('does not supply the four settings tests name for themselves', () => {
+    for (const name of ['NODE_ENV', 'APP_ENV', 'HTTP_PORT', 'DATABASE_URL']) {
+      expect(apiSettings(MAIN, {})).not.toHaveProperty(name);
+    }
+  });
+
+  // Break caught: key material put into the environment of a database tool, which has no use for it.
+  it('adds nothing for a script that is not the API', () => {
+    expect(apiSettings('db-migrate.js', { DATABASE_MIGRATION_URL: 'x' })).toEqual({
+      DATABASE_MIGRATION_URL: 'x',
+    });
+  });
+
+  it('gives each call fresh key material', () => {
+    expect(apiSettings(MAIN, {}).KEY_TOTP_SEED_MATERIAL).not.toBe(
+      apiSettings(MAIN, {}).KEY_TOTP_SEED_MATERIAL,
+    );
+  });
 });

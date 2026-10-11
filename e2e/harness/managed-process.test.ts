@@ -20,6 +20,21 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
+/**
+ * How long a stop that must succeed waits, after the kill, for a healthy child's exit event. The exit event of a plain
+ * Node server is not instant. Measured on this machine while the whole workspace's tests ran in parallel (30 stops in two
+ * runs of `pnpm test`), it arrived 32 to 192 ms after the stop request, median about 85 ms, while this process's own event
+ * loop never stalled for more than 35 ms in the same runs. So the late exit events are not explained by this process being
+ * slow to notice them, but **the cause of the delay is not established**: twelve busy loops alone did not reproduce it, and
+ * what the operating system was doing during the slow stops was not observed. What is known is the distribution. The earlier
+ * confirmation window of 100 ms after 50 ms of grace (150 ms in all) was shorter than the slowest of those stops: one stop
+ * in fifteen exceeded it in each of the two runs, which is consistent with the two `stopAll` tests below failing
+ * intermittently. 2 000 ms is ten times the worst
+ * stop observed and still finite. It is a budget for these tests only: the harness's own defaults are unchanged, and a
+ * process that really cannot be ended is still reported, after this wait, by name.
+ */
+const EXIT_CONFIRMATION_MS = 2_000;
+
 /** A script a test process runs: a small HTTP server that answers on PORT and says what it was given. */
 function script(name: string, body: string): string {
   const path = join(directory, name);
@@ -363,7 +378,9 @@ createServer((request, response) => response.end('ok')).listen(Number(process.en
       await ManagedProcess.start({ ...options(script('two.mjs', SERVER), second), name: 'second' });
       const restore = ignoreSignals(stubborn);
       try {
-        const error = await stopAll({ graceMs: 50, killMs: 100 }).catch((e: unknown) => e);
+        const error = await stopAll({ graceMs: 50, killMs: EXIT_CONFIRMATION_MS }).catch(
+          (e: unknown) => e,
+        );
 
         expect(error).toBeInstanceOf(Error);
         expect((error as Error).message).toContain('fixture');
@@ -486,7 +503,9 @@ createServer((request, response) => response.end('ok')).listen(Number(process.en
       await ManagedProcess.start({ ...options(script('two.mjs', SERVER), second), name: 'second' });
       const signals = failSignals(stubborn);
       try {
-        const error = await stopAll({ graceMs: 50, killMs: 100 }).catch((e: unknown) => e);
+        const error = await stopAll({ graceMs: 50, killMs: EXIT_CONFIRMATION_MS }).catch(
+          (e: unknown) => e,
+        );
 
         expect(error).toBeInstanceOf(ProcessNotStoppedError);
         expect((error as Error).message).toMatch(/1 of 2 processes could not be confirmed ended/);

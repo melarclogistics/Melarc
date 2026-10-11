@@ -16,6 +16,9 @@ ALTER TABLE melarc.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE melarc.orders FORCE ROW LEVEL SECURITY;
 `;
 
+/** An ordinary policy expression, for the tests of other rules to hold their policies in: the principal CASE of §14.4. */
+const SUPPORTED = "CASE melarc.principal_type() WHEN 'STAFF' THEN true ELSE false END";
+
 describe('lintMigrationSql', () => {
   // Break caught: the lint rejecting a migration that does everything required, which would block every
   // product slice's first table.
@@ -118,10 +121,357 @@ describe('lintMigrationSql', () => {
   // Break caught: a policy bound to a role. Policies decide on the request context alone, never on which
   // database role connected (SECURITY_DESIGN.md section 14.2).
   it('refuses a policy that names a role', () => {
-    const named = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT TO melarc_api_runtime USING (true);`;
+    const named = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT TO melarc_api_runtime USING (${SUPPORTED});`;
     expect(lintMigrationSql(named)).toEqual([expect.stringContaining('policy p')]);
-    const unbound = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT USING (to_regclass('x') IS NULL);`;
+    const unbound = `${PROTECTED}\nCREATE POLICY p ON melarc.orders FOR SELECT USING (${SUPPORTED});`;
     expect(lintMigrationSql(unbound)).toEqual([]);
+  });
+});
+
+describe('lintMigrationSql: roles, role grants and SECURITY DEFINER functions (S0.5)', () => {
+  // A function written as MIGRATION_AND_SEEDING.md §5.1 asks: SECURITY DEFINER, its own search_path, no PUBLIC, named roles.
+  const DEFINER = `CREATE FUNCTION melarc.reveal() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$ SELECT 1 $$;
+--> statement-breakpoint
+ALTER FUNCTION melarc.reveal() OWNER TO melarc_owner;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION melarc.reveal() FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION melarc.reveal() TO melarc_api_runtime;`;
+
+  // Break caught: the lint refusing the shape the design prescribes, which would block the first function that needs it.
+  it('accepts a SECURITY DEFINER function that fixes its search_path and grants EXECUTE to a named role only', () => {
+    expect(lintMigrationSql(DEFINER)).toEqual([]);
+  });
+
+  it('accepts object grants, which are not role grants', () => {
+    expect(
+      lintMigrationSql(
+        `GRANT USAGE ON SCHEMA melarc TO melarc_worker_runtime;
+         GRANT EXECUTE ON FUNCTION melarc.principal_type() TO melarc_worker_runtime, melarc_provisioning;
+         GRANT SELECT, INSERT ON TABLE melarc.orders TO melarc_api_runtime;
+         GRANT CONNECT ON DATABASE melarc TO melarc_api_runtime;`,
+      ),
+    ).toEqual([]);
+  });
+
+  // Break caught: a role created by a migration with nobody having said why. A migration that creates a role is flagged
+  // and reviewed (MIGRATION_AND_SEEDING.md §5.1): the reason is on the statement, as for a delete.
+  it.each([
+    ['CREATE ROLE', 'CREATE ROLE melarc_extra LOGIN;'],
+    ['CREATE USER', 'CREATE USER melarc_extra;'],
+    ['CREATE GROUP', 'CREATE GROUP melarc_extra;'],
+    ['ALTER ROLE', 'ALTER ROLE melarc_api_runtime CREATEDB;'],
+    ['ALTER USER', 'ALTER USER melarc_api_runtime WITH BYPASSRLS;'],
+    ['ALTER ROLE ... RENAME', 'ALTER ROLE melarc_api_runtime RENAME TO melarc_api;'],
+    ['GRANT a role to a role', 'GRANT melarc_owner TO melarc_api_runtime;'],
+    ['GRANT several roles', 'GRANT melarc_owner, melarc_migration_elevated TO melarc_api_runtime;'],
+    [
+      'GRANT a role WITH ADMIN OPTION',
+      'GRANT melarc_owner TO melarc_api_runtime WITH ADMIN OPTION;',
+    ],
+    ['GRANT a predefined role', 'GRANT pg_read_all_data TO melarc_api_runtime;'],
+  ])('refuses %s with no recorded reason', (what, statement) => {
+    const problems = lintMigrationSql(statement);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('no recorded reason');
+    expect(problems[0]).toContain('-- allow-role: <reason>');
+    expect(problems[0]).toContain(what.split(' ')[0] === 'GRANT' ? 'GRANT' : what.split(' ')[0]);
+  });
+
+  // Break caught: the reason being required and never satisfiable, or satisfied by an empty comment.
+  it('accepts the same statements with a reason on the statement, and not with an empty one', () => {
+    expect(
+      lintMigrationSql(
+        '-- allow-role: the worker needs its own login for the delivery process (S0.18)\nCREATE ROLE melarc_extra LOGIN;',
+      ),
+    ).toEqual([]);
+    expect(
+      lintMigrationSql(
+        '-- allow-role: the migration runs as a member of the owner\nGRANT melarc_owner TO melarc_api_runtime;',
+      ),
+    ).toEqual([]);
+    expect(lintMigrationSql('-- allow-role:\nCREATE ROLE melarc_extra LOGIN;')).toHaveLength(1);
+  });
+
+  // Break caught: the reason of one statement covering the next one, or a statement hidden in a string.
+  it('asks for a reason on each statement, and does not read a statement in a string', () => {
+    expect(
+      lintMigrationSql(
+        '-- allow-role: first\nCREATE ROLE melarc_one;\n--> statement-breakpoint\nCREATE ROLE melarc_two;',
+      ),
+    ).toHaveLength(1);
+    expect(
+      lintMigrationSql("COMMENT ON TABLE melarc.orders IS 'CREATE ROLE x; GRANT a TO b';"),
+    ).toEqual([]);
+  });
+
+  // Break caught: ALTER ROLE ... SET being counted twice, once as a role change and once as the stored context it is.
+  it('leaves ALTER ROLE ... SET to the stored-context rule', () => {
+    expect(
+      lintMigrationSql("ALTER ROLE melarc_api_runtime SET melarc.principal_type TO 'SYSTEM';"),
+    ).toEqual([expect.stringContaining('melarc.* setting')]);
+    expect(
+      lintMigrationSql("ALTER ROLE melarc_api_runtime SET statement_timeout TO '5s';"),
+    ).toEqual([]);
+  });
+
+  // Break caught: a definer function that runs with its owner's search_path, which anyone who can create an object in an
+  // earlier schema of that path can use to make it call their code as the owner.
+  it('refuses a SECURITY DEFINER function that does not fix its search_path', () => {
+    const problems = lintMigrationSql(DEFINER.replace(' SET search_path = pg_catalog', ''));
+    expect(problems).toEqual([expect.stringContaining('does not fix its search_path')]);
+    expect(problems[0]).toContain('melarc.reveal');
+  });
+
+  // Break caught: a definer function that anyone can execute, or that no named role is granted.
+  it('refuses a SECURITY DEFINER function that is not revoked from PUBLIC', () => {
+    const problems = lintMigrationSql(
+      DEFINER.replace('REVOKE ALL ON FUNCTION melarc.reveal() FROM PUBLIC;', ''),
+    );
+    expect(problems).toEqual([expect.stringContaining('does not revoke EXECUTE from PUBLIC')]);
+  });
+
+  it('refuses a SECURITY DEFINER function that is granted to no named role', () => {
+    const problems = lintMigrationSql(
+      DEFINER.replace('GRANT EXECUTE ON FUNCTION melarc.reveal() TO melarc_api_runtime;', ''),
+    );
+    expect(problems).toEqual([expect.stringContaining('grants EXECUTE to no named role')]);
+  });
+
+  it('refuses a SECURITY DEFINER function granted to PUBLIC, once, as a grant to PUBLIC', () => {
+    const problems = lintMigrationSql(DEFINER.replace('TO melarc_api_runtime', 'TO PUBLIC'));
+    expect(problems.some((problem) => problem.includes('grants a privilege to PUBLIC'))).toBe(true);
+    expect(problems.some((problem) => problem.includes('grants EXECUTE to no named role'))).toBe(
+      true,
+    );
+  });
+
+  // Break caught: a definer function that builds a statement from what it is given. An argument that becomes SQL runs with
+  // the owner's powers.
+  it.each([
+    ['EXECUTE format', "EXECUTE format('select %I', name)"],
+    ['EXECUTE of a string', "EXECUTE 'select ' || name"],
+    ['lower case execute', "execute 'select 1'"],
+  ])('refuses a SECURITY DEFINER function that uses %s', (_what, statement) => {
+    const body = `CREATE FUNCTION melarc.run(name text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$ BEGIN ${statement}; END $$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION melarc.run(text) FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION melarc.run(text) TO melarc_api_runtime;`;
+    expect(lintMigrationSql(body)).toEqual([expect.stringContaining('dynamic SQL')]);
+  });
+
+  // Break caught: a function that is not a definer being held to the definer's rules, which would stop the accessors.
+  it('does not apply the definer rules to a function that runs as its caller', () => {
+    expect(
+      lintMigrationSql(
+        'CREATE FUNCTION melarc.plain() RETURNS int LANGUAGE sql STABLE AS $$ SELECT 1 $$;\nALTER FUNCTION melarc.plain() OWNER TO melarc_owner;',
+      ),
+    ).toEqual([]);
+  });
+
+  // Break caught: a function made a definer after it was created without being one, which skips the search_path the
+  // CREATE statement would have had to carry.
+  it('refuses ALTER FUNCTION ... SECURITY DEFINER', () => {
+    expect(lintMigrationSql('ALTER FUNCTION melarc.plain() SECURITY DEFINER;')).toEqual([
+      expect.stringContaining('SECURITY DEFINER only in its CREATE statement'),
+    ]);
+  });
+
+  // Break caught: CREATE OR REPLACE bypassing the rules the first CREATE had to meet.
+  it('holds CREATE OR REPLACE to the same rules', () => {
+    const replaced = DEFINER.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION').replace(
+      ' SET search_path = pg_catalog',
+      '',
+    );
+    expect(lintMigrationSql(replaced)).toEqual([
+      expect.stringContaining('does not fix its search_path'),
+    ]);
+  });
+});
+
+describe('lintMigrationSql: the scope probe predicate is read-only (review of S0.4 and S0.5)', () => {
+  const policy = (clauses: string, verb = 'CREATE') =>
+    `${PROTECTED}\n${verb} POLICY probe ON melarc.orders ${clauses};`;
+  const probe = "melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id()";
+
+  // Break caught: the lint refusing the one policy the predicate is meant to be in.
+  it('accepts the predicate in a policy FOR SELECT', () => {
+    expect(lintMigrationSql(policy(`FOR SELECT USING (${probe})`))).toEqual([]);
+    expect(lintMigrationSql(policy(`AS PERMISSIVE FOR SELECT USING (${probe})`))).toEqual([]);
+  });
+
+  // Break caught: the predicate ORed into the ordinary policy (which is for ALL when no command is written), where it
+  // would decide which rows an UPDATE or a DELETE may touch and let a record of another hub be moved into one's own.
+  it.each([
+    [
+      'a policy with no command, which is for ALL',
+      `USING (hub_id = ANY (melarc.authorized_hub_ids()) OR id = melarc.scope_probe_id())`,
+    ],
+    [
+      'a policy FOR ALL',
+      `FOR ALL USING (${probe}) WITH CHECK (hub_id = ANY (melarc.authorized_hub_ids()))`,
+    ],
+    ['a policy FOR UPDATE', `FOR UPDATE USING (${probe})`],
+    ['a policy FOR DELETE', `FOR DELETE USING (${probe})`],
+    ['a policy FOR INSERT', `FOR INSERT WITH CHECK (${probe})`],
+  ])('refuses the predicate in %s', (_label, clauses) => {
+    const problems = lintMigrationSql(policy(clauses));
+    // The probe rule says it first. The expression is also not the supported structure outside a policy FOR SELECT, and the
+    // structure rule says so too: each rule holds on its own.
+    expect(problems[0]).toContain('belongs in a policy FOR SELECT only');
+    expect(problems[0]).toContain('policy probe on melarc.orders');
+    expect(problems.slice(1).join('\n')).toMatch(/not a supported policy expression/);
+  });
+
+  // Break caught: ALTER POLICY, which does not show its command, being the way the predicate gets into an ordinary policy.
+  it('refuses the predicate in an ALTER POLICY, which does not show the command', () => {
+    const problems = lintMigrationSql(policy(`USING (${probe})`, 'ALTER'));
+    expect(problems[0]).toContain('belongs in a policy FOR SELECT only');
+    expect(problems.slice(1).join('\n')).toMatch(/not a supported policy expression/);
+  });
+
+  it('does not read the name in a comment or a string', () => {
+    expect(
+      lintMigrationSql(
+        `${PROTECTED}\n-- melarc.scope_probe_id() is for SELECT\nCREATE POLICY p ON melarc.orders USING (CASE melarc.principal_type() WHEN 'STAFF' THEN note = 'melarc.scope_probe_id()' ELSE false END);`,
+      ),
+    ).toEqual([]);
+  });
+
+  // Break caught (F03): the exception widened from the scope probe policy to anything that mentions the probe.
+  it.each([
+    ['the probe with no staff guard', `FOR SELECT USING (id = melarc.scope_probe_id())`],
+    [
+      'a guard that excludes one type and admits the rest',
+      `FOR SELECT USING (melarc.principal_type() <> 'VENDOR' AND id = melarc.scope_probe_id())`,
+    ],
+    [
+      'the guard and the probe ORed',
+      `FOR SELECT USING (melarc.principal_type() = 'STAFF' OR id = melarc.scope_probe_id())`,
+    ],
+    [
+      'a third condition',
+      `FOR SELECT USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id() AND true)`,
+    ],
+  ])('refuses %s, even in a policy FOR SELECT', (_label, clauses) => {
+    const problems = lintMigrationSql(policy(clauses));
+    expect(problems).toEqual([expect.stringMatching(/not a supported policy expression/)]);
+  });
+});
+
+describe('lintMigrationSql: a SYSTEM branch names its capability (GBT-E7)', () => {
+  const policy = (clause: string, verb = 'CREATE') =>
+    `${PROTECTED}\n${verb} POLICY p ON melarc.orders ${clause};`;
+  const using = (expression: string) => `USING (${expression})`;
+
+  // Break caught: the lint refusing the prescribed shape, which would block the seed slice's first table.
+  it('accepts a SYSTEM arm that tests one capability, in USING and in WITH CHECK', () => {
+    const arm =
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed' ELSE false END";
+    expect(lintMigrationSql(policy(`${using(arm)} WITH CHECK (${arm})`))).toEqual([]);
+  });
+
+  // Break caught: the blanket policy. `SYSTEM` alone, or ORed into a policy, opens the table to every task.
+  it.each([
+    [
+      'a SYSTEM arm with no capability',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN true ELSE false END",
+    ],
+    [
+      'an OR that admits SYSTEM',
+      "hub_id = ANY (melarc.authorized_hub_ids()) OR melarc.principal_type() = 'SYSTEM'",
+    ],
+    [
+      'a capability outside the closed list',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'admin' ELSE false END",
+    ],
+  ])('refuses %s', (_label, expression) => {
+    const problems = lintMigrationSql(policy(using(expression)));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('policy p on melarc.orders');
+  });
+
+  // Break caught: the check reading only USING, so that a WITH CHECK that admits SYSTEM alone lets any task write.
+  it('refuses a SYSTEM branch in WITH CHECK that tests no capability', () => {
+    const good =
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed' ELSE false END";
+    const bad = "CASE melarc.principal_type() WHEN 'SYSTEM' THEN true ELSE false END";
+    expect(lintMigrationSql(policy(`USING (${good}) WITH CHECK (${bad})`))).toHaveLength(1);
+  });
+
+  // Break caught: the three predicates that the review of S0.4 and S0.5 reproduced as accepted: a capability test that is
+  // not mandatory. Each is judged as the clause it is, in USING and in WITH CHECK, and each is refused.
+  it.each([
+    [
+      'a negated capability test',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN NOT (melarc.task_capability() = 'seed') ELSE false END",
+    ],
+    [
+      'a disjunction that is true anyway',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN (melarc.task_capability() = 'seed' OR true) AND true ELSE false END",
+    ],
+    [
+      'an OR true around the CASE',
+      "(CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed' ELSE false END) OR true",
+    ],
+    [
+      'an ELSE that admits everyone else',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN melarc.task_capability() = 'seed' ELSE true END",
+    ],
+    // The second review: AND binds tighter than OR, so nothing inside a disjunction is mandatory. This is true for every
+    // capability, and it was accepted.
+    [
+      'a capability test inside a disjunction that is true anyway',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN (melarc.task_capability() = 'seed' AND false OR true) AND true ELSE false END",
+    ],
+    [
+      'the same with the grouping spelled out in nested parentheses',
+      "CASE melarc.principal_type() WHEN 'SYSTEM' THEN ((((melarc.task_capability() = 'seed' AND false) OR true))) AND ((true)) ELSE false END",
+    ],
+    [
+      'the same as pg_get_expr prints it, with the cast and a parenthesis for every operand',
+      "CASE melarc.principal_type() WHEN 'SYSTEM'::text THEN ((((melarc.task_capability() = 'seed'::text) AND false) OR true) AND true) ELSE false END",
+    ],
+  ])('refuses %s, in USING and in WITH CHECK', (_label, expression) => {
+    expect(lintMigrationSql(policy(using(expression)))).toHaveLength(1);
+    expect(lintMigrationSql(policy(`WITH CHECK (${expression})`))).toHaveLength(1);
+    expect(
+      lintMigrationSql(policy(`${using(expression)} WITH CHECK (${expression})`)),
+    ).toHaveLength(2);
+  });
+
+  // The line is not "no OR in the arm": a capability test that is mandatory, next to a parenthesized OR that has nothing to do
+  // with it, is the supported structure and is accepted, in USING and in WITH CHECK, in either order.
+  it.each([
+    ["melarc.task_capability() = 'seed' AND (a IS NULL OR b IS NULL)"],
+    ["(a IS NULL OR b IS NULL) AND melarc.task_capability() = 'seed'"],
+    ["((melarc.task_capability() = 'seed'::text) AND ((a IS NULL) OR (b IS NULL)))"],
+  ])('accepts a mandatory capability test beside an unrelated OR: %s', (body) => {
+    const expression = `CASE melarc.principal_type() WHEN 'SYSTEM' THEN ${body} ELSE false END`;
+    expect(lintMigrationSql(policy(`${using(expression)} WITH CHECK (${expression})`))).toEqual([]);
+  });
+
+  // Break caught: an ELSE that admits a SYSTEM context no arm names, in a policy that never writes SYSTEM at all.
+  it('refuses an ELSE true in the principal CASE of a policy that does not name SYSTEM', () => {
+    const open = "CASE melarc.principal_type() WHEN 'STAFF' THEN hub_id IS NOT NULL ELSE true END";
+    expect(lintMigrationSql(policy(using(open)))).toEqual([
+      expect.stringContaining('ELSE of the principal CASE'),
+    ]);
+  });
+
+  // Break caught: ALTER POLICY, which can widen a policy that was created correctly, being let through.
+  it('refuses a SYSTEM branch added by ALTER POLICY', () => {
+    const widened = policy(using("melarc.principal_type() = 'SYSTEM' OR true"), 'ALTER');
+    expect(lintMigrationSql(widened)).toHaveLength(1);
+  });
+
+  // Break caught: the word SYSTEM in a string that is data, or in a comment, being read as a branch.
+  it('does not read SYSTEM in a comment or in a string that is not part of the policy', () => {
+    const sql = `${PROTECTED}
+-- the SYSTEM principal is dealt with elsewhere
+COMMENT ON TABLE melarc.orders IS 'SYSTEM rows are written by a seed';`;
+    expect(lintMigrationSql(sql)).toEqual([]);
   });
 });
 
@@ -210,9 +560,7 @@ ALTER TABLE melarc.orders OWNER TO melarc_owner, ENABLE ROW LEVEL SECURITY, FORC
       [],
     );
     expect(
-      lintMigrationSql(
-        `${PROTECTED}\nALTER POLICY p ON melarc.orders USING (to_regclass('x') IS NULL);`,
-      ),
+      lintMigrationSql(`${PROTECTED}\nALTER POLICY p ON melarc.orders USING (${SUPPORTED});`),
     ).toEqual([]);
   });
 
@@ -323,6 +671,80 @@ describe('lintMigrationSql: statements that remove data', () => {
     "INSERT INTO melarc.notes VALUES ('ON DELETE CASCADE and TRUNCATE are only words here');",
   ])('allows %s', (statement) => {
     expect(lintMigrationSql(statement)).toEqual([]);
+  });
+});
+
+/**
+ * An ordinary policy is the principal CASE, and an expression that is not is refused whether or not it names SYSTEM (correction
+ * F03). The first three admit a SYSTEM context under any capability and name no SYSTEM, so the lint used to say nothing.
+ */
+describe('lintMigrationSql: nothing but the principal CASE (or the scope probe policy) is passed (F03)', () => {
+  const policy = (clauses: string, verb = 'CREATE') =>
+    `${PROTECTED}\n${verb} POLICY p ON melarc.orders ${clauses};`;
+  const UNSUPPORTED = /not a supported policy expression/;
+
+  // Break caught: the reproduction of F03. Each expression is a whole USING or WITH CHECK; each admits SYSTEM and names no SYSTEM.
+  it.each([
+    ['a literal true', 'true'],
+    ['an inequality on the principal type', "melarc.principal_type() <> 'VENDOR'"],
+    ['NOT IN a list', "melarc.principal_type() NOT IN ('VENDOR', 'RIDER')"],
+  ])(
+    'refuses %s as the USING, the WITH CHECK or both clauses of a policy',
+    (_label, expression) => {
+      const using = lintMigrationSql(policy(`USING (${expression})`));
+      expect(using).toEqual([expect.stringMatching(UNSUPPORTED)]);
+      expect(using[0]).toContain('policy p on melarc.orders');
+      expect(lintMigrationSql(policy(`FOR INSERT WITH CHECK (${expression})`))).toEqual([
+        expect.stringMatching(UNSUPPORTED),
+      ]);
+      expect(
+        lintMigrationSql(policy(`USING (${expression}) WITH CHECK (${expression})`)),
+      ).toHaveLength(2);
+    },
+  );
+
+  // Break caught: a policy judged alone, so that a second permissive policy beside a safe one admits what the safe one refuses
+  // (PostgreSQL ORs the permissive policies that apply).
+  it('refuses a second permissive policy that admits what the first refuses', () => {
+    const sql = `${PROTECTED}\nCREATE POLICY safe ON melarc.orders USING (${SUPPORTED});\n--> statement-breakpoint\nCREATE POLICY open ON melarc.orders FOR SELECT USING (true);`;
+    const problems = lintMigrationSql(sql);
+    expect(problems).toEqual([expect.stringMatching(UNSUPPORTED)]);
+    expect(problems[0]).toContain('policy open on melarc.orders');
+  });
+
+  // Break caught: ALTER POLICY, which can replace a supported expression with one that admits everyone.
+  it('refuses ALTER POLICY that replaces the expression with an unsupported one', () => {
+    expect(lintMigrationSql(policy('USING (true)', 'ALTER'))).toEqual([
+      expect.stringMatching(UNSUPPORTED),
+    ]);
+    expect(lintMigrationSql(policy(`USING (${SUPPORTED})`, 'ALTER'))).toEqual([]);
+  });
+
+  // Break caught: the supported forms refused, which would block the policy template of the next slice.
+  it.each([
+    ['one policy for every command', `USING (${SUPPORTED}) WITH CHECK (${SUPPORTED})`],
+    ['a policy for SELECT', `FOR SELECT USING (${SUPPORTED})`],
+    ['a policy for INSERT', `FOR INSERT WITH CHECK (${SUPPORTED})`],
+    ['a policy for UPDATE', `FOR UPDATE USING (${SUPPORTED}) WITH CHECK (${SUPPORTED})`],
+    ['a policy for DELETE', `FOR DELETE USING (${SUPPORTED})`],
+    [
+      'the three human principals and nothing for SYSTEM',
+      "USING (CASE melarc.principal_type() WHEN 'STAFF' THEN a WHEN 'VENDOR' THEN b WHEN 'RIDER' THEN c ELSE false END)",
+    ],
+    [
+      'the scope probe policy FOR SELECT',
+      "FOR SELECT USING (melarc.principal_type() = 'STAFF' AND id = melarc.scope_probe_id())",
+    ],
+  ])('accepts %s', (_label, clauses) => {
+    expect(lintMigrationSql(policy(clauses))).toEqual([]);
+  });
+
+  // Break caught: the arm for the principal that is not one, which admits a context that was never established.
+  it('refuses an arm for NONE', () => {
+    const problems = lintMigrationSql(
+      policy("USING (CASE melarc.principal_type() WHEN 'NONE' THEN true ELSE false END)"),
+    );
+    expect(problems).toEqual([expect.stringContaining('not a principal type')]);
   });
 });
 

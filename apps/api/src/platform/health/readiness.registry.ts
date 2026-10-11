@@ -1,14 +1,23 @@
 import { Injectable } from '@nestjs/common';
 
+/** What a check is told of the run it is part of. */
+export interface ReadinessCheckOptions {
+  /**
+   * How long the run waits for this check. The registry stops waiting when it passes, so a check that holds anything (a
+   * connection, a place in a line) must end it by then on its own account: an answer nobody waits for frees nothing.
+   */
+  readonly timeoutMs: number;
+}
+
 export interface ReadinessCheck {
   /** Identifies the check in logs. Never sent to a caller. */
   readonly name: string;
   /** Resolves when the dependency is usable; throws or rejects when it is not. */
-  check(): Promise<void> | void;
+  check(options: ReadinessCheckOptions): Promise<void> | void;
 }
 
 /** A probe must answer quickly even when a dependency does not. */
-const DEFAULT_CHECK_TIMEOUT_MS = 2000;
+export const DEFAULT_CHECK_TIMEOUT_MS = 2000;
 
 /**
  * The dependency checks that decide readiness. Platform modules that own a dependency (the database,
@@ -48,7 +57,7 @@ export class ReadinessRegistry {
         let timer: NodeJS.Timeout | undefined;
         try {
           await Promise.race([
-            Promise.resolve().then(() => check.check()),
+            Promise.resolve().then(() => check.check({ timeoutMs })),
             new Promise<never>((_resolve, reject) => {
               timer = setTimeout(() => {
                 reject(new Error('readiness check timed out'));

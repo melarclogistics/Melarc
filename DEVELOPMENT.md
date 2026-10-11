@@ -51,11 +51,16 @@ This creates two git-ignored files from their committed examples and prints no s
 
 - `infrastructure/postgres/.env`: random, throwaway passwords for the database's three identities (the cluster
   superuser, the migration identity and the API's runtime identity), the host and the port.
-- `apps/api/.env`: the API's settings, with `DATABASE_URL` using the runtime identity and the same password.
+- `apps/api/.env`: the API's settings, with `DATABASE_URL` using the runtime identity and the same password, and a
+  fresh random key for each of the five key purposes (`totp_seed`, `credential_delivery`, `idempotent_replay`,
+  `limiter_digest`, `password_pepper`). These keys are throwaway local substitutes, not KMS-backed custody: nothing
+  they protect is real, and production refuses to start on them.
 
 It never overwrites a file, so it is safe to run again. If an existing `apps/api/.env` has no readable `DATABASE_URL`
-(an older copy of the example) or its password no longer matches the database settings, it says so by name; delete that
-file and run the command again to have it rebuilt. The passwords are only ever used on your machine.
+(an older copy of the example), lacks a setting the API now requires, or its password no longer matches the database
+settings, it says so by name (the settings it lacks are listed, never a value); delete that file and run the command
+again to have it rebuilt. **A `.env` made before the key settings existed lacks them, and the API refuses to start until
+it is rebuilt or they are added.** The passwords are only ever used on your machine.
 
 ## 3. Start the database
 
@@ -79,9 +84,24 @@ pnpm --filter @melarc/api run db:bootstrap
 pnpm --filter @melarc/api run db:migrate
 ```
 
-The database tools run from the build, so build first. `db:bootstrap` creates the three roles and the `melarc_dev`
-database; `db:migrate` applies the migrations in `apps/api/migrations` as the migration identity. Both are safe to
-repeat.
+The database tools run from the build, so build first. `db:bootstrap` creates the roles (the owner, the migration, API
+runtime, worker and provisioning identities, and the worker's capability role) and the `melarc_dev` database. The worker
+and provisioning logins take passwords derived from the administrator password, which is for this machine's cluster only,
+so they need no setting of their own. `db:migrate` applies the migrations in `apps/api/migrations` as the migration
+identity. Both are safe to repeat; run `db:bootstrap` before `db:migrate` after updating, because a migration grants to
+the roles it names.
+
+```text
+pnpm --filter @melarc/api run db:seed
+```
+
+`db:seed` fills the migrated, empty `melarc_dev` with the reference data (the permission catalogue, the confirmed role
+bundles and their grants, the two fixed Vendor and Rider policies, the settings with an approved value, the hub and the
+twelve identity reasons) as the provisioning login, in one transaction, by a database function that only that login may run
+(the login holds no privilege on those tables, so nothing else of it can add to them). The database, not the command, refuses
+to run it twice: it refuses a database that already holds any of it, and changes nothing. `db:seed --fixtures` adds the test-only fixtures and refuses in production.
+For another database set `DATABASE_SEED_URL` (the provisioning login) and `APP_ENV`; the API refuses to start with either
+`DATABASE_SEED_URL` or `DATABASE_MIGRATION_URL` in its environment. `db:reset` (section 8) returns the database to migrated and empty, which allows a new seed.
 
 ## 5. Run the applications
 
@@ -102,6 +122,22 @@ curl http://127.0.0.1:3000/readyz
 
 `/readyz` answers ready only while the database is reachable. The Ops dev server prints its address (Vite's default,
 `http://localhost:5173`) and forwards `/api/v1` to the API, so the browser only ever talks to its own origin.
+
+The credential-delivery worker is a third process, with no listener, that sends the messages the API queues
+(setup grants and recovery links). Nothing queues one yet, so there is nothing for it to do until the first
+credential-issuing operation exists, but it can be started and stopped now:
+
+```text
+pnpm --filter @melarc/api run start:worker:local
+```
+
+It reads the same `apps/api/.env` and connects as `melarc_worker_runtime`; a local run derives that login's password from
+the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays unset (the API refuses to start with it
+set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
+yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
+by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
+Until the redemption records it must read exist (SLICE-000 S0.29 and S0.50) it confirms none, so it sends nothing and
+says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
 
 ## 6. Run the checks and the smoke tests
 
@@ -197,10 +233,12 @@ database, which listens on loopback.
 
 ## Windows, WSL2 and Linux
 
-- **Windows.** Use the commands above in any shell. Five API tests (under `pnpm test`), one more under
-  `pnpm run test:db` and one harness test need to receive `SIGTERM`, which Windows cannot deliver to a process, so they
-  are skipped there and run on Linux, in WSL2 and in CI. A skipped test is not a pass: run the suite in WSL2 or Linux
-  before relying on shutdown behaviour.
+- **Windows.** Use the commands above in any shell. Six API tests (under `pnpm test`; one is the delivery worker's), two
+  more under `pnpm run test:db` (one is the worker's) and one harness test need to receive `SIGTERM`, which Windows
+  cannot deliver to a process, so they are skipped there and run on Linux, in WSL2 and in CI. Two more tests of
+  `pnpm test` read the permission bits of the delivery worker's capture folder, which a Windows file system does not
+  have, and are skipped there too. A skipped test is not a pass: run the suite in WSL2 or Linux before relying on
+  shutdown behaviour.
 - **Linux and CI.** The same commands. CI runs them on Ubuntu with a PostgreSQL service container.
 - **WSL2.** Clone into the Linux filesystem (`~/Melarc`), not under `/mnt/c` or `/mnt/e`: it is much faster and keeps
   file permissions. Install Node and pnpm inside WSL2 and run every command on this page in the WSL2 shell.
@@ -276,6 +314,7 @@ database, which listens on loopback.
 
 ## Not provided yet
 
-Seeded fixtures for the Local environment and capture adapters for email and SMS belong to the product slices that
-need them ([DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) sections 3 and 4); there is
-no product data to seed and no provider to capture yet. Staging and production are not set up from here.
+Seeded fixtures for the Local environment belong to the product slices that need them
+([DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) sections 3 and 4); there is no product
+data to seed yet. The capture adapter and the delivery worker exist (section 5), but no operation queues a message yet,
+and no real email or SMS provider is built. Staging and production are not set up from here.

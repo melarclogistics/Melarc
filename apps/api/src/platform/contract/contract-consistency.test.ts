@@ -544,11 +544,11 @@ function cookieConditionProblems(contract: JsonObject): string[] {
     isJsonObject(contract.components) && isJsonObject(contract.components.schemas)
       ? contract.components.schemas
       : {};
-  const session = isJsonObject(schemas.Session) ? schemas.Session : {};
+  const session = isJsonObject(schemas.SessionRecord) ? schemas.SessionRecord : {};
   const properties = isJsonObject(session.properties) ? session.properties : {};
   const principal = isJsonObject(properties.principal_type) ? properties.principal_type : {};
   const types = stringsOf(principal.enum);
-  if (types.length === 0) throw new Error('Session.principal_type has no enum.');
+  if (types.length === 0) throw new Error('SessionRecord.principal_type has no enum.');
 
   for (const operation of operationsOf(contract)) {
     const responses = isJsonObject(operation.operation.responses)

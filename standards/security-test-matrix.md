@@ -23,6 +23,7 @@
 | `EDGE`| The reverse proxy, CORS configuration or a security header refuses|
 | `INFRA`| Cloud IAM, bucket policy, KMS policy or network policy refuses|
 | `WORKER`| The job's own envelope verification refuses|
+| `E2E`| A real browser against the real stack proves it; no layer above refuses on its own|
 
 ## 2. Principal-first scope model
 
@@ -68,6 +69,10 @@ Hub scope is the **Staff** boundary and only the Staff boundary. These tests ass
 | `GBT-B9`| Context carries an **unknown** `principal_type`| —| Read any protected table| **Zero rows**; write denied| `RLS`|
 | `GBT-B10`| A request whose resolved context would carry a **malformed** principal id| Any principal| Any protected operation, through the ordinary application path| **Context establishment fails.** No transaction opens, **no protected statement runs**, no row is disclosed, and the refusal is not a query returning zero rows| `APP`|
 | `GBT-B11`| `melarc.principal_id` corrupted **by hand** on a direct connection, bypassing the application| —| Read any protected table| **No row is disclosed.** The `::uuid` cast **raises** and the statement aborts — fail-closed **by abort**, which is a different code path from a policy returning false| `RLS`|
+| `GBT-B12`| A bundle reduction racing a sign-in, and racing a state-changing request, from the same bundle| Staff, any bundle| Run each pair with the reduction first and with the request first, on two real connections under the **runtime login**, with the transaction-scoped advisory protocol of `SECURITY_DESIGN.md` §13.10a| Sign-in either reads the reduced content or is ordered before the reduction and is **terminated by it**: no session with the old snapshot is left `ACTIVE`; a mutation already past its shared lock finishes first, and one that starts after sees its session terminated and does not proceed; neither order deadlocks and a lock-timeout expiry leaves no half-applied reduction. **An acceptance obligation of the task that builds it, not yet run**| `APP` + `RLS`|
+| `GBT-B13`| A bundle addition or widening, then a later reduction| Staff, any bundle| Add a grant, check existing sessions, then reduce a different grant| The addition **raises `revision` and ends no session**, every existing snapshot is retained and stays valid; the later reduction raises `reduction_floor` and ends every session recorded below it, including those issued after the addition. A name-only change raises nothing| `APP`|
+| `GBT-B14`| `resetStaffMfa` against each recorded state, and the lineage| Platform Admin; target identities| Reset an `ACTIVE` factor; a stranded `PENDING` factor; an unfinished reset; an identity with no factor record; an identity whose latest factor the system ended; a factor created in episode A and reset again into B; reissue while the predecessor is `PENDING` and after it has expired; consume a re-enrolment grant; try to create or change a `BOOTSTRAP` origin, a lineage column, or a reference to another principal's grant| Only the three recorded states are eligible and **absence of a factor never is** (`STATE_CONFLICT`); **only a `PENDING` grant becomes `SUPERSEDED`** and terminal grants keep their state; reissues share the episode and link by `supersedes_grant_id` only across a `PENDING` predecessor (an expired predecessor leaves no link), with one `PENDING` grant per episode, and a continuation names its consumed parent in the other column and never both; a factor keeps its creation episode A and gains B; a lineage reference to another principal's grant is refused by a constraint; **the one legal later write, `revocation_episode_id` from null to the reset's episode inside the revocation, succeeds under the runtime login while every other write to a lineage column (overwrite, clear, another principal's episode, `created_episode_id`, a table-wide `UPDATE`) is refused**; a bootstrap administrator is told only by its immutable `origin`, which no operation or runtime `UPDATE` can set or change. **Constraint and runtime-login behaviour: an acceptance obligation, not yet run**| `APP` + `CONSTRAINT`|
+| `GBT-B15`| Who may recover, and a recovery request or completion racing an offboarding or a suspension (`credential-recovery.md` §5.7)| Staff identity; vendor account for the credential-state rows| Request and complete recovery for an `ACTIVE`, a `SUSPENDED`, a `PENDING_APPROVAL`, a `REJECTED` and an `OFFBOARDED` staff identity and for a vendor account with no shared secret yet and for one whose organisation is `ACTIVE`, `SUSPENDED`, `REJECTED` or `TERMINATED`; then, on two real connections under the **runtime login**, run `completeCredentialRecovery` against an offboarding, `requestCredentialRecovery` against an offboarding and a completion against a suspension, each with the recovery first and with the status change first (no Slice-000 operation offboards or terminates a vendor organisation, so the status change is made by the test kit through a connection that holds the identity lock)| Only an `ACTIVE` or `SUSPENDED` principal with an established credential is eligible (for a vendor, also an `ACTIVE` or `SUSPENDED` organisation); recovery reactivates nothing. Anyone else gets the **identical `202`** with no request, link, delivery job, provider call or audit event, and an administrator naming them gets `STATE_CONFLICT` with nothing created. **Completion first:** the credential changes and the sessions end with `CREDENTIAL_CHANGED`. **Status change first:** `RECOVERY_TOKEN_INVALID`, indistinguishable from the other invalid-link answers, no credential changed, no lock cleared, no session touched. A request judged before the status change is `ISSUED` and its later completion is `RECOVERY_TOKEN_INVALID`; one judged after is excluded. A suspension changes nothing about a completion. No order deadlocks, and a lock-timeout expiry leaves nothing half applied. The offboarding operation's own half (it ends the links and cancels their jobs, [state-machines.md](../contracts/state-machines.md) §13.3) is proved by the slice that builds it. **An acceptance obligation, not yet run**| `APP` + `RLS`|
 
 ## 5. Family C — Vendor principal
 
@@ -85,6 +90,7 @@ A Vendor's boundary is `vendor_organization_id` and **never a Hub**. Vendor owne
 | `GBT-C8`| Vendor context with **no** `vendor_organization_id`| Vendor A| Read any vendor-owned row| **Denied** — `NULL` comparison is not `TRUE`| `RLS`|
 | `GBT-C9`| A `PickupManifest` carrying stops for several vendors| Vendor A| Read the manifest| **Denied.** The Vendor branch on that table is `DENY`| `RLS`|
 | `GBT-C10`| `SecurityRiskHold` against Vendor A| Vendor A| Read its own risk hold| **Denied.** Telling the subject is the failure mode| `RLS`|
+| `GBT-C11`| A reduced compiled Vendor policy (`minimum_revision` raised, a predicate changed); an instance still running the previous code| Vendor A| Through the old instance: sign in; make an authenticated request with a valid current-revision session. Through an instance that is above the floor but older than a session: make a request with that newer session. Through a current instance: present a session the old instance committed just before the raise; present an older session that remains above the floor| The old instance **refuses issuance and every authenticated request** of the type with the operational failure, writes nothing, reports `policy_superseded` and leaves the session `ACTIVE`; the current instance then serves that session. The instance older than a session **refuses that request** the same way and leaves it `ACTIVE`. The session committed before the raise is refused `SESSION_INVALID` and `TERMINATED` `AUTHORITY_CHANGED` **by the current instance**, never by the obsolete one; an older session above the floor is served. **Obligation: proved with two real application builds whose policies differ in an actual predicate, against one database under the runtime login (§13.10a, item 13); not yet run**| `APP` + `RLS`|
 
 ## 6. Family D — Rider assignment
 
@@ -103,6 +109,7 @@ A Vendor's boundary is `vendor_organization_id` and **never a Hub**. Vendor owne
 | `GBT-D9`| Rider context with **no** assignment on the target aggregate| Rider A| Read that aggregate| **Denied**| `RLS`|
 | `GBT-D10`| Rider context, forged `authorized_hub_ids` covering the row's hub| Rider A| Read Rider B's row| **Denied.** A Rider never reaches the Staff branch| `RLS`|
 | `GBT-D11`| A row carrying a `rider_id` that no existing Product permission exposes to a Rider| Rider A| Read it| **Denied.** No current Rider permission exposes that row| `RLS`|
+| `GBT-D12`| A reduced compiled Rider policy; an instance still running the previous code| Rider A| As `GBT-C11`, with the rider's bearer credential| Identical outcomes for a rider session: the old instance refuses issuance and every authenticated request and ends nothing, an instance older than a session refuses it and ends nothing, and a below-floor session is terminated only by a current instance. **The same two-build obligation; not yet run**| `APP` + `RLS`|
 
 ## 7. Family E — SYSTEM principal
 
@@ -114,6 +121,10 @@ SYSTEM is an explicit task capability plus the trusted envelope — **never a fa
 | `GBT-E2`| Worker sets `hub_scope_mode = ALL` directly| SYSTEM| Read across hubs| **Denied.** SYSTEM has no Staff `ALL` branch| `RLS`|
 | `GBT-E3`| Task class not permitted on the target table| SYSTEM| Read or write it| **Denied** by the task capability predicate| `RLS`|
 | `GBT-E4`| SYSTEM context with no task capability| SYSTEM| Any protected read| **Denied**| `RLS`|
+| `GBT-E5`| SYSTEM context under `authentication`| SYSTEM| Read a business table; inspect the credential repository port| **Business tables denied** by the policy (no `authentication` branch). **The port offers by-key lookups and no list or scan method**, and the grants limit the columns it may `UPDATE` (Registry §5.2)| `RLS` + `APP`|
+| `GBT-E6`| The API runtime sets the `seed` capability| API runtime| Write a table only a seed writes| **Denied** — the API runtime holds no DML grant on it, whatever label the context carries| `GRANT`|
+| `GBT-E7`| Every policy in the catalogue| Catalogue check| Scan `pg_policy` for a `SYSTEM` branch with no capability test (`task_capability()` or `outbox_task_permits`)| **None.** Every `SYSTEM` branch names one capability| `APP`|
+| `GBT-E8`| The `bootstrap` capability| `melarc_provisioning`, and the API runtime| Insert a `StaffIdentity` that is not of the bootstrap shape (`created_by` or `approved_by` not the reserved system actor), or run the bootstrap against a non-empty staff table| **Denied** by the `WITH CHECK` of the `bootstrap` branch, and the command refuses a non-empty table. The residual risk that code running as the API could assert the label is accepted (`SECURITY_DESIGN.md` §14.1)| `RLS` + `APP`|
 
 ## 8. Family F — Writes and scope mutation
 
@@ -200,6 +211,10 @@ The critical failure mode is not merely a key collision — it is **one caller r
 | `GBT-J13`| Any runtime identity| API / worker / scheduler / relay| `SET ROLE melarc_owner`| **Error** — and `melarc_owner` is `NOLOGIN`| `GRANT`|
 | `GBT-J14`| `melarc_owner`| —| Log in| **Refused.** `NOLOGIN`| `GRANT`|
 | `GBT-J15`| Normal application database credential| API runtime| Perform backup-plane authority| **Denied**| `INFRA`|
+| `GBT-J16`| `melarc_api_runtime`, the actual runtime login| API runtime| `CREATE` in a schema or the database, own a function or a schema, or execute a `SECURITY DEFINER` function it was not granted| **Error**, and the posture check reports the same finding when it is configured so| `GRANT`|
+| `GBT-J17`| `melarc_provisioning`| Provisioning| Appear in the API's or a worker's configuration, run DDL, or `SET ROLE melarc_migration_elevated`| **Absent / Error**| `GRANT` + `INFRA`|
+| `GBT-J18`| A statement, lock wait, idle transaction and whole transaction each run past their deadline| API runtime| Continue using the connection| **Ends at the deadline**; the connection's state is discarded, never reused| `APP`|
+| `GBT-J19`| The policy tables `RoleBundle`, `RoleBundleGrant` and `FixedPermissionPolicy` under the runtime login, and the advisory-lock protocol| `melarc_api_runtime`| `UPDATE` each; `SELECT … FOR SHARE` each; call the transaction-scoped advisory functions; look for a session-level advisory call in the application; reuse a pooled connection after commit, rollback and an aborted transaction| `UPDATE` and the row-locking `SELECT` are **refused**, the catalog shows **no `UPDATE` grant**, the transaction-scoped functions run, no session-level call exists, and no advisory lock survives the transaction. **Run under the actual runtime login, never the owner; an acceptance obligation, not yet run**| `GRANT`|
 
 ## 13. Family K — Migration and deployment authority
 
@@ -287,7 +302,9 @@ Mechanical assertions against the canonical settings authority.
 | `GBT-O2`| `contracts/settings.md`| —| Extract `evidence_retrieval_authorization_ttl_minutes`| **5**, exactly once, `CONFIRMED`| `APP`|
 | `GBT-O3`| `contracts/settings.md`| —| Extract `audit_integrity_checkpoint_interval_minutes`| **15**, exactly once, `CONFIRMED`| `APP`|
 | `GBT-O4`| `contracts/settings.md`| —| Look for `evidence_signed_url_ttl_minutes` as a live key| **Absent from §7.1–§7.5 and §7.7.** Retired to §7.6| `APP`|
-| `GBT-O5`| `contracts/settings.md` §7.7| —| Extract the rate-limit buckets and compare the runtime limiter against the contract| **Exactly six canonical buckets**, names and **credential keying unchanged** — staff identity · MFA challenge and principal · Vendor account **and** registered device · Rider submitted phone number · recovery principal · active Session. **Launch values read from the contract, never hard-coded in the test**: staff **10** · privileged MFA **10** · vendor **10** · rider challenge **20** · recovery **10** · authenticated API **120**, per minute. **No IP or source-address bucket exists.** The two sub-ceilings — report/export initiation **10/min**, provider-initiating operation **20/min** — are **inside** `rate_limit_authenticated_api` and must not be counted as a seventh or eighth bucket| `APP`|
+| `GBT-O5`| `contracts/settings.md` §7.7| —| Extract the rate-limit buckets and compare the runtime limiter against the contract| **Exactly six canonical buckets**, names and **credential-oriented keying as `settings.md` §7.7 states it** — staff identity · MFA challenge and principal · Vendor account **and** registered device · Rider submitted phone number · recovery principal · active Session. **Launch values read from the contract, never hard-coded in the test**: staff **10** · privileged MFA **10** · vendor **10** · rider challenge **20** · recovery **10** · authenticated API **120**, per minute. **No IP or source-address bucket exists in the application** (the edge's per-source ceiling is infrastructure, `DEPLOYMENT_AND_ENVIRONMENTS.md` §12.2). The two sub-ceilings — report/export initiation **10/min**, provider-initiating operation **20/min** — are **inside** `rate_limit_authenticated_api` and must not be counted as a seventh or eighth bucket| `APP`|
+| `GBT-O6`| `contracts/settings.md` §7.7 and `SECURITY_DESIGN.md` §13.4c, §14.12| —| Run the limiter against two API processes sharing one database, and look for hash admission, transport ceilings or the edge ceiling presented as a bucket or a settings key| **The state is PostgreSQL-authoritative in any integrated environment** (the in-memory adapter is a unit-test double only); a request refused by the rate limit or by hash admission is neither verified nor counted; the engineering ceilings are **not** a seventh bucket and **not** a settings key; and the `SECURITY_DESIGN.md` §14.12 proof holds — persistence across a restart, the exact threshold under concurrent admission, expiry, a flood of distinct identifiers, capacity exhaustion, a store outage (fail closed), a key rotation (no allowance reset), the additional-device account key, and no counter increment on overload| `APP`|
+| `GBT-O7`| `DEPLOYMENT_AND_ENVIRONMENTS.md` §12.2 and `SECURITY_DESIGN.md` §14.12| —| Send requests with a spoofed `X-Forwarded-For` to a direct-local server, and then through the documented proxy topology, from several users behind one shared address| **`trust proxy` is off by default and never set unconditionally**: a spoofed forwarded address changes no bucket key and no audit address; behind the documented topology only the last trusted hop is believed; users sharing an address are not throttled together, because no bucket is keyed on an address| `APP` + `EDGE`|
 
 ## 18. Family P — Encryption at rest
 
@@ -414,6 +431,12 @@ Detection, not prevention. **No row here claims tamper-proof.**
 | `GBT-W8`| Every API response, authentication and recovery included| —| Inspect cache headers| **`Cache-Control: no-store`**, sent by the API itself as a platform rule| `EDGE` + `APP`|
 | `GBT-W9`| Any browser surface response| —| Inspect security headers| CSP · `frame-ancestors 'none'` · `nosniff` · restrictive Referrer Policy · HSTS| `EDGE`|
 | `GBT-W10`| A safe read operation| Any| Submit with a CSRF token| **Not required**| `APP`|
+| `GBT-W11`| A browser pre-session mutation (sign-in, setup, recovery) with a missing, `null` or unapproved `Origin`| Attacker| Submit| **`403` `CSRF_VALIDATION_FAILED`**; the audit event names the route and the check and no principal that does not exist| `APP`|
+| `GBT-W12`| A native Rider operation with no `Origin`; a browser session cookie presented to a Rider-only operation| Rider app; browser| Submit| The first **succeeds**; the second is **refused**. A caller-supplied client-type string or `User-Agent` changes neither| `APP`|
+| `GBT-W13`| The trusted HTTPS test origin| Chromium, Firefox, WebKit (branded Chrome, Edge and Safari as smoke or manual)| Sign in, prove MFA, act, sign out, and revoke| Cookies are `Secure`, `HttpOnly` where specified, host-only, `Path`- and `SameSite`-correct; the session credential is **rotated** at sign-in; the protected next request is sent and then refused after sign-out and revocation; deletion uses `Max-Age=0` and leaves `melarc_vendor_device`; **a missing engine is reported blocked, never skipped**| `E2E`|
+| `GBT-W14`| A request over the transport limits: an oversized body (also sent chunked), a compressed body, an unsupported media type, invalid framing, a stalled header or body| Any| Submit to the real HTTP server; then submit a small bounded JSON syntax error| The transport refuses promptly with `413` or `415` and **no `Error.code`**, before authentication is consulted and without buffering the body; the bounded syntax error is carried to the validation stage and answered `400` in the refusal order of `permission-enforcement.md` §5.1| `APP` + `EDGE`|
+| `GBT-W15`| A cross-site browser mutation that Fetch Metadata marks, and a credentialed preflight from an unlisted origin| Attacker page| Submit the mutation; send the preflight| The mutation is refused `403` `CSRF_VALIDATION_FAILED`; the preflight is refused and the origin is **never reflected**; a safe read, a probe and a preflight receive no blanket `Origin` requirement| `APP` + `EDGE`|
+| `GBT-W16`| The setup, recovery and MFA re-enrolment pages opened from a link| Test browser| Open each link, reload, and inspect history, requests, referrers, storage, logs and analytics| The token is read once from the fragment and removed by replacing the history entry; no request, referrer, storage entry, log or analytics event carries it; opening the page redeems nothing; redemption is a `fetch` `POST` that carries a real `Origin`| `E2E`|
 
 ## 26. Family X — Evidence object storage topology
 
@@ -512,6 +535,7 @@ Throughout: a Staff Session holds **Grant A** — a permission with **`ALL`** Hu
 | `GBT-GS10`| Session holds all-Hub `report.read` and `pickup.request.reassign_hub` for Hub A only| Senior Ops| `reassignPickupRequestHub` from Hub A to Hub B| **Denied.** The grant authorizing reassignment must cover **both the source and target hubs**; an unrelated reporting grant supplies neither| `RLS` + `APP`|
 | `GBT-GS11`| Session holds an all-Hub **global-resource** permission and a Hub-limited operational one| Senior Ops| Invoke the global-resource operation| **Permitted**, against the registry's global / ownership predicate. **No Hub requirement is fabricated** for a resource that has none| `RLS`|
 | `GBT-GS12`| Session holds an all-Hub global permission| Senior Ops| Use it to reach a **Hub-scoped operational** row in an unauthorized hub| **Denied.** A global grant reaches global resources, not Hub-scoped ones| `RLS`|
+| `GBT-GS13`| A Platform Admin holds `staff.device.register` for all hubs and `staff.device.reregister` for their own hub; a Senior Ops holds both for their own hub| Platform Admin; Senior Ops| Register a first device for a rider in another hub; replace the device of a rider in another hub; the same without the registration grant| Registration in another hub **succeeds** for the Platform Admin whose grant says so and is `HUB_SCOPE_VIOLATION` for the Senior Ops; replacement in another hub is `HUB_SCOPE_VIOLATION` for both, so **the wider scope never extends to replacement**; without the registration grant the Platform Admin is `PERMISSION_DENIED`, because the role name is no bypass| `APP` + `RLS`|
 
 **`GBT-GS1` is the core behavior of this family:** an unrelated all-Hub grant must not broaden an operation authorized by a Hub-limited grant. **`GBT-GS7` and `GBT-GS8` are the structural pair**: they read the operation-resolved context itself rather than only its consequences, so application filtering alone cannot make the suite pass.
 
@@ -520,20 +544,20 @@ Throughout: a Staff Session holds **Grant A** — a permission with **`ALL`** Hu
 | Family| Tests| Focus|
 |---|---|---|
 | A — Pooled connections| 5| Transaction-local security context on reused connections|
-| B — Staff principal| 11| Staff Hub scope and fail-closed principal context|
-| C — Vendor principal| 10| Vendor ownership scope independent of Staff Hub scope|
-| D — Rider assignment| 11| Rider assignment scope|
-| E — SYSTEM principal| 4| Trusted task capability for SYSTEM work|
+| B — Staff principal| 15| Staff Hub scope and fail-closed principal context|
+| C — Vendor principal| 11| Vendor ownership scope independent of Staff Hub scope|
+| D — Rider assignment| 12| Rider assignment scope|
+| E — SYSTEM principal| 8| Trusted task capability for SYSTEM work|
 | F — Writes and scope mutation| 6| `WITH CHECK`, constraints and forbidden scope mutation|
 | G — PickupRequest hub reassignment| 11| Controlled Hub reassignment and stale-scope revocation|
 | H — Trusted Outbox envelope| 11| Server-derived task scope and worker envelope verification|
 | I — Idempotency| 8| Principal- and operation-bound replay isolation|
-| J — Technical identities| 15| Least-privilege runtime database identities|
+| J — Technical identities| 19| Least-privilege runtime database identities|
 | K — Migration and deployment authority| 7| Privileged migration lifecycle and ownership|
 | L — Vendor master versus operational history| 17| Global Vendor identity versus scoped operational history|
 | M — Evidence owner-aware scope| 9| Evidence ownership and conditional Hub scope|
 | N — Evidence signed object operations| 15| Signed single-object upload/retrieval capabilities|
-| O — Settings values| 5| Canonical security-sensitive settings|
+| O — Settings values| 7| Canonical security-sensitive settings|
 | P — Encryption at rest| 6| Required encrypted storage classes|
 | Q — OpenAPI topology| 15| Server topology, cookies and generated-client routing|
 | R — AdHocSender block reach| 8| Sender-block scope and enforcement|
@@ -541,13 +565,13 @@ Throughout: a Staff Session holds **Grant A** — a permission with **`ALL`** Hu
 | T — Audit integrity| 10| Tamper-evident audit verification|
 | U — Secret and telemetry redaction| 10| Secret exclusion from logs, traces and error sinks|
 | V — Backup, restore and key custody| 10| Restore proof, recovery isolation and KMS availability|
-| W — Browser origin, cookies and CSRF| 10| Browser-origin separation, cookies, CORS and CSRF|
+| W — Browser origin, cookies and CSRF| 16| Browser-origin separation, cookies, CORS and CSRF|
 | X — Evidence object storage topology| 10| Object-store reachability versus authorization|
 | Y — Worker task capability| 9| Task-scoped worker grants|
 | Z — Technical-table discovery and cross-document consistency| 13| Retained-specification and contract consistency|
 | SB — Sender-block reach and disclosure| 11| Sender-block reach versus disclosure|
-| GS — Operation-bound grant scope| 12| Operation-resolved permission and Hub scope|
-| **Total**| **274**||
+| GS — Operation-bound grant scope| 13| Operation-resolved permission and Hub scope|
+| **Total**| **297**||
 
 ### 31.1 What this matrix does not cover, stated rather than implied
 
@@ -564,7 +588,7 @@ These rows specify security tests to implement at the named layer. They do not c
 
 ### 31.3 STRIDE and OWASP Top 10 traceability
 
-**Family-level, not per-test.** [SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §15.1 and §15.6 map STRIDE and OWASP Top 10 (2021) at the **category** level, not per control — this table matches that granularity rather than inventing a finer one for 274 individual rows, which would assert a precision neither source claims.
+**Family-level, not per-test.** [SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §15.1 and §15.6 map STRIDE and OWASP Top 10 (2021) at the **category** level, not per control — this table matches that granularity rather than inventing a finer one for every individual row, which would assert a precision neither source claims.
 
 | Family| Primary STRIDE| OWASP Top 10| Why|
 |---|---|---|---|
@@ -599,7 +623,7 @@ These rows specify security tests to implement at the named layer. They do not c
 
 **Three families carry no STRIDE category by design.** `O`, `S` and `Z` validate consistency between retained specifications, configuration and canonical contracts. These are documentation/configuration defect classes rather than runtime attacker capabilities, so assigning a STRIDE category would be misleading.
 
-Three obsolete current-state bookkeeping tests were removed because they did not test runtime or retained-specification behavior. The remaining security matrix contains **274 tests** and keeps the same family-level STRIDE/OWASP mapping granularity as `SECURITY_DESIGN.md` §15.1/§15.6.
+Three obsolete current-state bookkeeping tests were removed because they did not test runtime or retained-specification behavior. The remaining security matrix (the total is in §31) keeps the same family-level STRIDE/OWASP mapping granularity as `SECURITY_DESIGN.md` §15.1/§15.6.
 
 ## 32. Related
 

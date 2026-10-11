@@ -50,6 +50,10 @@ const SENSITIVE_KEYS = [
   'recovery_code',
   'sig',
   'SIG',
+  // Key material, which a configuration object carries per purpose (S0.2).
+  'material',
+  'key_material',
+  'KEY_TOTP_SEED_MATERIAL',
 ];
 
 describe('redactValue: sensitive keys', () => {

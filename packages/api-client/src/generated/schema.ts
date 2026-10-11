@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.75.0-identity-reads-and-lockout
- *   SHA-256 ca476f42a7677008597d5e16a6d4d75338f16b7f2de30d4310aaeeab3d5cb1a1 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.77.0-slice-000-reconciliation
+ *   SHA-256 fb1b6a0c59642e3fb14f447fb2599d5b16f389ed590b4b54d8fe29cf8fae3755 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1312,7 +1312,9 @@ export interface paths {
          *     The audit record does distinguish them (`auth.session.failed`) — undifferentiated
          *     outward, precise inward.
          *
-         *     **Lockout is deliberately silent here**. A staff password is the first factor, so nothing has been proved when it is wrong, and announcing a lock to an unproved caller would let anyone learn which addresses are real staff by locking one. After `signin_max_attempts` (5) consecutive wrong passwords for an existing, active, credentialed identity the credential is locked for `signin_lockout_minutes` (15): every sign-in in that window, correct password included, is `INVALID_CREDENTIALS`, is not verified and does not extend the lock. Unknown, inactive and uncredentialed identities never lock and answer identically. The count resets on a complete sign-in, when the lock expires, and when a credential is set or recovered. A request refused by the rate limit (`RATE_LIMITED`) is neither verified nor counted.
+         *     **Lockout is deliberately silent here**. A staff password is the first factor, so nothing has been proved when it is wrong, and announcing a lock to an unproved caller would let anyone learn which addresses are real staff by locking one. After `signin_max_attempts` (5) consecutive wrong passwords for an existing, active, credentialed identity the credential is locked for `signin_lockout_minutes` (15): every sign-in in that window, correct password included, is `INVALID_CREDENTIALS`, is not verified and does not extend the lock. Unknown, inactive and uncredentialed identities never lock and answer identically. The count resets on a complete sign-in, when the lock expires, and when a credential is set or recovered. A request refused by the rate limit, or because no hash slot is free (`RATE_LIMITED`), is neither verified nor counted and does no dummy hash. The limit is keyed on the canonical submitted work email, whether or not it belongs to anyone.
+         *
+         *     **A browser pre-session credential mutation** (Product decision, 8 October 2026): the `Origin` must exactly match a configured allowlisted origin of the Ops Portal. A missing, `null` or unlisted `Origin` is `403` `CSRF_VALIDATION_FAILED`, answered before the password is examined and without counting it.
          */
         post: operations["staffSignIn"];
         delete?: never;
@@ -1345,7 +1347,9 @@ export interface paths {
          *
          *     **A wrong code counts twice**: against the challenge (`mfa_max_attempts` 3, then `CHALLENGE_UNUSABLE`) and against the identity's failed-attempt count shared with the password, so a thief who knows the password cannot guess codes across fresh challenges. The caller holds a live challenge - the password was proved - so a locked identity is told `CREDENTIAL_LOCKED` here. A complete sign-in resets the count.
          *
-         *     **An identity with no `ACTIVE` MFA factor** (privileged, password correct, no factor proven yet) is answered `MFA_ENROLMENT_REQUIRED` with `403` here, never at `staffSignIn`, which gave it the same `202` challenge as an enrolled identity. **That attempt does not count towards the lockout**: no factor was presented. No session is issued.
+         *     **An identity with no `ACTIVE` MFA factor** (privileged, password correct, no factor proven yet) is answered `MFA_ENROLMENT_REQUIRED` with `403` here, never at `staffSignIn`, which gave it the same `202` challenge as an enrolled identity. **That attempt does not count towards the lockout**: no factor was presented. The refusal has its own audit cause on `auth.session.failed`, and no lock counter moves. No session is issued.
+         *
+         *     **Limits and origin** (Product decision, 8 October 2026). The privileged MFA limit is keyed on the bounded challenge reference, bound to its principal, so an invalid or forged reference still meets admission limits; a request refused by the rate limit or because no hash slot is free (`RATE_LIMITED`) is neither verified nor counted. This is a browser pre-session mutation: the `Origin` must exactly match a configured allowlisted origin of the Ops Portal, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the code is examined.
          */
         post: operations["completeStaffMfaSignIn"];
         delete?: never;
@@ -1406,7 +1410,9 @@ export interface paths {
          *     could not establish a result, and is valid. A signature that does not verify is refused
          *     whatever the signal says.
          *
-         *     **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a status other than `ACTIVE` is `INVALID_CREDENTIALS`: the PIN is not examined, nothing is counted and no lock is announced, because the factor has not been reached. (5) With a valid signature and an `ACTIVE` status, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (6) Otherwise a wrong PIN is `INVALID_CREDENTIALS` and counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path performs one hash verification, so timing does not say which stage ended the request.
+         *     **The order the factors are decided in is the rule** (MSC-DEC-431, MSC-DEC-432; SECURITY_DESIGN.md 13.4b). (1) The challenge: unknown or consumed is `CHALLENGE_UNUSABLE`, expired is `CHALLENGE_EXPIRED`, and any other request consumes it, pass or fail. (2) If the phone belongs to a rider with an `ACTIVE` device, the signature must verify against that key: if it does not the answer is `DEVICE_PROOF_INVALID`, **the PIN is never looked at and nothing is counted** - so a caller who does not hold the handset can neither guess the PIN nor lock the rider out. (3) If the phone is unknown, or the rider has no `ACTIVE` device, there is no proof to check, so the PIN is decided instead: wrong is `DEVICE_PROOF_INVALID` - the answer for an unknown phone - and right is `DEVICE_NOT_ENROLLED`. Nothing is counted here, and a PIN learned here dies at the next enrolment, which sets a new one. (4) With a valid signature, a status other than `ACTIVE` is `INVALID_CREDENTIALS`: the PIN is not examined, nothing is counted and no lock is announced, because the factor has not been reached. (5) With a valid signature and an `ACTIVE` status, a locked rider is `CREDENTIAL_LOCKED` and the PIN is not examined. (6) Otherwise a wrong PIN is `INVALID_CREDENTIALS` and counts toward the lockout (`signin_max_attempts` 5, `signin_lockout_minutes` 15). A correct PIN resets the count and issues the session. Every path that is admitted to hashing performs one hash verification, so timing does not say which stage ended the request; a request refused by the rate limit or because no hash slot is free (`RATE_LIMITED`) does none and is not counted. The sign-in rate limit is keyed on the canonical submitted phone, whether or not it belongs to a rider.
+         *
+         *     **The device-key protocol** (Product decision, 8 October 2026). The device key is a hardware-backed ECDSA P-256 key signing with SHA-256. The bytes signed are the UTF-8 text `MELARC-RIDER-SIGNIN-V1`, one byte `0A`, and the challenge exactly as `requestRiderSignInChallenge` returned it: no trailing newline and no JSON. `device_signature` is the canonical standard base64 of the ASN.1 DER ECDSA signature, and the server supplies SHA-256 once. A sign-in challenge is never usable as an enrolment challenge or the reverse. SECURITY_DESIGN 13.6 owns the protocol and its published vectors.
          */
         post: operations["riderSignIn"];
         delete?: never;
@@ -1453,7 +1459,9 @@ export interface paths {
          *     **Audit identifies the account, never a person** (§37.5). Version 1 has no person-level
          *     attribution for vendors, and no surface may claim it.
          *
-         *     **The order the factors are decided in is the rule**. (1) The registered browser: the `melarc_vendor_device` credential must be bound to the account named; if it is absent, unknown or bound to another account the answer is `INVALID_CREDENTIALS`, **the secret is not examined and nothing is counted** - so nobody can lock a vendor organisation out from a browser it never registered. (2) An account that is not `ACTIVE` is `INVALID_CREDENTIALS`. (3) With the browser proved, a locked account is `CREDENTIAL_LOCKED`. (4) A wrong secret is `INVALID_CREDENTIALS` and counts - `signin_max_attempts` 5 and `signin_lockout_minutes` 15, shared by everyone using the credential, the consequence §37.5 already accepts; a correct secret resets the count. Every path performs one hash verification, so timing does not say which stage ended the request.
+         *     **The order the factors are decided in is the rule**. (1) The registered browser: the `melarc_vendor_device` credential must be bound to the account named; if it is absent, unknown or bound to another account the answer is `INVALID_CREDENTIALS`, **the secret is not examined and nothing is counted** - so nobody can lock a vendor organisation out from a browser it never registered. (2) An account that is not `ACTIVE` is `INVALID_CREDENTIALS`. (3) With the browser proved, a locked account is `CREDENTIAL_LOCKED`. (4) A wrong secret is `INVALID_CREDENTIALS` and counts - `signin_max_attempts` 5 and `signin_lockout_minutes` 15, shared by everyone using the credential, the consequence §37.5 already accepts; a correct secret resets the count. Every path that is admitted to hashing performs one hash verification, so timing does not say which stage ended the request; a request refused by the rate limit or because no hash slot is free (`RATE_LIMITED`) does none and is not counted.
+         *
+         *     **The limit is keyed on the submitted account together with the device-credential identity, and only once the device credential is recognised.** Device material that is not recognised shares the account's invalid-device partition, so a caller cannot mint fresh buckets with random cookie values. This is a browser pre-session mutation: the `Origin` must exactly match a configured allowlisted origin of the Vendor PWA, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the secret is examined or counted (Product decision, 8 October 2026).
          */
         post: operations["vendorSignIn"];
         delete?: never;
@@ -1477,6 +1485,14 @@ export interface paths {
          *
          *     **There is no elevation state**. This described a field the Session schema has
          *     never carried.
+         *
+         *     **Display data** (Product decision, 8 October 2026). The response is `CurrentSession`: the
+         *     session plus `principal_display_name` and `authorized_hubs` (each entry only a hub id and a hub
+         *     display name), so a client can say whose session this is and where they act. Only the caller's
+         *     own session carries them; `listSessions` and `revokeSession` return plain `Session`. The labels
+         *     may be refreshed when this operation is read, while **authority stays the immutable session
+         *     snapshot**: a hub rename grants nothing, and `permissions` are hints for the interface that the
+         *     server never relies on.
          */
         get: operations["getCurrentSession"];
         put?: never;
@@ -1578,15 +1594,30 @@ export interface paths {
          *     Accepting one would let anyone redirect a colleague's recovery, which is the single most
          *     exploitable mistake available here.
          *
-         *     **Always returns 202**, whether or not the identifier exists, with matching timing. An
-         *     enumerable recovery endpoint discloses which addresses are real staff (37.7).
+         *     **Always returns 202**, whether or not the identifier exists, with the same response and
+         *     equivalent bounded work on every outwardly identical branch. An enumerable recovery endpoint
+         *     discloses which addresses are real staff (37.7). The rate limit is keyed on the principal type
+         *     plus the canonical submitted identifier, whether or not it resolves, and every request counts
+         *     toward it, coalesced or not.
          *
-         *     Issuing supersedes any PENDING request for that principal, **except inside the supersede
-         *     guard**: a request made less than `recovery_request_supersede_guard_seconds` (60, a starting
-         *     value) after the pending link was issued neither supersedes it nor issues another, and is
-         *     answered with the same `202` as any other, so nothing is revealed.
+         *     **Recovery links coexist, in a bounded number** (Product decision, 8 October 2026). **At most two
+         *     unexpired, unconsumed recovery links - self-service and administrator-initiated combined -
+         *     exist for one credential**, and a queued successor never invalidates a usable link. Outside the
+         *     supersede guard a request with fewer than two live links issues another and leaves the earlier
+         *     one usable; with two live it is coalesced: nothing is issued or sent and the answer is the same
+         *     `202`. **Inside the supersede guard** a request made less than
+         *     `recovery_request_supersede_guard_seconds` (60, a starting value) after the pending link was
+         *     issued neither supersedes it nor issues another, and is answered with the same `202` as any
+         *     other, so nothing is revealed. Completing a recovery invalidates every outstanding link of that
+         *     credential (`completeCredentialRecovery`).
          *
-         *     **A suspended principal's request proceeds like any other**; the suspension stands. **A message the delivery channel refuses changes nothing the caller can see**: the request is rolled back, the failure is logged and counted by the provider-failure alert, and `CREDENTIAL_DELIVERY_FAILED` is never returned here.
+         *     **A suspended principal's request proceeds like any other**; the suspension stands. **Only an eligible principal is ever sent a link** (recorded 9 October 2026): a staff identity that is `ACTIVE` or `SUSPENDED` with an established password and a verified work email, or a vendor account with an established shared secret and a registered recovery channel whose organisation is `ACTIVE` or `SUSPENDED`. A `PENDING_APPROVAL`, `REJECTED` or `OFFBOARDED` staff identity and any principal with no established credential are answered **exactly as an unknown identifier**: the same `202`, nothing created, no provider call and no audit event. So is a vendor account whose organisation is `REJECTED` or `TERMINATED` (Product decision, 9 October 2026). Recovery reactivates nothing and restores no authority. A rejected profile's work email is released and may belong to someone else, so no link may go there. Eligibility is read after the identity's lock is held, so a request that races an offboarding is either issued first and ended by the offboarding, or excluded.
+         *
+         *     **The message is queued durably in the same transaction as the request and sent by a separate worker**: no provider is called on the response path, and none is called while a transaction is open. A provider's rejection or timeout is a delivery-job outcome that changes nothing the caller can see - it is retried within bounds and counted by the provider-failure alert - and `CREDENTIAL_DELIVERY_FAILED` is never returned here.
+         *
+         *     **Audit** (Product decision, 8 October 2026). A request for an eligible principal writes exactly one `auth.recovery.requested`, `ISSUED` (a new request and its delivery job were created) or `COALESCED` (the guard or the cap applied, so no link, token or job was created, and the event names the existing live request); it says nothing about delivery. A request that matches no principal or no eligible one, one refused by the rate limit and one refused before the operation runs write **no** event and store no raw identifier, token or destination anywhere.
+         *
+         *     **A browser pre-session mutation**: the `Origin` must exactly match a configured allowlisted origin of the requesting surface, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED`.
          */
         post: operations["requestCredentialRecovery"];
         delete?: never;
@@ -1627,6 +1658,12 @@ export interface paths {
          *     **Recovery never lifts a suspension.** A suspended principal who completes recovery is
          *     still suspended, and sign-in still fails.
          *
+         *     **A completion is judged under the identity's lock** (recorded 9 October 2026). It requires a
+         *     `PENDING`, unexpired request **and** an eligible identity, both read after the lock is held. If
+         *     the staff identity has been offboarded in the meantime the answer is the same
+         *     `RECOVERY_TOKEN_INVALID`, no credential changes, no lock is cleared and no session is touched. If
+         *     the completion commits first it stands and the offboarding then ends whatever is left.
+         *
          *     **On the vendor branch this also replaces the browser device credential**.
          *     Prior `melarc_vendor_device` credentials are revoked and a fresh one is issued to the
          *     browser completing recovery. Rotating only the shared secret would have left the person
@@ -1638,6 +1675,10 @@ export interface paths {
          *     path, which is the one thing a setup credential must never be.
          *
          *     **Completion clears the credential's failed-attempt count and any lock**, so a locked staff member or vendor recovers by recovering. The new credential is held to the length bounds on `RecoveryComplete` (12 to 128 characters, spaces permitted, no composition rule). Completion by a suspended principal changes the credential and nothing else: the suspension stands (§29.6).
+         *
+         *     **Completing recovery ends every outstanding link of the credential** (Product decision, 8 October 2026). In the same transaction it changes the credential, clears the lock, terminates every session, invalidates every other unexpired recovery link for the credential - self-service and administrator-initiated alike - and cancels their pending delivery jobs. A message already handed to a provider can still arrive; redeeming it afterwards is `RECOVERY_TOKEN_INVALID`.
+         *
+         *     **Redemption is a protected POST, and opening the link redeems nothing.** The token arrives in the fragment of a purpose-specific route on the configured origin of the surface (SECURITY_DESIGN 13.9a); the page reads it once, removes it from the address at once and posts it here. The rate limit is keyed on a purpose-qualified digest of the bounded submitted token. This is a browser pre-session mutation: the `Origin` must exactly match a configured allowlisted origin, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the token is examined.
          */
         post: operations["completeCredentialRecovery"];
         delete?: never;
@@ -2198,9 +2239,11 @@ export interface paths {
          *     Rejection is the same call with `approved: false` and a mandatory reason. It is terminal and
          *     the record stays queryable (36.1). **Its work email is released**: a new profile may use it.
          *
+         *     **A malformed body is `VALIDATION_FAILED` (`400`)** (Product decision, 8 October 2026), decided after the authority and scope refusals and before the version and state checks. The reason errors stay distinct: an empty reason is `REASON_REQUIRED` and an unknown, retired or foreign one is `REASON_NOT_ACTIVE`, both `422`.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["approveStaffIdentity"];
         delete?: never;
@@ -3187,6 +3230,8 @@ export interface paths {
          *
          *
          *     **The password is held to the length bounds on `CredentialSetup`**: 12 to 128 characters, spaces permitted, no composition rule. This operation also serves the bootstrap password. Establishing it resets the credential's failed-attempt count.
+         *
+         *     **This operation never refuses a privileged identity for lacking a factor** (Product decision, 8 October 2026). The answer is the provisioning response above, with no session, and `MFA_ENROLMENT_REQUIRED` belongs to `completeStaffMfaSignIn` alone. The setup token arrives in the fragment of `/setup/credential` on the configured Ops origin (SECURITY_DESIGN 13.9a); the page reads it once, removes it from the address at once and posts it here. The rate limit is keyed on a purpose-qualified digest of the bounded submitted token. This is a browser pre-session mutation: the `Origin` must exactly match a configured allowlisted origin of the Ops Portal, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the token is examined.
          */
         post: operations["completeStaffCredentialSetup"];
         delete?: never;
@@ -3224,6 +3269,8 @@ export interface paths {
          *     **No Session is issued.** The identity becomes authentication-ready and signs in normally
          *     with password plus TOTP. Issuing a session here would make enrolment an authentication path
          *     that skipped the password.
+         *
+         *     **A browser pre-session mutation** (Product decision, 8 October 2026): the `Origin` must exactly match a configured allowlisted origin of the Ops Portal, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the grant or the code is examined. The rate limit is keyed on a purpose-qualified digest of the bounded submitted token.
          */
         post: operations["completeMfaEnrolment"];
         delete?: never;
@@ -3261,15 +3308,38 @@ export interface paths {
          *     **The holder cannot turn MFA off.** There is no state in which a privileged identity has no
          *     factor and can still authenticate - no backup codes, no bypass codes, no support override.
          *
+         *     **What it reaches** (Product decision, 8 October 2026, corrected by the R2 review). A privileged
+         *     identity with an established password, in exactly one of three **recorded** states. (1) It holds an
+         *     `ACTIVE` factor to revoke (the original case). (2) It holds a `PENDING` factor of recorded
+         *     provenance with no usable enrolment or re-enrolment grant and no pending delivery attempt (a stranded
+         *     enrolment). (3) Its most recent factor was revoked by an administrator, carries a revocation episode,
+         *     and no replacement factor was created (an unfinished reset). The reason says which
+         *     (`MFA_AUTHENTICATOR_UNAVAILABLE` for the first, `MFA_ENROLMENT_EXPIRED` for the other two). Atomically
+         *     it revokes a `PENDING` factor, supersedes the enrolment and re-enrolment grants that are **still
+         *     `PENDING`** and cancels their delivery jobs, ends the target's sessions with `MFA_RESET`, and queues a
+         *     new `MFA_REENROLMENT` grant to the target's **verified work email only**. **It creates neither an
+         *     `ACTIVE` factor nor a session.** A repeated call in states 2 and 3 issues a new grant **in the same
+         *     reset episode**; the pending predecessor, if there is one, ends `SUPERSEDED` and the new grant names it,
+         *     so at most one grant of the episode is pending, while a grant that is already consumed, expired or
+         *     superseded keeps that terminal state and is never rewritten. A factor created in one episode and later
+         *     reset keeps its creation episode and gains the revocation episode. While a usable grant or a pending
+         *     delivery attempt exists the request is coalesced: it returns the existing grant's non-secret metadata
+         *     and issues nothing.
+         *
          *     **Refusals.** Resetting one's own factor is `SELF_APPROVAL_FORBIDDEN`; the other bootstrap
-         *     Platform Admin is a valid actor, as is any Platform Admin. A target whose factor is only
-         *     `PENDING` (never proven), and a non-privileged identity (it has no MFA), are `STATE_CONFLICT`.
-         *     A stranded bootstrap administrator is in that state: it is resumed through the provisioning
-         *     channel and not through this operation (MIGRATION_AND_SEEDING.md 3.3a).
+         *     Platform Admin is a valid actor, as is any Platform Admin. A non-privileged identity (it has no
+         *     MFA), a target with no established password, **a target with no factor record at all and a target
+         *     whose latest factor the system ended** are `STATE_CONFLICT`: the absence of a factor is never
+         *     eligibility. **A seeded bootstrap administrator** - the immutable `origin` `BOOTSTRAP`, read as a
+         *     column and never inferred - **is reached in the first state only**; in a stranded state it is refused
+         *     too, because its work email was never accepted by an approval, so it is resumed through the
+         *     provisioning channel and not through this operation (MIGRATION_AND_SEEDING.md 3.3a).
+         *
+         *     **A malformed body is `VALIDATION_FAILED` (`400`)**, decided after the authority refusals and before the version and state checks; an empty reason keeps `REASON_REQUIRED` and an unknown, retired or foreign one `REASON_NOT_ACTIVE`, both `422`.
          *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["resetStaffMfa"];
         delete?: never;
@@ -3326,9 +3396,11 @@ export interface paths {
          *     **The token is never returned.** `auth.setup_grant.issued` records that a grant was issued,
          *     never its value (20.4).
          *
+         *     **A malformed body is `VALIDATION_FAILED` (`400`)** (Product decision, 8 October 2026), decided after the authority and scope refusals and before the version and state checks; an empty reason keeps `REASON_REQUIRED` and an unknown, retired or foreign one `REASON_NOT_ACTIVE`, both `422`.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["reissueStaffCredentialSetup"];
         delete?: never;
@@ -3405,8 +3477,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Senior Ops initiates in-person first device binding for a rider
-         * @description `staff.device.register` - **Senior Ops at the rider's hub**, in person.
+         * Initiate in-person first device binding for a rider
+         * @description `staff.device.register` - **Senior Ops, or a Platform Admin who holds an explicit grant of the key
+         *     that reaches the rider's hub**, in person (Product decision, 8 October 2026). Platform Admin
+         *     status alone is not a bypass: the grant and its hub scope decide, and in-person verification of
+         *     the rider stays mandatory.
          *
          *     **The contract defined re-registration and no first registration**, so a rider could only
          *     become authentication-capable by an administrator writing rows.
@@ -3429,6 +3504,14 @@ export interface paths {
          *
          *     A separate key from `staff.device.reregister` deliberately: widening that one would leave
          *     the catalogue unable to say which act was authorised.
+         *
+         *     **This is the one operation whose replay returns a secret, and the exception is bounded**
+         *     (Product decision, 8 October 2026; SECURITY_DESIGN 14.16). The same principal, operation, key and
+         *     request, while the grant is still usable, replays the original response, enrolment URI included,
+         *     from fields stored sealed for that purpose. A changed request under the same key is
+         *     `IDEMPOTENCY_KEY_CONFLICT`. Once the grant is expired, consumed, superseded or revoked the answer
+         *     is `STATE_CONFLICT`, discloses no secret and executes nothing again. A caller who has lost
+         *     authority gets the current authentication or authorization refusal before any replay.
          */
         post: operations["registerRiderDevice"];
         delete?: never;
@@ -3482,8 +3565,11 @@ export interface paths {
          *     replacement, leaves the existing device exactly as it was. Success registers the device,
          *     consumes the grant and sets the PIN together; on replacement it also moves the old device
          *     from `ACTIVE` to `REPLACED` and ends any live session on it with `DEVICE_REPLACED`.
-         *     **If the trust data the verifier needs is too stale to evaluate against, or
-         *     this instance has not loaded it yet, the operation fails closed with `503`
+         *     **The attestation verifier is a separate private service** (Product decision, 8 October 2026;
+         *     SECURITY_DESIGN 15.2.3). It is called **outside any database transaction**; the grant, its
+         *     expiry, the actor's authority and the device state are then re-read under lock, and the single
+         *     atomic change follows. **If the trust data the verifier needs is too stale to evaluate against, or
+         *     the verifier service has not loaded it yet or cannot answer in time, the operation fails closed with `503`
          *     `TRUST_DATA_UNAVAILABLE` and a `Retry-After`** (MSC-DEC-437, SECURITY_DESIGN 15.2.2) - no
          *     device is created, the grant is not consumed and the handset may try again, and it is
          *     neither `DEVICE_INTEGRITY_FAILED` nor `DEVICE_SECURITY_UNSUPPORTED`. Nothing else in the
@@ -3549,6 +3635,8 @@ export interface paths {
          *     which an approved account becomes able to authenticate.
          *
          *     **The secret is held to the length bounds on `VendorCredentialSetup`**: 12 to 128 characters, spaces permitted, no composition rule. Establishing it resets the credential's failed-attempt count.
+         *
+         *     The grant arrives in the fragment of the Vendor PWA's credential-setup route on the configured Vendor origin (SECURITY_DESIGN 13.9a); real delivery to vendors is enabled only once that route exists. The rate limit is keyed on a purpose-qualified digest of the bounded submitted token. This is a browser pre-session mutation (Product decision, 8 October 2026): the `Origin` must exactly match a configured allowlisted origin of the Vendor PWA, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the grant is examined.
          */
         post: operations["completeVendorCredentialSetup"];
         delete?: never;
@@ -3585,10 +3673,12 @@ export interface paths {
          *     SESSIONS; this registers a DEVICE. Conflating the two is what made the gap, and the two
          *     concepts stay separate here.
          *
-         *     **Rate-limited on the `signin_max_attempts` ceiling**, because an authenticated caller who
-         *     can post an OTP to a registered channel repeatedly is a nuisance channel if unbounded.
+         *     **Rate-limited per authenticated vendor account, in the `rate_limit_recovery` bucket**
+         *     (Product decision, 8 October 2026), in addition to the authenticated API ceiling. The key is the
+         *     authenticated account and never a grant that does not exist yet, because an authenticated caller
+         *     who can post a message to a registered channel repeatedly is a nuisance channel if unbounded.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["requestAdditionalDeviceGrant"];
         delete?: never;
@@ -3620,6 +3710,8 @@ export interface paths {
          *
          *     **The grant is principal-bound**, so no account identifier is accepted here. Taking one
          *     would let a caller nominate whose browser is being registered.
+         *
+         *     The grant arrives in the fragment of the Vendor PWA's additional-browser route on the configured Vendor origin (SECURITY_DESIGN 13.9a). The rate limit is keyed on a purpose-qualified digest of the bounded submitted token. This is a browser pre-session mutation (Product decision, 8 October 2026): the `Origin` must exactly match a configured allowlisted origin of the Vendor PWA, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the grant is examined.
          */
         post: operations["completeAdditionalDeviceEnrolment"];
         delete?: never;
@@ -3730,6 +3822,8 @@ export interface paths {
          *     **An `MFA_REENROLMENT` grant can never activate a factor.** Activation requires the
          *     continuation grant plus a proven code at completeMfaEnrolment. Two grants because the two
          *     acts have different consequences: one authorises re-enrolment, the other proves possession.
+         *
+         *     The grant arrives in the fragment of `/setup/mfa` on the configured Ops origin (SECURITY_DESIGN 13.9a); the page reads it once, removes it from the address at once and posts it here. The rate limit is keyed on a purpose-qualified digest of the bounded submitted token. This is a browser pre-session mutation (Product decision, 8 October 2026): the `Origin` must exactly match a configured allowlisted origin of the Ops Portal, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the grant is examined. A malformed body is `VALIDATION_FAILED` (`400`).
          */
         post: operations["beginMfaReenrolment"];
         delete?: never;
@@ -3780,9 +3874,13 @@ export interface paths {
          *
          *     **The new credential is never returned to the performing actor.**
          *
+         *     **The target must be eligible** (recorded 9 October 2026): `ACTIVE` or `SUSPENDED`, with an established password and a verified work email. A `PENDING_APPROVAL`, `REJECTED` or `OFFBOARDED` identity, or one with no established password, is `STATE_CONFLICT` and nothing is created - the actor already holds the key and scope to read the record, so the refusal discloses nothing. The status is read after the identity's lock is held, so a call racing an offboarding is either issued first and then ended by the offboarding, or refused.
+         *
+         *     **The same coexistence rule as self-service applies** (Product decision, 8 October 2026). Inside the supersede guard, or with two live recovery links already exist for the credential, the call returns the existing eligible request's non-secret metadata with `coalesced` true and records that it was coalesced; it claims no new message. Otherwise it creates a request as above and leaves any earlier usable link usable. Repeated calls therefore never grow an unbounded queue of links or jobs.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getStaffIdentity` on this record. A mismatch is `STATE_CONFLICT`. The approver who is not the maker finds the record with `listStaffIdentities`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["recoverStaffCredential"];
         delete?: never;
@@ -3895,9 +3993,13 @@ export interface paths {
          *
          *     **The administrator never learns the new shared secret.**
          *
+         *     **The account must be eligible** (recorded 9 October 2026): `ACTIVE` or `SUSPENDED`, with an established shared secret and a registered recovery channel. An account that has no shared secret yet is `STATE_CONFLICT` and nothing is created; it is reached through `reissueVendorCredentialSetup`. An account whose organisation is `REJECTED` or `TERMINATED` is also `STATE_CONFLICT` (Product decision, 9 October 2026); a suspended account or organisation stays eligible, and recovery reactivates nothing. The state is read after the account's lock is held.
+         *
+         *     **The same coexistence rule as self-service applies** (Product decision, 8 October 2026). Inside the supersede guard, or with two live recovery links already existing for the credential, the call returns the existing eligible request's non-secret metadata with `coalesced` true and records that it was coalesced; it claims no new message. Otherwise it creates a request as above and leaves any earlier usable link usable.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getVendorAccount` on this account. A mismatch is `STATE_CONFLICT`; the account is found with `listVendorAccounts`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["recoverVendorCredential"];
         delete?: never;
@@ -3946,9 +4048,11 @@ export interface paths {
          *
          *     **The administrator never learns the vendor's permanent shared secret.**
          *
+         *     **A malformed body is `VALIDATION_FAILED` (`400`)** (Product decision, 8 October 2026), decided after the authority and scope refusals and before the version and state checks; an empty reason keeps `REASON_REQUIRED` and an unknown, retired or foreign one `REASON_NOT_ACTIVE`, both `422`.
+         *
          *     **Where `If-Match` comes from** (Gate PD-3R1, `PDA-47`): the ETag of `getVendorAccount` on this account. A mismatch is `STATE_CONFLICT`; the account is found with `listVendorAccounts`.
          *
-         *     **Delivery** (Gate PD-3R1, `PDA-54`): the grant or link is handed to the delivery channel inside this operation, before it commits, and its raw token is never persisted. If the channel refuses it the operation is rolled back - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the caller may issue again.
+         *     **Delivery** (Gate PD-3R1, `PDA-54`, revised 8 October 2026): the grant or link is queued as an encrypted, durable delivery job in this operation's own transaction, beside the hash-only grant, and a separate worker sends it. **No provider is called on the response path or while a transaction is open**, and in production the raw token is held nowhere in Melarc outside that job's encrypted payload (the non-production capture adapter writes the message to its own restricted sink). If the principal has no deliverable registered channel, or the channel is not available in this environment, nothing is written - no grant exists and an earlier pending grant is untouched - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the caller may issue again once a channel exists. A provider's rejection or timeout after the act committed is a delivery-job outcome and never this code.
          */
         post: operations["reissueVendorCredentialSetup"];
         delete?: never;
@@ -3970,7 +4074,9 @@ export interface paths {
         put?: never;
         /**
          * Senior Ops initiates in-person replacement device binding
-         * @description `staff.device.reregister` - **Senior Ops** at the rider's hub, **in person**.
+         * @description `staff.device.reregister` - **Senior Ops** (or a Platform Admin) at the rider's hub, **in person**. **Its scope is
+         *     deliberately narrower than first registration's and is not widened** (Product decision, 8 October 2026): replacement stays at the
+         *     actor's **own hub** for both tiers, whereas `registerRiderDevice` may reach other hubs for a Platform Admin whose grant says so.
          *
          *     Split out of performOpsRecovery in R1, and connected to the cryptographic lifecycle it was
          *     never wired to: it issues a `RIDER_DEVICE_REREGISTRATION` grant which the NEW handset
@@ -5287,11 +5393,14 @@ export interface paths {
          *     on approval and is stored on the vendor credential. It is the channel that grant, and every later
          *     credential-setup and recovery grant for the account, is delivered to; the vendor never supplies it.
          *
-         *     **Delivery** (Gate PD-3R2, applying `PDA-54` to the one issuing operation that lacked it): the grant
-         *     is handed to the delivery channel inside this operation, before it commits, and its raw token is
-         *     never persisted. If the channel refuses it the operation is rolled back - no grant exists and the
-         *     decision is not recorded - and the answer is `CREDENTIAL_DELIVERY_FAILED`; nothing was sent and the
-         *     approver may decide again. Rejection issues no grant and cannot return it.
+         *     **Delivery** (Gate PD-3R2, applying `PDA-54` to the one issuing operation that lacked it, revised 8
+         *     October 2026): the grant is queued as an encrypted, durable delivery job in this operation's own
+         *     transaction, beside the hash-only grant, and a separate worker sends it; no provider is called on
+         *     the response path or while a transaction is open. If the principal has no deliverable registered
+         *     channel, or the channel is not available in this environment, nothing is written - no grant exists
+         *     and the decision is not recorded - and the answer is `CREDENTIAL_DELIVERY_FAILED`; the approver may
+         *     decide again. A provider's rejection or timeout after the decision committed is a delivery-job
+         *     outcome and never this code. Rejection issues no grant and cannot return it.
          *
          *     **Rejection is the same call with `approved: false` and a mandatory reason.** It is
          *     terminal and the record stays queryable (36.1). **Reapplication is a new
@@ -6068,6 +6177,14 @@ export interface paths {
          *     that did not exist - rider-android.md families F and L both do exactly that. Both filters
          *     are ordinary narrowing of a read the caller is already entitled to: they change no scope,
          *     and 42.4's rule that filters are authorization-checked and never trusted applies unchanged.
+         *
+         *     **Filterable by operation and branch** (Product decision, 9 October 2026). `operation` returns the
+         *     ACTIVE reasons whose `permittedOperations` contains that operationId; `branch`, valid only with
+         *     `operation`, keeps those whose entry for it has that branch or no branch. Results are ordered by
+         *     `code`. Both are read-only narrowing of a read the caller already holds: they change no scope and
+         *     grant no authority. A `branch` without an `operation`, or a value outside either enumeration, is
+         *     `VALIDATION_FAILED`. The filters are a hint for the screen: the server decides at use and
+         *     revalidates the branch from recorded state under the identity lock (domain-model.md 3.9).
          */
         get: operations["listReasonDefinitions"];
         put?: never;
@@ -6095,6 +6212,14 @@ export interface paths {
          *     and its behaviour metadata.
          *
          *     **Deactivation never deletes** - history stays interpretable (35.9.1).
+         *
+         *     **The six identity reason domains are system-managed and are a Platform Admin's alone** (Product decision,
+         *     8 October 2026). For a reason of those domains this operation changes only `label` and `active`, and only
+         *     for a Platform Admin who holds the key explicitly. A holder at a lower tier (Senior Ops) is refused
+         *     `INSUFFICIENT_AUTHORITY`: the reason is one global row, so deactivating it removes it for every hub. Creating a
+         *     row in those domains, or changing a seeded reason's `code`, `domain`, `permitted_operations` or behaviour
+         *     metadata, is refused with `VALIDATION_FAILED` naming the field. Each permitted change writes the enhanced
+         *     `settings.reason.catalog_changed` event with the old and new values.
          *
          *     **Emits settings.reason.catalog_changed, enhanced.** Flipping consumes_delivery_attempt on
          *     a reason silently changes what every future delivery failure costs a customer, and it is
@@ -6931,6 +7056,37 @@ export interface components {
             requiresEscalation?: boolean;
             /** @description Deactivation never deletes */
             active: boolean;
+            /** @description Identity domains only; **null for every other domain**. The operations - and, where a reason is narrower than its operation, the branch - that accept this reason, read from the authoritative reason registry (domain-model.md 3.9). Seeded and never writable through this contract, so it is absent from ReasonDefinitionWrite. A hint for the screen: the server decides at use, and a reason used outside its operation or branch is REASON_NOT_ACTIVE. */
+            readonly permittedOperations: {
+                /** @enum {string} */
+                operationId: "revokeSession" | "approveStaffIdentity" | "resetStaffMfa" | "reissueStaffCredentialSetup" | "reissueVendorCredentialSetup" | "recoverStaffCredential" | "recoverVendorCredential" | "reregisterRiderDevice" | "revokeRiderDevice";
+                /** @enum {string|null} */
+                branch: "APPROVAL_REJECTED" | "FACTOR_ACTIVE" | "ENROLMENT_UNFINISHED" | null;
+            }[] | null;
+        };
+        /** @description The request body of upsertReasonDefinition: every writable field of ReasonDefinition and none of its response-only metadata. A body carrying permittedOperations is refused as VALIDATION_FAILED naming the field (Product decision, 9 October 2026). The properties are those of ReasonDefinition, verbatim. */
+        ReasonDefinitionWrite: {
+            /** @description Stable. Never reused after deactivation */
+            code: string;
+            domain: string;
+            /** @description The recipient-contact checkpoints this reason may be selected at. **Non-empty where domain is RECIPIENT_CONTACT, null for every other domain**, which has no checkpoints. This is what REASON_NOT_VALID_FOR_CHECKPOINT evaluates, on recordConfirmationAttempt, recordNextStopContact and recordDoorstepContact. **Fielded at MSC-DEC-407, closing OQ-138's engineering half.** Named in this schema's camelCase, beside consumesDeliveryAttempt and requiresNote; domain-model.md 3.9 carries it as valid_checkpoints, which is that document's convention. domain-model.md 6.12's RecipientContactAttempt invariant already read "the catalogue carries the mapping" and errors-and-enums.md 6 that "a reason declares the checkpoints it is valid for" - and no field held it, so a declared refusal had nothing to read and a client had nothing to filter on. **The RECIPIENT_CONTACT contents are seeded by MSC-DEC-409**, closing OQ-142: NO_ANSWER, NUMBER_INCORRECT, RECIPIENT_DECLINED and CONTACT_NOT_POSSIBLE_MELARC at all three checkpoints, and RECIPIENT_NOT_AT_LOCATION at DOORSTEP only - it is the one that asserts physical presence. **Seeded defaults, not a closed set**: an approved operational reason may be added under settings.reason.manage without a contract change, on MSC-DEC-252's routing test. */
+            validCheckpoints?: ("PRE_DISPATCH" | "NEXT_STOP" | "DOORSTEP")[] | null;
+            label: string;
+            /**
+             * @description Who caused it.
+             * @enum {string}
+             */
+            attribution: "CUSTOMER" | "MELARC" | "EXTERNAL";
+            /** @description Whether selecting this reason counts as a consumed physical delivery attempt - history and redelivery chargeability, never a count against a maximum, because none exists. A Melarc outage must not. */
+            consumesDeliveryAttempt: boolean;
+            requiresNote?: boolean;
+            requiresPhoto?: boolean;
+            requiresContactAttempt?: boolean;
+            requiresApproval?: boolean;
+            requiresOpsReview?: boolean;
+            requiresEscalation?: boolean;
+            /** @description Deactivation never deletes */
+            active: boolean;
         };
         Error: {
             /**
@@ -7611,8 +7767,10 @@ export interface components {
              */
             email: string;
             /**
-             * @description Capped at 128 so a hash is never asked to chew an unbounded input. **No minimum is checked here**:
-             *     a short guess is a wrong password, answered `INVALID_CREDENTIALS` like any other.
+             * @description Capped at 128 as sent so a hash is never asked to chew an unbounded input. **No minimum is checked here**:
+             *     a short guess is a wrong password, answered `INVALID_CREDENTIALS` like any other. The service
+             *     also bounds the length **after NFKC normalisation**: a value that expands past 128 is answered
+             *     `INVALID_CREDENTIALS`, is not hashed and is not counted.
              */
             password: string;
         };
@@ -7621,9 +7779,20 @@ export interface components {
             phone: string;
             /** @description Six numeric digits, a fixed policy that this schema makes structural. */
             pin: string;
-            /** @description The one-use nonce from requestRiderSignInChallenge */
+            /**
+             * @description The one-use nonce from requestRiderSignInChallenge, exactly as returned: the canonical
+             *     unpadded base64url of 32 random bytes (43 characters). The pattern checks the shape only;
+             *     the service also refuses a value that does not decode to 32 bytes and re-encode to itself.
+             */
             challenge: string;
-            /** @description Signature over the challenge by the registered non-exportable private key */
+            /**
+             * @description The canonical standard base64 (12 to 96 characters: a DER signature is 8 to 72 bytes) of the ASN.1 DER ECDSA signature (P-256, SHA-256) made by the
+             *     registered non-exportable private key over the UTF-8 bytes of `MELARC-RIDER-SIGNIN-V1`, one
+             *     byte `0A`, and the challenge text exactly as issued. The server supplies SHA-256 once; the
+             *     client does not pre-hash. A value that is not canonical base64 is `VALIDATION_FAILED`; one that
+             *     does not verify is `DEVICE_PROOF_INVALID` (Product decision, 8 October 2026;
+             *     SECURITY_DESIGN 13.6).
+             */
             device_signature: string;
             /**
              * @description The Rider app's own root-detection result.
@@ -7646,7 +7815,11 @@ export interface components {
              *     in the setup message.
              */
             account_identifier: string;
-            /** @description Capped at 128 so a hash is never asked to chew an unbounded input. No minimum is checked here. */
+            /**
+             * @description Capped at 128 as sent so a hash is never asked to chew an unbounded input. No minimum is checked here.
+             *     The service also bounds the length **after NFKC normalisation**: a value that expands past 128 is
+             *     answered `INVALID_CREDENTIALS`, is not hashed and is not counted.
+             */
             secret: string;
         };
         /**
@@ -7675,7 +7848,7 @@ export interface components {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
              *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
-             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
             note?: string;
@@ -7708,7 +7881,7 @@ export interface components {
          *     There is no elevation field. MSC-DEC-228 makes MFA a sign-in gate for Senior Ops and
          *     Platform Admin, so a session that exists is already privileged to whatever its bundle allows.
          */
-        Session: {
+        SessionRecord: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
@@ -7749,6 +7922,55 @@ export interface components {
             termination_reason?: "SIGNED_OUT" | "SUPERSEDED_BY_NEW_LOGIN" | "REPLACED_BY_NEW_SESSION" | "EXPIRED" | "CREDENTIAL_CHANGED" | "SUSPENDED" | "OFFBOARDED" | "ADMIN_REVOKED" | "AUTHORITY_CHANGED" | "HUB_SCOPE_CHANGED" | "DEVICE_REVOKED" | "DEVICE_REPLACED" | "MFA_RESET" | null;
         };
         /**
+         * @description **The ordinary session projection**: the fields of `SessionRecord` and nothing else. It is what
+         *     `listSessions` and `revokeSession` return, and it is **closed** (`unevaluatedProperties: false`), so a
+         *     response that adds the display fields of `SessionDisplay`, or any other field, is a contract violation
+         *     that response validation reports. The caller's own session is `CurrentSession`. The projection is
+         *     closed with `unevaluatedProperties` and not `additionalProperties` because the latter would also
+         *     refuse the fields `CurrentSession` composes in from `SessionDisplay`.
+         */
+        Session: components["schemas"]["SessionRecord"];
+        /**
+         * @description **The display half of the caller's own current session** (Product decision, 8 October 2026), kept in a
+         *     schema of its own so that it reaches only the responses that describe the caller's own session. It is
+         *     not part of `Session`, and `listSessions` and `revokeSession`, which describe another principal's
+         *     sessions, return plain `Session` and so never gain a name or a hub list by reuse. These are labels for
+         *     the interface and nothing else: authority stays the immutable session snapshot, a rename of a person or
+         *     a hub grants nothing, and the server authorises every operation itself. No bundle contents, secret or
+         *     policy object appears here.
+         */
+        SessionDisplay: {
+            /**
+             * @description Whose session this is. A staff member's or a rider's full name; for a vendor, **the vendor
+             *     organisation's display name** (the account identifier is not a display name). Null where the
+             *     principal has none. It may be refreshed whenever the current session is read.
+             */
+            principal_display_name: string | null;
+            /**
+             * @description The hubs of the session's `authorized_hub_ids`, each entry only the hub id and its display name,
+             *     for the interface to show where the principal acts. A principal with no hub scope (a vendor)
+             *     carries an empty list. **The list is finite and is never silently truncated**: a principal whose
+             *     authority covers more hubs than the supported maximum is refused where that authority is assigned
+             *     or at session issue, and is never given a shortened list. The supported maximum is a capacity
+             *     measurement owed before external exposure and is recorded with it; this schema states no number
+             *     until then, and a client must not assume one.
+             */
+            authorized_hubs: {
+                /** Format: uuid */
+                id: string;
+                display_name: string;
+            }[];
+        };
+        /**
+         * @description The caller's own session as the caller sees it: `SessionRecord` plus `SessionDisplay`, **with both display
+         *     fields always present**: `principal_display_name` is null where the principal has none, and
+         *     `authorized_hubs` is an empty list for a principal with no hub scope (a vendor). It is the
+         *     response of `getCurrentSession`, of the three sign-ins that issue a browser session
+         *     (`staffSignIn`, `completeStaffMfaSignIn`, `vendorSignIn`) and the `session` of
+         *     `RiderSessionIssued`. Nothing else returns it.
+         */
+        CurrentSession: components["schemas"]["SessionRecord"] & components["schemas"]["SessionDisplay"];
+        /**
          * @description **No device identifier and no replacement device appear on this schema, and that is the
          *     guard.** The rider is the subject; the binding to revoke is whichever one is current.
          *
@@ -7762,8 +7984,7 @@ export interface components {
             /**
              * @description Why the binding is being revoked - lost, stolen or otherwise compromised - as a code of the
              *     reason catalogue (`ReasonDefinition`), validated against the catalogue's identity domain for
-             *     this operation: empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another
-             *     domain is `REASON_NOT_ACTIVE`. Audited. Replacement is not a revocation reason; a handset
+             *     this operation: empty is `REASON_REQUIRED`, and a code that is unknown, retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`. Audited. Replacement is not a revocation reason; a handset
              *     replaced through reregisterRiderDevice leaves REPLACED, and the two stay distinguishable.
              */
             reason_code: string;
@@ -7857,8 +8078,12 @@ export interface components {
              * @description 12 to 128 characters, counted in Unicode code points after NFKC normalisation.
              *     Spaces are permitted and no composition rule applies: no mandatory case, digit or symbol.
              *     Never trimmed, truncated or echoed. Argon2id-hashed server-side.
-             *     `minLength` and `maxLength` check the string as sent and are a pre-filter; the service
-             *     applies the rule after normalisation and is the authority (Gate PD-3R2).
+             *     **Two bounds, and a value must satisfy both** (Product decision, 8 October 2026):
+             *     `minLength` and `maxLength` count the string as sent, and the service counts it again after
+             *     NFKC normalisation, before it hashes. A string whose compatibility characters expand under
+             *     NFKC can therefore be refused by the schema (four U+FB03 ligatures are 4 code points as
+             *     sent and 12 once normalised, and are refused). A violation is `VALIDATION_FAILED` naming
+             *     the field, never the value.
              */
             new_credential: string;
         };
@@ -7872,7 +8097,7 @@ export interface components {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
              *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
-             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
             note?: string;
@@ -7885,7 +8110,7 @@ export interface components {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
              *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
-             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
             /**
@@ -7990,6 +8215,13 @@ export interface components {
             consumed_at?: string | null;
             /** Format: uuid */
             initiated_by?: string | null;
+            /**
+             * @description True when an administrator's request found a reusable live request for the credential, inside
+             *     the supersede guard or at the cap of two, so this is that existing request's metadata and
+             *     nothing new was issued or claimed to be delivered (Product decision, 8 October 2026). Absent is
+             *     the same as false.
+             */
+            readonly coalesced?: boolean;
         };
         /**
          * @description MED-10 audit remediation. **No `purpose` or `principal_type` field** — both are fixed by
@@ -8001,7 +8233,7 @@ export interface components {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
              *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
-             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
             note?: string;
@@ -8012,6 +8244,15 @@ export interface components {
          *     MSC-DEC-274) with no schema a response could reference. **The token never appears here**,
          *     for the identical reason `RecoveryRequest` above omits it — never on issue, on read, or in
          *     an audit event (20.4).
+         *
+         *     **Where the token goes** (Product decision, 8 October 2026). A staff or vendor grant reaches its
+         *     owner as a link to a purpose-specific route on the configured origin of that surface, the token in
+         *     the URL **fragment** (`/setup/credential#token=...`, `/setup/mfa#token=...`,
+         *     `/recovery/complete#token=...` on the Ops origin; the Vendor PWA's routes on the Vendor origin).
+         *     The origin is configuration, never taken from `Host`, a forwarded header or a submitted redirect.
+         *     The page reads the fragment once, clears it from the address at once and posts the token to the
+         *     redeeming operation; opening the link redeems nothing. The server checks purpose, principal and
+         *     expiry whatever route the token came through. SECURITY_DESIGN 13.9a owns the rule.
          */
         SetupGrant: {
             /** Format: uuid */
@@ -9252,7 +9493,7 @@ export interface components {
             /**
              * @description Mandatory on rejection (`approved: false`). A code of the reason catalogue
              *     (`ReasonDefinition`), validated against the catalogue's identity domain for this operation:
-             *     empty is `REASON_REQUIRED`, and a code that is unknown, retired or in another domain is
+             *     empty is `REASON_REQUIRED`, and a code that is unknown, retired, in another domain or not permitted for this operation is
              *     `REASON_NOT_ACTIVE`.
              */
             reason_code?: string;
@@ -9336,6 +9577,11 @@ export interface components {
             /** Format: uuid */
             primary_hub_id?: string | null;
             mfa_enrolled: boolean;
+            /**
+             * @description Reset readiness of this identity, derived by the server from the recorded factor and grant lineage by the same rule resetStaffMfa applies (state-machines.md 18). A hint for the screen: NOT_ELIGIBLE hides the action and the other two name the branch to ask the reason catalogue for (listReasonDefinitions with operation=resetStaffMfa). The server revalidates when the reset is submitted. It is not actor-specific, and mfa_enrolled cannot stand in for it.
+             * @enum {string}
+             */
+            readonly mfa_reset_state: "FACTOR_ACTIVE" | "ENROLMENT_UNFINISHED" | "NOT_ELIGIBLE";
             /** Format: uuid */
             created_by: string;
             /** Format: uuid */
@@ -9786,8 +10032,12 @@ export interface components {
              * @description 12 to 128 characters, counted in Unicode code points after NFKC normalisation.
              *     Spaces are permitted and no composition rule applies: no mandatory case, digit or symbol.
              *     Never trimmed, truncated or echoed. Argon2id-hashed server-side.
-             *     `minLength` and `maxLength` check the string as sent and are a pre-filter; the service
-             *     applies the rule after normalisation and is the authority (Gate PD-3R2).
+             *     **Two bounds, and a value must satisfy both** (Product decision, 8 October 2026):
+             *     `minLength` and `maxLength` count the string as sent, and the service counts it again after
+             *     NFKC normalisation, before it hashes. A string whose compatibility characters expand under
+             *     NFKC can therefore be refused by the schema (four U+FB03 ligatures are 4 code points as
+             *     sent and 12 once normalised, and are refused). A violation is `VALIDATION_FAILED` naming
+             *     the field, never the value.
              */
             password: string;
         };
@@ -9843,7 +10093,7 @@ export interface components {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
              *     identity domain for this operation: empty is `REASON_REQUIRED`, and a code that is unknown,
-             *     retired or in another domain is `REASON_NOT_ACTIVE`.
+             *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
             note?: string;
@@ -9856,7 +10106,18 @@ export interface components {
         MfaResetResult: {
             /** @description Terminated with MFA_RESET */
             sessions_terminated: number;
+            /** @description True when this call queued a new grant; false when the request was coalesced. */
             reenrolment_grant_issued?: boolean;
+            /**
+             * @description True when a usable re-enrolment grant or a pending delivery attempt already existed, so nothing
+             *     new was issued or queued (Product decision, 8 October 2026). Absent is the same as false.
+             */
+            coalesced?: boolean;
+            /**
+             * Format: date-time
+             * @description The expiry of the grant that is usable now, new or existing. Non-secret metadata; the grant itself is never returned.
+             */
+            grant_expires_at?: string | null;
         };
         /**
          * @description **The in-person enrolment handoff**.
@@ -9883,9 +10144,18 @@ export interface components {
          */
         DeviceEnrolmentGrant: {
             /**
-             * @description The deep link the Ops Portal renders as a QR code for the rider to scan. Carries the
-             *     single-use RIDER_DEVICE_ENROLMENT grant, and the single-use attestation challenge the
-             *     handset binds into its key attestation. Never logged, audited or cached.
+             * @description The version-1 QR payload the Ops Portal renders for the rider to scan (Product decision, 8
+             *     October 2026): `melarc-rider://enrol/v1#token=<base64url-token>&challenge=<base64url-challenge>`.
+             *     The exact scheme, host `enrol` and path `v1`; exactly one `token` and one `challenge` in the
+             *     fragment, token first; unpadded canonical base64url; and a token and a challenge that are each 32
+             *     random bytes (43 characters), so the whole payload is exactly 127 ASCII characters.
+             *     Carries the single-use RIDER_DEVICE_ENROLMENT grant, and the single-use attestation challenge the
+             *     handset binds into its key attestation after decoding it to its 32 bytes. The Rider app parses it
+             *     strictly and rejects an unknown version, a duplicate parameter, user-info, a port, an extra
+             *     field, an invalid encoding and any callback, API origin or redirect: the URI never tells the app
+             *     which host to call. The pattern checks the shape; the app and the service also refuse a value that
+             *     does not decode to 32 bytes and re-encode to itself. The published protocol vectors (SECURITY_DESIGN
+             *     13.6) are consumed by the Node and Android tests. Never logged, audited or cached.
              */
             enrolment_uri: string;
             /**
@@ -9912,7 +10182,13 @@ export interface components {
              *     rider-bound and single-use.
              */
             setup_token: string;
-            /** @description Public half only. The private key is non-exportable and never leaves the handset */
+            /**
+             * @description Public half only. The private key is non-exportable and never leaves the handset. The canonical
+             *     standard base64 of the DER SubjectPublicKeyInfo of an uncompressed P-256 key: exactly 91 bytes, so
+             *     exactly 124 characters (Product decision, 8 October 2026).
+             *     Trailing DER data, another curve and an ambiguous encoding are refused, and the key is compared with
+             *     the verified attested key after canonicalisation by the reviewed crypto stack, never as strings.
+             */
             public_key: string;
             /**
              * @description Established by the rider: six numeric digits. Argon2id-hashed with a server-side
@@ -9947,7 +10223,11 @@ export interface components {
          *     number is known. Anything more would make this an enumeration endpoint (37.7).
          */
         RiderChallenge: {
-            /** @description Single-use nonce to be signed by the registered private key */
+            /**
+             * @description Single-use nonce to be signed by the registered private key: the canonical unpadded base64url
+             *     of 32 random bytes (43 characters). It is a sign-in challenge only and is never usable as an
+             *     enrolment challenge (SECURITY_DESIGN 13.6).
+             */
             challenge: string;
             /** Format: date-time */
             expires_at: string;
@@ -9965,8 +10245,12 @@ export interface components {
              * @description 12 to 128 characters, counted in Unicode code points after NFKC normalisation.
              *     Spaces are permitted and no composition rule applies: no mandatory case, digit or symbol.
              *     Never trimmed, truncated or echoed. Argon2id-hashed server-side.
-             *     `minLength` and `maxLength` check the string as sent and are a pre-filter; the service
-             *     applies the rule after normalisation and is the authority (Gate PD-3R2).
+             *     **Two bounds, and a value must satisfy both** (Product decision, 8 October 2026):
+             *     `minLength` and `maxLength` count the string as sent, and the service counts it again after
+             *     NFKC normalisation, before it hashes. A string whose compatibility characters expand under
+             *     NFKC can therefore be refused by the schema (four U+FB03 ligatures are 4 code points as
+             *     sent and 12 once normalised, and are refused). A violation is `VALIDATION_FAILED` naming
+             *     the field, never the value.
              */
             secret: string;
         };
@@ -10032,7 +10316,7 @@ export interface components {
          *     diagnostics or analytics.
          */
         RiderSessionIssued: {
-            session: components["schemas"]["Session"];
+            session: components["schemas"]["CurrentSession"];
             /** @description The newly issued opaque Session secret. Returned exactly once, here. */
             access_token: string;
             /** @enum {string} */
@@ -10460,6 +10744,10 @@ export interface components {
          *     onto the six buckets and eight keys MSC-DEC-285 created at settings.md 7.7 (OQ-077
          *     closed); the RESPONSE was declarable before either landed, which is why it was
          *     declared first.
+         *
+         *     **It is also the answer when bounded hash work has no free slot** (Product decision, 8 October
+         *     2026): the request is refused at once, without verification and without moving any credential
+         *     counter, so overload cannot be turned into a lockout.
          */
         RateLimited: {
             headers: {
@@ -10480,6 +10768,23 @@ export interface components {
          *     not assigned is told `NOT_ASSIGNED_RIDER` or `NOT_CUSTODY_HOLDER`, not this.
          */
         Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description `403` `CSRF_VALIDATION_FAILED` on a **browser pre-session credential mutation** (Product
+         *     decision, 8 October 2026): the request's `Origin` is missing, `null` or not on the exact
+         *     allowlist of configured origins for this surface. It is answered before the credential or
+         *     token in the body is examined, and nothing is counted against any lock. There is no session
+         *     and no CSRF token to check yet, so the allowlisted `Origin` is the whole cross-site defence of
+         *     the operation. **A native Rider operation is never refused for having no `Origin`**, and does
+         *     not declare this response.
+         */
+        OriginRefused: {
             headers: {
                 [name: string]: unknown;
             };
@@ -10540,10 +10845,15 @@ export interface components {
             };
         };
         /**
-         * @description `503` `TRUST_DATA_UNAVAILABLE` (MSC-DEC-437, SECURITY_DESIGN 15.2.2). The verifier cannot
-         *     evaluate a handset's key attestation because the trust data it needs - the accepted roots and
-         *     Google's revocation list - is older than the 24-hour maximum, was never loaded by this
-         *     instance, or could not be loaded. **Retryable, and the grant is still good**: nothing was
+         * @description `503` `TRUST_DATA_UNAVAILABLE` (MSC-DEC-437, SECURITY_DESIGN 15.2.2). The attestation evidence
+         *     could not be evaluated now, for a reason that says nothing about the device: the trust data the
+         *     verifier needs - the accepted roots and Google's revocation list - is older than the 24-hour
+         *     maximum, was never loaded by the verifier service, or could not be loaded, **or the verifier
+         *     service itself is unreachable, overloaded or did not answer within its deadline** (Product decision,
+         *     8 October 2026). The response is one code; the internal cause stays distinct in logs and a bounded
+         *     metric label (SECURITY_DESIGN 15.2.3). **A verdict is never relabelled**: evidence the verifier
+         *     evaluated and rejected is `DEVICE_INTEGRITY_FAILED` or `DEVICE_SECURITY_UNSUPPORTED`, and a verifier
+         *     fault is never either of those. **Retryable, and the grant is still good**: nothing was
          *     written and nothing was consumed. `Retry-After` says when to try again.
          *
          *     **Returned by `completeRiderDeviceEnrolment` and by nothing else.** Sign-in, sessions and
@@ -10638,8 +10948,11 @@ export interface components {
          */
         SetCookie: string;
         /**
-         * @description `no-store`. Set on any response carrying a raw setup credential, so no
-         *     intermediary or browser cache retains an enrolment secret.
+         * @description `no-store`. Set on every response that carries a raw credential or secret - a setup or
+         *     enrolment credential, an authenticator seed, a bearer session credential, or a `Set-Cookie`
+         *     that issues a session or device credential - so no intermediary or browser cache retains it
+         *     (Product decision, 8 October 2026). The API also sends `no-store` on every response as a
+         *     platform rule; this declaration makes the contract agree with it and lets a test hold it.
          *
          *     **Required, and exactly `no-store`.** A response that references this header must carry it,
          *     and its value is the constant `no-store`: omitting it, or saying `public`, `private` or
@@ -12565,10 +12878,11 @@ export interface operations {
             200: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Session"];
+                    "application/json": components["schemas"]["CurrentSession"];
                 };
             };
             /**
@@ -12586,6 +12900,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12610,17 +12925,19 @@ export interface operations {
             200: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Session"];
+                    "application/json": components["schemas"]["CurrentSession"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
             /**
              * @description `MFA_ENROLMENT_REQUIRED`. The identity is privileged, its password was proved and it has
              *     no `ACTIVE` MFA factor, so no privileged session can be issued. The attempt does not
-             *     count towards the lockout.
+             *     count towards the lockout. The same status also carries `CSRF_VALIDATION_FAILED`, for a
+             *     missing, `null` or unlisted `Origin` on this browser pre-session mutation.
              */
             403: {
                 headers: {
@@ -12650,6 +12967,7 @@ export interface operations {
             /** @description Session established. The opaque Bearer credential is returned here, once */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12681,13 +12999,15 @@ export interface operations {
             200: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Session"];
+                    "application/json": components["schemas"]["CurrentSession"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12707,7 +13027,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Session"];
+                    "application/json": components["schemas"]["CurrentSession"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
@@ -12823,6 +13143,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -12849,11 +13170,13 @@ export interface operations {
             204: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content?: never;
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -13480,6 +13803,7 @@ export interface operations {
                     "application/json": components["schemas"]["StaffIdentity"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -14708,6 +15032,7 @@ export interface operations {
             /** @description Password established. MFA provisioning returned for privileged identities only */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -14715,6 +15040,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14742,6 +15068,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -14768,7 +15095,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Factor revoked, sessions terminated, re-enrolment grant issued */
+            /**
+             * @description Factor revoked (or a pending one superseded), sessions terminated, re-enrolment grant queued -
+             *     or, while a usable grant or a pending delivery attempt exists, that grant's non-secret metadata
+             *     returned and nothing new issued.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14777,6 +15108,7 @@ export interface operations {
                     "application/json": components["schemas"]["MfaResetResult"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -14815,6 +15147,7 @@ export interface operations {
                     "application/json": components["schemas"]["SetupGrant"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -15017,6 +15350,7 @@ export interface operations {
             200: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -15024,6 +15358,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -15070,7 +15405,8 @@ export interface operations {
         requestBody?: never;
         responses: {
             /**
-             * @description Accepted. A `VENDOR_DEVICE_ENROLMENT` grant was issued to the registered channel.
+             * @description Accepted. A `VENDOR_DEVICE_ENROLMENT` grant was issued and its message queued for the
+             *     registered channel; the provider is called later, by the delivery worker.
              *     **No grant material is returned here** - a response that carried it would make the
              *     registered channel decorative.
              */
@@ -15104,6 +15440,7 @@ export interface operations {
             200: {
                 headers: {
                     "Set-Cookie": components["headers"]["SetCookie"];
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -15111,6 +15448,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -15189,12 +15527,15 @@ export interface operations {
             /** @description New PENDING factor provisioned; continuation grant issued. No Session */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["MfaReenrolmentBegun"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
+            403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
@@ -15222,8 +15563,8 @@ export interface operations {
         };
         responses: {
             /**
-             * @description `RecoveryRequest` created, `initiated_by` recorded, token delivered to the verified
-             *     work email. **No session is created and the password is not yet changed** - the staff
+             * @description `RecoveryRequest` created (or, with `coalesced` true, the existing one returned),
+             *     `initiated_by` recorded, token queued for delivery to the verified work email. **No session is created and the password is not yet changed** - the staff
              *     member completes recovery themselves.
              */
             200: {
@@ -15325,8 +15666,8 @@ export interface operations {
         };
         responses: {
             /**
-             * @description `RecoveryRequest` created, `initiated_by` recorded, token delivered to the registered
-             *     recovery channel. **No session, and no credential changed yet.**
+             * @description `RecoveryRequest` created (or, with `coalesced` true, the existing one returned),
+             *     `initiated_by` recorded, token queued for delivery to the registered recovery channel. **No session, and no credential changed yet.**
              */
             200: {
                 headers: {
@@ -15375,6 +15716,7 @@ export interface operations {
                     "application/json": components["schemas"]["SetupGrant"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18010,6 +18352,10 @@ export interface operations {
                 domain?: string;
                 /** @description Narrow to the reasons valid at one recipient-contact checkpoint - the codes whose validCheckpoints contains this value. **This is the filter that makes REASON_NOT_VALID_FOR_CHECKPOINT avoidable at the screen** rather than discoverable only by submitting and being refused. */
                 checkpoint?: "PRE_DISPATCH" | "NEXT_STOP" | "DOORSTEP";
+                /** @description Narrow to the ACTIVE reasons an identity operation accepts - the codes whose permittedOperations names this operationId. **This is the filter the reason picker of every Ops screen that acts on another principal uses**, so it offers only reasons the operation will not refuse as REASON_NOT_ACTIVE. */
+                operation?: "revokeSession" | "approveStaffIdentity" | "resetStaffMfa" | "reissueStaffCredentialSetup" | "reissueVendorCredentialSetup" | "recoverStaffCredential" | "recoverVendorCredential" | "reregisterRiderDevice" | "revokeRiderDevice";
+                /** @description Valid only with `operation`. Keeps the reasons whose entry for that operation names this branch or names none. APPROVAL_REJECTED is the `approved: false` branch of approveStaffIdentity; FACTOR_ACTIVE and ENROLMENT_UNFINISHED are the branches of resetStaffMfa, chosen from `StaffIdentity.mfa_reset_state`. */
+                branch?: "APPROVAL_REJECTED" | "FACTOR_ACTIVE" | "ENROLMENT_UNFINISHED";
             };
             header?: never;
             path?: never;
@@ -18017,7 +18363,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Reason definitions */
+            /** @description Reason definitions, ordered by `code` */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18026,6 +18372,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReasonDefinition"][];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };
@@ -18042,7 +18389,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ReasonDefinition"];
+                "application/json": components["schemas"]["ReasonDefinitionWrite"];
             };
         };
         responses: {

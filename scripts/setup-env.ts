@@ -4,9 +4,11 @@
  *   infrastructure/postgres/.env   the local PostgreSQL service and the database tools: three throwaway random
  *                                  passwords (cluster superuser, migration identity, runtime identity)
  *   apps/api/.env                  the API: its example, with DATABASE_URL pointing at the runtime identity
- *                                  using the runtime password and the host and port from the file above
+ *                                  using the runtime password and the host and port from the file above, and
+ *                                  a fresh random key in place of each key placeholder (throwaway local key
+ *                                  material, one per purpose, never the same twice)
  *
- * It never overwrites a file, never prints a password, and writes nothing unless it can write everything it was
+ * It never overwrites a file, never prints a password or a key, and writes nothing unless it can write everything it was
  * asked to. Each file appears whole or not at all, so a killed run leaves nothing the next run would refuse to
  * repair (createPrivateFile says how). A file that already exists is left alone, and a DATABASE_URL in it that does not match the runtime
  * password is reported as a note (by name, never by value), because that fails only when the API starts.
@@ -61,11 +63,17 @@ export interface FileOperations {
 export interface SetupEnvOptions {
   /** Produces one password. Real randomness by default; a test passes a predictable one. */
   random?: () => string;
+  /** Produces one key: 32 random bytes as 43 unpadded base64url characters. Real randomness by default. */
+  randomKey?: () => string;
   /** Replaces some file system operations; the rest are the real ones. */
   files?: Partial<FileOperations>;
 }
 
 const randomPassword = (): string => randomBytes(24).toString('hex');
+const randomKeyText = (): string => randomBytes(32).toString('base64url');
+
+/** A key setting as the example writes it: version 1 and the placeholder, to be replaced by a key. */
+const KEY_PLACEHOLDER = new RegExp(`^(KEY_[A-Z0-9_]+_MATERIAL=1:)${PLACEHOLDER}(\\r?)$`, 'gm');
 
 function readExample(root: string, target: string): string {
   const example = `${target}.example`;
@@ -103,13 +111,32 @@ function urlHost(host: string): string {
   return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
-function apiEnvFrom(example: string, url: string): string {
+function apiEnvFrom(example: string, url: string, key: () => string): string {
   const line = /^DATABASE_URL=.*$/m;
   if (!line.test(example)) {
     throw new SetupEnvError(`${API_ENV}.example has no DATABASE_URL line to fill in.`);
   }
-  // A function replacer: the URL may hold `$` sequences that a string replacement would expand.
-  return example.replace(line, () => `DATABASE_URL=${url}`);
+  if (!new RegExp(KEY_PLACEHOLDER).test(example)) {
+    throw new SetupEnvError(`${API_ENV}.example has no key placeholder to fill in.`);
+  }
+  // A function replacer: the URL may hold `$` sequences that a string replacement would expand. Each key is its own.
+  return example
+    .replace(line, () => `DATABASE_URL=${url}`)
+    .replace(
+      KEY_PLACEHOLDER,
+      (_match, assignment: string, lineEnd: string) => `${assignment}${key()}${lineEnd}`,
+    );
+}
+
+/**
+ * The settings the example gives that an existing settings file lacks, by name. A file written before a setting existed is
+ * left alone, as every existing file is, so a developer is told which names to add or to have rebuilt.
+ */
+function missingSettingsNote(apiEnv: string, example: string): string | undefined {
+  const have = parseEnv(apiEnv);
+  const missing = Object.keys(parseEnv(example)).filter((name) => !(name in have));
+  if (missing.length === 0) return undefined;
+  return `${API_ENV} lacks ${missing.join(', ')}, which the API now requires, so it will refuse to start. Add them from ${API_ENV}.example, or delete ${API_ENV} to have it rebuilt.`;
 }
 
 /** Why an existing API settings file does not match the database file, or undefined when it does. */
@@ -172,6 +199,7 @@ export function createPrivateFile(
  */
 export function setupLocalEnv(root: string, options: SetupEnvOptions = {}): SetupEnvResult {
   const random = options.random ?? randomPassword;
+  const key = options.randomKey ?? randomKeyText;
   const result: SetupEnvResult = { created: [], leftAlone: [], notes: [] };
   const writes: [path: string, content: string][] = [];
 
@@ -189,11 +217,14 @@ export function setupLocalEnv(root: string, options: SetupEnvOptions = {}): Setu
   }
 
   if (existsSync(join(root, API_ENV))) {
-    const note = apiEnvNote(readFileSync(join(root, API_ENV), 'utf8'), pgEnv);
+    const existing = readFileSync(join(root, API_ENV), 'utf8');
+    const note = apiEnvNote(existing, pgEnv);
     if (note !== undefined) result.notes.push(note);
+    const missing = missingSettingsNote(existing, readExample(root, API_ENV));
+    if (missing !== undefined) result.notes.push(missing);
     result.leftAlone.push(API_ENV);
   } else {
-    writes.push([API_ENV, apiEnvFrom(readExample(root, API_ENV), databaseUrl(pgEnv))]);
+    writes.push([API_ENV, apiEnvFrom(readExample(root, API_ENV), databaseUrl(pgEnv), key)]);
   }
 
   for (const [path, content] of writes) {
