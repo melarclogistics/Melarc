@@ -68,6 +68,8 @@ Desktop.ini
 # Local agent/session scratch
 .claude/
 .superpowers/
+# Output of the local code-graph tool (graphify): generated per machine, rebuilt from the source
+graphify-out/
 
 # Local archives and scratch exports
 *.zip

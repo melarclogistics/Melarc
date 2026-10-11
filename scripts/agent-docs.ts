@@ -64,6 +64,8 @@ const SKIPPED_FOLDERS: ReadonlySet<string> = new Set([
   'test-results',
   'playwright-report',
   'blob-report',
+  // The output of the local code-graph tool (graphify): git-ignored and generated, never a document anyone owns.
+  'graphify-out',
 ]);
 
 const isSkipped = (name: string): boolean => name.startsWith('.') || SKIPPED_FOLDERS.has(name);
