@@ -244,6 +244,39 @@ describe('a worker process that erases expired credential material while it runs
   });
 });
 
+/** The line the fixture's stalling provider writes as it receives a message (test/support/worker-process-fixture.mjs). */
+const SEND_ANNOUNCEMENT = 'fixture: the provider received a message';
+
+/**
+ * What a stop with a message in flight must leave, however the stop signal was delivered: the process says it stopped and ends by
+ * itself with exit code 0 and nothing on stderr, the job it was sending is RETRYABLE with its lease given back (RELINQUISHED, the one
+ * attempt counted), the stop reports the one relinquished and none unconfirmed, and neither the token nor the destination was written.
+ */
+async function expectTheMessageGivenBack(finished: Finished, id: string): Promise<void> {
+  expect(finished).toMatchObject({ code: 0, signal: null, stderr: '' });
+  expect(said(finished)).toEqual(
+    expect.arrayContaining([
+      'delivery worker started',
+      'signal received',
+      'delivery worker stopping',
+      'delivery worker stopped',
+      'shutdown complete',
+    ]),
+  );
+  expect(await rowOf(id)).toMatchObject({
+    state: 'RETRYABLE',
+    outcome_class: 'RELINQUISHED',
+    attempt_count: 1,
+  });
+  expect(finished.stdout).not.toContain('SENTINEL-PROCESS-TOKEN');
+  expect(finished.stdout).not.toContain('process.recipient@example.test');
+  const stopped = finished.stdout
+    .split('\n')
+    .filter((line) => line.includes('delivery worker stopped'))
+    .map((line) => JSON.parse(line) as Record<string, unknown>)[0];
+  expect(stopped).toMatchObject({ relinquished: 1, unconfirmed: 0 });
+}
+
 describe('a worker process stopped with a message in flight (S0.18; OB-24)', () => {
   // Break caught: a process that exits with the lease held (the message is stranded until the lease ends), that leaves its exit code
   // non-zero for a stop it handled, or that records the stalled send as something it was not. The stop signal arrives as the
@@ -257,45 +290,32 @@ describe('a worker process stopped with a message in flight (S0.18; OB-24)', () 
 
     const finished = await running.waitForExit(DEADLINES.stop, 'did not end by itself');
 
-    expect(finished).toMatchObject({ code: 0, signal: null, stderr: '' });
-    expect(said(finished)).toEqual(
-      expect.arrayContaining([
-        'delivery worker started',
-        'signal received',
-        'delivery worker stopping',
-        'delivery worker stopped',
-        'shutdown complete',
-      ]),
-    );
-    expect(await rowOf(id)).toMatchObject({
-      state: 'RETRYABLE',
-      outcome_class: 'RELINQUISHED',
-      attempt_count: 1,
-    });
-    expect(finished.stdout).not.toContain('SENTINEL-PROCESS-TOKEN');
-    expect(finished.stdout).not.toContain('process.recipient@example.test');
-    const stopped = finished.stdout
-      .split('\n')
-      .filter((line) => line.includes('delivery worker stopped'))
-      .map((line) => JSON.parse(line) as Record<string, unknown>)[0];
-    expect(stopped).toMatchObject({ relinquished: 1, unconfirmed: 0 });
+    await expectTheMessageGivenBack(finished, id);
   });
 
   // Break caught: the same, through a real signal from the operating system (Linux and macOS and CI; skipped, not passed, on Windows).
-  // THIS IS THE WORKER'S REAL-SIGTERM EVIDENCE WITH A MESSAGE IN FLIGHT (plan OB-24): Gate 2 stays pending until it has run on Linux,
-  // WSL2 or CI.
+  // THIS IS THE WORKER'S REAL-SIGTERM EVIDENCE WITH A MESSAGE IN FLIGHT (plan OB-24).
+  //
+  // The signal is sent as soon as the fixture says the provider holds the message, while the send has nearly all of its time (5 s, the
+  // capture adapter's) and the stop's drain is shorter than what is left of it, so the stop gives the message back. The shutdown budget is
+  // 3 s here (5 s above): the drain is then 1.5 s, and the signal may be late by up to 3.5 s on a slow runner before the send's time is
+  // spent. A stop that came after the send's own time had run out would find it recorded as UNKNOWN (the message may have been taken),
+  // which is right and is not what this tests. The first version waited for the worker's log line for the claim, which is written at
+  // debug and so never at the default level, behind a catch that swallowed the timeout: it signalled eight seconds late, and the first
+  // run on Linux (CI, 11 October 2026) found UNKNOWN.
   it.skipIf(process.platform === 'win32')('does the same after a real SIGTERM', async () => {
     const id = await issue();
-    const running = start(WORKER_FIXTURE, workerEnvironment(), ['stalling']);
-    await until(async () => (await rowOf(id))?.state === 'LEASED', 'the job to be claimed');
-    await until(() => running.stdout.includes('delivery claimed'), 'the claim to be logged').catch(
-      () => undefined,
+    const running = start(WORKER_FIXTURE, { ...workerEnvironment(), SHUTDOWN_TIMEOUT_MS: '3000' }, [
+      'stalling',
+    ]);
+    await until(
+      () => running.stdout.includes(SEND_ANNOUNCEMENT),
+      'the provider to receive the message',
     );
 
     running.signal('SIGTERM');
     const finished = await running.waitForExit(DEADLINES.stop, 'did not end after SIGTERM');
 
-    expect(finished).toMatchObject({ code: 0, signal: null, stderr: '' });
-    expect(await rowOf(id)).toMatchObject({ state: 'RETRYABLE', outcome_class: 'RELINQUISHED' });
+    await expectTheMessageGivenBack(finished, id);
   });
 });

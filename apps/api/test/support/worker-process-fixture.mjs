@@ -7,7 +7,10 @@
 //
 //   plain       the worker as composed: the capture adapter and the reader that confirms nothing
 //   stalling    a provider that is given a message and never answers, and a reader that says every record is pending, so that a
-//               message is claimed and its send is in flight when the process is told to stop
+//               message is claimed and its send is in flight when the process is told to stop. As the provider receives the message
+//               it writes one line to stdout, {"msg":"fixture: the provider received a message"}, for a test to wait for before it
+//               signals the process; a stop that comes after the send's own time (the capture adapter's 5 s) has run out finds the
+//               send recorded as UNKNOWN, not given back, so a test must signal while the send is within its time
 //   --signal-itself            sends itself a stop signal shortly after it has started, so that a test does not depend on the
 //                              operating system delivering one (Windows does not deliver SIGTERM)
 //   --signal-itself-on-send    (stalling) sends itself a stop signal as the provider receives its first message
@@ -31,6 +34,9 @@ if (mode !== 'plain' && mode !== 'stalling') {
 
 const stopSignal = () => process.emit('SIGTERM', 'SIGTERM');
 
+// The line `stalling` writes as the provider receives a message (test/database/delivery-worker-process.db.test.ts waits for it).
+const SEND_ANNOUNCEMENT = 'fixture: the provider received a message';
+
 const flagValue = (name) => {
   const given = flags.find((flag) => flag.startsWith(`--${name}=`));
   return given === undefined ? undefined : Number(given.slice(name.length + 3));
@@ -45,6 +51,9 @@ const options = {
     : {
         providerFactory: () => ({
           send: () => {
+            // The message is in flight from here. Say so on stdout (a line a test can wait for): the worker's own line for the claim
+            // is written at debug, which the default level does not write, so a test that waited for it would wait for nothing.
+            process.stdout.write(`${JSON.stringify({ msg: SEND_ANNOUNCEMENT })}\n`);
             if (flags.includes('--signal-itself-on-send')) stopSignal();
             return new Promise(() => undefined);
           },
