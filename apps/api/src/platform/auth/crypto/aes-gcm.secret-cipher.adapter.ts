@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-import type { KeyPurpose } from '../../config/key-material.js';
-import type { KeyConfig } from '../../config/load-config.js';
+import type { KeyHolding, KeyPurpose } from '../../config/key-material.js';
 import type { CipherPurpose, SealedSecret, SecretCipher } from '../ports/secret-cipher.port.js';
 import { CryptoConditionError } from './condition.js';
 import { heldKeys } from './held-keys.js';
@@ -53,10 +52,16 @@ interface HeldPurpose {
  * replacing one. A version that is not held is `KEY_VERSION_UNKNOWN`, which is told apart from a value that failed to
  * authenticate, and an envelope version that is not supported is `ENVELOPE_VERSION_UNSUPPORTED`.
  *
- * **It is not composed without its keys.** All three purposes it serves need a usable key (the purpose is held, and its active
+ * **It is not composed without its keys.** Every purpose it serves needs a usable key (the purpose is held, and its active
  * version is among the versions held): otherwise construction fails with `PURPOSE_KEY_ABSENT`. There is no instance that starts and
- * then fails on each call, and none that serves the purposes it has keys for and fails the rest (security-test-matrix.md GBT-V8,
- * "fails to start, no degraded mode", for local custody).
+ * then fails on each call (security-test-matrix.md GBT-V8, "fails to start, no degraded mode", for local custody).
+ *
+ * **It serves all three purposes unless it is told otherwise.** A process that handles one kind of value names it (`serves`): the
+ * delivery worker is given the `credential_delivery` key and no other, because each purpose has its own access policy
+ * (SECURITY_DESIGN.md §14.9) and a worker that can open a TOTP seed or a saved answer has a power it has no use for. The instance
+ * then decodes and keeps the keys of the purposes it serves and no others, and a purpose it was not told to serve is refused
+ * (`PURPOSE_KEY_ABSENT`, which is exactly what it holds for it). That is stated at composition, by the process, and is not a
+ * degraded mode: it never serves part of what it was told to serve.
  *
  * **Nonces.** Random 96-bit nonces are safe for up to 2^32 seals under one key (NIST SP 800-38D section 8.3). A deployment seals
  * one seed per privileged identity and one payload per delivery, far below that, and a new key version starts the count again.
@@ -65,16 +70,18 @@ interface HeldPurpose {
  * work with no I/O (`independent`), and answers with a promise because a managed key service will not be. It is an adapter,
  * imported only by the composition root.
  */
-export class AesGcmSecretCipher implements SecretCipher {
-  readonly #held: Readonly<Record<CipherPurpose, HeldPurpose>>;
+export interface AesGcmSecretCipherOptions {
+  /** The purposes this instance serves, one or more. All three when it is not told. */
+  readonly serves?: readonly CipherPurpose[];
+}
 
-  constructor(keys: KeyConfig) {
-    const held = {} as Record<CipherPurpose, HeldPurpose>;
-    for (const [purpose, { key }] of Object.entries(PURPOSES) as [
-      CipherPurpose,
-      { key: KeyPurpose },
-    ][]) {
-      const purposeKeys = heldKeys(keys, key);
+export class AesGcmSecretCipher implements SecretCipher {
+  readonly #held: Readonly<Partial<Record<CipherPurpose, HeldPurpose>>>;
+
+  constructor(keys: KeyHolding, options: AesGcmSecretCipherOptions = {}) {
+    const held: Partial<Record<CipherPurpose, HeldPurpose>> = {};
+    for (const purpose of servedPurposes(options.serves)) {
+      const purposeKeys = heldKeys(keys, PURPOSES[purpose].key);
       const active = purposeKeys?.keys.get(purposeKeys.activeVersion);
       if (purposeKeys === undefined || active === undefined) {
         throw new CryptoConditionError('PURPOSE_KEY_ABSENT');
@@ -104,6 +111,13 @@ export class AesGcmSecretCipher implements SecretCipher {
     });
   }
 
+  /** The keys of a purpose this instance serves; a purpose it was not told to serve has no key here. */
+  #heldFor(purpose: CipherPurpose): HeldPurpose {
+    const held = this.#held[purpose];
+    if (held === undefined) throw new CryptoConditionError('PURPOSE_KEY_ABSENT');
+    return held;
+  }
+
   #seal(
     purpose: CipherPurpose,
     plaintext: Uint8Array,
@@ -112,7 +126,7 @@ export class AesGcmSecretCipher implements SecretCipher {
     const { code } = known(purpose);
     const context = contextOf(authenticatedData);
     if (!(plaintext instanceof Uint8Array)) throw new TypeError('A value to seal is bytes.');
-    const held = this.#held[purpose];
+    const held = this.#heldFor(purpose);
 
     const nonce = randomBytes(NONCE_BYTES);
     const cipher = createCipheriv('aes-256-gcm', held.active, nonce, { authTagLength: TAG_BYTES });
@@ -133,6 +147,7 @@ export class AesGcmSecretCipher implements SecretCipher {
   #open(purpose: CipherPurpose, sealed: SealedSecret, authenticatedData: Uint8Array): Uint8Array {
     const { code } = known(purpose);
     const context = contextOf(authenticatedData);
+    const held = this.#heldFor(purpose);
     // The envelope is read from a row, so what is in it is not trusted, but an envelope that is not even an object was not read
     // from one.
     const envelope: unknown = sealed;
@@ -148,8 +163,7 @@ export class AesGcmSecretCipher implements SecretCipher {
     if (typeof envelopeVersion !== 'number' || !SUPPORTED_ENVELOPE_VERSIONS.has(envelopeVersion)) {
       throw new CryptoConditionError('ENVELOPE_VERSION_UNSUPPORTED');
     }
-    const key =
-      typeof keyVersion === 'number' ? this.#held[purpose].keys.get(keyVersion) : undefined;
+    const key = typeof keyVersion === 'number' ? held.keys.get(keyVersion) : undefined;
     if (typeof keyVersion !== 'number' || key === undefined) {
       throw new CryptoConditionError('KEY_VERSION_UNKNOWN');
     }
@@ -179,6 +193,20 @@ export class AesGcmSecretCipher implements SecretCipher {
       throw new CryptoConditionError('AUTHENTICATION_FAILED');
     }
   }
+}
+
+/** The purposes to serve: the list given, once each, or all of them when none is given. Anything else is a defect of the caller. */
+function servedPurposes(serves: unknown): CipherPurpose[] {
+  const all = Object.keys(PURPOSES) as CipherPurpose[];
+  if (serves === undefined) return all;
+  if (
+    !Array.isArray(serves) ||
+    serves.length === 0 ||
+    serves.some((purpose) => typeof purpose !== 'string' || !Object.hasOwn(PURPOSES, purpose))
+  ) {
+    throw new TypeError('A cipher serves one or more of the purposes it knows.');
+  }
+  return [...new Set(serves as CipherPurpose[])];
 }
 
 function known(purpose: unknown): { readonly key: KeyPurpose; readonly code: number } {

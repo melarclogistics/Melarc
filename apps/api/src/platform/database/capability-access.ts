@@ -115,9 +115,17 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     identity: 'api',
     opener: 'The limiter adapter',
     openedUnder: ['platform/limiter/'],
-    tables: on(['RateLimitAdmission'], ['SELECT', 'INSERT', 'DELETE'], 'DELETE of expired rows'),
+    tables: [
+      ...on(['RateLimitAdmission'], ['SELECT', 'INSERT', 'DELETE'], 'DELETE of expired rows'),
+      ...on(
+        ['Setting'],
+        ['SELECT'],
+        'the six rate_limit_* rows (the buckets names, settings.md section 7.7) and no other row; no write (migration 0012, the Gate 2 correction, OB-102)',
+      ),
+    ],
     lookups: 'A bucket and a key digest',
-    returns: 'The admitted timestamps in the window and nothing else',
+    returns:
+      'The admitted timestamps in the window and nothing else; reads the bucket limit in its own transaction',
   },
   seed: {
     identity: 'provisioning',
@@ -150,7 +158,7 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
   credential_delivery: {
     identity: 'worker',
     opener: 'The credential-delivery worker process',
-    openedUnder: ['platform/delivery/worker/'],
+    openedUnder: ['platform/delivery/worker/', 'platform/delivery/retention/'],
     tables: [
       ...on(
         ['CredentialDeliveryJob'],

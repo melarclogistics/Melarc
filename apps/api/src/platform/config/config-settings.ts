@@ -60,6 +60,18 @@ export const HASHING_DEFAULTS = {
   ARGON2_PARALLELISM: '1',
 } as const;
 
+/**
+ * Hash admission (SECURITY_DESIGN.md §13.4c): how many password hashes may run at once, and the memory they may take together.
+ * **Development-qualified, not production-qualified** (S0.16; S0.65 proposes the release figures). The slot count is below the
+ * libuv pool of four that hashing shares with the rest of the process, so that hashing never takes every thread; the memory
+ * budget holds the slots at the largest profile that may be derived (`hashingProblems` in `load-config.ts`). The deployment record
+ * of what was measured and where is DEPLOYMENT_AND_ENVIRONMENTS.md §12.5, "What S0.16 applied and where it was exercised".
+ */
+export const HASH_ADMISSION_DEFAULTS = {
+  HASH_ADMISSION_SLOTS: '2',
+  HASH_ADMISSION_MEMORY_BUDGET_MIB: '256',
+} as const;
+
 const ENDPOINT_TEXT =
   'an https URL (http only to a loopback host when APP_ENV is local) with no user information, query or fragment';
 const KEY_TEXT =
@@ -109,6 +121,10 @@ export const EXPECTED = {
   ARGON2_PARALLELISM: `an integer from 1 to ${String(ARGON2ID_LIMITS.maxParallelism)}`,
   ARGON2_ACCEPTED_PROFILES:
     'absent, or one to eight comma-separated <memory KiB>:<passes>:<lanes> profiles, each valid as above, none repeated and none the write profile',
+  HASH_ADMISSION_SLOTS:
+    'an integer from 1 to 64 such that the slots, each at the largest memory of the write profile and every accepted profile, fit HASH_ADMISSION_MEMORY_BUDGET_MIB',
+  HASH_ADMISSION_MEMORY_BUDGET_MIB:
+    'an integer from 64 to 65536: the memory, in MiB, that the hash slots may take together',
   DELIVERY_EMAIL_ADAPTER: `one of: ${DELIVERY_ADAPTERS.join(', ')}; capture is refused when APP_ENV is production`,
   DELIVERY_EMAIL_ENDPOINT: `${ENDPOINT_TEXT}; required with provider, absent with capture`,
   DELIVERY_EMAIL_TIMEOUT_MS:
@@ -139,7 +155,7 @@ export const OPTIONAL_KEYS: readonly ConfigKey[] = [
   'ATTESTATION_VERIFIER_CALLER_SECRET',
 ];
 
-const integerBetween = (min: number, max: number) =>
+export const integerBetween = (min: number, max: number) =>
   z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(min).max(max));
 
 /** An endpoint a service is reached at: http or https, a host, no user information, query or fragment, a path allowed. */
@@ -208,6 +224,8 @@ export const envShape = {
     .string()
     .refine((text) => parseAcceptedProfiles(text) !== undefined)
     .optional(),
+  HASH_ADMISSION_SLOTS: integerBetween(1, 64).default(2),
+  HASH_ADMISSION_MEMORY_BUDGET_MIB: integerBetween(64, 65_536).default(256),
   DELIVERY_EMAIL_ADAPTER: z.enum(DELIVERY_ADAPTERS).default('capture'),
   DELIVERY_EMAIL_ENDPOINT: endpoint.optional(),
   DELIVERY_EMAIL_TIMEOUT_MS: integerBetween(100, 60_000).optional(),

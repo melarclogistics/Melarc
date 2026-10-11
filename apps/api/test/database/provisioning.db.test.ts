@@ -127,10 +127,11 @@ describe('provisionRoles', () => {
   });
 
   // Break caught: the runtime role being able to become the owner, which is the owner's power over every
-  // table and policy; and the migration role being unable to, which would leave its objects owned by it. No other
-  // login holds a membership, and the capability role is granted to nobody: a capability is put in front of a process
-  // by the task that needs it, so the worker base alone has none (GBT-Y5) and cannot take another (GBT-Y9).
-  it('lets the migration role act as the owner, and gives no other role a membership at all', async () => {
+  // table and policy; and the migration role being unable to, which would leave its objects owned by it. The one other
+  // membership is the delivery worker's: provisioning puts the capability role of the one task that process runs in front of
+  // its login (S0.18, OB-50), so that it inherits the grants of that capability and cannot SET ROLE to it. No other login
+  // holds a membership, and a capability that no task has put in front of a process is granted to nobody (GBT-Y5, GBT-Y9).
+  it('lets the migration role act as the owner, gives the delivery worker its capability and no other role a membership at all', async () => {
     const { rows } = await admin.client.query(
       `select granted.rolname as granted, member.rolname as member,
               m.inherit_option, m.set_option, m.admin_option
@@ -147,6 +148,13 @@ describe('provisionRoles', () => {
         member: MIGRATION_ROLE,
         inherit_option: true,
         set_option: true,
+        admin_option: false,
+      },
+      {
+        granted: WORKER_CREDENTIAL_DELIVERY_ROLE,
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
         admin_option: false,
       },
     ]);
@@ -237,6 +245,10 @@ describe('provisionRoles', () => {
       await admin.client.query(`grant pg_read_all_data to ${role}`);
     }
     await admin.client.query(`grant ${WORKER_CREDENTIAL_DELIVERY_ROLE} to ${PROVISIONING_ROLE}`);
+    // The worker's capability membership drifted to the wider form, which would let the login SET ROLE to it.
+    await admin.client.query(
+      `grant ${WORKER_CREDENTIAL_DELIVERY_ROLE} to ${WORKER_RUNTIME_ROLE} with inherit false, set true`,
+    );
 
     await provisionRoles(admin, settings);
 
@@ -254,8 +266,18 @@ describe('provisionRoles', () => {
     };
     expect(rows).toEqual([
       { rolname: PROVISIONING_ROLE, ...none, memberships: 0 },
-      { rolname: WORKER_RUNTIME_ROLE, ...none, memberships: 0 },
+      // The one membership the worker has is its capability, and in the form that inherits and cannot SET ROLE.
+      { rolname: WORKER_RUNTIME_ROLE, ...none, memberships: 1 },
     ]);
+    const { rows: capability } = await admin.client.query(
+      `select m.inherit_option, m.set_option, m.admin_option
+         from pg_auth_members m
+         join pg_roles granted on granted.oid = m.roleid
+         join pg_roles member on member.oid = m.member
+        where granted.rolname = $1 and member.rolname = $2`,
+      [WORKER_CREDENTIAL_DELIVERY_ROLE, WORKER_RUNTIME_ROLE],
+    );
+    expect(capability).toEqual([{ inherit_option: true, set_option: false, admin_option: false }]);
   });
 
   // Break caught: a password that cannot be changed, so a leaked credential cannot be rotated away.

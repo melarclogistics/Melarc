@@ -1,5 +1,4 @@
-import type { KeyPurpose, PurposeKeys } from '../../config/key-material.js';
-import type { KeyConfig } from '../../config/load-config.js';
+import type { KeyHolding, KeyPurpose, PurposeKeys } from '../../config/key-material.js';
 import { decodeBase64Url32 } from './canonical-base64url.js';
 
 /** The versions of one purpose a deployment holds, as the key bytes they spell. */
@@ -22,7 +21,7 @@ export interface HeldKeys {
  * from a string, and any later exposure of `.buffer` by unrelated code would show the pool. `Buffer.alloc` is never pooled, and the
  * pooled temporary is cleared.
  */
-export function heldKeys(config: KeyConfig, purpose: KeyPurpose): HeldKeys | undefined {
+export function heldKeys(config: KeyHolding, purpose: KeyPurpose): HeldKeys | undefined {
   if (config.custody !== 'local') return undefined;
   const held: Partial<Record<KeyPurpose, PurposeKeys>> = config.purposes;
   const entry = held[purpose];

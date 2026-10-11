@@ -40,6 +40,7 @@ import { registerExclusiveGate } from './transaction-gate.js';
 import { registerTransactionFacts, transactionFacts } from './transaction-facts.js';
 import {
   SecurityContextError,
+  frozenContextCopy,
   toContextSettings,
   type SecurityContext,
 } from './transaction-context.js';
@@ -172,6 +173,8 @@ export class DatabaseService {
     work: (tx: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
     const settings = toContextSettings(context);
+    // Taken in the same synchronous step as the validation: this copy is what was validated, and what the transaction runs under.
+    const fixedContext = frozenContextCopy(context);
     return this.runInTransaction(async (tx) => {
       const assignments = settings.map(([name, value]) => sql`set_config(${name}, ${value}, true)`);
       // The role comes back from the statement that sets the context: it is what the database says this connection
@@ -180,10 +183,11 @@ export class DatabaseService {
         sql`select ${sql.join(assignments, sql`, `)}, current_user as database_role`,
       );
       // The context is configuration, not data: what the work issues from here is counted (the policy locks come before it).
-      transactionFacts(tx)?.markContextApplied();
-      const capability = context.taskCapability;
+      transactionFacts(tx)?.markContextApplied(fixedContext);
+      // Judged on the copy that was validated and applied, not on the caller's object, which it may have changed since.
+      const capability = fixedContext.taskCapability;
       if (
-        context.principalType === 'SYSTEM' &&
+        fixedContext.principalType === 'SYSTEM' &&
         (capability === undefined ||
           !capabilityPermittedFor(capability, applied.rows[0]?.database_role as string | undefined))
       ) {
@@ -252,6 +256,7 @@ export class DatabaseService {
     // The statements the work has issued (not BEGIN, COMMIT or ROLLBACK), and how many of them were the security context.
     let issued = 0;
     let contextStatements = 0;
+    let appliedContext: SecurityContext | undefined;
     // The first statement of the work that the server refused. A transaction that has had one is aborted whatever the work does
     // next, and its COMMIT is answered with ROLLBACK: this is the cause that error carries.
     let firstStatementFailure: unknown;
@@ -316,9 +321,11 @@ export class DatabaseService {
       const tx: DatabaseTransaction = drizzle(guarded as never);
       registerTransactionFacts(tx, {
         statementsSinceContext: () => issued - contextStatements,
-        markContextApplied: () => {
+        markContextApplied: (context) => {
           contextStatements = issued;
+          appliedContext = context;
         },
+        appliedContext: () => appliedContext,
       });
       registerExclusiveGate(tx, async (exclusiveWork) => {
         if (holder !== undefined) {

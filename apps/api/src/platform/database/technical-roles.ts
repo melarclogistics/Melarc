@@ -6,10 +6,13 @@ import { API_RUNTIME_ROLE } from '../config/load-config.js';
  * them. These are the roles a running process connects as, or a grant set a process is given.
  *
  * - The API runtime is the only login the API's configuration may name (`load-config.ts` refuses any other).
- * - The worker base identity holds no protected-business-table grant. A worker runs as the base identity plus exactly the
- *   capabilities its task class needs (§14.17b), and a capability is a `melarc_worker_cap_<task>` grant-set role that a
- *   task puts in front of its process: provisioning never grants one by default, so the base alone reads no business
- *   table (`GBT-Y5`) and a process cannot acquire a second capability by asking (`GBT-Y9`).
+ * - The worker base identity holds no protected-business-table grant of its own. A worker runs as the base identity plus
+ *   exactly the capabilities its task class needs (§14.17b), and a capability is a `melarc_worker_cap_<task>` grant-set role
+ *   that is put in front of its process. The one worker of this slice is the credential-delivery worker (S0.18), so
+ *   `provisionRoles` grants its capability to the base login (the login inherits the grants and cannot `SET ROLE` to the
+ *   role): the base role itself reads no business table (`GBT-Y5`), what the login reaches is the delivery job and nothing
+ *   else, and a process cannot acquire a second capability by asking (`GBT-Y9`). A later worker with another capability is
+ *   given it by the task that builds it.
  * - The provisioning identity runs the approved seed and bootstrap procedures as `SYSTEM`. It is in no API's, worker's or
  *   request path's configuration.
  */

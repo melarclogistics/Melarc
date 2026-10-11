@@ -4,7 +4,11 @@ import { parseEnv } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { randomKey } from '../../test-support/config-env.js';
+import { WORKER_ONLY_KEYS, loadWorkerConfig } from '../delivery/worker/worker-config.js';
 import { OPTIONAL_KEYS } from './config-settings.js';
 import { KEY_PURPOSES, keyEnvName } from './key-material.js';
 import { API_RUNTIME_ROLE, CONFIG_KEYS, loadConfig } from './load-config.js';
@@ -70,10 +74,23 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   ARGON2_MEMORY_KIB: /^\d{1,7}$/,
   ARGON2_PASSES: /^\d{1,2}$/,
   ARGON2_PARALLELISM: /^\d{1,2}$/,
+  HASH_ADMISSION_SLOTS: /^\d{1,2}$/,
+  HASH_ADMISSION_MEMORY_BUDGET_MIB: /^\d{1,5}$/,
   DELIVERY_EMAIL_ADAPTER: /^(capture|provider)$/,
   DELIVERY_SMS_ADAPTER: /^(capture|provider)$/,
   ATTESTATION_VERIFIER: /^(substitute|service)$/,
+  // The delivery worker's own settings (S0.18). Its other three are commented examples, which have no value to judge.
+  DELIVERY_WORKER_CONCURRENCY: /^\d{1,2}$/,
+  DELIVERY_WORKER_POLL_INTERVAL_MS: /^\d{1,5}$/,
 };
+
+/** The worker's settings the example leaves commented out: each is optional beside a choice, or derived for a local run. */
+const WORKER_OPTIONAL = [
+  'DATABASE_WORKER_URL',
+  'DELIVERY_CAPTURE_DIRECTORY',
+  'DELIVERY_PROVIDER_APPROVAL_REF',
+  'DELIVERY_PROVIDER_ALLOWLIST',
+];
 
 const POSTGRES_FORMS: Readonly<Record<string, Form>> = {
   MELARC_PG_HOST: LOOPBACK,
@@ -187,8 +204,40 @@ describe('apps/api/.env.example', () => {
       (match) => match[1] ?? '',
     );
 
-    expect(commented.toSorted()).toEqual([...OPTIONAL_KEYS].toSorted());
-    expect([...Object.keys(example), ...commented].toSorted()).toEqual([...CONFIG_KEYS].toSorted());
+    expect(commented.toSorted()).toEqual([...OPTIONAL_KEYS, ...WORKER_OPTIONAL].toSorted());
+    expect([...Object.keys(example), ...commented].toSorted()).toEqual(
+      [...CONFIG_KEYS, ...WORKER_ONLY_KEYS].toSorted(),
+    );
+  });
+
+  // Break caught (S0.18): the worker's settings documented in the API's example and never checked against the worker's own loader, so
+  // that the first thing a developer copies for the worker fails.
+  it('is a configuration the delivery worker accepts, once the key placeholders are replaced and the local defaults are given', () => {
+    const local = {
+      ...withGeneratedKeys(example),
+      DATABASE_WORKER_URL: 'postgres://melarc_worker_runtime:x@127.0.0.1:5432/melarc_dev',
+      DELIVERY_CAPTURE_DIRECTORY: join(tmpdir(), 'melarc-capture'),
+    };
+
+    expect(loadWorkerConfig(local).ok).toBe(true);
+    // The example does not carry the worker's login or its sink: a local run derives them.
+    expect(WORKER_OPTIONAL.filter((key) => key in example)).toEqual([]);
+  });
+
+  // Break caught: the worker accepting the placeholder as its key, as the API does not.
+  it('is not a configuration the delivery worker accepts while its key is still the placeholder', () => {
+    const result = loadWorkerConfig({
+      ...example,
+      DATABASE_WORKER_URL: 'postgres://melarc_worker_runtime:x@127.0.0.1:5432/melarc_dev',
+      DELIVERY_CAPTURE_DIRECTORY: join(tmpdir(), 'melarc-capture'),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.map((problem) => problem.key)).toEqual([
+        'KEY_CREDENTIAL_DELIVERY_MATERIAL',
+      ]);
+    }
   });
 
   // Break caught: a real credential committed in the example, since .env.example is tracked by git. The values are scanned,

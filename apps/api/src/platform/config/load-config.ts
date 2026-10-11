@@ -14,6 +14,7 @@ import {
   type ConfigKey,
 } from './config-settings.js';
 import { parseAcceptedProfiles, type CredentialHashingConfig } from './credential-hashing.js';
+import { deliveryAdapterProblems, endpointNeedsHttps } from './delivery-adapter-problems.js';
 import {
   KEY_PURPOSES,
   keyEnvName,
@@ -112,6 +113,15 @@ export interface AdaptersConfig {
   readonly attestationVerifier: VerifierConfig;
 }
 
+/**
+ * The bound on concurrent password hashing (SECURITY_DESIGN.md §13.4c). Validated at start: the slots, each at the largest memory
+ * a hash may be derived at (the write profile and every accepted profile), fit the budget.
+ */
+export interface HashAdmissionConfig {
+  readonly slots: number;
+  readonly memoryBudgetMiB: number;
+}
+
 export interface AppConfig {
   /** Framework mode. Express and other libraries read the same variable directly. */
   readonly nodeEnv: (typeof NODE_ENVS)[number];
@@ -132,6 +142,8 @@ export interface AppConfig {
    * (`adapter-refusals.ts`).
    */
   readonly credentialHashing: CredentialHashingConfig;
+  /** How many hashes may run at once, and the memory they may take together. */
+  readonly hashAdmission: HashAdmissionConfig;
   readonly adapters: AdaptersConfig;
   /**
    * Always present in a configuration that `loadConfig` returns, so the real API cannot start without
@@ -169,6 +181,10 @@ const FORBIDDEN_KEYS = {
     'absent: migration credentials must never be present in the API environment',
   DATABASE_SEED_URL:
     'absent: provisioning credentials must never be present in the API environment',
+  // The delivery worker's own login (S0.18): its capability reads the sealed payload of every queued message, so an API that
+  // carried the connection would be one compromise away from the destinations and the tokens it queues.
+  DATABASE_WORKER_URL:
+    "absent: the delivery worker's credentials must never be present in the API environment",
 } as const;
 
 const envSchema = z.object(envShape);
@@ -238,6 +254,12 @@ function hashingProblems(env: ParsedEnv, invalid: (key: ConfigKey) => void): voi
   if (accepted.some((older) => profileKey(older) === profileKey(profile))) {
     invalid('ARGON2_ACCEPTED_PROFILES');
   }
+  // SECURITY_DESIGN.md §13.4c: memory is budgeted for the largest profile a slot may be asked to derive. An old hash verifies at the
+  // cost it was made with, so that is the largest of the write profile and every accepted one, not the write profile alone.
+  const largestKiB = Math.max(profile.memoryKiB, ...accepted.map((older) => older.memoryKiB));
+  if (env.HASH_ADMISSION_SLOTS * largestKiB > env.HASH_ADMISSION_MEMORY_BUDGET_MIB * 1024) {
+    invalid('HASH_ADMISSION_SLOTS');
+  }
 }
 
 /** The active version is one the purpose holds, and no key is used twice anywhere (SECURITY_DESIGN.md §14.9). */
@@ -260,39 +282,12 @@ function keyProblems(env: ParsedEnv, invalid: (key: ConfigKey) => void): void {
   }
 }
 
-/** A provider or service endpoint: https, or plain http to a loopback host in a local run only. */
-function endpointNeedsHttps(text: string, appEnv: ParsedEnv['APP_ENV']): boolean {
-  const url = parseEndpoint(text);
-  if (url === undefined) return true;
-  return !(url.protocol === 'https:' || (appEnv === 'local' && isLoopbackHost(url)));
-}
-
 function adapterProblems(
   env: ParsedEnv,
   invalid: (key: ConfigKey) => void,
   missing: (key: ConfigKey) => void,
 ): void {
-  const channels = [
-    [
-      'EMAIL',
-      env.DELIVERY_EMAIL_ADAPTER,
-      env.DELIVERY_EMAIL_ENDPOINT,
-      env.DELIVERY_EMAIL_TIMEOUT_MS,
-    ],
-    ['SMS', env.DELIVERY_SMS_ADAPTER, env.DELIVERY_SMS_ENDPOINT, env.DELIVERY_SMS_TIMEOUT_MS],
-  ] as const;
-  for (const [channel, adapter, endpoint, timeout] of channels) {
-    const endpointKey = `DELIVERY_${channel}_ENDPOINT` as const;
-    const timeoutKey = `DELIVERY_${channel}_TIMEOUT_MS` as const;
-    if (adapter === 'provider') {
-      if (endpoint === undefined) missing(endpointKey);
-      else if (endpointNeedsHttps(endpoint, env.APP_ENV)) invalid(endpointKey);
-      if (timeout === undefined) missing(timeoutKey);
-    } else {
-      if (endpoint !== undefined) invalid(endpointKey);
-      if (timeout !== undefined) invalid(timeoutKey);
-    }
-  }
+  deliveryAdapterProblems(env, invalid, missing);
 
   const url = env.ATTESTATION_VERIFIER_URL;
   const timeout = env.ATTESTATION_VERIFIER_TIMEOUT_MS;
@@ -432,6 +427,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
     }),
     keys: keysFrom(values),
     credentialHashing: hashingFrom(values),
+    hashAdmission: Object.freeze({
+      slots: values.HASH_ADMISSION_SLOTS,
+      memoryBudgetMiB: values.HASH_ADMISSION_MEMORY_BUDGET_MIB,
+    }),
     adapters: Object.freeze({
       limiter: values.RATE_LIMITER,
       delivery: Object.freeze({

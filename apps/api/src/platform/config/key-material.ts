@@ -41,6 +41,18 @@ export interface PurposeKeys {
   readonly versions: Readonly<Record<number, Secret>>;
 }
 
+/**
+ * The key material a process holds: every purpose (the API) or only those it was given (the delivery worker holds the
+ * `credential_delivery` key and no other, SECURITY_DESIGN.md §14.9: each purpose has its own access policy). The full
+ * `KeyConfig` of the API is one of these; a configuration made by hand may leave a purpose out.
+ */
+export type KeyHolding =
+  | {
+      readonly custody: 'local';
+      readonly purposes: Readonly<Partial<Record<KeyPurpose, PurposeKeys>>>;
+    }
+  | { readonly custody: 'describe' };
+
 /** At most this many versions of one purpose are held at once. An engineering bound, so rotation cannot pile up unnoticed. */
 const MAX_VERSIONS = 8;
 const ENTRY = /^([1-9]\d{0,5}):([A-Za-z0-9_-]{43})$/;

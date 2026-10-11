@@ -6,9 +6,12 @@ import {
   AUTH_POLICY_FIXED,
   FIXED_POLICY_ORDINAL,
   PolicyLockError,
+  RATE_LIMIT_CAPACITY,
+  RATE_LIMIT_KEY,
   bundleLockKey,
   fixedLockKey,
   isInt32,
+  rateLimitLockKey,
 } from './lock-keys.js';
 
 describe('the advisory lock classes (SECURITY_DESIGN.md §13.10a)', () => {
@@ -25,13 +28,28 @@ describe('the advisory lock classes (SECURITY_DESIGN.md §13.10a)', () => {
 
   // Break caught: a class number changed in a later edit. Two instances of the application that disagree on it would not
   // exclude each other, and a rolling release runs both. The values are pinned.
-  it('pins the two policy classes', () => {
+  it('pins the two policy classes and the limiter’s two', () => {
     expect(AUTH_POLICY_BUNDLE).toBe(1296843313);
     expect(AUTH_POLICY_FIXED).toBe(1296844337);
+    expect(RATE_LIMIT_KEY).toBe(1296847409);
+    expect(RATE_LIMIT_CAPACITY).toBe(1296847411);
     expect(Object.keys(ADVISORY_CLASSES).toSorted()).toEqual([
       'AUTH_POLICY_BUNDLE',
       'AUTH_POLICY_FIXED',
+      'RATE_LIMIT_CAPACITY',
+      'RATE_LIMIT_KEY',
     ]);
+    // The retired election's number (0x4D4C5232) is not reused by any class.
+    expect(Object.values(ADVISORY_CLASSES)).not.toContain(1296847410);
+  });
+
+  // Break caught (OB-67): the limiter's per-key serialisation taking a class the policy protocol uses, so a request for one
+  // caller’s bucket would queue behind a bundle change, or the reverse.
+  it('gives the limiter a class that is not one of the policy classes', () => {
+    expect([AUTH_POLICY_BUNDLE, AUTH_POLICY_FIXED]).not.toContain(RATE_LIMIT_KEY);
+    expect([AUTH_POLICY_BUNDLE, AUTH_POLICY_FIXED, RATE_LIMIT_KEY]).not.toContain(
+      RATE_LIMIT_CAPACITY,
+    );
   });
 
   it('is frozen: a class cannot be added or changed at run time', () => {
@@ -83,5 +101,26 @@ describe('the fixed-policy key: the principal type’s ordinal', () => {
   // Break caught: a fixed key taken for a type that has no fixed policy (staff has bundles, SYSTEM has a capability).
   it.each(['STAFF', 'SYSTEM', 'ADMIN', '', undefined])('refuses %j', (value) => {
     expect(() => fixedLockKey(value as 'VENDOR')).toThrow(PolicyLockError);
+  });
+});
+
+describe('the limiter key: a 32-bit lock key from a keyed digest', () => {
+  // Break caught: a lock key that differs between instances (another byte order, another offset), so two instances serialise
+  // one caller’s bucket on different locks and exclude nothing. The vectors are pinned.
+  it.each([
+    ['00000000ffffffff', 0],
+    ['ffffffff00000000', -1],
+    ['7fffffffaabbccdd', 2147483647],
+    ['80000000aabbccdd', -2147483648],
+    ['12345678aabbccdd', 305419896],
+  ])('reads the first four bytes of %s as a signed big-endian integer: %i', (hex, key) => {
+    expect(rateLimitLockKey(Buffer.from(hex, 'hex'))).toBe(key);
+  });
+
+  // Break caught: a short or non-buffer value read as a key, which would lock on garbage.
+  it('refuses a digest that is not at least four bytes', () => {
+    for (const digest of [Buffer.alloc(0), Buffer.alloc(3), 'abcd', null, undefined]) {
+      expect(() => rateLimitLockKey(digest as never)).toThrow(PolicyLockError);
+    }
   });
 });

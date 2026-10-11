@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { createCapture } from './capture.js';
+import type { CapturedMessage } from '../platform/delivery/worker/capture-sink.js';
+import { createCapture, deliverySinkOver } from './capture.js';
 
 /**
  * The capture reader (S0.10). The delivery adapters in the `capture` mode keep what they would have sent in memory
  * (DEPLOYMENT_AND_ENVIRONMENTS.md section 4: a staging or local run sends nothing to anyone), and a test reads it here: the setup
- * link a vendor would have received, the code a recipient would have been texted. The adapter arrives with S0.17; the reader is the
- * kit's half, and what it must be from the first day is empty.
+ * link a vendor would have received. The reader is the kit's half, and what it must be from the first day is empty; the capture
+ * adapter writes to it through `deliverySinkOver` (OB-88).
  */
 describe('createCapture', () => {
   // Break caught: a reader that starts with something in it, so that a test which expects "nothing was sent" passes or fails on
@@ -60,5 +61,72 @@ describe('createCapture', () => {
     const two = createCapture<string>();
     one.sink.push('x');
     expect(two.reader.all()).toEqual([]);
+  });
+});
+
+describe('deliverySinkOver (OB-88)', () => {
+  const FIRST = 'a'.repeat(32);
+  const SECOND = 'b'.repeat(32);
+  const message = (
+    dedupeId: string,
+    link = 'https://ops.example.test/setup#token=t-one',
+  ): CapturedMessage => ({
+    capturedAt: '2026-10-10T12:00:00.000Z',
+    dedupeId,
+    kind: 'SETUP_GRANT',
+    channel: 'EMAIL',
+    destination: 'someone@example.test',
+    link,
+  });
+
+  // Break caught: a sink the capture adapter writes to that the reader does not read, so that a test would find nothing was sent.
+  it('puts what the capture adapter writes where the reader reads it, in the order it was written', async () => {
+    const { reader, sink } = createCapture<CapturedMessage>();
+    const delivery = deliverySinkOver(reader, sink);
+
+    await delivery.write(message(FIRST));
+    await delivery.write(message(SECOND, 'https://ops.example.test/setup#token=t-two'));
+
+    expect(reader.all().map((entry) => entry.dedupeId)).toEqual([FIRST, SECOND]);
+    expect(reader.last()?.link).toBe('https://ops.example.test/setup#token=t-two');
+  });
+
+  // Break caught: a retried send captured twice. The adapter's rule is one message for one deduplication identity.
+  it('keeps one message for one deduplication identity: a send tried again leaves one', async () => {
+    const { reader, sink } = createCapture<CapturedMessage>();
+    const delivery = deliverySinkOver(reader, sink);
+
+    await delivery.write(message(FIRST));
+    await delivery.write(message(FIRST));
+    await delivery.write(message(SECOND));
+
+    expect(reader.all().map((entry) => entry.dedupeId)).toEqual([FIRST, SECOND]);
+  });
+
+  // Break caught: a `has` that answers for every identity, for none, or for the wrong one; or one that outlives a clear.
+  it('says whether a message is held by its deduplication identity, and no longer once the capture is cleared', async () => {
+    const { reader, sink } = createCapture<CapturedMessage>();
+    const delivery = deliverySinkOver(reader, sink);
+    expect(await delivery.has(FIRST)).toBe(false);
+
+    await delivery.write(message(FIRST));
+
+    expect(await delivery.has(FIRST)).toBe(true);
+    expect(await delivery.has(SECOND)).toBe(false);
+    sink.clear();
+    expect(await delivery.has(FIRST)).toBe(false);
+    await delivery.write(message(FIRST));
+    expect(reader.size).toBe(1);
+  });
+
+  // Break caught: two captures sharing one store, so that one test's mail reaches the next.
+  it('writes to the capture it was given and to no other', async () => {
+    const one = createCapture<CapturedMessage>();
+    const two = createCapture<CapturedMessage>();
+
+    await deliverySinkOver(one.reader, one.sink).write(message(FIRST));
+
+    expect(one.reader.size).toBe(1);
+    expect(two.reader.size).toBe(0);
   });
 });

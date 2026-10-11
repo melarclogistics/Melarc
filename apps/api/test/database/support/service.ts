@@ -30,12 +30,19 @@ export function buildService(
     readonly poolMax?: number;
     readonly deadlines?: DatabaseDeadlines;
     readonly login?: Login;
+    /** What the server shows for the pool's sessions. The API's name unless the test is a worker. */
+    readonly applicationName?: string;
   } = {},
 ): BuiltService {
   const url = database.urlFor(options.login ?? API_RUNTIME_ROLE);
   const poolMax = options.poolMax ?? 1;
   const deadlines = options.deadlines ?? INERT_DEADLINES;
-  const pool = createPool({ url, poolMax, deadlines });
+  const pool = createPool({
+    url,
+    poolMax,
+    deadlines,
+    ...(options.applicationName === undefined ? {} : { applicationName: options.applicationName }),
+  });
   const logs = new CapturedLogs();
   const shutdown = new ShutdownRegistry();
   const service = new DatabaseService(

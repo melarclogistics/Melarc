@@ -63,8 +63,9 @@ describe('the migrated database agrees with the registry', () => {
         )
       ).rows.map((row: { relname: string }) => row.relname),
     );
+    // The seven are there among the tables later tasks add (the audit ledger of S0.11 is not a reference table).
     expect(names).toEqual(
-      [
+      expect.arrayContaining([
         'fixed_permission_policy',
         'hub',
         'permission',
@@ -72,7 +73,7 @@ describe('the migrated database agrees with the registry', () => {
         'role_bundle',
         'role_bundle_grant',
         'setting',
-      ].toSorted(),
+      ]),
     );
     for (const table of [
       'Hub',
@@ -137,6 +138,62 @@ describe('the check can fire (it is not satisfied by an empty database)', () => 
     // The privileges the registry never gives anyone: a table that can be emptied, referenced to take a lock, given a trigger, or
     // locked in any mode (MAINTAIN, PostgreSQL 17 on) by a login that connects.
     [API_RUNTIME_ROLE, 'TRUNCATE', 'hub', 'a runtime login able to empty a table'],
+    // GBT-T1: the audit ledger is append-only. The registry's write cell reads INSERT, and the ceiling holds it there.
+    [API_RUNTIME_ROLE, 'UPDATE', 'audit_event', 'a runtime login able to rewrite audit history'],
+    // The limiter's admissions are written once: there is no UPDATE.
+    [
+      API_RUNTIME_ROLE,
+      'UPDATE',
+      'rate_limit_admission',
+      'a runtime login able to change an admission',
+    ],
+    [
+      WORKER_RUNTIME_ROLE,
+      'SELECT',
+      'rate_limit_admission',
+      'a base worker able to read the limiter',
+    ],
+    // The idempotency record is removed by the cleanup of S0.19 and by nothing before it.
+    [
+      API_RUNTIME_ROLE,
+      'DELETE',
+      'idempotency_record',
+      'a runtime login able to remove idempotency records',
+    ],
+    [API_RUNTIME_ROLE, 'DELETE', 'audit_event', 'a runtime login able to remove audit history'],
+    // The delivery job (S0.17): the registry's write cell reads `api` and a worker capability, and no identity holds DELETE on a job
+    // (the retention of a finished job's metadata is OQ-028), nor does the worker queue a message (only an issuing operation does).
+    [
+      API_RUNTIME_ROLE,
+      'DELETE',
+      'credential_delivery_job',
+      'a runtime login able to remove delivery jobs',
+    ],
+    [
+      WORKER_RUNTIME_ROLE,
+      'INSERT',
+      'credential_delivery_job',
+      'a worker able to queue a credential message of its own',
+    ],
+    [
+      WORKER_RUNTIME_ROLE,
+      'DELETE',
+      'credential_delivery_job',
+      'a worker able to remove delivery jobs',
+    ],
+    [
+      PROVISIONING_ROLE,
+      'SELECT',
+      'credential_delivery_job',
+      'a provisioning login able to read delivery jobs',
+    ],
+    [WORKER_RUNTIME_ROLE, 'UPDATE', 'audit_event', 'a base worker able to rewrite audit history'],
+    [
+      PROVISIONING_ROLE,
+      'DELETE',
+      'audit_event',
+      'a provisioning login able to remove audit history',
+    ],
     [PROVISIONING_ROLE, 'TRIGGER', 'setting', 'a provisioning login able to add a trigger'],
     [
       WORKER_RUNTIME_ROLE,

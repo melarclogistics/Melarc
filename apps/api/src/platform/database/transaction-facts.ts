@@ -1,3 +1,5 @@
+import type { SecurityContext } from './transaction-context.js';
+
 /**
  * What `DatabaseService` knows about a transaction it opened, for the code that must act first in it (S0.7). The policy locks of
  * SECURITY_DESIGN.md §13.10a come before any statement that reads or writes data; only the transaction's own configuration (here:
@@ -10,8 +12,13 @@
 export interface TransactionFacts {
   /** The statements the work has issued since the security context was applied. */
   readonly statementsSinceContext: () => number;
-  /** Called by the service once its context statement has run: statements before this are configuration, not data. */
-  readonly markContextApplied: () => void;
+  /**
+   * Called by the service once its context statement has run: statements before this are configuration, not data. It is given the
+   * (frozen) context that was validated and applied, which is the one context the transaction has.
+   */
+  readonly markContextApplied: (context: SecurityContext) => void;
+  /** The context the service applied to the transaction, or `undefined` before it has been applied. */
+  readonly appliedContext: () => SecurityContext | undefined;
 }
 
 const facts = new WeakMap<object, TransactionFacts>();

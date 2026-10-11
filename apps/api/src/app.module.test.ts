@@ -409,6 +409,49 @@ describe('the composition root refuses what its environment refuses (S0.2)', () 
     ]);
   });
 
+  // Break caught (OB-127, closed by the owner's decision of 11 October 2026): a local run, and CI, which runs as one, reaching a real
+  // provider through a configuration built by hand, which the environment's loader refuses but a hand-built one would not. The API's
+  // composition judges the built configuration: capture is the only delivery adapter there, in the API as in the worker.
+  it('refuses a hand-built local configuration that selects a real delivery provider, whatever its endpoint', () => {
+    const provider = (endpoint: string) =>
+      ({
+        kind: 'provider',
+        endpoint,
+        timeoutMs: 5_000,
+      }) as AppConfig['adapters']['delivery']['email'];
+    const adapters = (email: 'capture' | 'provider', sms: 'capture' | 'provider') =>
+      Object.freeze({
+        limiter: 'postgres',
+        delivery: Object.freeze({
+          email:
+            email === 'provider'
+              ? provider('http://127.0.0.1:9000/send')
+              : Object.freeze({ kind: 'capture' }),
+          sms:
+            sms === 'provider'
+              ? provider('https://sms.example.test/v1')
+              : Object.freeze({ kind: 'capture' }),
+        }),
+        attestationVerifier: Object.freeze({ kind: 'substitute' }),
+      }) as AppConfig['adapters'];
+
+    expect(
+      refused(inertConfig({ adapters: adapters('provider', 'capture') })).problems.map(
+        (problem) => problem.key,
+      ),
+    ).toEqual(['DELIVERY_EMAIL_ADAPTER']);
+    expect(
+      refused(inertConfig({ adapters: adapters('capture', 'provider') })).problems.map(
+        (problem) => problem.key,
+      ),
+    ).toEqual(['DELIVERY_SMS_ADAPTER']);
+    expect(
+      refused(inertConfig({ adapters: adapters('provider', 'provider') })).problems.map(
+        (problem) => problem.key,
+      ),
+    ).toEqual(['DELIVERY_EMAIL_ADAPTER', 'DELIVERY_SMS_ADAPTER']);
+  });
+
   it('accepts the describe composition in a local run', () => {
     const logger = createLogger({ config: TEST_CONFIG });
 

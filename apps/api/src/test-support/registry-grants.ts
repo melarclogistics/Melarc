@@ -63,6 +63,28 @@ export const SEED_ONLY_TABLES: ReadonlySet<string> = new Set([
   'FixedPermissionPolicy',
 ]);
 
+/**
+ * Tables whose grants are held below what the registry's "Write identity" reads as, and the most any login may hold on them.
+ * The audit ledger is written once and never changed or removed; other tables are held to the statements their task has built.
+ * The registry's write cell for `AuditEvent` reads `api` `worker` *(INSERT)*, and the check above reads a write identity as INSERT,
+ * UPDATE and DELETE: the ceiling is what keeps it at INSERT (GBT-T1: no runtime identity can change or remove an audit event). A
+ * task that builds another table of this kind adds it here in the same change.
+ */
+export const GRANT_CEILINGS: ReadonlyMap<string, readonly Privilege[]> = new Map([
+  ['AuditEvent', ['SELECT', 'INSERT']],
+  // The idempotency record is completed and its sealed fields erased by UPDATE. No registry row gives any identity DELETE on it,
+  // although settings.md says a record "may be reclaimed" after `idempotency_record_ttl_hours`: who reclaims it is a decision for
+  // the Product Owner (plan section 7.14), and until it is made no login holds DELETE, whatever the write cell says.
+  ['IdempotencyRecord', ['SELECT', 'INSERT', 'UPDATE']],
+  // The limiter's admissions are written once and removed when they leave the window: the registry's write cell reads `api`, and
+  // the ceiling keeps it from reading as UPDATE.
+  ['RateLimitAdmission', ['SELECT', 'INSERT', 'DELETE']],
+  // A delivery job is queued, leased, finished and cancelled by UPDATE and never removed: no registry row gives any identity DELETE
+  // on it (the retention of a finished job's metadata is OQ-028, the Product Owner's), and the registry's write cell reads `api`,
+  // which the check reads as DELETE too. The worker's capability row lists SELECT and UPDATE and no INSERT.
+  ['CredentialDeliveryJob', ['SELECT', 'INSERT', 'UPDATE']],
+]);
+
 /** The privileges `login` may hold on `row`'s table. */
 export function allowedPrivileges(login: Login, row: RegistryRow): Set<Privilege> {
   const allowed = new Set<Privilege>();
@@ -83,6 +105,10 @@ export function allowedPrivileges(login: Login, row: RegistryRow): Set<Privilege
   if (SEED_ONLY_TABLES.has(row.table)) {
     const ceiling: readonly Privilege[] = login.identity === 'provisioning' ? [] : ['SELECT'];
     for (const privilege of allowed) if (!ceiling.includes(privilege)) allowed.delete(privilege);
+  }
+  const appendOnly = GRANT_CEILINGS.get(row.table);
+  if (appendOnly !== undefined) {
+    for (const privilege of allowed) if (!appendOnly.includes(privilege)) allowed.delete(privilege);
   }
   return allowed;
 }

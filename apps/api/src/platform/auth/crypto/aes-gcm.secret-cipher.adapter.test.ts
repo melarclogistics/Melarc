@@ -624,6 +624,110 @@ describe('AesGcmSecretCipher (S0.3d)', () => {
     });
   });
 
+  // S0.18: the delivery worker is given one key purpose and no other (SECURITY_DESIGN.md section 14.9: each purpose has its own access
+  // policy). A cipher is told which purposes it serves; it holds those keys and no others, and says so for the rest.
+  describe('a cipher told to serve some of its purposes (the delivery worker holds one key)', () => {
+    const OTHERS = ['totp_seed', 'idempotent_replay', 'limiter_digest', 'password_pepper'] as const;
+    const workerCipher = () =>
+      new AesGcmSecretCipher(localKeys({}, OTHERS), { serves: ['DELIVERY_PAYLOAD'] });
+
+    // Break caught: a cipher told to serve one purpose that still insists on the keys of the others, or cannot seal and open its own.
+    it('is composed with the one key it serves, and round-trips that purpose', async () => {
+      const subject = workerCipher();
+
+      const sealed = await subject.seal('DELIVERY_PAYLOAD', PLAINTEXT, CONTEXT);
+
+      expect(
+        Buffer.from(await subject.open('DELIVERY_PAYLOAD', sealed, CONTEXT)).equals(PLAINTEXT),
+      ).toBe(true);
+    });
+
+    // Break caught: a purpose it does not serve being sealed or opened, whatever it holds; the answer is the one the port gives for a
+    // purpose with no key, because that is what the cipher holds for it.
+    it.each(['TOTP_SEED', 'REPLAY_SECRET'] as const)(
+      'refuses to seal or open %s, which it does not serve',
+      async (purpose) => {
+        const subject = workerCipher();
+        const sealed = await subject.seal('DELIVERY_PAYLOAD', PLAINTEXT, CONTEXT);
+
+        await expect(subject.seal(purpose, PLAINTEXT, CONTEXT)).rejects.toMatchObject({
+          condition: 'PURPOSE_KEY_ABSENT',
+        });
+        await expect(subject.open(purpose, sealed, CONTEXT)).rejects.toMatchObject({
+          condition: 'PURPOSE_KEY_ABSENT',
+        });
+      },
+    );
+
+    // Break caught: the keys of the purposes it does not serve being decoded and kept because the configuration happens to carry them.
+    it('does not use the key of a purpose it does not serve, though the configuration carries it', async () => {
+      const subject = new AesGcmSecretCipher(localKeys(), { serves: ['DELIVERY_PAYLOAD'] });
+
+      await expect(subject.seal('TOTP_SEED', PLAINTEXT, CONTEXT)).rejects.toMatchObject({
+        condition: 'PURPOSE_KEY_ABSENT',
+      });
+    });
+
+    // Break caught: a cipher composed without the key of the purpose it was told to serve, which would fail on every call.
+    it('is not composed when the key of a purpose it serves is not held', () => {
+      expect(
+        thrownBy(
+          () =>
+            new AesGcmSecretCipher(localKeys({}, ['credential_delivery']), {
+              serves: ['DELIVERY_PAYLOAD'],
+            }),
+        ),
+      ).toMatchObject({ name: 'CryptoConditionError', condition: 'PURPOSE_KEY_ABSENT' });
+    });
+
+    // Break caught: a list that serves nothing (a cipher that is composed and can do nothing), that names a purpose that does not
+    // exist, or that is not a list.
+    it.each([
+      ['nothing', []],
+      ['a purpose that does not exist', ['NOPE']],
+      ['one that does and one that does not', ['DELIVERY_PAYLOAD', 'NOPE']],
+      ['a name from the prototype', ['constructor']],
+      ['text instead of a list', 'DELIVERY_PAYLOAD'],
+    ])('refuses to serve %s', (_label, serves) => {
+      expect(
+        () =>
+          new AesGcmSecretCipher(localKeys(), {
+            serves: serves as unknown as readonly CipherPurpose[],
+          }),
+      ).toThrow(TypeError);
+    });
+
+    it('serves a purpose once however often it is named', async () => {
+      const subject = new AesGcmSecretCipher(localKeys({}, OTHERS), {
+        serves: ['DELIVERY_PAYLOAD', 'DELIVERY_PAYLOAD'],
+      });
+
+      const sealed = await subject.seal('DELIVERY_PAYLOAD', PLAINTEXT, CONTEXT);
+
+      expect(
+        Buffer.from(await subject.open('DELIVERY_PAYLOAD', sealed, CONTEXT)).equals(PLAINTEXT),
+      ).toBe(true);
+    });
+
+    // Break caught: a value sealed by the worker's cipher and a full cipher not being the same thing: both are the delivery purpose
+    // under the one key, and the API opens what the worker's cipher sealed (and the worker what the API sealed).
+    it('opens what a cipher serving every purpose sealed, and the other way round', async () => {
+      const keys = localKeys();
+      const full = new AesGcmSecretCipher(keys);
+      const narrow = new AesGcmSecretCipher(keys, { serves: ['DELIVERY_PAYLOAD'] });
+
+      const fromFull = await full.seal('DELIVERY_PAYLOAD', PLAINTEXT, CONTEXT);
+      const fromNarrow = await narrow.seal('DELIVERY_PAYLOAD', PLAINTEXT, CONTEXT);
+
+      expect(
+        Buffer.from(await narrow.open('DELIVERY_PAYLOAD', fromFull, CONTEXT)).equals(PLAINTEXT),
+      ).toBe(true);
+      expect(
+        Buffer.from(await full.open('DELIVERY_PAYLOAD', fromNarrow, CONTEXT)).equals(PLAINTEXT),
+      ).toBe(true);
+    });
+  });
+
   // The plan's rule for every task that touches a secret (§3, "Secrets"): a sentinel test.
   describe('sentinel: nothing secret leaves it', () => {
     it('keeps the plaintext, the context and every key out of what it throws, prints and serialises', async () => {

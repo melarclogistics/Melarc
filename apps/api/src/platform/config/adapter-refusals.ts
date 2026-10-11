@@ -33,6 +33,14 @@ export function adapterRefusals(config: AppConfig): ConfigProblem[] {
 
   if (config.keys.custody === 'describe' && deployed) refuse('KEY_CUSTODY', EXPECTED.KEY_CUSTODY);
   if (config.keys.custody === 'local' && production) refuse('KEY_CUSTODY', EXPECTED.KEY_CUSTODY);
+  // A local run, and CI, which runs as one, uses the capture adapter only: no local real-provider exception (OB-127, closed by the
+  // owner's decision of 11 October 2026). The same rule is on the environment, in the loader, so the two agree.
+  if (config.appEnv === 'local' && config.adapters.delivery.email.kind === 'provider') {
+    refuse('DELIVERY_EMAIL_ADAPTER', EXPECTED.DELIVERY_EMAIL_ADAPTER);
+  }
+  if (config.appEnv === 'local' && config.adapters.delivery.sms.kind === 'provider') {
+    refuse('DELIVERY_SMS_ADAPTER', EXPECTED.DELIVERY_SMS_ADAPTER);
+  }
   if (production && config.adapters.delivery.email.kind === 'capture') {
     refuse('DELIVERY_EMAIL_ADAPTER', EXPECTED.DELIVERY_EMAIL_ADAPTER);
   }

@@ -11,6 +11,8 @@
     "test:db": "vitest run --project database",
     "start": "node dist/main.js",
     "start:local": "node --env-file=.env dist/main.js",
+    "start:worker": "node dist/delivery-worker-main.js",
+    "start:worker:local": "node --env-file=.env dist/delivery-worker-main.js",
     "openapi:generate": "node dist/tools/generate-openapi.js",
     "contract:check": "node dist/tools/check-contract.js",
     "db:generate": "drizzle-kit generate",

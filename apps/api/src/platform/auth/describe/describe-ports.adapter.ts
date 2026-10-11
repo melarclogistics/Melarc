@@ -16,6 +16,7 @@ import type {
   IdempotencyStore,
   IdentityDirectory,
   IssuedToken,
+  JobEnd,
   Metrics,
   PortBindings,
   PrincipalSummary,
@@ -119,6 +120,9 @@ export class DescribeIdempotencyStore extends DescribeAdapter implements Idempot
   complete(): Promise<void> {
     return refuse('IdempotencyStore', 'complete');
   }
+  eraseSealedReplay(): Promise<boolean> {
+    return refuse('IdempotencyStore', 'eraseSealedReplay');
+  }
 }
 
 export class DescribeAuditWriter extends DescribeAdapter implements AuditWriter {
@@ -176,7 +180,7 @@ export class DescribeDeliveryQueue extends DescribeAdapter implements DeliveryQu
   claim(): Promise<ClaimedDelivery | null> {
     return refuse('DeliveryQueue', 'claim');
   }
-  recordOutcome(): Promise<void> {
+  recordOutcome(): Promise<JobEnd> {
     return refuse('DeliveryQueue', 'recordOutcome');
   }
 }

@@ -1,11 +1,12 @@
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { CLOCK, type Clock } from '../../src/platform/auth/ports/clock.port.js';
 import { serverErrorIn } from '../../src/platform/database/database-failures.js';
 import { DatabaseService } from '../../src/platform/database/database.service.js';
 import { runSeed } from '../../src/platform/database/seed/seed-helper.js';
 import { PROVISIONING_ROLE } from '../../src/platform/database/technical-roles.js';
+import { CaptureDeliveryProvider } from '../../src/platform/delivery/worker/capture.delivery-provider.adapter.js';
 import { DATABASE_POOL } from '../../src/platform/platform.tokens.js';
 import { sameShape } from '../../src/test-support/work-shape.js';
 import { referenceSeedPlan } from '../../src/tools/seed/reference-seed.js';
@@ -196,14 +197,62 @@ describe('observe(): a second connection that only reads', () => {
 });
 
 describe('the capture reader', () => {
-  // The evidence of S0.10: empty by default. Nothing writes to it until a delivery adapter in capture mode is bound (S0.17).
+  // The evidence of S0.10: empty by default. Since S0.18 the capture delivery adapter writes to it through `kit.deliverySink` (OB-88).
+  afterEach(() => {
+    kit.captureSink.clear();
+  });
+
+  const SETUP_TOKEN = 'KIT-SETUP-TOKEN-0123456789abcdef';
+  const message = (dedupeId: string) => ({
+    dedupeId,
+    kind: 'SETUP_GRANT',
+    channel: 'EMAIL' as const,
+    destination: 'vendor.owner@example.test',
+    link: `https://ops.example.test/setup/credential#token=${SETUP_TOKEN}`,
+  });
+
   it('is empty by default, and reads what a sink is given', () => {
     expect(kit.capture.all()).toEqual([]);
     expect(kit.capture.size).toBe(0);
-    kit.captureSink.push({ to: 'someone' });
-    expect(kit.capture.last()).toEqual({ to: 'someone' });
+    const captured = {
+      capturedAt: '2026-10-10T12:00:00.000Z',
+      ...message('c'.repeat(32)),
+    };
+    kit.captureSink.push(captured);
+    expect(kit.capture.last()).toEqual(captured);
     kit.captureSink.clear();
     expect(kit.capture.all()).toEqual([]);
+  });
+
+  // Break caught: a sink that is not the kit's (the adapter would write where no test reads), or one that writes the message without
+  // its link, its destination or the time of the kit's clock.
+  it('reads the setup link the capture adapter was asked to send, who it was for and when, by the kit’s clock', async () => {
+    const provider = new CaptureDeliveryProvider({ sink: kit.deliverySink, clock: kit.clock });
+
+    const outcome = await provider.send(message('d'.repeat(32)));
+
+    expect(outcome).toMatchObject({ outcome: 'ACCEPTED' });
+    const captured = kit.capture.last((entry) => entry.kind === 'SETUP_GRANT');
+    expect(captured).toEqual({
+      capturedAt: kit.clock.now().toISOString(),
+      ...message('d'.repeat(32)),
+    });
+    // What a later task's test does with it: follow the link and take the token out of it.
+    expect(new URL(captured?.link ?? '').hash).toBe(`#token=${SETUP_TOKEN}`);
+  });
+
+  // Break caught: a retry captured as a second message, or a status query that does not know the first.
+  it('keeps one message for one deduplication identity, and the adapter’s status query knows it', async () => {
+    const provider = new CaptureDeliveryProvider({ sink: kit.deliverySink, clock: kit.clock });
+
+    await provider.send(message('e'.repeat(32)));
+    await provider.send(message('e'.repeat(32)));
+
+    expect(kit.capture.where((entry) => entry.dedupeId === 'e'.repeat(32))).toHaveLength(1);
+    expect(await provider.status('e'.repeat(32))).toMatchObject({ outcome: 'ACCEPTED' });
+    expect(await provider.status('f'.repeat(32))).toBeNull();
+    kit.captureSink.clear();
+    expect(await provider.status('e'.repeat(32))).toBeNull();
   });
 });
 

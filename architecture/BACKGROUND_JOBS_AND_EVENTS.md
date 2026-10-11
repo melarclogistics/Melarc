@@ -53,6 +53,7 @@ This is the same rule the contract already applies at the API boundary — `IDEM
 | **Class 3 — unknown result** after a potentially side-effecting request| **Never blindly repeat the business effect.** §3.2a|
 | **Class 4 — broker or queue infrastructure unavailable**| The business transaction keeps its Outbox intent; the relay retries transport. §3.2b|
 | Business guard refused the transition| **No retry, and not an error.** A job that finds its precondition no longer true has been overtaken by events|
+| **This worker cannot do what a send needs** (G2 correction): it does not hold the key, envelope or layout version the payload was sealed in, or cannot confirm the redemption record, so **no provider was asked**| **Not a send, not a failure and not on the schedule below.** The claim is recorded as deferred and given back (it is not one of the six attempts), and the job waits on a backoff of its own, about 30 seconds doubling to 10 minutes with jitter, for a worker that can send it. It is never dead-lettered for this: only the credential's own end, or a cancellation, ends it. A claim whose worker says nothing (a crash) is still an attempt, because it may have sent. A worker that has no way to confirm a record claims nothing at all|
 | Unhandled exception| One retry, then dead-letter. A second identical crash is a defect, not a transient|
 
 **The Class 1 schedule, and it terminates:**

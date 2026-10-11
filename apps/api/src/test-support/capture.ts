@@ -1,8 +1,14 @@
+import type {
+  CapturedMessage,
+  CaptureSink as DeliveryCaptureSink,
+} from '../platform/delivery/worker/capture-sink.js';
+
 /**
- * The capture reader (S0.10). A delivery adapter in `capture` mode keeps what it would have sent in memory and sends nothing to
- * anyone (DEPLOYMENT_AND_ENVIRONMENTS.md section 4); a test reads it through a `CaptureReader`. The adapter arrives with S0.17 and
- * writes to the `CaptureSink` it is given; until then nothing writes, so the reader is empty, and it is empty by default for every
- * test: a test that expects that nothing was sent can say so, and a store never carries one test's messages into the next.
+ * The capture reader (S0.10). A delivery adapter in `capture` mode keeps what it would have sent and sends nothing to anyone
+ * (DEPLOYMENT_AND_ENVIRONMENTS.md section 4); a test reads it through a `CaptureReader`. The capture adapter of S0.18 writes to the
+ * sink it is given, and `deliverySinkOver` is how a test gives it this one (OB-88). Until something writes, the reader is empty, and it
+ * is empty by default for every test: a test that expects that nothing was sent can say so, and a store never carries one test's
+ * messages into the next.
  *
  * The reader can only read, so code under test that is handed it cannot change what was captured; the sink alone can add and clear.
  * Test support, excluded from the build.
@@ -43,4 +49,24 @@ export function createCapture<T>(): { reader: CaptureReader<T>; sink: CaptureSin
     },
   };
   return { reader, sink };
+}
+
+/**
+ * The sink the capture adapter (`CaptureDeliveryProvider`) is given, over a capture of this kit: what the adapter would have sent is
+ * what `reader` reads, a setup link and who it was for. It keeps the adapter's rule of one message for one deduplication identity, as
+ * a provider that deduplicates would (the same job tried again is the same message), and `has` is what its status query answers.
+ */
+export function deliverySinkOver(
+  reader: CaptureReader<CapturedMessage>,
+  sink: CaptureSink<CapturedMessage>,
+): DeliveryCaptureSink {
+  const held = (dedupeId: string): boolean =>
+    reader.last((message) => message.dedupeId === dedupeId) !== undefined;
+  return {
+    write: (message) => {
+      if (!held(message.dedupeId)) sink.push(message);
+      return Promise.resolve();
+    },
+    has: (dedupeId) => Promise.resolve(held(dedupeId)),
+  };
 }

@@ -166,7 +166,8 @@ describe('the catalogue invariants', () => {
       ],
       [
         'a technical role that does not exist',
-        `drop role ${WORKER_CREDENTIAL_DELIVERY_ROLE};`,
+        // The role holds the delivery job's grants and a membership (S0.17, S0.18): they go with it, as they would in a catalogue that lost it.
+        `drop owned by ${WORKER_CREDENTIAL_DELIVERY_ROLE}; drop role ${WORKER_CREDENTIAL_DELIVERY_ROLE};`,
         /role melarc_worker_cap_credential_delivery does not exist/,
       ],
       // Privileges reachable by switching role (review of S0.4 and S0.5): a membership granted WITH INHERIT FALSE, SET TRUE gives
@@ -413,9 +414,9 @@ describe('the catalogue invariants', () => {
     expect(found).toEqual([]);
   });
 
-  // Control for the cases above: a grant-set role that holds nothing is not a finding however it is granted. This is the
-  // configuration of the delivery worker once S0.18 puts its capability role in front of it, with the capability role of
-  // today (it holds no grant yet), so the checks that reach through memberships do not refuse the intended design.
+  // Control for the cases above: a grant-set role that holds table grants and no power is not a finding however it is granted.
+  // This is the configuration of the delivery worker (S0.18 puts its capability role, which holds the delivery job's grants, in
+  // front of it), so the checks that reach through memberships do not refuse the intended design.
   it.each([
     ['inherited', 'with inherit true, set false'],
     ['switched into', 'with inherit false, set true'],

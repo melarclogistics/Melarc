@@ -16,6 +16,9 @@ export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
 export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
+/** The delivery worker's entry point, and a test-only entry that composes it with a provider that stalls (S0.18). */
+export const WORKER_MAIN = resolve(API_ROOT, 'dist/delivery-worker-main.js');
+export const WORKER_FIXTURE = resolve(API_ROOT, 'test/support/worker-process-fixture.mjs');
 /** A test-only entry point: the real application plus something that refuses to shut down. */
 export const SHUTDOWN_FIXTURE = resolve(API_ROOT, 'test/support/shutdown-fixture.mjs');
 
@@ -63,16 +66,17 @@ export function requireBuild(): void {
     DB_RESET,
     DB_SEED,
     DB_ORPHANS,
+    WORKER_MAIN,
     BUILT_SHUTDOWN_HANDLERS,
   ]) {
     if (!existsSync(script)) {
       throw new Error(`${script} does not exist. Build first: pnpm --filter @melarc/api build`);
     }
   }
-  if (!existsSync(SHUTDOWN_FIXTURE)) {
-    throw new Error(
-      `${SHUTDOWN_FIXTURE} does not exist: the test fixture is part of the repository.`,
-    );
+  for (const fixture of [SHUTDOWN_FIXTURE, WORKER_FIXTURE]) {
+    if (!existsSync(fixture)) {
+      throw new Error(`${fixture} does not exist: the test fixture is part of the repository.`);
+    }
   }
 }
 

@@ -16,14 +16,22 @@ const isProduction = (file: SourceFile): boolean =>
  */
 const isTool = (file: SourceFile): boolean => file.path.startsWith('tools/');
 
-/** Where an advisory lock may be taken: the policy toolkit, whose classes come from one module. */
-const ADVISORY_CALLERS = ['platform/database/policy-lock/'];
+/**
+ * Where an advisory lock may be taken: the policy toolkit, and the rate limiter's per-key serialisation (S0.14, obligation OB-67),
+ * whose classes come from the one module `lock-keys.ts`. A new place is added here with its own test, not by a task's say-so.
+ */
+const ADVISORY_CALLERS = ['platform/database/policy-lock/', 'platform/limiter/'];
 
+/** A lock whose first argument is a number written in the call: its class would not be in `lock-keys.ts`, where no two may share a value. */
+const LITERAL_CLASS = /\bpg_advisory_xact_lock(?:_shared)?\s*\(\s*-?\d/;
 /** Every advisory function that is not the transaction-scoped lock: the session-level lock and unlock functions. */
 const SESSION_LEVEL = /\bpg_advisory_(?!xact_)[a-z_]+/g;
 /** A try-lock returns false instead of waiting; in a loop with no bound it spins on the database. */
 const TRY_LOCK = /\bpg_try_advisory_[a-z_]+/g;
 const TRANSACTION_LOCK = /\bpg_advisory_xact_lock(?:_shared)?\b/g;
+
+const literalClass = (file: SourceFile): string =>
+  `${file.path} locks on a class written in the call; a class is defined in lock-keys.ts, where a test asserts that no two share a value`;
 
 /** Comments are prose: a doc comment may name a function to explain why it is not used. */
 function withoutComments(text: string): string {
@@ -35,7 +43,8 @@ function withoutComments(text: string): string {
  *
  * - the session-level functions (`pg_advisory_lock`, `pg_advisory_unlock`, ...) are refused everywhere but the command-line tools
  *   (see `isTool`): on a pooled connection they outlive the transaction and the request;
- * - `pg_try_advisory_*` is refused everywhere: no bounded use exists; one that does is added to the allow-list with its bound;
+ * - `pg_try_advisory_*` is refused everywhere: it returns instead of waiting, and a use of it would be added to an allow-list with
+ *   its bound and its own test, as the limiter's cleanup election once was (removed when the capacity lock made it redundant);
  * - `pg_advisory_xact_lock` and `pg_advisory_xact_lock_shared` are refused outside the toolkit, so every class is defined in
  *   `lock-keys.ts`, where a test asserts that no two share a value.
  */
@@ -58,8 +67,10 @@ export function findAdvisoryLockViolations(files: readonly SourceFile[]): string
       TRANSACTION_LOCK.test(text)
     ) {
       violations.push(
-        `${file.path} calls an advisory lock function; advisory locks live in platform/database/policy-lock/ and take a class from lock-keys.ts`,
+        `${file.path} calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (and the limiter's key lock in platform/limiter/) and take a class from lock-keys.ts`,
       );
+    } else if (LITERAL_CLASS.test(text) && !violations.includes(literalClass(file))) {
+      violations.push(literalClass(file));
     }
     TRANSACTION_LOCK.lastIndex = 0;
   }

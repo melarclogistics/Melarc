@@ -123,6 +123,22 @@ curl http://127.0.0.1:3000/readyz
 `/readyz` answers ready only while the database is reachable. The Ops dev server prints its address (Vite's default,
 `http://localhost:5173`) and forwards `/api/v1` to the API, so the browser only ever talks to its own origin.
 
+The credential-delivery worker is a third process, with no listener, that sends the messages the API queues
+(setup grants and recovery links). Nothing queues one yet, so there is nothing for it to do until the first
+credential-issuing operation exists, but it can be started and stopped now:
+
+```text
+pnpm --filter @melarc/api run start:worker:local
+```
+
+It reads the same `apps/api/.env` and connects as `melarc_worker_runtime`; a local run derives that login's password from
+the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays unset (the API refuses to start with it
+set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
+yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
+by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
+Until the redemption records it must read exist (SLICE-000 S0.29 and S0.50) it confirms none, so it sends nothing and
+says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+
 ## 6. Run the checks and the smoke tests
 
 These are the checks CI runs ([ci.yml](.github/workflows/ci.yml)), which also runs `pnpm run build`,
@@ -217,10 +233,12 @@ database, which listens on loopback.
 
 ## Windows, WSL2 and Linux
 
-- **Windows.** Use the commands above in any shell. Five API tests (under `pnpm test`), one more under
-  `pnpm run test:db` and one harness test need to receive `SIGTERM`, which Windows cannot deliver to a process, so they
-  are skipped there and run on Linux, in WSL2 and in CI. A skipped test is not a pass: run the suite in WSL2 or Linux
-  before relying on shutdown behaviour.
+- **Windows.** Use the commands above in any shell. Six API tests (under `pnpm test`; one is the delivery worker's), two
+  more under `pnpm run test:db` (one is the worker's) and one harness test need to receive `SIGTERM`, which Windows
+  cannot deliver to a process, so they are skipped there and run on Linux, in WSL2 and in CI. Two more tests of
+  `pnpm test` read the permission bits of the delivery worker's capture folder, which a Windows file system does not
+  have, and are skipped there too. A skipped test is not a pass: run the suite in WSL2 or Linux before relying on
+  shutdown behaviour.
 - **Linux and CI.** The same commands. CI runs them on Ubuntu with a PostgreSQL service container.
 - **WSL2.** Clone into the Linux filesystem (`~/Melarc`), not under `/mnt/c` or `/mnt/e`: it is much faster and keeps
   file permissions. Install Node and pnpm inside WSL2 and run every command on this page in the WSL2 shell.
@@ -296,6 +314,7 @@ database, which listens on loopback.
 
 ## Not provided yet
 
-Seeded fixtures for the Local environment and capture adapters for email and SMS belong to the product slices that
-need them ([DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) sections 3 and 4); there is
-no product data to seed and no provider to capture yet. Staging and production are not set up from here.
+Seeded fixtures for the Local environment belong to the product slices that need them
+([DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) sections 3 and 4); there is no product
+data to seed yet. The capture adapter and the delivery worker exist (section 5), but no operation queues a message yet,
+and no real email or SMS provider is built. Staging and production are not set up from here.

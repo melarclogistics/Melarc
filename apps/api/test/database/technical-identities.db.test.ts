@@ -113,8 +113,9 @@ describe.each(LOGINS)('the login %s', (login) => {
   });
 
   // Break caught: the login being a privileged one: a superuser, a bypass of row-level security, a creator of
-  // databases or roles, a member of the owner or the migration identity, or an owner itself (GBT-J1, J3, J4).
-  it('is not the database owner, a superuser, a bypass role or a member of any role', async () => {
+  // databases or roles, a member of the owner or the migration identity, or an owner itself (GBT-J1, J3, J4). The one
+  // membership any of them has is the delivery worker's capability role (S0.18), tested for what it is further down.
+  it('is not the database owner, a superuser, a bypass role or a member of any role but its own capability', async () => {
     const { rows } = await as(login).query(
       `select r.rolsuper, r.rolbypassrls, r.rolcreatedb, r.rolcreaterole, r.rolreplication,
               pg_has_role(current_user, $1, 'MEMBER') as member_of_owner,
@@ -137,7 +138,7 @@ describe.each(LOGINS)('the login %s', (login) => {
         rolreplication: false,
         member_of_owner: false,
         member_of_migration: false,
-        memberships: 0,
+        memberships: login === WORKER_RUNTIME_ROLE ? 1 : 0,
         database_owner: OWNER_ROLE,
         owned_relations: 0,
         owned_functions: 0,
@@ -307,30 +308,96 @@ describe.each([WORKER_RUNTIME_ROLE, PROVISIONING_ROLE] as const)(
 );
 
 describe('the worker capability role', () => {
-  // Break caught: the capability role being a login, owning something, or holding a grant before a task needs one.
-  // It is a grant set: nothing logs in as it, nobody is a member of it by default, and nothing is granted to it yet.
-  it('is a grant set that holds nothing and that nobody has been given', async () => {
+  // Break caught: the capability role being a login, owning something, holding a grant no task needs, or being given to anyone
+  // but the worker's login in a form that lets it switch into the role. It is a grant set: nothing logs in as it, it owns
+  // nothing, it holds the grants of the one task it serves (the delivery job: SELECT on the row, UPDATE on the columns a lease
+  // and an outcome change; and, for the retention cleanup, the erase of an idempotency record's sealed columns) and no other, and its only member is the worker login, which inherits it and cannot SET ROLE.
+  it('is a grant set that holds only the delivery grants and has the worker login as its one member', async () => {
     const facts = await withClient(database.urlFor('postgres'), async (client) => {
-      const { rows } = await client.query<Record<string, unknown>>(
+      const role = await client.query<Record<string, unknown>>(
         `select r.rolcanlogin,
-                (select count(*) from pg_auth_members m where m.roleid = r.oid or m.member = r.oid)::int as memberships,
                 (select count(*) from pg_class where relowner = r.oid)::int as owned,
-                (select count(*) from pg_class c cross join lateral aclexplode(c.relacl) a where a.grantee = r.oid)::int as table_grants,
                 (select count(*) from pg_namespace n cross join lateral aclexplode(n.nspacl) a where a.grantee = r.oid)::int as schema_grants,
-                (select count(*) from pg_proc p cross join lateral aclexplode(p.proacl) a where a.grantee = r.oid)::int as function_grants
+                (select count(*) from pg_proc p cross join lateral aclexplode(p.proacl) a where a.grantee = r.oid)::int as function_grants,
+                (select count(*) from pg_auth_members m where m.member = r.oid)::int as memberships_held
            from pg_roles r where r.rolname = $1`,
         [WORKER_CREDENTIAL_DELIVERY_ROLE],
       );
-      return rows;
+      const tables = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", a.privilege_type as privilege
+           from pg_class c cross join lateral aclexplode(c.relacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, a.privilege_type`,
+        [WORKER_CREDENTIAL_DELIVERY_ROLE],
+      );
+      const columns = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", t.attname as "column", a.privilege_type as privilege
+           from pg_attribute t join pg_class c on c.oid = t.attrelid
+           cross join lateral aclexplode(t.attacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, t.attname, a.privilege_type`,
+        [WORKER_CREDENTIAL_DELIVERY_ROLE],
+      );
+      const members = await client.query<Record<string, unknown>>(
+        `select member.rolname as member, m.inherit_option, m.set_option, m.admin_option
+           from pg_auth_members m
+           join pg_roles granted on granted.oid = m.roleid
+           join pg_roles member on member.oid = m.member
+          where granted.rolname = $1`,
+        [WORKER_CREDENTIAL_DELIVERY_ROLE],
+      );
+      return { role: role.rows, tables: tables.rows, columns: columns.rows, members: members.rows };
     });
-    expect(facts).toEqual([
+    expect(facts.role).toEqual([
       {
         rolcanlogin: false,
-        memberships: 0,
         owned: 0,
-        table_grants: 0,
         schema_grants: 0,
         function_grants: 0,
+        memberships_held: 0,
+      },
+    ]);
+    expect(facts.tables).toEqual([{ table: 'credential_delivery_job', privilege: 'SELECT' }]);
+    expect(
+      facts.columns.map(
+        (row) => `${String(row.table)}.${String(row.column)}:${String(row.privilege)}`,
+      ),
+    ).toEqual(
+      [
+        'accepted_at',
+        'attempt_count',
+        'deferred_claims',
+        'lease_expires_at',
+        'lease_owner',
+        'lease_version',
+        'next_attempt_at',
+        'outcome_class',
+        'payload_ciphertext',
+        'payload_envelope_version',
+        'payload_erased_at',
+        'payload_key_version',
+        'payload_nonce',
+        'provider_message_ref',
+        'state',
+      ]
+        .map((column) => `credential_delivery_job.${column}:UPDATE`)
+        // S0.19: the retention cleanup erases the sealed replay of an idempotency record whose window has closed, and reads only the
+        // two columns that find one.
+        .concat([
+          'idempotency_record.id:SELECT',
+          'idempotency_record.replay_unavailable_at:UPDATE',
+          'idempotency_record.sealed_ciphertext:UPDATE',
+          'idempotency_record.sealed_envelope_version:UPDATE',
+          'idempotency_record.sealed_expires_at:SELECT',
+          'idempotency_record.sealed_expires_at:UPDATE',
+          'idempotency_record.sealed_key_version:UPDATE',
+          'idempotency_record.sealed_nonce:UPDATE',
+        ]),
+    );
+    expect(facts.members).toEqual([
+      {
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
+        admin_option: false,
       },
     ]);
   });

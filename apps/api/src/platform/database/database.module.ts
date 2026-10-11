@@ -21,7 +21,16 @@ import { PgStatementCanceller } from './statement-canceller.js';
  * The pool is given the facts read from the URL and never the URL, which the driver would read again,
  * query string included (see postgresConnectionSettings). A URL that is not accepted throws here.
  */
-export function createPool({ url, poolMax, deadlines }: DatabaseConfig): pg.Pool {
+/**
+ * The pool of one process. `applicationName` is what the server shows for its sessions (`pg_stat_activity`), so that an operator
+ * tells the API's apart from the delivery worker's; it is plain text, never a credential.
+ */
+export function createPool({
+  url,
+  poolMax,
+  deadlines,
+  applicationName = 'melarc-api',
+}: DatabaseConfig & { readonly applicationName?: string }): pg.Pool {
   return new pg.Pool({
     ...postgresConnectionSettings(url),
     max: poolMax,
@@ -30,7 +39,7 @@ export function createPool({ url, poolMax, deadlines }: DatabaseConfig): pg.Pool
     statement_timeout: deadlines.statementTimeoutMs,
     lock_timeout: deadlines.lockTimeoutMs,
     idle_in_transaction_session_timeout: deadlines.idleInTransactionTimeoutMs,
-    application_name: 'melarc-api',
+    application_name: applicationName,
   });
 }
 

@@ -1,8 +1,13 @@
 import { AppModule } from '../../../src/app.module.js';
 import { API_RUNTIME_ROLE, loadConfig } from '../../../src/platform/config/load-config.js';
+import type {
+  CapturedMessage,
+  CaptureSink as DeliveryCaptureSink,
+} from '../../../src/platform/delivery/worker/capture-sink.js';
 import { validEnv } from '../../../src/test-support/config-env.js';
 import {
   createCapture,
+  deliverySinkOver,
   type CaptureReader,
   type CaptureSink,
 } from '../../../src/test-support/capture.js';
@@ -27,7 +32,8 @@ import type { TestDatabase } from './test-database.js';
  *   it on, and nothing in the production tree imports the kit** (`integration-kit.test.ts` pins both);
  * - `admin`: arranges data the application will never arrange (age a row, change a status, break a write);
  * - `observe`: a second, read-only connection that asserts what the application did;
- * - `capture`: what the delivery adapters in `capture` mode would have sent. Empty until an adapter writes to `captureSink`;
+ * - `capture`: what the delivery adapters in `capture` mode would have sent (a `CapturedMessage`: the setup link, who it was for).
+ *   Empty until the capture adapter writes to it, which it does when it is given `deliverySink` (OB-88);
  * - `trace`: the shapes of the statements the application's login sent while some work ran.
  *
  * Several kits can run at once (each has its own database and port); the database project still runs its files one at a time, because
@@ -40,8 +46,10 @@ export interface IntegrationKit {
   readonly database: TestDatabase;
   readonly admin: Admin;
   readonly observe: Observer;
-  readonly capture: CaptureReader<unknown>;
-  readonly captureSink: CaptureSink<unknown>;
+  readonly capture: CaptureReader<CapturedMessage>;
+  readonly captureSink: CaptureSink<CapturedMessage>;
+  /** The sink to give a capture delivery adapter (`CaptureDeliveryProvider`): what it writes is what `capture` reads. */
+  readonly deliverySink: DeliveryCaptureSink;
   /** Runs `work` and returns it with the statements the application's login sent meanwhile, each reduced to its shape. */
   trace<T>(work: () => Promise<T>): Promise<{ readonly result: T; readonly statements: string[] }>;
   /**
@@ -99,7 +107,7 @@ export async function startIntegrationKit(
     const reader = opened.add('the observer’s connection', await observe(database), (each) =>
       each.close(),
     );
-    const { reader: capture, sink: captureSink } = createCapture<unknown>();
+    const { reader: capture, sink: captureSink } = createCapture<CapturedMessage>();
     const client = new TestClient({ baseUrl: app.baseUrl, now: () => clock.now() });
 
     return {
@@ -111,6 +119,7 @@ export async function startIntegrationKit(
       observe: reader,
       capture,
       captureSink,
+      deliverySink: deliverySinkOver(capture, captureSink),
       trace: (work) => traceStatements(API_RUNTIME_ROLE, work),
       stop: () => opened.close(),
     };

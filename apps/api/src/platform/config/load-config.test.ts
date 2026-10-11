@@ -505,6 +505,18 @@ describe('loadConfig: refused environments', () => {
     expect(loadConfig(validEnv({ DATABASE_SEED_URL: '' })).ok).toBe(true);
   });
 
+  // Break caught: the delivery worker's login in the API's environment (S0.18). Its capability reads the sealed payload of every queued
+  // message, so an API that carried the connection would be one compromise away from every destination and token it queues.
+  it('refuses an environment that carries the delivery worker database URL', () => {
+    const env = validEnv({
+      DATABASE_WORKER_URL: 'postgres://melarc_worker_runtime:x@127.0.0.1/melarc_dev',
+    });
+    expect(problemsFor(env)).toEqual([
+      expect.objectContaining({ key: 'DATABASE_WORKER_URL', problem: 'invalid' }),
+    ]);
+    expect(loadConfig(validEnv({ DATABASE_WORKER_URL: '' })).ok).toBe(true);
+  });
+
   // Break caught: the migration URL going unreported when another key is wrong too, so the operator fixes the one
   // they were told about, starts the API again and is refused a second time for the credential that was there all along.
   it('reports the migration database URL together with every other invalid key', () => {
@@ -761,9 +773,36 @@ describe('loadConfig: origins and the other settings that relate keys', () => {
       ['sms', 'SMS'],
     ])('requires an endpoint and a timeout for the %s provider', (_label, channel) => {
       expect(
-        keysOf(problemsFor(validEnv({ [`DELIVERY_${channel}_ADAPTER`]: 'provider' }))),
+        keysOf(
+          problemsFor(deployedEnv('staging', { [`DELIVERY_${channel}_ADAPTER`]: 'provider' })),
+        ),
       ).toEqual([`DELIVERY_${channel}_ENDPOINT`, `DELIVERY_${channel}_TIMEOUT_MS`]);
     });
+
+    // Break caught (OB-127, closed by the owner's decision of 11 October 2026): a local run, and CI, which runs as one, accepting a
+    // real provider: with a good endpoint, with plain http to a loopback stand-in, or with neither. There is no local exception.
+    it.each([
+      ['EMAIL', 'https://provider.example/v1'],
+      ['EMAIL', 'http://127.0.0.1:9000/v1'],
+      ['SMS', 'https://provider.example/v1'],
+      ['SMS', 'http://127.0.0.1:9000/v1'],
+    ])(
+      'refuses a real %s provider in a local run, whatever its endpoint (%s)',
+      (channel, endpoint) => {
+        const problems = problemsFor(
+          validEnv({
+            [`DELIVERY_${channel}_ADAPTER`]: 'provider',
+            [`DELIVERY_${channel}_ENDPOINT`]: endpoint,
+            [`DELIVERY_${channel}_TIMEOUT_MS`]: '5000',
+          }),
+        );
+
+        expect(problems).toEqual([
+          expect.objectContaining({ key: `DELIVERY_${channel}_ADAPTER`, problem: 'invalid' }),
+        ]);
+        expect(JSON.stringify(problems)).not.toContain(endpoint);
+      },
+    );
 
     // Break caught: an operator who sets a provider endpoint and leaves the adapter on capture, so messages go nowhere.
     it.each(['EMAIL', 'SMS'])(
@@ -798,13 +837,12 @@ describe('loadConfig: origins and the other settings that relate keys', () => {
 
     // Break caught: a provider reached over plain http outside a local test double.
     it.each([
-      ['http to a named host, locally', 'local', 'http://provider.example/v1', false],
-      ['http to loopback, locally', 'local', 'http://127.0.0.1:9000/v1', true],
+      ['http to a named host, in staging', 'staging', 'http://provider.example/v1', false],
       ['http to loopback, in staging', 'staging', 'http://127.0.0.1:9000/v1', false],
       ['https, in staging', 'staging', 'https://provider.example/v1', true],
-      ['user information', 'local', 'https://user:pass@provider.example/v1', false],
-      ['a query string', 'local', 'https://provider.example/v1?key=value', false],
-      ['a fragment', 'local', 'https://provider.example/v1#x', false],
+      ['user information', 'staging', 'https://user:pass@provider.example/v1', false],
+      ['a query string', 'staging', 'https://provider.example/v1?key=value', false],
+      ['a fragment', 'staging', 'https://provider.example/v1#x', false],
     ])('judges an endpoint with %s', (_label, appEnv, endpoint, accepted) => {
       const env =
         appEnv === 'local'

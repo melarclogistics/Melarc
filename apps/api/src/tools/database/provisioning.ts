@@ -146,10 +146,13 @@ export const LOGIN_ROLES = [
 /**
  * Creates the roles, or brings existing ones back to the intended shape, and sets their passwords. Safe to repeat.
  * Credentials are distinct: the migration role may create objects and run as the owner; every other login owns
- * nothing, bypasses nothing and is a member of nothing, and the worker's capability role is a grant set that nothing
- * logs in as and nobody is given by default (a task puts it in front of its process; see technical-roles.ts). The
- * worker and provisioning logins have no setting of their own: their passwords are derived (local-logins.ts), which is
- * for this machine's cluster only.
+ * nothing and bypasses nothing, and is a member of nothing but, for the worker, the one capability its process runs under.
+ * The worker's capability role is a grant set that nothing logs in as. It is put in front of the delivery worker's login
+ * here (S0.18, OB-50: the one worker of this slice runs the one task that capability serves), granted so that the login
+ * inherits its grants and cannot `SET ROLE` to it; any other membership a login has acquired is taken away. A task that adds
+ * a worker with another capability decides how that process is given it (technical-roles.ts). The worker and provisioning
+ * logins have no setting of their own: their passwords are derived (local-logins.ts), which is for this machine's cluster
+ * only.
  */
 export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres): Promise<void> {
   assertLocalHost(admin.host);
@@ -207,6 +210,15 @@ export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres)
     for (const row of memberships) {
       await runFormatted(client, 'REVOKE %I FROM %I', String(row.granted), String(row.member));
     }
+
+    // The one membership a login is given: the delivery worker's capability. It inherits the grants (so that its transactions
+    // can use them) and cannot become the role (so that nothing it runs can SET ROLE to it or hand it on).
+    await runFormatted(
+      client,
+      'GRANT %I TO %I WITH INHERIT TRUE, SET FALSE',
+      WORKER_CREDENTIAL_DELIVERY_ROLE,
+      WORKER_RUNTIME_ROLE,
+    );
   });
 }
 

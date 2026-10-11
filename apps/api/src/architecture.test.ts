@@ -57,25 +57,46 @@ const PORT_NAMES = [
  * The files in `platform/` allowed to implement a port, each added by the task that builds that adapter. S0.1 added none. S0.2
  * added the one file of inert describe adapters, which `adapterRefusals` keeps out of any environment but a local run. S0.3 adds
  * the four cryptographic adapters (`Hasher`, `SecretCipher`, `TokenService`, `TotpVerifier`), one file each. S0.6 adds the
- * production `Clock`, the first adapter the composition root binds itself. The next adapter, a real one, is added here by the
- * task that builds it, and a review sees the line.
+ * production `Clock`, the first adapter the composition root binds itself. S0.11 adds the audit writer over PostgreSQL, S0.12 the idempotency store and S0.14 the two rate limiters (the authoritative one
+ * and the in-memory one that unit tests use and a deployed environment refuses), S0.15 the bounded metrics registry and S0.16 the bounded hash admission.
+ * S0.17 adds the durable delivery queue over PostgreSQL. S0.18 adds the two delivery providers of the worker: the capture adapter and
+ * the allow-list that stands in front of a real provider (no real provider is built). The next adapter, a real one, is added here by
+ * the task that builds it, and a review sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
+  'platform/audit/postgres.audit-writer.adapter.ts',
   'platform/auth/clock/system.clock.adapter.ts',
   'platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts',
   'platform/auth/crypto/argon2.hasher.adapter.ts',
   'platform/auth/crypto/rfc6238.totp-verifier.adapter.ts',
   'platform/auth/crypto/sha256.token-service.adapter.ts',
   'platform/auth/describe/describe-ports.adapter.ts',
+  'platform/delivery/postgres.delivery-queue.adapter.ts',
+  'platform/delivery/worker/allow-listed.delivery-provider.adapter.ts',
+  'platform/delivery/worker/capture.delivery-provider.adapter.ts',
+  'platform/idempotency/postgres.idempotency-store.adapter.ts',
+  'platform/limiter/bounded.hash-admission.adapter.ts',
+  'platform/limiter/in-memory.rate-limiter.adapter.ts',
+  'platform/limiter/postgres.rate-limiter.adapter.ts',
+  'platform/metrics/bounded.metrics.adapter.ts',
 ];
 
 /** The port each real adapter above implements, so that a test can say what the checker must see in each file. */
 const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
+  ['platform/audit/postgres.audit-writer.adapter.ts', 'AuditWriter'],
   ['platform/auth/clock/system.clock.adapter.ts', 'Clock'],
   ['platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts', 'SecretCipher'],
   ['platform/auth/crypto/argon2.hasher.adapter.ts', 'Hasher'],
   ['platform/auth/crypto/rfc6238.totp-verifier.adapter.ts', 'TotpVerifier'],
   ['platform/auth/crypto/sha256.token-service.adapter.ts', 'TokenService'],
+  ['platform/delivery/postgres.delivery-queue.adapter.ts', 'DeliveryQueue'],
+  ['platform/delivery/worker/allow-listed.delivery-provider.adapter.ts', 'DeliveryProvider'],
+  ['platform/delivery/worker/capture.delivery-provider.adapter.ts', 'DeliveryProvider'],
+  ['platform/idempotency/postgres.idempotency-store.adapter.ts', 'IdempotencyStore'],
+  ['platform/limiter/bounded.hash-admission.adapter.ts', 'HashAdmission'],
+  ['platform/limiter/in-memory.rate-limiter.adapter.ts', 'RateLimiter'],
+  ['platform/limiter/postgres.rate-limiter.adapter.ts', 'RateLimiter'],
+  ['platform/metrics/bounded.metrics.adapter.ts', 'Metrics'],
 ];
 const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
 
@@ -84,7 +105,11 @@ const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
  * list, not a pattern. A file is not the composition root for being a module; a task that adds an adapter lists the one module
  * file that provides it here, so every widening of this list is a reviewed line of this file.
  */
-const COMPOSITION_ROOT: readonly string[] = ['app.module.ts', 'tools/seed/seed-runtime.ts'];
+const COMPOSITION_ROOT: readonly string[] = [
+  'app.module.ts',
+  'delivery-worker-runtime.ts',
+  'tools/seed/seed-runtime.ts',
+];
 
 /**
  * The only operations described as `independent`: safe local work, in process, with no database connection, no I/O and no lock.
@@ -601,8 +626,13 @@ describe('the ports of platform/auth (S0.1)', () => {
       "import { Argon2Hasher } from './crypto/argon2.hasher.adapter.js';\nexport const x = Argon2Hasher;";
 
     // S0.9 added the second: the `db:seed` process binds the production clock for the seed's database service, in a file of its own.
-    it('names the composition root explicitly: the application module and the seed process wiring', () => {
-      expect(COMPOSITION_ROOT).toEqual(['app.module.ts', 'tools/seed/seed-runtime.ts']);
+    // S0.18 added the third: the delivery worker is its own process, and binds its adapters in a file of its own.
+    it('names the composition root explicitly: the application module, the delivery worker and the seed process wiring', () => {
+      expect(COMPOSITION_ROOT).toEqual([
+        'app.module.ts',
+        'delivery-worker-runtime.ts',
+        'tools/seed/seed-runtime.ts',
+      ]);
     });
 
     it.each([
@@ -927,9 +957,13 @@ export const x = Argon2Hasher;`;
     it('has no adapter file but the listed ones, and no class that implements a port anywhere else', () => {
       const files = sourceFiles();
 
+      // The order the directory is walked in is not the order of the list (a shallower folder comes first), so the two are compared sorted.
       expect(
-        files.filter((source) => source.path.endsWith('.adapter.ts')).map((source) => source.path),
-      ).toEqual([...ALLOWED_PORT_IMPLEMENTATIONS]);
+        files
+          .filter((source) => source.path.endsWith('.adapter.ts'))
+          .map((source) => source.path)
+          .sort(),
+      ).toEqual([...ALLOWED_PORT_IMPLEMENTATIONS].sort());
       expect(
         findPortImplementationViolations(realModel(), PORT_NAMES, ALLOWED_PORT_IMPLEMENTATIONS),
       ).toEqual([]);
@@ -1196,6 +1230,27 @@ describe('the database door (S0.4)', () => {
       expect(findAdvisoryLockViolations([file('staff/x.ts', text)])).toHaveLength(1);
     });
 
+    // Break caught: a try-lock coming back into application code, in the limiter or anywhere else. The one there was (the limiter's
+    // cleanup election; review of 10 October 2026) was removed when the capacity lock (G2-05) put every delete under one lock, and
+    // the rule is again that none is allowed, with the class written in lock-keys.ts or in the call.
+    it('refuses a try-lock in the limiter too, in every form, with or without a class from lock-keys.ts', () => {
+      for (const text of [
+        'sql`select pg_try_advisory_xact_lock(${RATE_LIMIT_CAPACITY}::int4, 0)`',
+        'sql`select pg_try_advisory_lock(${RATE_LIMIT_CAPACITY}, 0)`',
+        'sql`select pg_try_advisory_lock_shared(${RATE_LIMIT_CAPACITY}, 0)`',
+        'sql`select pg_try_advisory_xact_lock_shared(${RATE_LIMIT_CAPACITY}, 0)`',
+        'sql`select pg_try_advisory_xact_lock(7, 0)`',
+      ]) {
+        for (const path of [
+          'platform/limiter/cleanup.ts',
+          'platform/database/policy-lock/x.ts',
+          'staff/x.ts',
+        ]) {
+          expect(findAdvisoryLockViolations([file(path, text)])).toHaveLength(1);
+        }
+      }
+    });
+
     // Break caught: a second use of advisory locks, with a class of its own in the code that uses it, where the test that no two
     // classes share a value cannot see it. Every use goes through policy-lock/ (or an allow-listed file).
     it.each([
@@ -1203,7 +1258,7 @@ describe('the database door (S0.4)', () => {
       ['pg_advisory_xact_lock_shared', 'sql`select pg_advisory_xact_lock_shared(1, 2)`'],
     ])('refuses %s outside platform/database/policy-lock/', (_name, text) => {
       expect(findAdvisoryLockViolations([file('staff/staff.repository.ts', text)])).toEqual([
-        'staff/staff.repository.ts calls an advisory lock function; advisory locks live in platform/database/policy-lock/ and take a class from lock-keys.ts',
+        "staff/staff.repository.ts calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (and the limiter's key lock in platform/limiter/) and take a class from lock-keys.ts",
       ]);
     });
 
@@ -1221,12 +1276,39 @@ describe('the database door (S0.4)', () => {
       ).toHaveLength(1);
     });
 
+    // Break caught (OB-67): the limiter's key lock refused where the plan puts it, or accepted with a class written in the call, where the
+    // test that no two classes share a value cannot see it.
+    it('accepts the limiter’s key lock when it takes its class from lock-keys.ts, and refuses a class written in the call', () => {
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'platform/limiter/key-lock.ts',
+            'sql`select pg_advisory_xact_lock(${RATE_LIMIT_KEY}, ${key})`',
+          ),
+        ]),
+      ).toEqual([]);
+      for (const text of [
+        'sql`select pg_advisory_xact_lock(7, ${key})`',
+        'sql`select pg_advisory_xact_lock_shared( 7, 8)`',
+        'sql`select pg_advisory_xact_lock(-1, 2)`',
+      ]) {
+        expect(findAdvisoryLockViolations([file('platform/limiter/key-lock.ts', text)])).toEqual([
+          'platform/limiter/key-lock.ts locks on a class written in the call; a class is defined in lock-keys.ts, where a test asserts that no two share a value',
+        ]);
+      }
+      expect(
+        findAdvisoryLockViolations([
+          file('platform/limiters/other.ts', 'sql`select pg_advisory_xact_lock(1, 2)`'),
+        ]),
+      ).toHaveLength(1);
+    });
+
     it('accepts the transaction-scoped functions in policy-lock/, the session-level ones in the command-line tools, tests and test support', () => {
       expect(
         findAdvisoryLockViolations([
           file(
             'platform/database/policy-lock/acquire.ts',
-            'sql`select pg_advisory_xact_lock_shared(1, 2)`',
+            'sql`select pg_advisory_xact_lock_shared(${lock.class}, ${lock.key})`',
           ),
           // A tool owns the one connection it locks on; the session-level functions are right there.
           file('tools/database/run-migrations.ts', "client.query('select pg_advisory_lock(1)')"),

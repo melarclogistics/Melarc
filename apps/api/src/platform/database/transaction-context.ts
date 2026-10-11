@@ -57,6 +57,19 @@ export interface SecurityContext {
   readonly correlationId: string;
 }
 
+/**
+ * A frozen copy of a context, with its list of hubs frozen too, so that nothing the caller does to its own object afterwards
+ * changes the context a transaction was opened under. The database service takes it in the same synchronous step that validates
+ * the context, so the copy is what was validated and what is applied.
+ */
+export function frozenContextCopy(context: SecurityContext): SecurityContext {
+  const copy: { -readonly [K in keyof SecurityContext]: SecurityContext[K] } = { ...context };
+  if (context.authorizedHubIds !== undefined) {
+    copy.authorizedHubIds = Object.freeze([...context.authorizedHubIds]);
+  }
+  return Object.freeze(copy);
+}
+
 /** One transaction-local setting: its name and the text value that is set. */
 export type ContextSetting = readonly [name: string, value: string];
 
