@@ -20,6 +20,7 @@ import {
   TechnicalEndpoint,
   type AccessDetail,
 } from './access-declaration.js';
+import { EVERY_SURFACE } from '../../test-support/route-options.js';
 
 describe('the four declarations', () => {
   @Controller('declared')
@@ -37,13 +38,13 @@ describe('the four declarations', () => {
     }
 
     @Get('self')
-    @Self()
+    @Self(EVERY_SURFACE)
     self(): string {
       return 'x';
     }
 
     @Get('permission')
-    @RequiresPermission('staff.read')
+    @RequiresPermission('staff.read', EVERY_SURFACE)
     permission(): string {
       return 'x';
     }
@@ -65,9 +66,184 @@ describe('the four declarations', () => {
   });
 
   // Break caught: the permission a route requires not being on the route, where a reader and the authorization guard look for it.
-  it('keep the permission key of a permission declaration, and nothing else', () => {
-    expect(detail('permission')).toEqual({ permission: 'staff.read' });
-    expect(detail('self')).toBeUndefined();
+  it('keep the permission key of a permission declaration, with what every authenticated route states', () => {
+    expect(detail('permission')).toEqual({
+      permission: 'staff.read',
+      authenticated: { surfaces: EVERY_SURFACE.surfaces, activity: 'qualifying' },
+    });
+    expect(detail('self')).toEqual({
+      authenticated: { surfaces: EVERY_SURFACE.surfaces, activity: 'qualifying' },
+    });
+  });
+});
+
+describe('what an authenticated route must state (S0.26)', () => {
+  const detailOf = (decorator: MethodDecorator): AccessDetail | undefined => {
+    const handler = (): void => undefined;
+    decorator({}, 'handler', { value: handler });
+    return Reflect.getMetadata(ACCESS_DETAIL_KEY, handler) as AccessDetail | undefined;
+  };
+
+  // Break caught: a route that serves no surface, or one that is not a surface, accepted: it would be refused for everyone or served
+  // to someone it was never meant for.
+  it.each([
+    ['no surface', { surfaces: [], activity: 'qualifying' }],
+    ['a surface that does not exist', { surfaces: ['ADMIN_PANEL'], activity: 'qualifying' }],
+    ['the SYSTEM surface', { surfaces: ['SYSTEM'], activity: 'qualifying' }],
+    ['a surface twice', { surfaces: ['OPS_PORTAL', 'OPS_PORTAL'], activity: 'qualifying' }],
+    ['surfaces that are not a list', { surfaces: 'OPS_PORTAL', activity: 'qualifying' }],
+  ])('refuses %s', (_label, options) => {
+    expect(() => Self(options as never)).toThrow(/surfaces it serves/);
+    expect(() => RequiresPermission('staff.read', options as never)).toThrow(/surfaces it serves/);
+  });
+
+  // Break caught: the activity policy defaulted. A forgotten polling route would then keep an unattended session alive for ever, or
+  // a route in use would end the session under the person who is using it (decision A of 12 October 2026).
+  it.each([
+    ['none', { surfaces: ['OPS_PORTAL'] }],
+    ['a policy that does not exist', { surfaces: ['OPS_PORTAL'], activity: 'always' }],
+    ['a policy that is empty', { surfaces: ['OPS_PORTAL'], activity: '' }],
+  ])('refuses %s as the activity policy, there is no default', (_label, options) => {
+    expect(() => Self(options as never)).toThrow(/counts as the person acting/);
+  });
+
+  it('keeps both policies as stated, and the surfaces in the order given', () => {
+    expect(
+      detailOf(Self({ surfaces: ['VENDOR_PWA', 'OPS_PORTAL'], activity: 'background' })),
+    ).toEqual({
+      authenticated: { surfaces: ['VENDOR_PWA', 'OPS_PORTAL'], activity: 'background' },
+    });
+  });
+
+  // Break caught: a stated option that a caller can change afterwards, so a declaration is not what the guard reads.
+  it('freezes what it keeps', () => {
+    const surfaces = ['OPS_PORTAL' as const];
+    const kept = detailOf(Self({ surfaces, activity: 'qualifying' }))?.authenticated;
+    surfaces.push('VENDOR_PWA' as never);
+
+    expect(kept?.surfaces).toEqual(['OPS_PORTAL']);
+    expect(Object.isFrozen(kept)).toBe(true);
+    expect(Object.isFrozen(kept?.surfaces)).toBe(true);
+  });
+
+  it('keeps the record a route names, and refuses a record scope that is not an entity and a parameter', () => {
+    expect(
+      detailOf(
+        RequiresPermission('staff.read', {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+        }),
+      )?.authenticated?.record,
+    ).toEqual({ entity: 'staff_identity', param: 'id' });
+
+    for (const record of [
+      { entity: 'Staff', param: 'id' },
+      { entity: 'staff-identity', param: 'id' },
+      { entity: 'staff_identity', param: 'the id' },
+      { entity: 'staff_identity', param: '' },
+      { entity: 1, param: 'id' },
+      'staff_identity',
+      null,
+    ]) {
+      expect(() =>
+        Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying', record: record as never }),
+      ).toThrow(/entity and the path parameter/);
+    }
+  });
+});
+
+describe('the tier an authenticated route needs (the review of 12 October 2026, F01)', () => {
+  const detailOf = (decorator: MethodDecorator): AccessDetail | undefined => {
+    const handler = (): void => undefined;
+    decorator({}, 'handler', { value: handler });
+    return Reflect.getMetadata(ACCESS_DETAIL_KEY, handler) as AccessDetail | undefined;
+  };
+  const record = { entity: 'fixture_order', param: 'id' } as const;
+  const base = { surfaces: ['OPS_PORTAL'], activity: 'qualifying' } as const;
+
+  // Break caught: the declaration dropped, so the guard has nothing to decide step 6 by and the tier is left to the handler.
+  it('keeps a minimum tier, a rule, or both, frozen', () => {
+    const kept = detailOf(
+      RequiresPermission('staff.read', {
+        ...base,
+        record,
+        tier: { minimum: 'S', rule: 'order_tier' },
+      }),
+    )?.authenticated?.tier;
+
+    expect(kept).toEqual({ minimum: 'S', rule: 'order_tier' });
+    expect(Object.isFrozen(kept)).toBe(true);
+    expect(
+      detailOf(RequiresPermission('staff.read', { ...base, tier: { minimum: 'P' } }))?.authenticated
+        ?.tier,
+    ).toEqual({ minimum: 'P' });
+    expect(
+      detailOf(RequiresPermission('staff.read', { ...base, record, tier: { rule: 'order_tier' } }))
+        ?.authenticated?.tier,
+    ).toEqual({ rule: 'order_tier' });
+  });
+
+  // Break caught: a tier declaration that says nothing, or something that is not a tier, accepted as "no requirement".
+  it.each([
+    ['nothing', {}],
+    ['a minimum that is not a tier', { minimum: 'Z' }],
+    ['a lower-case tier', { minimum: 's' }],
+    ['a rule with a name that is not an identifier', { rule: 'Order Tier' }],
+    ['a rule that is not text', { rule: 7 }],
+    ['a declaration that is not an object', 'S'],
+    ['null', null],
+  ])('refuses %s', (_label, tier) => {
+    expect(() =>
+      RequiresPermission('staff.read', { ...base, record, tier: tier as never }),
+    ).toThrow(/names a minimum tier/);
+  });
+
+  // Break caught: a rule on a route that names no record: it would have no id to ask about, and so would never be asked.
+  it('refuses a rule on a route that names no record', () => {
+    expect(() =>
+      RequiresPermission('staff.read', { ...base, tier: { rule: 'order_tier' } }),
+    ).toThrow(/names the record/);
+  });
+
+  // Break caught: a self operation given a tier, which it has no grant to hold.
+  it('refuses a tier on a self operation, which holds no grant', () => {
+    expect(() => Self({ ...base, tier: { minimum: 'S' } })).toThrow(/no grant/);
+  });
+});
+
+describe('what an anonymous route states about its client (S0.25)', () => {
+  const clientOf = (decorator: MethodDecorator): AccessDetail['client'] => {
+    const handler = (): void => undefined;
+    decorator({}, 'handler', { value: handler });
+    return (Reflect.getMetadata(ACCESS_DETAIL_KEY, handler) as AccessDetail | undefined)?.client;
+  };
+
+  // Break caught: an anonymous route that says nothing taken for native, which would release a pre-session mutation from the Origin
+  // check by omission.
+  it('is a browser route on both surfaces unless it says otherwise', () => {
+    expect(clientOf(Anonymous())).toEqual({
+      kind: 'browser',
+      surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
+    });
+  });
+
+  it('keeps the surfaces a browser route names, and a native route as native', () => {
+    expect(clientOf(Anonymous(undefined, { kind: 'browser', surfaces: ['VENDOR_PWA'] }))).toEqual({
+      kind: 'browser',
+      surfaces: ['VENDOR_PWA'],
+    });
+    expect(clientOf(Anonymous(undefined, { kind: 'native' }))).toEqual({ kind: 'native' });
+  });
+
+  it.each([
+    ['a browser route with no surface', { kind: 'browser', surfaces: [] }],
+    ['a surface twice', { kind: 'browser', surfaces: ['OPS_PORTAL', 'OPS_PORTAL'] }],
+    ['a surface that does not exist', { kind: 'browser', surfaces: ['RIDER_ANDROID'] }],
+    ['a client that is neither', { kind: 'robot' }],
+    ['no client kind', {}],
+  ])('refuses %s', (_label, client) => {
+    expect(() => Anonymous(undefined, client as never)).toThrow();
   });
 });
 
@@ -81,7 +257,7 @@ describe('RequiresPermission: a key of the closed catalogue', () => {
     'pickup.request.cancel_chargeable',
   ])('accepts %s', (key) => {
     expect(isPermissionKey(key)).toBe(true);
-    expect(() => RequiresPermission(key)).not.toThrow();
+    expect(() => RequiresPermission(key, EVERY_SURFACE)).not.toThrow();
   });
 
   it.each([
@@ -103,7 +279,7 @@ describe('RequiresPermission: a key of the closed catalogue', () => {
     'staff.read\n',
   ])('refuses %j', (key) => {
     expect(isPermissionKey(key)).toBe(false);
-    expect(() => RequiresPermission(key)).toThrow(/not a permission key/);
+    expect(() => RequiresPermission(key, EVERY_SURFACE)).toThrow(/not a permission key/);
   });
 
   // Break caught: the pattern drifting from the catalogue it stands for. Every key the seed holds (the document's order, the
@@ -133,7 +309,7 @@ describe('the declarations state the operation in the description, so the guard 
 
     @Get('self')
     @ContractOperation('selfOperation')
-    @Self()
+    @Self(EVERY_SURFACE)
     @ApiResponse({ status: 200, description: 'OK' })
     self(): string {
       return 'x';
@@ -141,7 +317,7 @@ describe('the declarations state the operation in the description, so the guard 
 
     @Get('permission')
     @ContractOperation('permissionOperation')
-    @RequiresPermission('staff.read')
+    @RequiresPermission('staff.read', EVERY_SURFACE)
     @ApiResponse({ status: 200, description: 'OK' })
     permission(): string {
       return 'x';

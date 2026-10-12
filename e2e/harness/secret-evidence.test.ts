@@ -94,7 +94,35 @@ describe('the Playwright configuration', () => {
     const ordinaryName = 'tests/a/b.spec.ts';
     expect(secretName.endsWith('.spec.ts')).toBe(false);
     expect(ordinaryName.endsWith('.secret.test.ts')).toBe(false);
-    expect(projects.map((project) => project.name)).toEqual(['chromium', 'chromium-secret']);
+    expect(projects.map((project) => project.name)).toEqual([
+      'chromium',
+      'chromium-secret',
+      'https-chromium',
+      'https-chromium-secret',
+      'https-firefox',
+      'https-firefox-secret',
+      'https-webkit',
+      'https-webkit-secret',
+      'https-chrome',
+      'https-msedge',
+    ]);
+  });
+
+  // Break caught (S0.23): the specs of the trusted HTTPS origin running in a project that records (a secret spec among them), or in
+  // the plain projects, which have no HTTPS origin to reach. Each engine has an ordinary project and a secret one; the secret one
+  // turns the recorders off; the plain projects ignore the specs of the HTTPS origin; and no HTTPS project matches a plain spec.
+  it('runs the specs of the HTTPS origin in projects of their own, the secret ones with the recorders off', () => {
+    for (const engine of ['chromium', 'firefox', 'webkit']) {
+      const ordinary = projects.find((project) => project.name === `https-${engine}`);
+      const secret = projects.find((project) => project.name === `https-${engine}-secret`);
+      expect(ordinary?.testMatch).toBe('**/https-*.spec.ts');
+      expect(secret?.testMatch).toBe('**/https-*.secret.test.ts');
+      expect(secret?.use).toMatchObject(NO_EVIDENCE);
+      expect(ordinary?.use).not.toHaveProperty('trace');
+    }
+    for (const name of ['chromium', 'chromium-secret']) {
+      expect(projects.find((project) => project.name === name)?.testIgnore).toBe('**/https-*');
+    }
   });
 
   // Break caught: the configuration leaving Playwright's page snapshot on, which writes the text of the page into error-context.md

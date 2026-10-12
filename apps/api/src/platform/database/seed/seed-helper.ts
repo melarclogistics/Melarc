@@ -2,8 +2,7 @@ import { sql } from 'drizzle-orm';
 
 import { serverErrorIn } from '../database-failures.js';
 import type { DatabaseService, DatabaseTransaction } from '../database.service.js';
-import { acquirePolicyLocks } from '../policy-lock/acquire.js';
-import { planPolicyLocks, type PolicyLockRequest } from '../policy-lock/plan.js';
+import { FIXED_POLICY_PRINCIPALS } from '../schema/reference-data.js';
 import type { SecurityContext } from '../transaction-context.js';
 
 /**
@@ -21,15 +20,42 @@ import type { SecurityContext } from '../transaction-context.js';
  *   seven are empty, so a second run changes nothing, a run that fails leaves nothing and can be run again, and two runs at once
  *   cannot both fill the tables. This file maps that refusal to `SeedRefusedError` and cannot weaken it.
  *
- * What stays here: the policy locks. The seed that inserts the first bundles and the first fixed policy rows follows the one protocol
- * (section 13.10a: "exclusive on each key it creates; one protocol has no special case"), so a sign-in that holds a key shared is
- * never interleaved with it; the locks come before the function is called. And a short insert is checked once more on this side
- * (`SeedIncompleteError`), though the function checks it first.
+ * What stays here: the policy locks, taken by the primitive of the bundle-change task and not by this file (S0.27, migration 0017).
+ * The seed that inserts the first bundles and the first fixed policy rows follows the one protocol (section 13.10a: "exclusive on each
+ * key it creates; one protocol has no special case"), so a sign-in that holds a key shared is never interleaved with it. It names the
+ * bundles and the fixed policies its rows depend on, and `melarc.lock_policy_keys` takes their exclusive locks in the one canonical
+ * order, as the first statement after the context and before the function is called: the same SQL that a migration which changes a
+ * bundle uses, so that exclusive acquisition has one implementation, held to the toolkit's keys by `policy-change.db.test.ts`. And a
+ * short insert is checked once more on this side (`SeedIncompleteError`), though the function checks it first.
  *
  * The capability is a label and not an identity (`capability-access.ts`). The context is opened only over the provisioning login (the
  * service refuses `seed` over any other connection), and only that login may execute the functions. This file is one of the few places
  * that may open the capability (`CAPABILITY_ACCESS.seed.openedUnder`); the architecture test enforces it.
  */
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A plan's keys as the two array literals `melarc.lock_policy_keys` takes. Each element is checked against its closed shape, so that
+ * nothing of a plan is ever more than a uuid or one of the two audiences inside a literal that travels as a parameter.
+ */
+function lockArguments(keys: SeedPolicyKeys): { bundles: string; fixed: string } | undefined {
+  for (const id of keys.bundleIds) {
+    if (typeof id !== 'string' || !UUID.test(id)) {
+      throw new RangeError('A seed plan names its bundles by their ids (UUIDs)');
+    }
+  }
+  for (const type of keys.fixedPolicies) {
+    if (!(FIXED_POLICY_PRINCIPALS as readonly string[]).includes(type)) {
+      throw new RangeError('A seed plan names the fixed policies of the Vendor and the Rider only');
+    }
+  }
+  if (keys.bundleIds.length === 0 && keys.fixedPolicies.length === 0) return undefined;
+  return {
+    bundles: `{${keys.bundleIds.map((id) => id.toLowerCase()).join(',')}}`,
+    fixed: `{${keys.fixedPolicies.join(',')}}`,
+  };
+}
 
 /** The technical identifier of the seed task as a `SYSTEM` principal: stable, and not the id of any business record. */
 export const SEED_PRINCIPAL_ID = '5eed0000-0000-4000-8000-000000000001';
@@ -42,9 +68,15 @@ export type SeedEntryPoint = 'initialize_reference_data' | 'add_reason_fixtures'
 /** The rows of a plan, by table: one array of objects whose keys are the table's column names. */
 export type SeedPayload = Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
 
+/** The policy objects a plan's rows depend on: the bundles it creates and the fixed policies of the audiences it seeds. */
+export interface SeedPolicyKeys {
+  readonly bundleIds: readonly string[];
+  readonly fixedPolicies: readonly (typeof FIXED_POLICY_PRINCIPALS)[number][];
+}
+
 export interface SeedPlan {
-  /** Every policy key the rows created depend on, each taken exclusively. */
-  readonly locks: readonly PolicyLockRequest[];
+  /** Every policy object the rows created depend on, each locked exclusively, in the canonical order, before anything is written. */
+  readonly policyKeys: SeedPolicyKeys;
   /** The function that applies the plan. */
   readonly entryPoint: SeedEntryPoint;
   /** The rows to insert, by table. */
@@ -149,14 +181,17 @@ export async function runSeed(
       );
     }
   }
-  const locks = planPolicyLocks(
-    plan.locks.map((lock) => ({ ...lock, mode: 'exclusive' as const })),
-  );
+  const locks = lockArguments(plan.policyKeys);
   const document = JSON.stringify(plan.payload);
 
   return database.transactionWithContext(seedContext(), async (tx) => {
-    // The locks first, so that nothing below reads a table a sign-in could still be relying on.
-    await acquirePolicyLocks(tx, locks);
+    // The locks first, so that nothing below reads a table a sign-in could still be relying on. One statement, in the canonical order,
+    // by the SQL that every writer of the policy tables uses; it refuses a transaction that is not at read committed.
+    if (locks !== undefined) {
+      await tx.execute(
+        sql`select melarc.lock_policy_keys(${locks.bundles}::uuid[], ${locks.fixed}::text[])`,
+      );
+    }
     const received = await apply(tx, plan.entryPoint, document).catch((error: unknown) => {
       throw refusalFrom(error) ?? error;
     });

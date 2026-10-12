@@ -1,10 +1,12 @@
 import { createRequire } from 'node:module';
 
+import { Controller, Get, Module } from '@nestjs/common';
 import type { Router as ExpressRouter } from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { AccessFixtureModule, FixtureModule } from '../../test-support/fixtures.js';
 import { appWith, startTestApp, type TestApp } from '../../test-support/test-app.js';
+import { RequiresPermission } from './access-declaration.js';
 import { assertRoutesAreSound, inspectRoutes } from './route-inventory.js';
 
 // The router class of the Express that the platform adapter runs on: the application does not depend on it directly.
@@ -168,5 +170,37 @@ describe('assertRoutesAreSound', () => {
     expect(() => {
       assertRoutesAreSound(app);
     }).toThrow(/declared but not served: GET \/readyz/);
+  });
+});
+
+describe('a route that names what the application does not have (S0.26; the review of 12 October 2026, F01)', () => {
+  @Controller('ghost')
+  class GhostController {
+    @Get(':id')
+    @RequiresPermission('staff.read', {
+      surfaces: ['OPS_PORTAL'],
+      activity: 'qualifying',
+      record: { entity: 'ghost_record', param: 'id' },
+      tier: { rule: 'ghost_rule' },
+    })
+    read(): string {
+      return 'x';
+    }
+  }
+  @Module({ controllers: [GhostController] })
+  class GhostModule {}
+
+  // Break caught: a record entity or a tier rule that does not exist accepted at start, so that the first request meets a lookup that
+  // cannot be made (and a tier that is never asked is a tier never enforced).
+  it('is incoherent, and stops the application at start, naming the entity and the rule', async () => {
+    const { app } = await start({ rootModule: appWith(GhostModule), allowUnsoundRoutes: true });
+
+    expect(inspectRoutes(app).incoherent.map(({ reason }) => reason)).toEqual([
+      expect.stringContaining('record entity ghost_record'),
+      expect.stringContaining('tier rule ghost_rule'),
+    ]);
+    expect(() => {
+      assertRoutesAreSound(app);
+    }).toThrow(/ghost_rule/);
   });
 });

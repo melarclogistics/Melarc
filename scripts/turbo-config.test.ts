@@ -97,3 +97,44 @@ describe('turbo.json', () => {
     assert.equal(task.cache, false, 'a browser run is never replayed from the cache');
   });
 });
+
+/**
+ * The local test profile (decision D of the owner, 12 October 2026). `pnpm test` runs the four package suites at once, and on the
+ * developer machine the Ops Portal suite has more than once failed to start its workers ("Timeout waiting for worker to respond");
+ * the cause is not established. `pnpm run test:local` is **bounded local scheduling**, not an explanation: the same tests, the same
+ * assertions and the same timeouts, with one package suite at a time. CI keeps the canonical command.
+ */
+describe('the local test profile', () => {
+  const rootScripts = (): Record<string, string> => {
+    const parsed = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    return parsed.scripts;
+  };
+
+  // Break caught: the profile drifting into a different test run: a filter that skips a package, a retry that hides a flaky test,
+  // `--continue` that reports past the first failure, a raised timeout, or a missing root half.
+  it('runs the root tests and then every package suite, one at a time, and nothing else', () => {
+    assert.equal(
+      rootScripts()['test:local'],
+      'pnpm run test:root && turbo run test --concurrency=1',
+    );
+  });
+
+  // Break caught: the canonical command changed to make the local one look like a copy of it. CI and `pnpm test` stay as they were.
+  it('leaves the canonical test command as it was', () => {
+    assert.equal(rootScripts().test, 'pnpm run test:root && turbo run test');
+  });
+
+  // Break caught: CI quietly adopting the local profile, so that the hosted run no longer tests what the canonical command tests.
+  it('is never run by the CI workflow', () => {
+    const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8');
+    assert.ok(!workflow.includes('test:local'), 'ci.yml must run the canonical command');
+  });
+
+  // Break caught: a package-level retry, which is how a flaky test is made to look green.
+  it('adds no retry, no continue-on-failure and no timeout', () => {
+    const command = rootScripts()['test:local'] ?? '';
+    assert.doesNotMatch(command, /--retry|--continue|--timeout|--bail=0|--no-bail/);
+  });
+});

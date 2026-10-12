@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=chromium --project=chromium-secret",
+    "test:e2e:https": "node harness/https-run.ts",
     "tls:generate": "node harness/test-ca-main.ts"
   },
   "devDependencies": {

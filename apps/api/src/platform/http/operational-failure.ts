@@ -10,8 +10,11 @@ import {
 } from '../database/connection-queue.js';
 import { CommitOutcomeUnknownError, DatabaseDeadlineError } from '../database/database-failures.js';
 import { PolicyCoordinationError } from '../database/policy-lock/coordinate.js';
+import { VendorOrganizationUnavailableError } from '../authorization/operation-contexts.js';
 import { BudgetExpiredError } from '../execution/execution-budget.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
+import { RecordScopeUnavailableError } from '../routes/authorization.guard.js';
+import { SettingInvalidError, SettingMissingError } from '../settings/settings-reader.js';
 
 /**
  * How the platform reads a failure that ended a request (S0.20; plan obligations OB-37, OB-55).
@@ -59,6 +62,16 @@ const OPERATIONAL: readonly (abstract new (...args: never[]) => Error)[] = [
   FixedPolicyUnavailableError,
   SessionSnapshotUnreadableError,
   AuthenticationUnavailableError,
+  // Decision B of the owner (12 October 2026): a setting the runtime requires and cannot read (`SettingMissingError`) or cannot use
+  // (`SettingInvalidError`) is the platform's failure, in the same fixed, code-less `503` as the rest. The two catalogue codes of
+  // the same names stay the business answers of the hub-settings paths of later slices; this is never one of them on the wire, and
+  // nothing of the setting (its key included) reaches the response. The message the error carries names the key and never a value.
+  SettingMissingError,
+  SettingInvalidError,
+  // S0.26. A route names a record and nothing is composed to look for it, or a Vendor session acts and nothing says which
+  // organisation its account belongs to: the application is composed without a part the request needs, and nothing was done.
+  RecordScopeUnavailableError,
+  VendorOrganizationUnavailableError,
 ];
 
 export function classifyFailure(error: unknown): FailureKind {

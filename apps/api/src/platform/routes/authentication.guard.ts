@@ -21,6 +21,7 @@ import {
 } from '../auth/sessions/session-authenticator.js';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
+import { credentialModesOf } from '../openapi/operation-statements.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
 import { currentRequestContext } from '../logging/request-context.js';
 import { accessKindOf } from './access-kind.js';
@@ -62,6 +63,13 @@ export class AuthenticationGuard implements CanActivate {
     const credential = presentedCredential(request.headers, request.rawHeaders);
     // Nothing to judge, or two credentials to choose between: refused without a statement, and with or without a store composed.
     if (credential.kind === 'NONE' || credential.kind === 'AMBIGUOUS') {
+      throw ApiException.of(ErrorCode.SessionInvalid, 'No usable session');
+    }
+    // The operation takes the credential modes it describes (S0.25): a Rider-only operation takes no browser cookie, whoever sent it,
+    // and a browser-only one takes no bearer credential. The mode is how the credential arrived, which is read from the request
+    // and not from anything the caller declares about itself, and the answer is the one a request with no usable session gets, so
+    // it tells nothing about the operation.
+    if (!credentialModesOf(context.getHandler()).has(credential.kind)) {
       throw ApiException.of(ErrorCode.SessionInvalid, 'No usable session');
     }
     if (this.authenticator === undefined) throw new AuthenticationUnavailableError();

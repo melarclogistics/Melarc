@@ -14,6 +14,7 @@ import {
   TransactionRolledBackError,
 } from '../database/database-failures.js';
 import { BudgetExpiredError } from '../execution/execution-budget.js';
+import { SettingInvalidError, SettingMissingError } from '../settings/settings-reader.js';
 import { AllExceptionsFilter } from './all-exceptions.filter.js';
 import { ApiException } from './api-exception.js';
 import { ErrorCode } from './error-codes.js';
@@ -151,6 +152,19 @@ describe('AllExceptionsFilter: the platform’s own resources (S0.20, OB-55)', (
     ['the pool is saturated', () => new PoolSaturatedError(64)],
     ['no connection became free', () => new AcquireTimeoutError(3_000)],
     ['the pool is closed', () => new PoolClosedError()],
+    // Decision B (12 October 2026): the runtime cannot read, or cannot use, a setting it requires. The caller is told nothing of which.
+    [
+      'a required setting has no approved value',
+      () => new SettingMissingError('session_idle_timeout_minutes'),
+    ],
+    [
+      'a required setting is not valid',
+      () =>
+        new SettingInvalidError(
+          'session_lifetime_minutes',
+          'the standard tier is not a whole number',
+        ),
+    ],
   ];
 
   // Break caught: an outage answered as a defect (500, paged) or as the caller's mistake, or the answer carrying a hint to retry
@@ -180,6 +194,28 @@ describe('AllExceptionsFilter: the platform’s own resources (S0.20, OB-55)', (
     expect(sent.status).toBe(503);
     expect(JSON.stringify(sent.body)).not.toContain('hunter2');
     expect(JSON.stringify(sent.body)).not.toContain('abc123');
+  });
+
+  // Break caught: the failure of a setting answered with a code of the catalogue, with the key that named it, or with a hint to retry.
+  // The catalogue's `SETTING_MISSING` and `SETTING_INVALID` are the business answers of the hub-settings paths of later slices; the
+  // runtime's own failure to read a setting is none of them (decision B, 12 October 2026).
+  it.each([
+    ['missing', () => new SettingMissingError('rate_limit_authenticated_api')],
+    [
+      'invalid',
+      () =>
+        new SettingInvalidError(
+          'rate_limit_authenticated_api',
+          'it is a string and an object was asked for',
+        ),
+    ],
+  ])('answers a %s setting with no code, no setting name and no Retry-After', (_kind, make) => {
+    const { sent, headers } = filtered(make());
+
+    expect(sent.status).toBe(503);
+    expect(Object.keys(sent.body ?? {}).toSorted()).toEqual(['message', 'request_id']);
+    expect(JSON.stringify(sent.body)).not.toMatch(/rate_limit|SETTING_|string|object/);
+    expect(headers['retry-after']).toBeUndefined();
   });
 
   // Break caught: a commit that may have happened answered "try again later". The owner's answer (11 October 2026): 500, no code,

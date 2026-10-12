@@ -120,6 +120,13 @@
       "when": 1791743357654,
       "tag": "0016_staff_identity_and_session",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791806657072,
+      "tag": "0017_bundle_change_primitive",
+      "breakpoints": true
     }
   ]
 }

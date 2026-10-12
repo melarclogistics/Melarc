@@ -1,4 +1,3 @@
-import { bundleLock, fixedLock } from '../../platform/database/policy-lock/plan.js';
 import type { SeedPlan } from '../../platform/database/seed/seed-helper.js';
 import { BUNDLES, FIXED_POLICIES, GRANTS } from './bundles.js';
 import { HUBS } from './hubs.js';
@@ -18,10 +17,10 @@ import { SETTINGS } from './settings.js';
 /** A new plan on each call: the arrays are copies, so nothing a caller does to one changes the next. */
 export function referenceSeedPlan(): SeedPlan {
   return {
-    locks: [
-      ...BUNDLES.map((bundle) => bundleLock(bundle.id, 'exclusive')),
-      ...FIXED_POLICIES.map((policy) => fixedLock(policy.principalType, 'exclusive')),
-    ],
+    policyKeys: {
+      bundleIds: BUNDLES.map((bundle) => bundle.id),
+      fixedPolicies: FIXED_POLICIES.map((policy) => policy.principalType),
+    },
     entryPoint: 'initialize_reference_data',
     payload: {
       hub: HUBS.map((each) => ({ id: each.id, name: each.name })),

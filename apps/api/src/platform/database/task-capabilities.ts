@@ -14,6 +14,10 @@ export const TASK_CAPABILITIES = [
   'seed',
   'credential_delivery',
   'bootstrap',
+  // The change of a bundle or of a fixed policy after the seed (S0.27; migration 0017). Only the database functions
+  // `melarc.change_role_bundle` and `melarc.change_fixed_policy` assert it, for their own statements, and only the migration login
+  // may execute them: no application context is opened under it.
+  'policy_change',
 ] as const;
 
 export type TaskCapability = (typeof TASK_CAPABILITIES)[number];

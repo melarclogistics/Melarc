@@ -37,12 +37,13 @@ import { DenyByDefaultGuard } from './deny-by-default.guard.js';
 import { GUARD_CHAIN } from './guard-chain.js';
 import { RateLimitGuard } from './rate-limit.guard.js';
 import { inspectRoutes } from './route-inventory.js';
+import { EVERY_SURFACE } from '../../test-support/route-options.js';
 
 /**
  * The guard chain over real HTTP (S0.22). The order is the refusal order of permission-enforcement.md §5.1, built once and
- * proved on fixture routes: **declaration, rate limit, authentication, CSRF and Origin, then (S0.26) authorization**. The
- * slots after the limiter exist and **fail closed** until their own tasks replace them (S0.24 authentication, S0.25 CSRF, S0.26
- * authorization), so a route that is declared but whose guard is not built is refused, never served.
+ * proved on fixture routes: **declaration, rate limit, authentication, CSRF and Origin, then (S0.26) authorization**. A slot
+ * whose task has not replaced it **fails closed** (authorization, until S0.26), so a route whose guard is not built is refused,
+ * never served.
  */
 
 const LIMIT_PER_MINUTE = 2;
@@ -142,21 +143,21 @@ class AccessController {
   }
 
   @Get('self')
-  @Self()
+  @Self(EVERY_SURFACE)
   self(): { label: string } {
     handled += 1;
     return { label: 'self' };
   }
 
   @Post('self')
-  @Self()
+  @Self(EVERY_SURFACE)
   selfWrite(): { label: string } {
     handled += 1;
     return { label: 'self' };
   }
 
   @Get('permission')
-  @RequiresPermission('staff.read')
+  @RequiresPermission('staff.read', EVERY_SURFACE)
   permission(): { label: string } {
     handled += 1;
     return { label: 'permission' };
@@ -221,12 +222,23 @@ interface Answer {
   readonly retryAfter: string | null;
 }
 
-async function call(app: TestApp, method: string, path: string, body?: unknown): Promise<Answer> {
+async function call(
+  app: TestApp,
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<Answer> {
   const response = await fetch(`${app.baseUrl}/api/v1/access/${path}`, {
     method,
     ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      ? Object.keys(headers).length === 0
+        ? {}
+        : { headers }
+      : {
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify(body),
+        }),
   });
   return {
     status: response.status,
@@ -289,10 +301,10 @@ describe('the four declarations, and what the chain does with each', () => {
     },
   );
 
-  // Break caught: the CSRF and Origin step missing, so that the first state-changing anonymous operation is open to a cross-site
-  // form. Until S0.25 builds it, the slot refuses every unsafe request that reaches it.
+  // Break caught: the CSRF and Origin step missing, so that a state-changing anonymous operation is open to a cross-site form. The
+  // slot is built (S0.25): an unsafe browser request with no Origin is refused, whatever the method.
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
-    'refuses an unsafe anonymous %s with 403 CSRF_VALIDATION_FAILED until the CSRF slot is built',
+    'refuses an unsafe anonymous %s that carries no Origin with 403 CSRF_VALIDATION_FAILED',
     async (method) => {
       const app = await start();
 
@@ -301,6 +313,20 @@ describe('the four declarations, and what the chain does with each', () => {
       expect(answer.status).toBe(403);
       expect(codeOf(answer)).toBe('CSRF_VALIDATION_FAILED');
       expect(handled).toBe(0);
+    },
+  );
+
+  // Break caught: the slot refusing every unsafe request, as it did while it was a stand-in, so that no pre-session operation could
+  // ever be served: the configured Origin is what lets it through, on every unsafe method.
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'serves an unsafe anonymous %s that carries the configured Ops origin',
+    async (method) => {
+      const app = await start();
+
+      const answer = await call(app, method, 'open', {}, { origin: TEST_CONFIG.origins.ops });
+
+      expect(answer.status).toBeLessThan(300);
+      expect(handled).toBe(1);
     },
   );
 
@@ -315,7 +341,7 @@ describe('the four declarations, and what the chain does with each', () => {
   });
 });
 
-describe('the authorization slot, reached directly (it fails closed until S0.26)', () => {
+describe('the authorization slot, reached directly', () => {
   const context = (declaration: string | undefined): ExecutionContext => {
     const controller = (): void => undefined;
     const handler = (): void => undefined;
@@ -324,19 +350,20 @@ describe('the authorization slot, reached directly (it fails closed until S0.26)
     return {
       getHandler: () => handler,
       getClass: () => controller,
+      switchToHttp: () => ({ getRequest: () => ({ method: 'GET', params: {} }) }),
     } as unknown as ExecutionContext;
   };
-  const guard = new AuthorizationGuard(new Reflector());
+  const guard = new AuthorizationGuard(new Reflector(), undefined, undefined);
 
-  // Break caught: a route that needs a principal served by the slot that is meant to refuse it. Authentication refuses first on a
-  // real request, so no request reaches this slot until a session can exist; the slot is held to its own rule here and again, with a
-  // session, in the sessions test.
+  // Break caught: a route that needs a principal served by the slot with no session held and no statement of what it serves.
+  // Authentication always holds the session it found and every such route states its surfaces, so this is a state that cannot
+  // happen, and it must never be a way through (deny by default).
   it.each(['self', 'permission'])(
-    'refuses a %s route with 403 PERMISSION_DENIED',
-    (declaration) => {
+    'refuses a %s route that is reached with no session held, with 403 PERMISSION_DENIED',
+    async (declaration) => {
       let refusal: unknown;
       try {
-        guard.canActivate(context(declaration));
+        await guard.canActivate(context(declaration));
       } catch (error) {
         refusal = error;
       }
@@ -347,9 +374,12 @@ describe('the authorization slot, reached directly (it fails closed until S0.26)
     },
   );
 
-  it.each(['anonymous', 'technical'])('has nothing to refuse on a %s route', (declaration) => {
-    expect(guard.canActivate(context(declaration))).toBe(true);
-  });
+  it.each(['anonymous', 'technical'])(
+    'has nothing to refuse on a %s route',
+    async (declaration) => {
+      expect(await guard.canActivate(context(declaration))).toBe(true);
+    },
+  );
 });
 
 describe('the rate limit comes first (AC-SLICE-000-130, step 1)', () => {

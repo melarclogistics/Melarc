@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   LEAF_EXTENSIONS,
+  OUTSIDE_EXTENSIONS,
+  OUTSIDE_NAME,
   TestCaRefusedError,
   mintTestCertificates,
   opensslRunner,
@@ -45,9 +47,14 @@ afterEach(() => {
 interface Call {
   readonly args: readonly string[];
   readonly cwd: string;
-  /** The extension file the leaf was signed with, as it was when `openssl` was called. */
+  /** The extension file a certificate was signed with, as it was when `openssl` was called. */
   readonly extensions?: string;
+  /** Whether the CA's key was still in the work directory when the call was made. */
+  readonly caKeyPresent: boolean;
 }
+
+/** What `openssl verify` does with the certificate for a name outside the loopback, in the fake. */
+type Outside = 'refused-by-constraints' | 'accepted' | 'refused-otherwise';
 
 /**
  * An `openssl` that writes a placeholder at every `-out` and records the call. `failOn` is the index of the call that fails.
@@ -59,15 +66,47 @@ interface Call {
 function fakeOpenssl(
   failOn?: number,
   during?: (index: number, cwd: string) => void,
+  behaviour: { readonly outside?: Outside; readonly refuseLeaf?: 'localhost' | '127.0.0.1' } = {},
 ): { run: OpensslRun; calls: Call[] } {
   const calls: Call[] = [];
   const run: OpensslRun = (args, cwd) => {
     const extension = args.includes('-extfile')
-      ? readFileSync(join(cwd, 'leaf.ext'), 'utf8')
+      ? readFileSync(join(cwd, args[args.indexOf('-extfile') + 1] ?? 'leaf.ext'), 'utf8')
       : undefined;
-    calls.push({ args, cwd, ...(extension === undefined ? {} : { extensions: extension }) });
+    calls.push({
+      args,
+      cwd,
+      caKeyPresent: existsSync(join(cwd, 'ca-key.pem')),
+      ...(extension === undefined ? {} : { extensions: extension }),
+    });
     during?.(calls.length - 1, cwd);
     if (failOn === calls.length - 1) throw new Error('openssl failed');
+    if (args[0] === 'verify') {
+      const certificate = args.at(-1) ?? '';
+      if (certificate.endsWith('outside.pem')) {
+        const outside = behaviour.outside ?? 'refused-by-constraints';
+        if (outside === 'refused-by-constraints') {
+          throw new Error(
+            'openssl "verify" failed (exit 2): CN = example.com | error 47 at 0 depth lookup: permitted subtree violation | error outside.pem: verification failed',
+          );
+        }
+        if (outside === 'refused-otherwise') {
+          throw new Error(
+            'openssl "verify" failed (exit 2): error 20 at 0 depth lookup: unable to get local issuer certificate',
+          );
+        }
+        return;
+      }
+      const names = args.filter(
+        (_, at, all) => all[at - 1] === '-verify_hostname' || all[at - 1] === '-verify_ip',
+      );
+      if (behaviour.refuseLeaf !== undefined && names.includes(behaviour.refuseLeaf)) {
+        throw new Error(
+          'openssl "verify" failed (exit 2): error 62 at 0 depth lookup: hostname mismatch',
+        );
+      }
+      return;
+    }
     const out = args[args.indexOf('-out') + 1];
     if (out !== undefined)
       writeFileSync(resolve(cwd, out), args[0] === 'genpkey' ? KEY : 'PLACEHOLDER-CERT');
@@ -191,6 +230,12 @@ describe('what it asks openssl to make', () => {
       'genpkey -algorithm',
       'req -new',
       'x509 -req',
+      // The proofs, with the CA key still in the work directory (below).
+      'verify -CAfile',
+      'verify -CAfile',
+      'req -new',
+      'x509 -req',
+      'verify -CAfile',
     ]);
     const [caKey, caCertificate, leafKey, leafRequest, leafSigning] = calls;
     expect(caKey?.args).toEqual(expect.arrayContaining(['EC', 'ec_paramgen_curve:P-256']));
@@ -232,8 +277,9 @@ describe('what it asks openssl to make', () => {
       calls.flatMap((call) =>
         call.args.includes('-days') ? [call.args[call.args.indexOf('-days') + 1] ?? ''] : [],
       );
-    expect(daysOf(seven.calls)).toEqual(['7', '7']);
-    expect(daysOf(three.calls)).toEqual(['3', '3']);
+    // The CA, the leaf, and the leaf for another name that the CA must refuse: none of them outlives the days asked for.
+    expect(daysOf(seven.calls)).toEqual(['7', '7', '7']);
+    expect(daysOf(three.calls)).toEqual(['3', '3', '3']);
   });
 
   it('signs the leaf with the CA certificate and the CA key, and writes where the policy looks', () => {
@@ -258,6 +304,112 @@ describe('what it asks openssl to make', () => {
     const serial = signing[signing.indexOf('-CAserial') + 1] ?? '';
     expect(serial).toMatch(/^[^\\/]+\.srl$/);
   });
+});
+
+describe('the proof that the name constraints bind (S0.23; openssl verify)', () => {
+  const mint = (fake: ReturnType<typeof fakeOpenssl>) =>
+    mintTestCertificates({
+      directory: target(),
+      checkoutRoot: checkout,
+      run: fake.run,
+      verify: accepted,
+    });
+
+  // Break caught: the constraints present in the certificate and never shown to refuse anything, which is all that the policy of
+  // tls-material.ts can read. A verifier that enforces them is asked, while the CA's key can still sign the outside leaf.
+  it('verifies the leaf for both its names, then fails a leaf for another name signed by the same CA, before the CA key is deleted', () => {
+    const fake = fakeOpenssl();
+
+    mint(fake);
+
+    const verifications = fake.calls.filter((call) => call.args[0] === 'verify');
+    expect(verifications).toHaveLength(3);
+    const [hostname, address, outside] = verifications;
+    expect(hostname?.args).toEqual(
+      expect.arrayContaining([
+        '-CAfile',
+        join('..', TLS_FILES.ca),
+        '-verify_hostname',
+        'localhost',
+      ]),
+    );
+    expect(hostname?.args.at(-1)).toBe(join('..', TLS_FILES.leaf));
+    expect(address?.args).toEqual(expect.arrayContaining(['-verify_ip', '127.0.0.1']));
+    expect(address?.args.at(-1)).toBe(join('..', TLS_FILES.leaf));
+    expect(outside?.args.at(-1)).toBe('outside.pem');
+    expect(outside?.args).not.toContain('-verify_hostname');
+    // The CA's key was there for the second leaf and for every verification, and is gone when the run ends.
+    expect(
+      fake.calls.filter((call) => call.args[0] !== 'genpkey').every((call) => call.caKeyPresent),
+    ).toBe(true);
+    expect(readdirSync(target()).toSorted()).toEqual(
+      [TLS_FILES.ca, TLS_FILES.leaf, TLS_FILES.leafKey].toSorted(),
+    );
+  });
+
+  // Break caught: a second leaf that differs in more than its name (another CA, another key, other extensions), which would make its
+  // refusal prove nothing about the constraints.
+  it('signs the outside leaf with the same CA, the same key and the same extensions but for the name', () => {
+    const fake = fakeOpenssl();
+
+    mint(fake);
+
+    const signings = fake.calls.filter((call) => call.args[0] === 'x509');
+    const [real, outside] = signings;
+    const after = (call: Call | undefined, flag: string): string | undefined =>
+      call?.args[call.args.indexOf(flag) + 1];
+    expect(after(outside, '-CA')).toBe(after(real, '-CA'));
+    expect(after(outside, '-CAkey')).toBe('ca-key.pem');
+    expect(after(outside, '-CAserial')).toBe(after(real, '-CAserial'));
+    expect(outside?.extensions).toBe(OUTSIDE_EXTENSIONS);
+    expect(OUTSIDE_EXTENSIONS).toContain(`subjectAltName = DNS:${OUTSIDE_NAME}`);
+    expect(OUTSIDE_EXTENSIONS).not.toContain('localhost');
+    expect(OUTSIDE_EXTENSIONS.replace(`DNS:${OUTSIDE_NAME}`, '')).toBe(
+      LEAF_EXTENSIONS.replace('DNS:localhost, IP:127.0.0.1', ''),
+    );
+    const requests = fake.calls.filter(
+      (call) =>
+        call.args[0] === 'req' && call.args.includes('-key') && !call.args.includes('-x509'),
+    );
+    expect(requests[1]?.args).toEqual(
+      expect.arrayContaining([
+        '-key',
+        join('..', TLS_FILES.leafKey),
+        '-subj',
+        `/CN=${OUTSIDE_NAME}`,
+      ]),
+    );
+  });
+
+  // Break caught: a CA that accepts an outside name handed over because it was made, when its constraints do nothing.
+  it('refuses a CA that verifies a certificate for another name, says so, and removes everything', () => {
+    expect(() => mint(fakeOpenssl(undefined, undefined, { outside: 'accepted' }))).toThrow(
+      /verified a certificate for example\.com: its name constraints do not hold/,
+    );
+
+    expect(existsSync(target())).toBe(false);
+  });
+
+  // Break caught: the outside leaf refused for a reason that is not the constraints (a malformed request, a missing issuer), which
+  // would count as the proof and prove nothing.
+  it('refuses a result in which the outside leaf was refused for any other reason than a permitted subtree violation', () => {
+    expect(() => mint(fakeOpenssl(undefined, undefined, { outside: 'refused-otherwise' }))).toThrow(
+      /not by the name constraints \(no permitted subtree violation\)/,
+    );
+
+    expect(existsSync(target())).toBe(false);
+  });
+
+  it.each(['localhost', '127.0.0.1'] as const)(
+    'refuses a leaf that does not verify for %s',
+    (name) => {
+      expect(() => mint(fakeOpenssl(undefined, undefined, { refuseLeaf: name }))).toThrow(
+        new RegExp(`does not verify against the CA for ${name.replaceAll('.', '\\.')}`),
+      );
+
+      expect(existsSync(target())).toBe(false);
+    },
+  );
 });
 
 describe('what is left', () => {
@@ -300,7 +452,7 @@ describe('what is left', () => {
 
 describe('a failure', () => {
   // Break caught: a failed run leaving half a CA behind: a key with no certificate, or a certificate with no way to tell.
-  it.each([0, 1, 2, 3, 4])(
+  it.each([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])(
     'at openssl call %i leaves nothing, the CA key included, and reports it',
     (failing) => {
       const { run } = fakeOpenssl(failing);

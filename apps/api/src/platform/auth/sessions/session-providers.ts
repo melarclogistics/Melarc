@@ -1,9 +1,10 @@
 import type { FactoryProvider } from '@nestjs/common';
+import type { Logger } from 'pino';
 
 import type { AppConfig } from '../../config/load-config.js';
 import { DatabaseService } from '../../database/database.service.js';
 import { PolicyCoordinator } from '../../database/policy-lock/coordinate.js';
-import { APP_CONFIG } from '../../platform.tokens.js';
+import { APP_CONFIG, LOGGER } from '../../platform.tokens.js';
 import { SettingsReader } from '../../settings/settings-reader.js';
 import { AUDIT_WRITER, type AuditWriter } from '../ports/audit-writer.port.js';
 import { CLOCK, type Clock } from '../ports/clock.port.js';
@@ -11,12 +12,22 @@ import { IDENTITY_DIRECTORY, type IdentityDirectory } from '../ports/identity-di
 import { SESSION_STORE, type SessionStore } from '../ports/session-store.port.js';
 import { TOKEN_SERVICE, type TokenService } from '../ports/token-service.port.js';
 import { UNIT_OF_WORK, type UnitOfWork } from '../ports/unit-of-work.port.js';
+import { ReadinessRegistry } from '../../health/readiness.registry.js';
+import { ActivityRecorder } from './activity-recorder.js';
+import { PolicyReadiness } from './policy-readiness.js';
+import type { CompiledFixedPolicy } from './session-authority.js';
 import { SESSION_AUTHENTICATOR, SessionAuthenticator } from './session-authenticator.js';
 import { SessionIssuer } from './session-issuer.js';
 
 /** The injection tokens of the coordinator of policy-locked operations and of the session-issue protocol. */
 export const POLICY_COORDINATOR = Symbol('POLICY_COORDINATOR');
 export const SESSION_ISSUER = Symbol('SESSION_ISSUER');
+/** The injection token of the fixed-policy revisions this build was compiled with (`CompiledFixedPolicy`). */
+export const COMPILED_FIXED_POLICY = Symbol('COMPILED_FIXED_POLICY');
+/** The injection token of the writer of session activity (`activity-recorder.ts`). */
+export const ACTIVITY_RECORDER = Symbol('ACTIVITY_RECORDER');
+/** The readiness check of the fixed policy (`policy-readiness.ts`), registered with the readiness registry when it is built. */
+export const POLICY_READINESS = Symbol('POLICY_READINESS');
 
 const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
@@ -31,8 +42,9 @@ const optional = (token: symbol | typeof DatabaseService) => ({ token, optional:
  * with no authenticator is `503`, and an operation with no issuer cannot sign anyone in. Nothing here falls back to a stand-in.
  * The describe composition binds inert adapters to every port, so the services exist there and are never invoked.
  *
- * The compiled fixed-policy revision of this build is declared by the tasks that build the Vendor and Rider sign-ins (S0.48,
- * S0.63); until then no revision is declared and no session of either audience can be issued.
+ * The compiled fixed-policy revision of this build (`COMPILED_FIXED_POLICY`) is declared by the tasks that build the Vendor and
+ * Rider sign-ins (S0.48, S0.63) through the composition root's `compiledFixedPolicy` option; until then none is declared, no
+ * session of either audience can be issued, and an instance that is shown one serves nothing of the audience (`503`).
  */
 export const sessionProviders: readonly FactoryProvider[] = [
   {
@@ -51,21 +63,62 @@ export const sessionProviders: readonly FactoryProvider[] = [
     inject: [optional(DatabaseService), optional(CLOCK), APP_CONFIG],
   },
   {
+    provide: ACTIVITY_RECORDER,
+    useFactory: (
+      unitOfWork: UnitOfWork | undefined,
+      sessions: SessionStore | undefined,
+      logger: Logger,
+    ): ActivityRecorder | undefined =>
+      unitOfWork === undefined || sessions === undefined
+        ? undefined
+        : new ActivityRecorder({ unitOfWork, sessions, logger }),
+    inject: [optional(UNIT_OF_WORK), optional(SESSION_STORE), LOGGER],
+  },
+  {
+    // Registered with the probe where there is something to compare: a database to read the floor from, and a revision this build
+    // declares for some audience. Created when the application is, so the probe reports `policy_superseded` from its first answer.
+    provide: POLICY_READINESS,
+    useFactory: (
+      registry: ReadinessRegistry,
+      unitOfWork: UnitOfWork | undefined,
+      compiled: CompiledFixedPolicy,
+    ): PolicyReadiness | undefined => {
+      if (unitOfWork === undefined || Object.keys(compiled).length === 0) return undefined;
+      const check = new PolicyReadiness({ unitOfWork, compiled });
+      registry.register(check);
+      return check;
+    },
+    inject: [ReadinessRegistry, optional(UNIT_OF_WORK), COMPILED_FIXED_POLICY],
+  },
+  {
     provide: SESSION_AUTHENTICATOR,
     useFactory: (
       unitOfWork: UnitOfWork | undefined,
       sessions: SessionStore | undefined,
       tokens: TokenService | undefined,
+      audit: AuditWriter | undefined,
+      compiledPolicy: CompiledFixedPolicy,
     ): SessionAuthenticator | undefined =>
-      unitOfWork === undefined || sessions === undefined || tokens === undefined
+      unitOfWork === undefined ||
+      sessions === undefined ||
+      tokens === undefined ||
+      audit === undefined
         ? undefined
         : new SessionAuthenticator({
             unitOfWork,
             sessions,
             tokens,
+            audit,
+            compiledPolicy,
             settings: new SettingsReader(),
           }),
-    inject: [optional(UNIT_OF_WORK), optional(SESSION_STORE), optional(TOKEN_SERVICE)],
+    inject: [
+      optional(UNIT_OF_WORK),
+      optional(SESSION_STORE),
+      optional(TOKEN_SERVICE),
+      optional(AUDIT_WRITER),
+      COMPILED_FIXED_POLICY,
+    ],
   },
   {
     provide: SESSION_ISSUER,
@@ -76,6 +129,7 @@ export const sessionProviders: readonly FactoryProvider[] = [
       sessions: SessionStore | undefined,
       tokens: TokenService | undefined,
       audit: AuditWriter | undefined,
+      compiledPolicy: CompiledFixedPolicy,
     ): SessionIssuer | undefined =>
       coordinator === undefined ||
       unitOfWork === undefined ||
@@ -91,6 +145,7 @@ export const sessionProviders: readonly FactoryProvider[] = [
             sessions,
             tokens,
             audit,
+            compiledPolicy,
             settings: new SettingsReader(),
           }),
     inject: [
@@ -100,6 +155,7 @@ export const sessionProviders: readonly FactoryProvider[] = [
       optional(SESSION_STORE),
       optional(TOKEN_SERVICE),
       optional(AUDIT_WRITER),
+      COMPILED_FIXED_POLICY,
     ],
   },
 ];

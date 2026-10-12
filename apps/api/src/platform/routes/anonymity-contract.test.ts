@@ -18,6 +18,10 @@ interface Op {
   readonly permission: Json | undefined;
   readonly hasOwnSecurity: boolean;
   readonly security: Json | undefined;
+  /** The `x-error-codes` the operation declares. */
+  readonly errorCodes: readonly string[];
+  /** Whether the operation names hosts of its own (the dedicated Rider host). */
+  readonly hasServers: boolean;
 }
 
 function operations(): Op[] {
@@ -34,6 +38,10 @@ function operations(): Op[] {
         permission: operation['x-permission'],
         hasOwnSecurity: 'security' in operation,
         security: operation.security,
+        errorCodes: Array.isArray(operation['x-error-codes'])
+          ? operation['x-error-codes'].filter((code): code is string => typeof code === 'string')
+          : [],
+        hasServers: Array.isArray(operation.servers),
       });
     }
   }
@@ -103,5 +111,64 @@ describe('anonymity is declared, never inferred (AC-SLICE-000-43)', () => {
         ).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * The client of every anonymous operation (S0.25; SECURITY_DESIGN.md §13.8 "Client policy"; the readiness audit's C-10): the
+ * contract classifies each pre-authentication operation by the client it serves, by declaring `CSRF_VALIDATION_FAILED` for the
+ * browser operations (their `Origin` is refused when missing, `null` or unlisted) and by not declaring it for the native ones. The
+ * application states the same fact in `Anonymous(limit, client)`; the task that builds each operation passes the client this
+ * partition gives it, and the conformance check holds the two together. The partition is pinned here by name, so a new operation
+ * (or a changed declaration) is a deliberate edit of this list and not a silent drift.
+ */
+describe('which anonymous operations are browser pre-session mutations (S0.25)', () => {
+  const anonymous = operations().filter((op) => op.permission === 'none');
+  const browser = anonymous.filter((op) => op.errorCodes.includes('CSRF_VALIDATION_FAILED'));
+  const notBrowser = anonymous.filter((op) => !op.errorCodes.includes('CSRF_VALIDATION_FAILED'));
+
+  // Break caught: a browser pre-session mutation dropped from the Origin rule (or a native one added to it) without anyone deciding.
+  it('holds exactly the sign-in, setup, recovery and enrolment operations of the browser surfaces to the Origin rule', () => {
+    expect(browser.map((op) => op.id).toSorted()).toEqual([
+      'beginMfaReenrolment',
+      'completeAdditionalDeviceEnrolment',
+      'completeCredentialRecovery',
+      'completeMfaEnrolment',
+      'completeStaffCredentialSetup',
+      'completeStaffMfaSignIn',
+      'completeVendorCredentialSetup',
+      'requestCredentialRecovery',
+      'staffSignIn',
+      'vendorSignIn',
+    ]);
+  });
+
+  // Break caught: a native Rider operation made subject to the browser rule, which would refuse the app for lacking an Origin it
+  // does not send; or a browser operation declared native.
+  it('leaves the Rider app’s operations, and the provider’s callback, out of it', () => {
+    expect(notBrowser.map((op) => op.id).toSorted()).toEqual([
+      'completeRiderDeviceEnrolment',
+      'receiveHubtelPaymentCallback',
+      'requestRiderSignInChallenge',
+      'riderSignIn',
+    ]);
+  });
+
+  it('names the dedicated Rider host for every Rider operation and for no browser one', () => {
+    const rider = anonymous.filter((op) => op.hasServers);
+
+    expect(rider.map((op) => op.id).toSorted()).toEqual([
+      'completeRiderDeviceEnrolment',
+      'requestRiderSignInChallenge',
+      'riderSignIn',
+    ]);
+    for (const op of browser) expect(op.hasServers, op.id).toBe(false);
+  });
+
+  // Break caught: the browser rule resting on the operation being anonymous alone. No authenticated operation is a pre-session
+  // mutation, and none of them declares the origin refusal as its own: an authenticated unsafe operation declares it for the
+  // synchronizer token and the session's Origin, which is the cookie rule, not this one.
+  it('is a list of anonymous operations only', () => {
+    expect(browser.every((op) => op.permission === 'none')).toBe(true);
   });
 });

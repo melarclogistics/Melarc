@@ -116,6 +116,37 @@ const DYNAMIC_SQL = /\bexecute\b/i;
 /** A dollar-quoted body, which is code and not part of the function's attributes. */
 const DOLLAR_BODY = /(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?\1/g;
 
+/**
+ * The three policy tables (SECURITY_DESIGN.md section 13.10a). After the seed, a bundle, its grants and a fixed policy change only
+ * through `melarc.change_role_bundle` and `melarc.change_fixed_policy` (migration 0017, S0.27): the functions that take the exclusive
+ * lock, raise the revision and, for a reduction, the floor, and end the sessions below it in the same transaction. Under forced
+ * row-level security a plain `UPDATE` by the migration login changes no row at all, so a migration that tried would not fail: it
+ * would silently do nothing. The lint turns that into a message. A statement that writes one of the tables directly, at the top
+ * level of a migration or inside a `DO` block, needs a recorded reason (`-- allow-policy-dml: <reason>`): a backfill of a new
+ * column that is not authorization content, for instance. The bodies of functions are not read: a definer function is its own review.
+ */
+const POLICY_TABLE = String.raw`(?:public\s*\.\s*)?"?(?:role_bundle|role_bundle_grant|fixed_permission_policy)"?(?![A-Za-z0-9_$"])`;
+const POLICY_DML = new RegExp(
+  String.raw`^(?:insert\s+into|update(?:\s+only)?|delete\s+from(?:\s+only)?|merge\s+into|truncate(?:\s+table)?(?:\s+only)?)\s+${POLICY_TABLE}`,
+  'i',
+);
+const POLICY_DML_IN_BLOCK = new RegExp(
+  String.raw`\b(?:insert\s+into|update(?:\s+only)?|delete\s+from(?:\s+only)?|merge\s+into)\s+${POLICY_TABLE}`,
+  'i',
+);
+const DO_BLOCK = /^do\b/i;
+const WITH_STATEMENT = /^with\b/i;
+const POLICY_DML_REASON = /allow-policy-dml:[ \t]*\S/i;
+
+function writesPolicyTable(statement: string): boolean {
+  if (POLICY_DML.test(statement)) return true;
+  // A `WITH ... INSERT` or a `DO` block carries the statement inside; a function definition is not read (see above).
+  return (
+    (DO_BLOCK.test(statement) || WITH_STATEMENT.test(statement)) &&
+    POLICY_DML_IN_BLOCK.test(statement)
+  );
+}
+
 const GRANT_TO_PUBLIC = /^grant\b[\s\S]*\bto\s+(?:[^;]*,\s*)?public\b/i;
 const DEFAULT_PRIVILEGES = /^alter\s+default\s+privileges\b/i;
 const STORED_CONTEXT_SETTING = /^alter\s+(?:database|role|user)\b[\s\S]*\bset\s+["']?melarc\./i;
@@ -269,6 +300,15 @@ export function lintMigrationSql(sql: string): string[] {
     if (removes !== undefined && !DELETE_REASON.test(comments)) {
       problems.push(
         `${removes} has no recorded reason: add a comment "-- allow-delete: <reason>" on the statement`,
+      );
+    }
+
+    if (
+      writesPolicyTable(statement.replaceAll(/'(?:[^']|'')*'/g, "''")) &&
+      !POLICY_DML_REASON.test(comments)
+    ) {
+      problems.push(
+        'statement writes a policy table directly: change a bundle with melarc.change_role_bundle and a fixed policy with melarc.change_fixed_policy (SECURITY_DESIGN.md section 13.10a), which raise the revision and the floor and end the sessions in the same transaction; a plain statement changes no row under row-level security. A backfill that is not authorization content records "-- allow-policy-dml: <reason>"',
       );
     }
 

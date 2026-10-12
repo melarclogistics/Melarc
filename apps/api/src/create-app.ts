@@ -11,6 +11,7 @@ import { CLOCK, type Clock } from './platform/auth/ports/clock.port.js';
 import type { AppConfig } from './platform/config/load-config.js';
 import { DISPOSAL_BOUND_MS } from './platform/execution/execution-parameters.js';
 import { AllExceptionsFilter } from './platform/http/all-exceptions.filter.js';
+import { createCors } from './platform/http/cors.js';
 import { AdmissionGate } from './platform/http/admission/admission-gate.js';
 import { bodyErrors } from './platform/http/admission/body-errors.js';
 import { createRequestBudget } from './platform/http/admission/request-budget.js';
@@ -142,6 +143,10 @@ export async function createApp(options: CreateAppOptions): Promise<NestExpressA
       isExempt: isProbe,
     }),
   );
+  // Credentialed CORS with the exact origins of the two surfaces, and the answer to a preflight (S0.25). After admission, so that a
+  // preflight meets the gate and the head limits, and before the parser and the guards: a preflight carries no body and no
+  // credentials, and is answered here and routed nowhere.
+  app.use(createCors([options.config.origins.ops, options.config.origins.vendor]));
   // The parser inflates nothing (a compressed body is refused above, and the size limit counts the bytes received), and it is
   // given the same limit as the counter above: the counter answers first and promptly, the parser is the second line.
   app.useBodyParser('json', { ...JSON_BODY_OPTIONS, limit: http.bodyLimitBytes, inflate: false });

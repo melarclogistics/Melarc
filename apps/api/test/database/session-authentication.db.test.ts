@@ -9,7 +9,6 @@ import {
 } from '../../src/platform/auth/sessions/session-authenticator.js';
 import { contextOfSession } from '../../src/platform/auth/sessions/session-context.js';
 import type { PresentedCredential } from '../../src/platform/auth/sessions/session-credentials.js';
-import { ACTIVITY_COALESCE_MS } from '../../src/platform/auth/sessions/session-parameters.js';
 import { transactionOf } from '../../src/platform/database/transaction-handle.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { openAdmin, type Admin } from './support/admin.js';
@@ -29,8 +28,9 @@ import type pg from 'pg';
 
 /**
  * S0.24, authentication against a real PostgreSQL, as the API's login: the session a credential names is found by the hash of its
- * token and judged on one fresh database time, a refused request records nothing, an accepted one records its activity coalesced,
- * and the context built from the session carries the session's id into the transaction a use case opens (obligation OB-54).
+ * token and judged on one fresh database time, a refused request records nothing, an accepted one records nothing either (activity
+ * is recorded after the request by the route's own policy, S0.26: `activity.db.test.ts`), and the context built from the session
+ * carries the session's id into the transaction a use case opens (obligation OB-54).
  *
  * A session cannot be aged by updating it (its issue time, expiry and activity are guarded), so a session that is old is a row
  * inserted with old times, which is what an old session is.
@@ -65,6 +65,10 @@ beforeAll(async () => {
     sessions: machinery.sessions,
     tokens: machinery.tokens,
     settings: machinery.settings,
+    audit: machinery.audit,
+    // The revision of the compiled Vendor and Rider rules this instance declares: a Rider session is served only by an instance that
+    // can say which rules it runs (S0.26; the seed records revision 1).
+    compiledPolicy: { VENDOR: 1, RIDER: 1 },
   });
 });
 
@@ -137,7 +141,7 @@ describe('a credential is judged before the database is asked', () => {
 
 describe('a live session', () => {
   // Break caught: a session issued by the protocol not being accepted from the cookie it was issued for.
-  it('is accepted from the cookie it was issued for, and records its activity', async () => {
+  it('is accepted from the cookie it was issued for, at the instant the database judged it', async () => {
     const persona = await staffPersona(machinery, admin);
 
     const outcome = await authenticate(cookie(persona.issued.token));
@@ -150,20 +154,20 @@ describe('a live session', () => {
     expect(Math.abs(outcome.authenticated.judgedAt.getTime() - Date.now())).toBeLessThan(5_000);
   });
 
-  // Break caught: a write per request. Within the coalescing window of the issue nothing is written; once the recorded activity is
-  // old enough the next accepted request records the database's time.
-  it('records activity once the recorded one is old enough, and not before', async () => {
+  // Break caught (S0.26, decision A): authentication writing activity itself, so that every accepted request, a background poll and
+  // an action alike, extended the idle lifetime. Authentication reads and judges; the recording is the route policy's and the
+  // outcome's (`activity.db.test.ts`), so a session of any age is accepted here and left exactly as it was.
+  it('does not record activity, whatever the age of the recorded one', async () => {
     const recent = await arranged({ lastActivityAt: minutesAgo(0.2), issuedAt: minutesAgo(5) });
     const older = await arranged({ lastActivityAt: minutesAgo(2), issuedAt: minutesAgo(5) });
     const recentBefore = await lastActivity(recent.row.id);
+    const olderBefore = await lastActivity(older.row.id);
 
-    await authenticate(cookie(recent.token));
-    await authenticate(cookie(older.token));
+    expect((await authenticate(cookie(recent.token))).kind).toBe('AUTHENTICATED');
+    expect((await authenticate(cookie(older.token))).kind).toBe('AUTHENTICATED');
 
-    expect(ACTIVITY_COALESCE_MS).toBe(30_000);
     expect(await lastActivity(recent.row.id)).toEqual(recentBefore);
-    const after = await lastActivity(older.row.id);
-    expect(Math.abs((after?.getTime() ?? 0) - Date.now())).toBeLessThan(5_000);
+    expect(await lastActivity(older.row.id)).toEqual(olderBefore);
   });
 
   // Break caught (OB-54): a context built from the authenticated session that does not carry its id into the transaction. The

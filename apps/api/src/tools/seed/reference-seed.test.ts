@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { bundleLock, fixedLock } from '../../platform/database/policy-lock/plan.js';
 import { BUNDLES, FIXED_POLICIES, GRANTS } from './bundles.js';
 import { HUBS } from './hubs.js';
 import { PERMISSION_KEYS } from './permission-keys.js';
@@ -104,16 +103,16 @@ describe('the reference seed plan', () => {
     }
   });
 
-  // Break caught: a bundle the seed creates without taking its key (a sign-in reading it half-written), or a key taken shared.
-  it('takes every bundle key and both fixed-policy keys, exclusively, and no other', () => {
-    const expected = [
-      ...BUNDLES.map((bundle) => bundleLock(bundle.id, 'exclusive')),
-      ...FIXED_POLICIES.map((policy) => fixedLock(policy.principalType, 'exclusive')),
-    ];
-    expect(plan.locks.toSorted((a, b) => a.class - b.class || a.key - b.key)).toEqual(
-      expected.toSorted((a, b) => a.class - b.class || a.key - b.key),
+  // Break caught: a bundle the seed creates without naming it for its lock (a sign-in reading it half-written), or a policy object it
+  // does not create locked. The helper takes the exclusive lock of every object named, in the canonical order; this is the list.
+  it('names every bundle it creates and both fixed policies for their locks, and no other', () => {
+    expect(plan.policyKeys.bundleIds.toSorted()).toEqual(
+      BUNDLES.map((bundle) => bundle.id).toSorted(),
     );
-    expect(plan.locks.every((lock) => lock.mode === 'exclusive')).toBe(true);
+    expect(plan.policyKeys.fixedPolicies.toSorted()).toEqual(
+      FIXED_POLICIES.map((policy) => policy.principalType).toSorted(),
+    );
+    expect(new Set(plan.policyKeys.bundleIds).size).toBe(plan.policyKeys.bundleIds.length);
   });
 
   // Break caught: a grant that names a bundle or a permission the seed does not create (the foreign key refuses it at the seed, on

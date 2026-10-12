@@ -748,6 +748,79 @@ describe('lintMigrationSql: nothing but the principal CASE (or the scope probe p
   });
 });
 
+describe('lintMigrationSql: the policy tables change only through the primitive (S0.27)', () => {
+  // Break caught: a migration that updates a bundle with a plain statement. Under forced row-level security that changes no row and
+  // raises no error, so the revision, the floor and the sessions stay as they were while the migration reports success.
+  it.each([
+    ['an UPDATE', 'UPDATE role_bundle SET revision = revision + 1;'],
+    ['an UPDATE of a quoted, qualified table', `UPDATE public."role_bundle_grant" SET tier = 'P';`],
+    ['an UPDATE ONLY', 'UPDATE ONLY fixed_permission_policy SET revision = 2;'],
+    ['an INSERT', `INSERT INTO fixed_permission_policy (principal_type) VALUES ('VENDOR');`],
+    ['a DELETE', 'DELETE FROM public.role_bundle_grant WHERE true;'],
+    ['a TRUNCATE', 'TRUNCATE role_bundle_grant;'],
+    [
+      'a MERGE',
+      'MERGE INTO role_bundle USING (SELECT 1) AS s ON false WHEN NOT MATCHED THEN DO NOTHING;',
+    ],
+    ['an UPDATE in a DO block', `DO $$ BEGIN UPDATE role_bundle SET name = 'x'; END $$;`],
+    ['an UPDATE after a WITH', `WITH g AS (SELECT 1) UPDATE role_bundle SET name = 'y';`],
+  ])('refuses %s of a policy table, and names the primitive', (_label, statement) => {
+    const problems = lintMigrationSql(statement);
+    expect(problems.some((problem) => problem.includes('melarc.change_role_bundle'))).toBe(true);
+    expect(problems.some((problem) => problem.includes('melarc.change_fixed_policy'))).toBe(true);
+  });
+
+  it('accepts the call of the primitive, which is a SELECT', () => {
+    expect(
+      lintMigrationSql(
+        `SELECT melarc.change_role_bundle('5eed0001-0000-4000-8000-000000000001', NULL, '[]'::jsonb, 'release-1');`,
+      ),
+    ).toEqual([]);
+    expect(
+      lintMigrationSql(`SELECT melarc.change_fixed_policy('VENDOR', true, 'release-1');`),
+    ).toEqual([]);
+  });
+
+  // Break caught: the rule matching names that merely begin like a policy table, a statement on another table, a mention in a string or
+  // a comment, or the body of a function (a definer function is its own review).
+  it.each([
+    ['a table whose name begins like one', 'UPDATE role_bundle_grant_archive SET tier = null;'],
+    ['a table whose name ends like one', 'UPDATE old_role_bundle SET revision = 2;'],
+    ['another table', 'UPDATE staff_identity SET full_name = full_name;'],
+    ['a string that names one', `SELECT 'UPDATE role_bundle SET revision = 2';`],
+    ['a comment that names one', '-- UPDATE role_bundle SET revision = 2;\nSELECT 1;'],
+    [
+      'the body of a function',
+      `CREATE FUNCTION melarc.f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE role_bundle SET name = name; END $$;`,
+    ],
+    [
+      'an ON CONFLICT DO UPDATE of another table',
+      'INSERT INTO hub (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET id = 1;',
+    ],
+  ])('does not refuse %s', (_label, statement) => {
+    expect(
+      lintMigrationSql(statement).filter((problem) => problem.includes('policy table')),
+    ).toEqual([]);
+  });
+
+  // Break caught: the reason accepted when empty, or not on the statement it excuses.
+  it('accepts the statement with a reason on it, and not with an empty one or one on another statement', () => {
+    expect(
+      lintMigrationSql(
+        '-- allow-policy-dml: backfills display_order, which is not authorization content\nUPDATE role_bundle SET revision = revision;',
+      ),
+    ).toEqual([]);
+    expect(
+      lintMigrationSql('-- allow-policy-dml:\nUPDATE role_bundle SET revision = revision;'),
+    ).toHaveLength(1);
+    expect(
+      lintMigrationSql(
+        '-- allow-policy-dml: first\nUPDATE role_bundle SET a = 1;\n--> statement-breakpoint\nUPDATE role_bundle SET b = 2;',
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe('the committed migrations', () => {
   const folder = fileURLToPath(new URL('../../../migrations', import.meta.url));
   const files = readdirSync(folder).filter((name) => name.endsWith('.sql'));

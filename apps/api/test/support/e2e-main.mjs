@@ -10,6 +10,14 @@
 //   GET  /api/v1/e2e/notes/:id   reads it back
 //   POST /api/v1/e2e/outbound    tries to reach an external provider, to show the sandbox refuses it
 //
+// and, for the specs of the trusted HTTPS origin (S0.23), three technical routes that need no session and carry no secret:
+//
+//   POST /api/v1/e2e/cookies/issue   sets the two session cookies of the identity slice, with the product's own cookie writer and
+//                                    random values that protect nothing (a real sign-in is not built)
+//   POST /api/v1/e2e/cookies/expire  expires them, as a sign-out does
+//   GET and POST /api/v1/e2e/echo    says what the browser sent that the CSRF guard judges: the Origin, the Fetch Metadata headers,
+//                                    the names (never the values) of the cookies, and whether the CSRF header equals the CSRF cookie
+//
 // The notes routes use a pool of this file's own, connected as the same runtime identity from the same
 // configuration. The API's database service offers no driver handle and no transaction without a security context
 // (S0.4c), so the harness does not reach into it; the table has no row-level security and is retired with the
@@ -19,6 +27,8 @@
 import 'reflect-metadata';
 
 import process from 'node:process';
+
+import { randomBytes } from 'node:crypto';
 
 import {
   BadRequestException,
@@ -30,9 +40,15 @@ import {
   NotFoundException,
   Param,
   Post,
+  Req,
+  Res,
 } from '@nestjs/common';
 
 import { AppModule } from '../../dist/app.module.js';
+import {
+  expireBrowserSessionCookies,
+  issueBrowserSessionCookies,
+} from '../../dist/platform/auth/cookies/cookie-writer.js';
 import { createApp } from '../../dist/create-app.js';
 import { loadConfig } from '../../dist/platform/config/load-config.js';
 import { reportConfigProblems } from '../../dist/platform/config/report-config-problems.js';
@@ -87,6 +103,52 @@ class E2eController {
     return present(result.rows[0]);
   }
 
+  /** The product's own writer sets the cookies, with random values: the browser's handling of the attributes is what is under test. */
+  issueCookies(response) {
+    issueBrowserSessionCookies(response, {
+      session: randomBytes(32).toString('base64url'),
+      csrf: randomBytes(32).toString('base64url'),
+    });
+    return { issued: true };
+  }
+
+  expireCookies(response) {
+    expireBrowserSessionCookies(response);
+    return { expired: true };
+  }
+
+  /** What the browser sent, as facts a spec can compare. No cookie value is returned: names, and one boolean about two of them. */
+  echo(request) {
+    const header = request.headers.cookie ?? '';
+    const cookies = new Map(
+      header
+        .split(';')
+        .map((each) => each.trim())
+        .filter((each) => each !== '')
+        .map((each) => {
+          const at = each.indexOf('=');
+          return at === -1 ? [each, ''] : [each.slice(0, at), each.slice(at + 1)];
+        }),
+    );
+    const sent = request.headers['x-csrf-token'];
+    return {
+      method: request.method,
+      origin: request.headers.origin ?? null,
+      secFetchSite: request.headers['sec-fetch-site'] ?? null,
+      secFetchMode: request.headers['sec-fetch-mode'] ?? null,
+      secFetchDest: request.headers['sec-fetch-dest'] ?? null,
+      cookieNames: [...cookies.keys()].toSorted(),
+      csrfHeaderPresent: typeof sent === 'string' && sent !== '',
+      csrfHeaderMatchesCookie:
+        typeof sent === 'string' && sent !== '' && cookies.get('melarc_csrf') === sent,
+    };
+  }
+
+  /** The same answer to a POST: a route is declared for one method, because the route inventory refuses a handler for every method. */
+  echoPost(request) {
+    return this.echo(request);
+  }
+
   async outbound() {
     try {
       await globalThis.fetch('https://payments.provider.example/v1/charges', {
@@ -113,6 +175,18 @@ function route(name, decorators, parameters = []) {
 route('create', [Post('notes'), HttpCode(201), TechnicalEndpoint()], [Body()]);
 route('read', [Get('notes/:id'), TechnicalEndpoint()], [Param('id')]);
 route('outbound', [Post('outbound'), HttpCode(200), TechnicalEndpoint()]);
+route(
+  'issueCookies',
+  [Post('cookies/issue'), HttpCode(200), TechnicalEndpoint()],
+  [Res({ passthrough: true })],
+);
+route(
+  'expireCookies',
+  [Post('cookies/expire'), HttpCode(200), TechnicalEndpoint()],
+  [Res({ passthrough: true })],
+);
+route('echo', [Get('echo'), TechnicalEndpoint()], [Req()]);
+route('echoPost', [Post('echo'), HttpCode(200), TechnicalEndpoint()], [Req()]);
 
 const loaded = loadConfig(process.env);
 if (!loaded.ok) {

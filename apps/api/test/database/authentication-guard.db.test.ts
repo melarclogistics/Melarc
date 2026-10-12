@@ -26,12 +26,14 @@ import { assemble, staffPersona, type Machinery } from './support/personas.js';
 import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
 import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
+import { EVERY_SURFACE } from '../../src/test-support/route-options.js';
 
 /**
  * S0.24 over real HTTP and the real stack: the authentication guard as the application ships it, on a database. A session the
- * issue protocol issued is accepted from its cookie, and what follows is the next slot of the chain refusing (CSRF for an unsafe
- * method, authorization for the rest), because neither is built yet and neither serves a route that needs a principal; a request
- * with no usable session is `401`, and all of them answer the same; the authenticated bucket counts the session it found.
+ * issue protocol issued is accepted from its cookie, and what follows is the rest of the chain (CSRF for an unsafe method, then
+ * authorization), so a route the session may use is served and one it holds no permission for is refused; a request with no usable
+ * session is `401`, and all of them answer the same; the authenticated bucket counts the session it found. The refusals of the
+ * later slots and their order are `csrf-guard.db.test.ts`, `authorization.db.test.ts` and `refusal-order.db.test.ts`.
  */
 let database: TestDatabase;
 let built: BuiltService;
@@ -44,21 +46,21 @@ let handled = 0;
 @Controller('guarded')
 class GuardedController {
   @Get('self')
-  @Self()
+  @Self(EVERY_SURFACE)
   self(): { handled: boolean } {
     handled += 1;
     return { handled: true };
   }
 
   @Post('self')
-  @Self()
+  @Self(EVERY_SURFACE)
   selfWrite(): { handled: boolean } {
     handled += 1;
     return { handled: true };
   }
 
   @Get('permission')
-  @RequiresPermission('staff.read')
+  @RequiresPermission('staff.read', EVERY_SURFACE)
   permission(): { handled: boolean } {
     handled += 1;
     return { handled: true };
@@ -93,7 +95,14 @@ beforeAll(async () => {
   app = await startTestApp({
     config: loaded.config,
     rootModule: (options) => {
-      Module({ imports: [AppModule.register(options), GuardedModule] })(Root);
+      // The instance declares the revision of the compiled Vendor and Rider rules it runs, as a release that serves them does
+      // (S0.26): without it a Vendor or Rider session is answered 503, which `authority.db.test.ts` holds.
+      Module({
+        imports: [
+          AppModule.register({ ...options, compiledFixedPolicy: { VENDOR: 1, RIDER: 1 } }),
+          GuardedModule,
+        ],
+      })(Root);
       return Root;
     },
     allowUnsoundRoutes: true,
@@ -266,29 +275,35 @@ describe('two credentials in one request', () => {
     handled = 0;
 
     const one = await send([`Bearer ${token}`]);
+    const servedOnce = handled;
     const two = await send([`Bearer ${token}`, `Bearer ${token}`]);
 
-    // One credential authenticates, and the next slot (authorization, not built) refuses; two are refused at authentication.
-    expect(one.status).toBe(403);
-    expect(one.json).toMatchObject({ code: 'PERMISSION_DENIED' });
+    // One credential authenticates and the route (a Self route every surface serves) answers; two are refused at authentication,
+    // and the handler is not reached for them.
+    expect(one.status).toBe(200);
+    expect(servedOnce).toBe(1);
     expect(two.status).toBe(401);
     expect(two.json).toMatchObject({ code: 'SESSION_INVALID' });
-    expect(handled).toBe(0);
+    expect(handled).toBe(servedOnce);
   });
 });
 
 describe('a live session', () => {
-  // Break caught: an authenticated session served by a slot that is not built. Authentication passes, and the next slot refuses
-  // (authorization: PERMISSION_DENIED; for an unsafe method CSRF comes first), and the handler is never reached.
-  it('passes authentication and is refused by the slot after it, and the handler is not reached', async () => {
+  // Break caught: an authenticated session refused by the slot after authentication that it should pass, or served by one that
+  // should refuse it. Authentication passes; a Self route is served; a permission the session's bundle does not hold is refused
+  // (an Ops Staff fixture with no grants), and the handler is not reached for it; an unsafe method without the synchronizer token
+  // is refused by CSRF before authorization is asked.
+  it('passes authentication, and the slots after it serve what the session may do and refuse the rest', async () => {
     const persona = await staffPersona(machinery, admin);
 
     const read = await call('GET', 'self', { cookie: persona.cookie });
+    const served = handled;
     const permission = await call('GET', 'permission', { cookie: persona.cookie });
     const write = await call('POST', 'self', { cookie: persona.cookie });
 
-    expect(read.status).toBe(403);
-    expect(read.body).toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(read.status).toBe(200);
+    expect(served).toBe(1);
+    expect(permission.status).toBe(403);
     expect(permission.body).toMatchObject({ code: 'PERMISSION_DENIED' });
     expect(write.status).toBe(403);
     expect(write.body).toMatchObject({ code: 'CSRF_VALIDATION_FAILED' });
@@ -325,7 +340,7 @@ describe('a live session', () => {
     );
 
     for (let index = 0; index < limit; index += 1) {
-      expect((await call('GET', 'self', { cookie: persona.cookie })).status).toBe(403);
+      expect((await call('GET', 'self', { cookie: persona.cookie })).status).toBe(200);
     }
     const spent = await call('GET', 'self', { cookie: persona.cookie });
 

@@ -14,8 +14,8 @@ import { RateLimitGuard } from './rate-limit.guard.js';
  * the maker-checker step, which follow the guards, are the interceptor's and the use case's.
  *
  * Nest runs global guards in the order they are registered, so this list is the order, and `guard-chain.test.ts` pins both the list
- * and the registration. Each slot after the limiter exists and fails closed until the task that owns it replaces its body
- * (S0.24, S0.25, S0.26): the chain's shape does not change when they land.
+ * and the registration. A slot whose task has not replaced its body fails closed (authorization, until S0.26): the chain's shape
+ * does not change when the tasks land (S0.24 authentication, S0.25 CSRF and Origin, S0.26 authorization).
  */
 export const GUARD_CHAIN: readonly Type<unknown>[] = [
   DenyByDefaultGuard,

@@ -190,6 +190,29 @@ export function DescribeServers(servers: readonly DescribedServer[]): MethodDeco
   return state((current) => ({ ...current, servers }));
 }
 
+/** How a request presents its session credential: the cookie of a browser session, or the bearer credential of a Rider's. */
+export type CredentialMode = 'COOKIE' | 'BEARER';
+
+/**
+ * The credential modes an operation accepts, read from the **same statement** the description makes of it (S0.25): an alternative
+ * that names `browserSession` takes the cookie and one that names `riderSession` takes the bearer credential, and an operation
+ * that states nothing inherits the default posture, which takes both. One source for the description and the guard means a route
+ * cannot be described as Rider-only and still accept a browser cookie, and the conformance check that compares the description
+ * with the contract compares this too.
+ *
+ * It is not the question "is this a browser operation": a request is never judged native by a header it sends (a `User-Agent`, a
+ * client-type string). The mode is how the credential arrived, which authentication has already decided from the request itself.
+ */
+export function credentialModesOf(handler: object): ReadonlySet<CredentialMode> {
+  const statements = Reflect.getMetadata(STATEMENTS_KEY, handler) as Statements | undefined;
+  const modes = new Set<CredentialMode>();
+  for (const alternative of statements?.security ?? DEFAULT_SECURITY) {
+    if (alternative.includes('browserSession')) modes.add('COOKIE');
+    if (alternative.includes('riderSession')) modes.add('BEARER');
+  }
+  return modes;
+}
+
 function requirementOf(alternative: readonly SchemeName[]): Record<string, string[]> {
   return Object.fromEntries(alternative.map((scheme) => [scheme, [] as string[]]));
 }

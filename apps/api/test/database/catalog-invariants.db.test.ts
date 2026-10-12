@@ -166,8 +166,10 @@ describe('the catalogue invariants', () => {
       ],
       [
         'a technical role that does not exist',
-        // The role holds the delivery job's grants and a membership (S0.17, S0.18): they go with it, as they would in a catalogue that lost it.
-        `drop owned by ${WORKER_CREDENTIAL_DELIVERY_ROLE}; drop role ${WORKER_CREDENTIAL_DELIVERY_ROLE};`,
+        // A role by that name that does not exist, in a transaction that is rolled back. It is renamed and not dropped: `drop role` is
+        // refused while any other database on the server holds a privilege granted to the role, which a leftover test database of a
+        // run that was killed does (the gate of 12 October 2026 met it), and that has nothing to do with what is checked here.
+        `alter role ${WORKER_CREDENTIAL_DELIVERY_ROLE} rename to melarc_absent_probe_role;`,
         /role melarc_worker_cap_credential_delivery does not exist/,
       ],
       // Privileges reachable by switching role (review of S0.4 and S0.5): a membership granted WITH INHERIT FALSE, SET TRUE gives

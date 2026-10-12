@@ -69,7 +69,10 @@ export function main(
     for (const note of result.notes) io.out(`  note: ${note}`);
     io.out('');
     io.out(
-      'The CA key was deleted as soon as the leaf was signed. Nothing was trusted by this command:',
+      'Before the CA key was deleted, openssl verify showed that the CA refuses a certificate for another name (example.com: a permitted subtree violation) and accepts the leaf for localhost and 127.0.0.1.',
+    );
+    io.out(
+      'The CA key was deleted as soon as the leaf was signed and those proofs were made. Nothing was trusted by this command:',
     );
     io.out(
       'how each browser is made to trust the CA, in a disposable profile, is recorded per engine (e2e/README.md).',

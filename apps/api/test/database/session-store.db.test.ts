@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type {
@@ -7,9 +8,9 @@ import type {
   NewSession,
   StoredSession,
 } from '../../src/platform/auth/ports/session-store.port.js';
-import { ACTIVITY_COALESCE_MS } from '../../src/platform/auth/sessions/session-parameters.js';
 import { PostgresSessionStore } from '../../src/platform/auth/sessions/postgres.session-store.adapter.js';
 import { SessionSnapshotUnreadableError } from '../../src/platform/auth/sessions/session-errors.js';
+import { INERT_DEADLINES } from '../../src/platform/config/inert-config.js';
 import { PostgresUnitOfWork } from '../../src/platform/database/postgres.unit-of-work.adapter.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { ManualClock } from '../../src/test-support/manual-clock.js';
@@ -19,7 +20,7 @@ import { observe, type Observer } from './support/observe.js';
 import { HUB_A, HUB_B, systemContext } from './support/rls-fixture.js';
 import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
-import { createTestDatabase, type TestDatabase } from './support/test-database.js';
+import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
 
 /**
  * S0.24, the session store (`SessionStore` over PostgreSQL) against a real PostgreSQL, as `melarc_api_runtime` under the
@@ -85,8 +86,10 @@ const create = (session: NewSession): Promise<StoredSession> =>
   unitOfWork.run(systemContext('authentication'), (handle) => store.create(handle, session));
 const find = (hash: Uint8Array): Promise<StoredSession | null> =>
   unitOfWork.run(systemContext('authentication'), (handle) => store.findByTokenHash(handle, hash));
-const activity = (id: string, at: Date): Promise<void> =>
-  unitOfWork.run(systemContext('authentication'), (handle) => store.recordActivity(handle, id, at));
+const activity = (id: string, idleMinutes: number | null = 30): Promise<boolean> =>
+  unitOfWork.run(systemContext('authentication'), (handle) =>
+    store.recordActivity(handle, id, idleMinutes),
+  );
 const terminate = (
   selector: Parameters<PostgresSessionStore['terminate']>[1],
   reason: Parameters<PostgresSessionStore['terminate']>[2] = 'ADMIN_REVOKED',
@@ -267,47 +270,298 @@ describe('findByTokenHash', () => {
 });
 
 describe('recordActivity', () => {
+  /**
+   * Lets `minutes` pass for a session, by changing the data (the database's clock is the one that judges): its issue, its recorded
+   * activity and its absolute end all move back together. The table's guard trigger forbids this to the application, and rightly,
+   * so it is switched off for the one statement, as the kit does for the other tables whose guards forbid ageing.
+   */
+  const age = async (id: string, minutes: number) => {
+    await admin.query('alter table session disable trigger session_guard');
+    try {
+      await admin.query(
+        `update session set issued_at = issued_at - make_interval(mins => $2),
+                            last_activity_at = last_activity_at - make_interval(mins => $2),
+                            expires_at = expires_at - make_interval(mins => $2) where id = $1`,
+        [id, minutes],
+      );
+    } finally {
+      await admin.query('alter table session enable trigger session_guard');
+    }
+  };
+  /** A session issued a moment ago, with eight hours to run: live on every count until it is aged. */
+  const live = async (): Promise<StoredSession> => {
+    const issuedAt = new Date(Date.now() - 1_000);
+    return create(
+      newSession({ issuedAt, expiresAt: new Date(issuedAt.getTime() + 8 * 3_600_000) }),
+    );
+  };
+
   // Break caught: a write per request, which a burst of requests would turn into a burst of updates on one row.
   it('writes once for a burst, and again once the recorded activity is old enough', async () => {
-    const issuedAt = new Date(Date.now() - 10 * 60_000);
-    const stored = await create(
-      newSession({ issuedAt, expiresAt: new Date(issuedAt.getTime() + 3_600_000) }),
-    );
-    const start = stored.lastActivityAt.getTime();
+    const stored = await live();
+    await age(stored.id, 10);
+    const aged = (await rowOf(stored.id))?.last_activity_at.getTime() ?? 0;
 
-    await activity(stored.id, new Date(start + 5_000));
-    await activity(stored.id, new Date(start + ACTIVITY_COALESCE_MS - 1));
-    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(start);
+    expect(await activity(stored.id)).toBe(true);
+    const first = (await rowOf(stored.id))?.last_activity_at.getTime() ?? 0;
+    expect(first).toBeGreaterThan(aged + 9 * 60_000);
 
-    await activity(stored.id, new Date(start + ACTIVITY_COALESCE_MS));
-    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(start + ACTIVITY_COALESCE_MS);
-    await activity(stored.id, new Date(start + ACTIVITY_COALESCE_MS + 1_000));
-    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(start + ACTIVITY_COALESCE_MS);
+    // The burst: covered by the write above, nothing more is written.
+    expect(await activity(stored.id)).toBe(false);
+    expect(await activity(stored.id)).toBe(false);
+    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(first);
+
+    // Once the recorded one is older than the coalescing window, it is written again.
+    await age(stored.id, 1);
+    expect(await activity(stored.id)).toBe(true);
+    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBeGreaterThan(first - 1_000);
   });
 
-  // Break caught: activity moving back (a clock step, a late request) and making an idle session look idler or fresher.
-  it('never moves the recorded activity back', async () => {
-    const stored = await create(newSession());
-    await activity(stored.id, new Date(stored.lastActivityAt.getTime() + 2 * ACTIVITY_COALESCE_MS));
-    const recorded = (await rowOf(stored.id))?.last_activity_at.getTime();
+  // Break caught: the activity written on a clock other than the database's (the caller's, a request's), which can run ahead or
+  // behind and has no say in whether the session is still live.
+  it('is stamped by the database’s own clock, within the span of the statement', async () => {
+    const stored = await live();
+    await age(stored.id, 5);
+    const before = Date.now();
 
-    await activity(stored.id, new Date(stored.lastActivityAt.getTime()));
+    await activity(stored.id);
 
-    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(recorded);
+    const at = (await rowOf(stored.id))?.last_activity_at.getTime() ?? 0;
+    expect(at).toBeGreaterThanOrEqual(before - 2_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 2_000);
   });
 
   // Break caught: activity recorded on a session that has ended, which would revive what a guard trigger holds ended.
   it('records nothing on an ended session, and raises nothing', async () => {
-    const stored = await create(newSession());
+    const stored = await live();
+    await age(stored.id, 10);
     await terminate({ by: 'session', sessionId: stored.id }, 'SIGNED_OUT');
     const before = (await rowOf(stored.id))?.last_activity_at.getTime();
 
-    await activity(
-      stored.id,
-      new Date(stored.lastActivityAt.getTime() + 10 * ACTIVITY_COALESCE_MS),
-    );
+    expect(await activity(stored.id)).toBe(false);
 
     expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(before);
+  });
+
+  // Break caught: a session past its absolute end given a fresh activity, which a later check could take for a live one.
+  it('records nothing on a session past its absolute end, whatever its activity says', async () => {
+    const stored = await create(
+      newSession({
+        issuedAt: new Date(Date.now() - 600 * 60_000),
+        expiresAt: new Date(Date.now() - 60_000),
+      }),
+    );
+    // Its recorded activity is recent enough to be inside the idle limit and old enough to be outside the coalescing window, so that
+    // the absolute end is the only thing that can refuse the write (a session idle for hours would be refused by the idle rule).
+    await admin.query('alter table session disable trigger session_guard');
+    await admin.query(
+      `update session set last_activity_at = clock_timestamp() - interval '2 minutes' where id = $1`,
+      [stored.id],
+    );
+    await admin.query('alter table session enable trigger session_guard');
+    const before = (await rowOf(stored.id))?.last_activity_at.getTime();
+
+    expect(await activity(stored.id, 30)).toBe(false);
+    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(before);
+    // The same recorded activity on a session that is still inside its absolute end is written: the end was what refused it.
+    const alive = await create(
+      newSession({
+        issuedAt: new Date(Date.now() - 600 * 60_000),
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    );
+    await admin.query('alter table session disable trigger session_guard');
+    await admin.query(
+      `update session set last_activity_at = clock_timestamp() - interval '2 minutes' where id = $1`,
+      [alive.id],
+    );
+    await admin.query('alter table session enable trigger session_guard');
+    expect(await activity(alive.id, 30)).toBe(true);
+  });
+
+  // Break caught: an idle session revived by the very request that finds it idle: its activity extended instead of left to end it.
+  it('records nothing on a browser session that is already idle, and writes for a rider that has no idle rule', async () => {
+    const idle = await live();
+    await age(idle.id, 31);
+    const idleBefore = (await rowOf(idle.id))?.last_activity_at.getTime();
+
+    expect(await activity(idle.id, 30)).toBe(false);
+    expect((await rowOf(idle.id))?.last_activity_at.getTime()).toBe(idleBefore);
+
+    // One tick inside the limit is live, and is written.
+    const inside = await live();
+    await admin.query('alter table session disable trigger session_guard');
+    await admin.query(
+      `update session set issued_at = clock_timestamp() - interval '40 minutes',
+                          last_activity_at = clock_timestamp() - make_interval(mins => 30) + interval '5 seconds' where id = $1`,
+      [inside.id],
+    );
+    await admin.query('alter table session enable trigger session_guard');
+    expect(await activity(inside.id, 30)).toBe(true);
+
+    const rider = await create(
+      newSession({
+        principalType: 'RIDER',
+        registeredDeviceId: randomUUID(),
+        authority: { ...newSession().authority, policyRevision: 1 },
+        issuedAt: new Date(Date.now() - 120 * 60_000),
+        expiresAt: new Date(Date.now() + 3_600_000),
+      }),
+    );
+    await age(rider.id, 31);
+    expect(await activity(rider.id, null)).toBe(true);
+  });
+
+  /**
+   * A lock that changes nothing, held while the database's clock crosses a boundary (the review of 12 October 2026, V01; plan
+   * `OB-131`). PostgreSQL re-checks a waiting UPDATE's qualification only against a row that the other transaction *changed*; a holder
+   * that only locked the row (`SELECT ... FOR UPDATE`) leaves the qualification as it was evaluated before the wait, and the clock
+   * it read then. So the existing tests, whose holder changes the row, do not say what happens when only real time passes. Here the
+   * holder changes nothing; the boundary is two seconds away and is crossed while the write waits, by polling the database's own
+   * clock with a short step and a bound, never by a long sleep and never by changing a guarded column.
+   */
+  describe('a lock that changes nothing, held while the clock crosses a boundary', () => {
+    // These writes wait for two seconds on purpose, which is the default lock time of a request (`DATABASE_LOCK_TIMEOUT_MS`): a write
+    // that waits longer than that is ended by the database and the recorder logs it, which is right in production and is not what
+    // is being asked here. So this describe has a service of its own, whose lock and statement times are longer than the wait.
+    let patient: BuiltService;
+    let patientUnitOfWork: PostgresUnitOfWork;
+    beforeAll(() => {
+      patient = buildService(database, {
+        poolMax: 2,
+        deadlines: { ...INERT_DEADLINES, lockTimeoutMs: 15_000, statementTimeoutMs: 30_000 },
+      });
+      patientUnitOfWork = new PostgresUnitOfWork(patient.service);
+    });
+    afterAll(async () => {
+      await patient.close();
+    });
+    const activityHere = (id: string, idleMinutes: number | null): Promise<boolean> =>
+      patientUnitOfWork.run(systemContext('authentication'), (handle) =>
+        store.recordActivity(handle, id, idleMinutes),
+      );
+
+    /** Locks the row of a session from a connection of its own and changes nothing. */
+    async function lockOnly(id: string): Promise<pg.Client> {
+      const client = clientFor(database.urlFor('postgres'));
+      client.on('error', () => undefined);
+      await client.connect();
+      await client.query('begin');
+      await client.query('select 1 from session where id = $1 for update', [id]);
+      return client;
+    }
+
+    /** Waits, by asking the server, until a statement on the session table is blocked on a lock. */
+    async function untilWaiting(): Promise<void> {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const waiting = await observer.rows(
+          `select 1 from pg_stat_activity
+            where wait_event_type = 'Lock' and datname = current_database() and query ~* 'from session where id|update session'`,
+        );
+        if (waiting.length > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error('the write never waited on the row lock');
+    }
+
+    /** Waits, by asking the database's clock, until it has passed `boundary`; bounded. */
+    async function untilClockPasses(boundary: Date): Promise<void> {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const now = await observer.one<{ past: boolean }>(
+          `select clock_timestamp() > $1::timestamptz as past`,
+          [boundary],
+        );
+        if (now?.past === true) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error('the database clock did not pass the boundary in time');
+    }
+
+    // Break caught: the idle limit judged before the wait on the row and not after it, so that a write which waited past the limit
+    // gives the session a fresh activity and keeps alive what the limit had ended.
+    it('does not extend a session that goes idle while the write waits for it', async () => {
+      const issuedAt = new Date(Date.now() - (30 * 60_000 - 2_000));
+      const stored = await create(
+        newSession({ issuedAt, expiresAt: new Date(issuedAt.getTime() + 8 * 3_600_000) }),
+      );
+      const before = (await rowOf(stored.id))?.last_activity_at.getTime();
+      const holder = await lockOnly(stored.id);
+      try {
+        const pending = activityHere(stored.id, 30);
+        await untilWaiting();
+        await untilClockPasses(new Date(issuedAt.getTime() + 30 * 60_000));
+        await holder.query('rollback');
+
+        expect(await pending).toBe(false);
+      } finally {
+        await holder.end();
+      }
+      expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(before);
+    });
+
+    // Break caught: the absolute end judged before the wait and not after it, so that a write which waited past it is recorded on a
+    // session whose end has come.
+    it('records nothing on a session whose absolute end comes while the write waits for it', async () => {
+      const issuedAt = new Date(Date.now() - 2 * 3_600_000);
+      const expiresAt = new Date(Date.now() + 2_000);
+      const stored = await create(newSession({ issuedAt, expiresAt }));
+      const before = (await rowOf(stored.id))?.last_activity_at.getTime();
+      const holder = await lockOnly(stored.id);
+      try {
+        // No idle limit, so the absolute end is the only thing that can refuse the write.
+        const pending = activityHere(stored.id, null);
+        await untilWaiting();
+        await untilClockPasses(expiresAt);
+        await holder.query('rollback');
+
+        expect(await pending).toBe(false);
+      } finally {
+        await holder.end();
+      }
+      expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(before);
+    });
+
+    // Control: the same write, with the same lock released before either boundary, is made. A test that cannot show this proves
+    // nothing about the two above, because it would be refused whatever the order.
+    it('writes when the lock is released before the boundary', async () => {
+      const issuedAt = new Date(Date.now() - (30 * 60_000 - 20_000));
+      const stored = await create(
+        newSession({ issuedAt, expiresAt: new Date(issuedAt.getTime() + 8 * 3_600_000) }),
+      );
+      const before = (await rowOf(stored.id))?.last_activity_at.getTime() ?? 0;
+      const holder = await lockOnly(stored.id);
+      try {
+        const pending = activityHere(stored.id, 30);
+        await untilWaiting();
+        await holder.query('rollback');
+
+        expect(await pending).toBe(true);
+      } finally {
+        await holder.end();
+      }
+      expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBeGreaterThan(before);
+    });
+  });
+
+  // Break caught: activity moving back (a clock step, a late request) and making an idle session look idler or fresher. A recorded
+  // activity a little ahead of the database's clock (the table tolerates a few minutes) is left alone, not pulled back to now.
+  it('never moves the recorded activity back', async () => {
+    const stored = await live();
+    await admin.query(
+      `update session set last_activity_at = clock_timestamp() + interval '2 minutes' where id = $1`,
+      [stored.id],
+    );
+    const ahead = (await rowOf(stored.id))?.last_activity_at.getTime();
+
+    expect(await activity(stored.id)).toBe(false);
+
+    expect((await rowOf(stored.id))?.last_activity_at.getTime()).toBe(ahead);
+  });
+
+  it('refuses an id that is not a session id and an idle limit that is not whole minutes', async () => {
+    await expect(activity('not-a-uuid')).rejects.toBeInstanceOf(TypeError);
+    await expect(activity(randomUUID(), 0)).rejects.toBeInstanceOf(RangeError);
+    await expect(activity(randomUUID(), 1.5)).rejects.toBeInstanceOf(RangeError);
   });
 });
 

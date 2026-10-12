@@ -160,8 +160,10 @@ function selection(selector: SessionSelector): SQL {
  * - **A session is found by the hash of its token and by nothing else**, in whatever state it is in. The store does not judge
  *   expiry: that is the caller's, on one fresh database time after the locks it needs. An ended session is returned with the
  *   reason it ended, which is how a displaced vendor is told so and how a refused request can say why in the audit.
- * - **Activity is coalesced**: a write only when the recorded activity is at least `ACTIVITY_COALESCE_MS` older than the new one,
- *   never backwards, never on an ended session. One conditional `UPDATE`, so a burst of requests writes once.
+ * - **Activity is coalesced and judged by the statement that writes it**: a write only when the recorded activity is at least
+ *   `ACTIVITY_COALESCE_MS` old, never backwards, and only on a session that is live at the database's clock when the statement runs
+ *   (not ended, before its absolute end, not idle), so a wait on a revocation's lock cannot revive a session. One conditional
+ *   `UPDATE`, so a burst of requests writes once.
  * - **Ending is one statement that takes the row locks in id order** (`ORDER BY id FOR UPDATE` under the `UPDATE`), so two endings
  *   that overlap cannot wait for each other in a cycle (SECURITY_DESIGN.md §13.10a, lock order: session rows by id ascending). A
  *   session that has already ended is not touched, so it keeps its first reason. The end is recorded at the database's time, **never
@@ -207,12 +209,38 @@ export class PostgresSessionStore implements SessionStore {
     return row === undefined ? null : sessionOf(row);
   }
 
-  async recordActivity(transaction: TransactionHandle, sessionId: string, at: Date): Promise<void> {
+  async recordActivity(
+    transaction: TransactionHandle,
+    sessionId: string,
+    idleMinutes: number | null,
+  ): Promise<boolean> {
     if (!isUuid(sessionId)) throw new TypeError('A session is identified by its id (a UUID)');
-    await transactionOf(transaction).execute(sql`
-      update session set last_activity_at = ${at}
-       where id = ${sessionId} and terminated_at is null
-         and last_activity_at <= ${at}::timestamptz - make_interval(secs => ${ACTIVITY_COALESCE_MS / 1000}::double precision)`);
+    if (idleMinutes !== null && (!Number.isInteger(idleMinutes) || idleMinutes < 1)) {
+      throw new RangeError('An idle limit is a positive whole number of minutes, or none');
+    }
+    // The lock first, the judgement after it. A single UPDATE that waited for the row would have judged on the clock it read before
+    // the wait: PostgreSQL re-checks a waiting UPDATE's qualification only against a row that the other transaction *changed*, and a
+    // transaction that merely locked the row (`SELECT ... FOR UPDATE`) leaves the statement to go on with the tuple and the time it
+    // had. So the lock is taken in a statement of its own, which waits for every holder; under READ COMMITTED it is a lock on the
+    // latest version of the row (a revocation that ended the session while this waited is seen), and the statement that judges and
+    // writes runs afterwards, on the clock as it is then (a session that went idle, or reached its absolute end, while this waited
+    // is not written). One row, and no other lock, so it adds nothing to the lock order of section 13.10a.
+    const database = transactionOf(transaction);
+    const locked = await database.execute(
+      sql`select 1 from session where id = ${sessionId} for no key update`,
+    );
+    if (locked.rows.length === 0) return false;
+    const result = await database.execute(sql`
+      update session
+         set last_activity_at = greatest(last_activity_at, clock_timestamp())
+       where id = ${sessionId}
+         and terminated_at is null
+         and expires_at > clock_timestamp()
+         and (${idleMinutes}::int is null
+              or last_activity_at + make_interval(mins => ${idleMinutes}::int) > clock_timestamp())
+         and last_activity_at <= clock_timestamp() - make_interval(secs => ${ACTIVITY_COALESCE_MS / 1000}::double precision)
+      returning 1`);
+    return result.rows.length === 1;
   }
 
   async terminate(

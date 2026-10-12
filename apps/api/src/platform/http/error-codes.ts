@@ -145,8 +145,10 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
  * - every other code states a business rule (every domain code of §5, `SELF_APPROVAL_FORBIDDEN`, and the sign-in, factor, grant,
  *   challenge and recovery codes) and is `422`;
  * - **`SETTING_MISSING` and `SETTING_INVALID` have no status in any retained document** (§4 gives their meaning and not their
- *   status). They are `null` here and are not given one: a status for them is the owner's decision (plan §7.16), and `statusOf`
- *   refuses to answer for them until it is made.
+ *   status). They are `null` here and are not given one: the status of the business answers of the hub-settings paths that declare
+ *   them is each such operation's own task's (plan §7.16, §7.18), and `statusOf` refuses to answer for them until it is made. The
+ *   runtime's own failure to read a setting it needs is not one of them on the wire: it is the code-less `503` (decision B of 12
+ *   October 2026, `operational-failure.ts`).
  */
 const NAMED_STATUS: Readonly<Partial<Record<ErrorCode, number | null>>> = {
   [ErrorCode.ValidationFailed]: 400,

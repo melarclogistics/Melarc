@@ -606,8 +606,9 @@ describe('the functions, as the catalogue and the posture check see them', () =>
   });
 
   it('are the whole of the allow-list, and the catalogue holds', async () => {
+    // The two seed functions, and the one function of migration 0017 that the seed takes its exclusive policy locks with (S0.27).
     expect(APPROVED_DEFINER_EXECUTE[PROVISIONING_ROLE]?.toSorted()).toEqual(
-      NAMES.map((name) => `melarc.${name}`).toSorted(),
+      [...NAMES.map((name) => `melarc.${name}`), 'melarc.lock_policy_keys'].toSorted(),
     );
     // And the runtime's one: the read of a credential hash for the authentication capability (migration 0016). A definer function
     // added to either list is a reviewed line here, and no other login is on the list.

@@ -96,14 +96,44 @@ describe('the invariants the matrix keeps (SECURITY_DESIGN.md §14.1, §14.17b; 
     expect(CAPABILITY_ACCESS.rate_limit.identity).toBe('api');
   });
 
+  // Break caught (S0.27): the policy-change capability handed to a runtime identity, which would let code running as the API, the
+  // worker or the provisioning login assert the label with a function it may execute. It belongs to the migration identity alone, and
+  // that identity holds nothing else.
+  it('keeps policy_change with the migration identity, and gives that identity nothing else', () => {
+    expect(CAPABILITY_ACCESS.policy_change.identity).toBe('migration');
+    expect(IDENTITY_ROLES.migration).toBe('melarc_migration_elevated');
+    const heldByMigration = entries.filter(([, access]) => access.identity === 'migration');
+    expect(heldByMigration.map(([capability]) => capability)).toEqual(['policy_change']);
+  });
+
+  // Break caught: the policy-change capability reaching a table beyond the three policy tables, or touching them with a statement
+  // the functions do not run. The grants of a bundle are replaced as a set (insert, update, delete); the bundle and the fixed policy
+  // are read and updated, and never inserted or deleted (the seed inserts, nothing deletes).
+  it('lets policy_change touch the three policy tables only, and never insert or delete a bundle or a fixed policy', () => {
+    const byTable = new Map(
+      CAPABILITY_ACCESS.policy_change.tables.map((entry) => [entry.table, entry.statements]),
+    );
+    expect([...byTable.keys()].toSorted()).toEqual([
+      'FixedPermissionPolicy',
+      'RoleBundle',
+      'RoleBundleGrant',
+    ]);
+    expect(byTable.get('RoleBundle')).toEqual(['SELECT', 'UPDATE']);
+    expect(byTable.get('FixedPermissionPolicy')).toEqual(['SELECT', 'UPDATE']);
+    expect(byTable.get('RoleBundleGrant')).toEqual(['SELECT', 'INSERT', 'UPDATE', 'DELETE']);
+    for (const entry of CAPABILITY_ACCESS.policy_change.tables) {
+      expect(entry.restriction, entry.table).toMatch(/only inside melarc\.change_/);
+    }
+  });
+
   // Break caught: a capability gaining DELETE. Only the limiter removes rows, and only the expired ones of its own table.
-  it('allows DELETE nowhere but on the limiter admission rows', () => {
+  it('allows DELETE nowhere but on the limiter admission rows and the grants of a bundle being replaced', () => {
     const deleters = entries.flatMap(([capability, access]) =>
       access.tables
         .filter((entry) => entry.statements.includes('DELETE'))
         .map((entry) => `${capability}:${entry.table}`),
     );
-    expect(deleters).toEqual(['rate_limit:RateLimitAdmission']);
+    expect(deleters).toEqual(['rate_limit:RateLimitAdmission', 'policy_change:RoleBundleGrant']);
   });
 
   // Break caught: seed gaining a way to change or to read what it seeded. It inserts into an empty set and refuses otherwise; the
@@ -191,6 +221,12 @@ describe('capabilityPermittedFor: the identity opening the transaction', () => {
     ['seed', 'melarc_provisioning', true],
     ['bootstrap', 'melarc_provisioning', true],
     ['credential_delivery', 'melarc_worker_runtime', true],
+    ['policy_change', 'melarc_migration_elevated', true],
+    ['policy_change', 'melarc_api_runtime', false],
+    ['policy_change', 'melarc_provisioning', false],
+    ['policy_change', 'melarc_worker_runtime', false],
+    ['policy_change', 'melarc_owner', false],
+    ['policy_change', 'postgres', false],
     ['seed', 'melarc_api_runtime', false],
     ['bootstrap', 'melarc_api_runtime', false],
     ['credential_delivery', 'melarc_api_runtime', false],

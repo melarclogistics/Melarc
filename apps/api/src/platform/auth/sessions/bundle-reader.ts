@@ -85,6 +85,23 @@ export async function readBundle(
   };
 }
 
+/**
+ * A bundle's current revision and its `reduction_floor`, **without a lock**: what the authentication step compares a session's
+ * recorded revision with (SECURITY_DESIGN.md §13.10a, "Every request also compares the recorded revision with the floor"). It reads
+ * the two counters and nothing of the content. `null` where there is no such bundle.
+ */
+export async function readBundleFloor(
+  transaction: TransactionHandle,
+  bundleId: string,
+): Promise<{ readonly revision: number; readonly reductionFloor: number } | null> {
+  const result = await transactionOf(transaction).execute(
+    sql`select revision, reduction_floor from role_bundle where id = ${bundleId}`,
+  );
+  const row = result.rows[0] as unknown as
+    { revision: number; reduction_floor: number } | undefined;
+  return row === undefined ? null : { revision: row.revision, reductionFloor: row.reduction_floor };
+}
+
 /** The fixed policy of a Vendor or a Rider, read under the shared fixed-policy lock; `null` where the seed has not written it. */
 export async function readFixedPolicy(
   transaction: TransactionHandle,

@@ -82,6 +82,9 @@ describe('the test CA command', () => {
     expect(answer.out).toContain('BB:BB');
     expect(answer.out).toContain('note: a note');
     expect(answer.out).toContain('Nothing was trusted by this command');
+    expect(answer.out).toContain(
+      'openssl verify showed that the CA refuses a certificate for another name',
+    );
     expect(answer.out).toContain('MELARC_E2E_TLS_DIR=/safe/tls');
     expect(answer.out).not.toMatch(/BEGIN [A-Z ]*PRIVATE KEY/);
   });

@@ -49,13 +49,14 @@ export class SessionIssueRefusedError extends Error {
 /**
  * This instance cannot be sure of the fixed policy of a Vendor or a Rider, and so serves nothing of that type (SECURITY_DESIGN.md
  * §13.10): its compiled revision is below the stored `minimum_revision` (a release that reduced the policy has raised the floor),
- * it has no compiled revision for the type at all, or the seed has not written the policy. The platform answers the operational
+ * it is older than the revision the session was issued under, it has no compiled revision for the type at all, or the seed has
+ * not written the policy. The platform answers the operational
  * failure (`503`, retryable, no business code) and ends no session: the instance is the wrong one, not the principal.
  */
 export class FixedPolicyUnavailableError extends Error {
   constructor(
     readonly principalType: 'VENDOR' | 'RIDER',
-    readonly reason: 'BELOW_FLOOR' | 'NOT_COMPILED' | 'NOT_SEEDED',
+    readonly reason: 'BELOW_FLOOR' | 'OLDER_THAN_SESSION' | 'NOT_COMPILED' | 'NOT_SEEDED',
   ) {
     super(`This instance cannot serve the ${principalType} fixed policy: ${reason}`);
     this.name = 'FixedPolicyUnavailableError';

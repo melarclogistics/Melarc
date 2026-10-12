@@ -23,8 +23,12 @@ import {
  *   length of zero and **name constraints that permit only `localhost` and `127.0.0.1`**, so that even a browser that trusted it
  *   could be made to believe nothing outside the loopback. The leaf is not a CA, serves `serverAuth`, and names `localhost` and
  *   `127.0.0.1`.
- * - **The CA's private key is deleted as soon as the leaf is signed.** What remains is the CA certificate and the leaf certificate
- *   (both public) and the leaf's private key, which is readable by its owner alone.
+ * - **Before the CA's key is deleted, the name constraints are proved to bind, with `openssl verify`**, which is the only tool here that
+ *   enforces them (the policy of `tls-material.ts` reads that they exist, not what they permit): the leaf verifies against the CA for
+ *   `localhost` and for `127.0.0.1`, and a second leaf for `example.com`, signed by the same CA, **does not** (a permitted subtree
+ *   violation). A CA whose constraints do not refuse an outside name is refused, and everything it made is removed.
+ * - **The CA's private key is deleted as soon as the leaf is signed and the proofs are done.** What remains is the CA certificate and
+ *   the leaf certificate (both public) and the leaf's private key, which is readable by its owner alone.
  * - It works in a private directory of its own inside the result and removes it (the serial file of the CA goes with it), and it
  *   checks that exactly the three files remain. If any step fails, or the directory holds anything else, everything it made is
  *   removed (the folders it created, or the contents of the empty directory it was given) and the failure is reported; it leaves
@@ -71,6 +75,18 @@ export const LEAF_EXTENSIONS = [
   'subjectAltName = DNS:localhost, IP:127.0.0.1',
   '',
 ].join('\n');
+
+/** A name outside the loopback, for the leaf that the CA must refuse. */
+export const OUTSIDE_NAME = 'example.com';
+
+/** The extensions of that leaf: the same as the real one's, but for a name the CA's constraints do not permit. */
+export const OUTSIDE_EXTENSIONS = LEAF_EXTENSIONS.replace(
+  'subjectAltName = DNS:localhost, IP:127.0.0.1',
+  `subjectAltName = DNS:${OUTSIDE_NAME}`,
+);
+
+/** What `openssl verify` says when a name constraint refuses a certificate (X509_V_ERR_PERMITTED_VIOLATION). */
+const PERMITTED_VIOLATION = /permitted subtree violation/i;
 
 export class TestCaRefusedError extends Error {
   readonly problems: readonly string[];
@@ -180,6 +196,10 @@ export function mintTestCertificates(options: MintOptions): MintResult {
       ],
       work,
     );
+
+    // The CA's key is still here. Show what the policy can only read: that the constraints are enforced by a verifier.
+    const proof = nameConstraintProblems(run, work, days_);
+    if (proof.length > 0) throw new TestCaRefusedError(proof);
   } catch (failure) {
     // Whatever was made is removed, the CA's key with it, and a directory this call made goes too.
     undo();
@@ -218,6 +238,83 @@ export function mintTestCertificates(options: MintOptions): MintResult {
     leafFingerprint256: material.leafFingerprint256,
     notes: material.notes,
   };
+}
+
+/**
+ * The proof that the name constraints bind, by the tool that enforces them: positive for the leaf's own names, negative for a name
+ * outside, signed by the same CA with the same key (so that nothing but the name differs). Steps that make the second leaf are
+ * generation steps and fail the run as any other does; the verifications are judged, and say what they found.
+ */
+function nameConstraintProblems(run: OpensslRun, work: string, days: string): string[] {
+  const problems: string[] = [];
+  const ca = join('..', TLS_FILES.ca);
+  const leaf = join('..', TLS_FILES.leaf);
+  const verify = (extra: readonly string[], certificate: string): string | undefined => {
+    try {
+      run(['verify', '-CAfile', ca, '-purpose', 'sslserver', ...extra, certificate], work);
+      return undefined;
+    } catch (failure) {
+      return failure instanceof Error ? failure.message : 'openssl verify failed';
+    }
+  };
+
+  for (const [what, extra] of [
+    ['localhost', ['-verify_hostname', 'localhost']],
+    ['127.0.0.1', ['-verify_ip', '127.0.0.1']],
+  ] as const) {
+    const failure = verify(extra, leaf);
+    if (failure !== undefined) {
+      problems.push(`the leaf certificate does not verify against the CA for ${what}: ${failure}`);
+    }
+  }
+
+  writeFileSync(join(work, 'outside.ext'), OUTSIDE_EXTENSIONS, { mode: 0o600 });
+  run(
+    [
+      'req',
+      '-new',
+      '-key',
+      join('..', TLS_FILES.leafKey),
+      '-subj',
+      `/CN=${OUTSIDE_NAME}`,
+      '-out',
+      'outside.csr',
+    ],
+    work,
+  );
+  run(
+    [
+      'x509',
+      '-req',
+      '-sha256',
+      '-in',
+      'outside.csr',
+      '-CA',
+      ca,
+      '-CAkey',
+      'ca-key.pem',
+      '-CAserial',
+      SERIAL_FILE,
+      '-days',
+      days,
+      '-extfile',
+      'outside.ext',
+      '-out',
+      'outside.pem',
+    ],
+    work,
+  );
+  const refusal = verify([], 'outside.pem');
+  if (refusal === undefined) {
+    problems.push(
+      `the CA verified a certificate for ${OUTSIDE_NAME}: its name constraints do not hold, and the CA is not made`,
+    );
+  } else if (!PERMITTED_VIOLATION.test(refusal)) {
+    problems.push(
+      `a certificate for ${OUTSIDE_NAME} was refused, but not by the name constraints (no permitted subtree violation): ${refusal}`,
+    );
+  }
+  return problems;
 }
 
 /**

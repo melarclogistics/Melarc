@@ -59,11 +59,18 @@ export type PostureFlag = (typeof POSTURE_FLAGS)[number];
  * The `SECURITY DEFINER` functions each role may execute, as `schema.function`, because a reviewed migration granted it. Today that
  * is the provisioning login and the two seed functions of migration 0005 (the initialization of the reference data, once, and the
  * test-only reason fixtures): they are the only way that login writes the reference tables, and it holds no privilege on the tables.
+ * And the one function of migration 0017 that the seed takes its policy locks with (`melarc.lock_policy_keys`, S0.27): it takes the
+ * exclusive advisory locks of the bundles and the fixed policies named, in the canonical order, and reads and writes no table. The
+ * change functions of the same migration are on no line: only the migration login, which is not a runtime identity, may execute them.
  * And the API runtime and the one function of migration 0016 that reads a credential hash for the authentication capability. The
  * workers are on no line, so EXECUTE on any definer is a finding for them, and for the API runtime on any other.
  */
 export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {
-  [PROVISIONING_ROLE]: ['melarc.initialize_reference_data', 'melarc.add_reason_fixtures'],
+  [PROVISIONING_ROLE]: [
+    'melarc.initialize_reference_data',
+    'melarc.add_reason_fixtures',
+    'melarc.lock_policy_keys',
+  ],
   // The one way to read the credential hash of a staff identity (migration 0016): the runtime has no SELECT on the column, and the
   // function refuses any context but a SYSTEM one under the authentication capability.
   [API_RUNTIME_ROLE]: ['melarc.staff_credential_hash'],

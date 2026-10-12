@@ -144,8 +144,19 @@ export interface SessionStore {
     transaction: TransactionHandle,
     tokenHash: Uint8Array,
   ): Promise<StoredSession | null>;
-  /** Records activity, coalesced so that a burst of requests writes once. */
-  recordActivity(transaction: TransactionHandle, sessionId: string, at: Date): Promise<void>;
+  /**
+   * Records that the person acted, **on the database's own clock and only on a session that is live at that moment** (decision A of
+   * 12 October 2026). One statement judges and writes: the session is not ended, is before its absolute end and (for a browser
+   * session, `idleMinutes` not null) is not idle, each against a fresh `clock_timestamp()` evaluated again if the update had to wait
+   * on a lock held by a revocation, so a wait cannot revive a session that ended or expired meanwhile. Coalesced: a recorded
+   * activity younger than `ACTIVITY_COALESCE_MS` is left as it is. Resolves with whether a write was made; `false` is a session that
+   * is not live or one already covered, and is never an error: the caller's answer does not depend on it.
+   */
+  recordActivity(
+    transaction: TransactionHandle,
+    sessionId: string,
+    idleMinutes: number | null,
+  ): Promise<boolean>;
   /** Ends the live sessions the selector names and returns their ids, so that whoever ended them can record each (in id order). */
   terminate(
     transaction: TransactionHandle,
@@ -176,8 +187,10 @@ export const SESSION_STORE_DESCRIPTOR: PortDescriptor<SessionStore> = {
       transaction: 'inside-callers-transaction',
     },
     recordActivity: {
-      inputs: 'the transaction, the session and the time of the activity',
-      outputs: 'nothing: the write is skipped when a recent one already covers it',
+      inputs:
+        'the transaction, the session and the idle limit of its tier in minutes (none for a rider)',
+      outputs:
+        'whether the activity was written: nothing is written for a session that has ended, expired or gone idle at the database time of the statement, or when a recent write already covers it',
       outcomes: 'none',
       raises: 'none',
       transaction: 'inside-callers-transaction',

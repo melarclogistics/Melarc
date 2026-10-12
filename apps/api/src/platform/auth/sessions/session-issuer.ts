@@ -19,6 +19,7 @@ import type { TokenService } from '../ports/token-service.port.js';
 import type { TransactionHandle, UnitOfWork } from '../ports/unit-of-work.port.js';
 import type { SettingsReader } from '../../settings/settings-reader.js';
 import { readBundle, readFixedPolicy } from './bundle-reader.js';
+import type { CompiledFixedPolicy } from './session-authority.js';
 import { FixedPolicyUnavailableError, SessionIssueRefusedError } from './session-errors.js';
 import {
   AUTHENTICATION_PRINCIPAL_ID,
@@ -26,8 +27,7 @@ import {
   tierOf,
 } from './session-parameters.js';
 
-/** The compiled fixed-policy revision of this build for each audience that has one (SECURITY_DESIGN.md §13.10, part 2). */
-export type CompiledFixedPolicy = Readonly<Partial<Record<'VENDOR' | 'RIDER', number>>>;
+export type { CompiledFixedPolicy };
 
 export interface SessionIssuerOptions {
   readonly coordinator: Pick<PolicyCoordinator, 'run'>;

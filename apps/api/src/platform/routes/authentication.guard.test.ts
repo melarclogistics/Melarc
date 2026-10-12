@@ -51,6 +51,7 @@ const AUTHENTICATED_SESSION: AuthenticatedSession = {
   session: SESSION,
   credential: 'COOKIE',
   judgedAt: new Date('2026-10-11T09:00:00Z'),
+  idleMinutes: 30,
 };
 const AUTHENTICATED: AuthenticationOutcome = {
   kind: 'AUTHENTICATED',

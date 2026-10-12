@@ -18,6 +18,7 @@ import {
 } from '../auth/sessions/session-errors.js';
 import { PolicyCoordinationError } from '../database/policy-lock/coordinate.js';
 import { BudgetClosedError, BudgetExpiredError } from '../execution/execution-budget.js';
+import { SettingInvalidError, SettingMissingError } from '../settings/settings-reader.js';
 import { classifyFailure } from './operational-failure.js';
 
 const cause = { cause: new Error('driver') };
@@ -36,6 +37,17 @@ const OPERATIONAL: readonly [string, () => Error][] = [
   ['FixedPolicyUnavailableError', () => new FixedPolicyUnavailableError('VENDOR', 'BELOW_FLOOR')],
   ['SessionSnapshotUnreadableError', () => new SessionSnapshotUnreadableError(2)],
   ['AuthenticationUnavailableError', () => new AuthenticationUnavailableError()],
+  // The owner's decision B of 12 October 2026: a setting the runtime requires and cannot read, or cannot use, is the platform's
+  // failure and not a business answer. It is the code-less 503, so no setting value or key reaches a caller.
+  ['SettingMissingError', () => new SettingMissingError('session_idle_timeout_minutes')],
+  [
+    'SettingInvalidError',
+    () =>
+      new SettingInvalidError(
+        'session_idle_timeout_minutes',
+        'its value is not of its type object',
+      ),
+  ],
 ];
 
 describe('classifyFailure: which failures are the platform’s generic operational failure', () => {

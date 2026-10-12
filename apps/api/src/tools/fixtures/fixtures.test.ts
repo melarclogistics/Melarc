@@ -120,7 +120,7 @@ describe('the fixture plan', () => {
     expect(Object.keys(plan.payload)).toEqual(['reason_code']);
     expect(plan.payload.reason_code).toHaveLength(REASON_FIXTURES.length);
     expect(plan.labels).toEqual({ reason_code: 'reason_code (fixtures)' });
-    expect(plan.locks).toEqual([]);
+    expect(plan.policyKeys).toEqual({ bundleIds: [], fixedPolicies: [] });
   });
 
   // Break caught: a fixture row whose code the function would refuse (it writes codes that start with FIXTURE_ and no others), or a

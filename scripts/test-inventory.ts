@@ -201,13 +201,29 @@ export function readVitestConfig(text: string): VitestFacts {
   };
 }
 
+/** What one project of a Playwright configuration says about the specs it runs: the patterns it matches and the ones it ignores. */
+export interface PlaywrightProject {
+  testMatch: string[];
+  testIgnore: string[];
+}
+
 export interface PlaywrightFacts {
   /** The folder the specs are looked for in, relative to the package, without a leading `./`. */
   testDir: string | undefined;
   /** Every `testMatch` pattern; none when the configuration keeps Playwright's default. */
   testMatch: string[];
+  /**
+   * The projects, read from the text after each `name: '...'`, **only when the configuration has a `testIgnore`**: an ignore
+   * belongs to one project, and a spec ignored by a project can still be run by another. Without one the patterns above decide.
+   */
+  projects?: PlaywrightProject[];
   unreadable: string[];
 }
+
+const literalsOf = (text: string, key: string): string[] =>
+  [...text.matchAll(new RegExp(String.raw`\b${key}\s*:\s*(['"])((?:(?!\1).)*)\1`, 'g'))].map(
+    (match) => match[2] ?? '',
+  );
 
 /** What a Playwright configuration says about which specs it runs, read from its text. */
 export function readPlaywrightConfig(text: string): PlaywrightFacts {
@@ -220,12 +236,24 @@ export function readPlaywrightConfig(text: string): PlaywrightFacts {
   if ([...text.matchAll(/\btestMatch\s*:/g)].length !== matches.length) {
     unreadable.push('a testMatch that is not a string literal');
   }
-  if (/\btestIgnore\s*:/.test(text)) {
-    unreadable.push('a testIgnore, which this check does not model');
+  const ignores = literalsOf(text, 'testIgnore');
+  if ([...text.matchAll(/\btestIgnore\s*:/g)].length !== ignores.length) {
+    unreadable.push('a testIgnore that is not a string literal');
   }
+  const projects =
+    ignores.length === 0
+      ? undefined
+      : text
+          .split(/(?=\bname\s*:\s*['"])/)
+          .slice(1)
+          .map((block) => ({
+            testMatch: literalsOf(block, 'testMatch'),
+            testIgnore: literalsOf(block, 'testIgnore'),
+          }));
   return {
     testDir: (dirs[0]?.[2] ?? '').replace(/^\.\//, '').replace(/\/$/, ''),
     testMatch: matches.map((match) => match[2] ?? ''),
+    ...(projects === undefined ? {} : { projects }),
     unreadable,
   };
 }
@@ -236,11 +264,20 @@ export function playwrightRuns(facts: PlaywrightFacts, file: string): boolean {
   const prefix = dir === '' ? '' : `${dir}/`;
   if (!file.startsWith(prefix)) return false;
   const inside = file.slice(prefix.length);
-  if (facts.testMatch.length === 0) return PLAYWRIGHT_DEFAULT.test(inside);
   // A pattern without a slash is matched against the file's name wherever it sits under the test folder.
-  return facts.testMatch.some((pattern) =>
-    globToRegExp(pattern).test(pattern.includes('/') ? inside : (inside.split('/').at(-1) ?? '')),
-  );
+  const matched = (pattern: string): boolean =>
+    globToRegExp(pattern).test(pattern.includes('/') ? inside : (inside.split('/').at(-1) ?? ''));
+  if (facts.projects !== undefined && facts.projects.length > 0) {
+    // Run by a project that matches it and does not ignore it; a project that names no pattern keeps Playwright's default.
+    return facts.projects.some(
+      (project) =>
+        (project.testMatch.length === 0
+          ? PLAYWRIGHT_DEFAULT.test(inside)
+          : project.testMatch.some(matched)) && !project.testIgnore.some(matched),
+    );
+  }
+  if (facts.testMatch.length === 0) return PLAYWRIGHT_DEFAULT.test(inside);
+  return facts.testMatch.some(matched);
 }
 
 export interface PackageFacts {
@@ -323,7 +360,7 @@ export function findPackageProblems(facts: PackageFacts): InventoryProblem[] {
   }
   if (playwright !== undefined) {
     for (const pattern of playwright.testMatch) {
-      const alone: PlaywrightFacts = { ...playwright, testMatch: [pattern] };
+      const alone: PlaywrightFacts = { ...playwright, testMatch: [pattern], projects: [] };
       if (!testFiles.some((file) => playwrightRuns(alone, file))) {
         problems.push({
           code: 'PATTERN_MATCHES_NOTHING',

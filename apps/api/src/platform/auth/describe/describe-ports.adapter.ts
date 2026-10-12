@@ -138,7 +138,7 @@ export class DescribeSessionStore extends DescribeAdapter implements SessionStor
   findByTokenHash(): Promise<StoredSession | null> {
     return refuse('SessionStore', 'findByTokenHash');
   }
-  recordActivity(): Promise<void> {
+  recordActivity(): Promise<boolean> {
     return refuse('SessionStore', 'recordActivity');
   }
   terminate(): Promise<readonly string[]> {
