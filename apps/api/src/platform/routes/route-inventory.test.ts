@@ -56,13 +56,21 @@ describe('inspectRoutes', () => {
     const inspection = inspectRoutes(app);
 
     expect(inspection.live.map((route) => `${route.method} ${route.path}`)).toEqual([
+      'GET /api/v1/fixture/budget',
+      'GET /api/v1/fixture/budget-after-pause',
+      'GET /api/v1/fixture/budget-then-wait',
+      'GET /api/v1/fixture/cooperative',
+      'GET /api/v1/fixture/fail/:kind',
       'GET /api/v1/fixture/fails-after-answering',
       'GET /api/v1/fixture/orders/:id',
       'GET /api/v1/fixture/slow/:label',
       'GET /api/v1/fixture/throw-secret',
+      'GET /api/v1/fixture/whoami',
       'GET /livez',
       'GET /readyz',
       'POST /api/v1/fixture/body/:label',
+      'POST /api/v1/fixture/budget',
+      'POST /api/v1/fixture/guarded',
     ]);
     expect(inspection.outsideNest).toEqual([]);
     expect(inspection.missingFromRouter).toEqual([]);

@@ -22,16 +22,15 @@ export const KEY_CUSTODIES = ['local'] as const;
  * The engineering bounds this task introduces, each with the value an environment gets when it sets none
  * (plan section 3, "Engineering parameters").
  *
- * **Provisional defaults, validated by configuration only.** Each is a concrete value chosen so that a development or test run
- * is bounded. The loader checks it against its bounds and, for the database deadlines, their nesting; nothing has measured it,
- * applied it to a running server or database, or exercised it under load, and `load-config.test.ts` proves the bounds and the
- * relations and nothing about behaviour. So none is yet qualified as the engineering-parameter rule of the plan (section 3)
- * requires. That obligation stays with the first consumer: S0.6 (resource deadlines) for the database deadlines, S0.20
- * (transport admission) for the HTTP limits and deadlines, S0.18 (delivery worker process) for the provider timeouts. It
- * chooses a measured development or test value, records the environment and the test, and labels the value
- * development-qualified, not production-qualified. S0.65 (benchmark and capacity) then calibrates all of them on a recorded
- * machine and proposes release values for the owner's approval. `HTTP_BODY_LIMIT_BYTES` keeps the 100 KiB the JSON body
- * parser already applies.
+ * **Provisional until their first consumer.** Each is a concrete value chosen so that a development or test run is bounded. The
+ * loader checks it against its bounds and, for the database deadlines, their nesting, and `load-config.test.ts` proves the
+ * bounds and the relations and nothing about behaviour. The engineering-parameter rule of the plan (section 3) puts the
+ * qualification with the first consumer, which chooses a measured development or test value, records the environment and the
+ * test, and labels the value development-qualified, not production-qualified. S0.6 (resource deadlines) has done so for the
+ * database deadlines and S0.20 (transport admission) for the HTTP limits and deadlines and the request budget
+ * (DEPLOYMENT_AND_ENVIRONMENTS.md section 12.5); S0.18 (delivery worker process) still owes it for the provider timeouts, which
+ * no real provider applies yet. S0.65 (benchmark and capacity) then calibrates all of them on a recorded machine and proposes
+ * release values for the owner's approval.
  */
 export const ENGINEERING_DEFAULTS = {
   HTTP_BODY_LIMIT_BYTES: '102400',

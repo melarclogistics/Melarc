@@ -4,7 +4,7 @@ import type { Clock } from '../auth/ports/clock.port.js';
 
 /**
  * The shared execution-budget mechanism (S0.6; plan section 11.8; OB-37). One budget bounds one unit of work, normally a
- * request. The database layer consumes it now; S0.20 puts one around every request in the HTTP pipeline.
+ * request. The database layer consumes it, and the HTTP pipeline puts one around every request (S0.20, `request-budget.ts`).
  *
  * What a budget is, and is not:
  *

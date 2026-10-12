@@ -120,13 +120,14 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     const text = paragraph.slice(0, paragraph.indexOf('\n\n'));
 
     expect(text).toMatch(/provisional default/);
-    expect(text).toMatch(/No HTTP value has been measured/);
+    expect(text).toMatch(/No provider or verifier value has been measured/);
     expect(text).toMatch(/none is labelled development-qualified/);
-    // The obligation is kept, with the tasks that own it. S0.6 has met it for the database deadlines (the next test).
+    // The obligation is kept, with the tasks that own it. S0.6 has met it for the database deadlines and S0.20 for the HTTP
+    // limits (the sections below).
     expect(text).toMatch(/development-qualified, not production-qualified/);
-    expect(text).toMatch(/S0\.20 \(transport admission\)/);
     expect(text).toMatch(/S0\.18 \(delivery worker process\)/);
     expect(text).toMatch(/S0\.6 \(resource deadlines\) has done so/);
+    expect(text).toMatch(/S0\.20 \(transport admission\) has done so/);
     expect(text).toMatch(/S0\.65 \(benchmark and capacity\)/);
     expect(document).not.toMatch(/\*\*Development-qualified engineering values\*\*/);
   });
@@ -237,6 +238,86 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     });
   });
 
+  // Break caught (S0.20): a figure called development-qualified that is not the one the code applies, a test named as the exercise that
+  // does not exist, or the environment of the measurement dropped.
+  describe('what S0.20 applied and where it was exercised', () => {
+    const heading =
+      '**What S0.20 applied and where it was exercised (development-qualified, not production-qualified).**';
+    const start = document.indexOf(heading);
+    const section = document.slice(start, document.indexOf('**Metrics** (decided 8 October 2026'));
+    const cells = section
+      .split('\n')
+      .filter((line) => line.startsWith('| ') && !line.startsWith('| Value'))
+      .map((line) => line.split('|').map((cell) => cell.trim()));
+
+    it('is there, and says the figures are not production-qualified and that the edge is release gate G2', () => {
+      expect(start, 'the section is there').toBeGreaterThan(0);
+      expect(section).toMatch(/\*\*not production-qualified\*\*/);
+      expect(section).toMatch(/S0\.65 \(benchmark and capacity\)/);
+      expect(section).toMatch(/release gate G2/);
+    });
+
+    // Break caught: a default changed in the code and not in the record of what was exercised.
+    it('quotes, for every setting S0.20 applied, the default the code gives it', () => {
+      for (const key of [
+        'HTTP_BODY_LIMIT_BYTES',
+        'HTTP_HEADER_TIMEOUT_MS',
+        'HTTP_BODY_TIMEOUT_MS',
+        'HTTP_ADMISSION_CONCURRENCY',
+        'HTTP_ADMISSION_TIMEOUT_MS',
+        'REQUEST_EXECUTION_BUDGET_MS',
+      ] as const) {
+        const row = cells.find((each) => each[1] === `\`${key}\``);
+        expect(row, key).toBeDefined();
+        expect(row?.[2], key).toBe(`\`${ENGINEERING_DEFAULTS[key]}\``);
+      }
+      // `off` is not an engineering default of the loader (it is a list of hops or nothing): the table's own default is the record.
+      const trust = cells.find((each) => each[1] === '`HTTP_TRUST_PROXY`');
+      expect(trust?.[2]).toBe(`\`${rows.get('HTTP_TRUST_PROXY')?.default ?? ''}\``);
+    });
+
+    it('quotes the answer grace the pipeline uses, which is the disposal bound of S0.6', () => {
+      const row = cells.find((each) => (each[1] ?? '').includes('answer grace'));
+      expect(row?.[2]).toBe(`\`${String(DISPOSAL_BOUND_MS)}\` ms`);
+    });
+
+    // Break caught: a test cited as the exercise of a figure that does not exist (or was renamed).
+    it('names only test files that exist', () => {
+      const names = [...section.matchAll(/`([a-z-]+(?:\.db)?\.test\.ts)`/g)].map(
+        (match) => match[1] ?? '',
+      );
+      expect(names.length).toBeGreaterThan(3);
+      const found = (name: string): boolean =>
+        [resolve(ROOT, 'apps/api/src'), resolve(ROOT, 'apps/api/test')].some((directory) =>
+          readdirSync(directory, { withFileTypes: true, recursive: true }).some(
+            (entry) => entry.isFile() && entry.name === name,
+          ),
+        );
+      for (const name of new Set(names)) expect(found(name), name).toBe(true);
+    });
+
+    // Break caught: the answers the owner decided drifting from the ones the document states.
+    it('states the answers for the platform’s own resources that the owner decided (OB-55)', () => {
+      expect(section).toMatch(/`503` with no code and no `Retry-After`/);
+      expect(section).toMatch(/`500` of its own, with no code, no `Retry-After`/);
+      expect(section).toMatch(/The outcome of the request could not be confirmed/);
+      expect(section).toMatch(/the owner's decision of 11 October 2026/);
+    });
+
+    it('records the environment and the measurement the check interval rests on', () => {
+      expect(section).toMatch(/\*\*Environment \(11 October 2026\)\.\*\*/);
+      expect(section).toMatch(/Windows 11/);
+      expect(section).toMatch(/Node 24\.21\.0/);
+      expect(section).toMatch(/PostgreSQL 18\.6/);
+      expect(section).toMatch(/30005 ms with the default interval and after 564 ms/);
+    });
+
+    it('says what S0.20 does not do', () => {
+      expect(section).toMatch(/\*\*What S0\.20 does not do\.\*\*/);
+      expect(section).toMatch(/OB-100/);
+    });
+  });
+
   // Break caught: a deadline described as bounding more than it does, so a reader trusts a slow-sender limit to stop a handler.
   describe('the deadlines map', () => {
     const lines = document.split('\n');
@@ -266,7 +347,7 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
       expect(named.toSorted()).toEqual(bounds.toSorted());
     });
 
-    it('says the receipt limits bound receipt, not a handler, and that no request has a budget until S0.20', () => {
+    it('says the receipt limits bound receipt, not a handler, and that every request has a budget since S0.20', () => {
       const header = rows.find((cells) => (cells[2] ?? '').includes('`HTTP_HEADER_TIMEOUT_MS`'));
       const body = rows.find((cells) => (cells[2] ?? '').includes('`HTTP_BODY_TIMEOUT_MS`'));
       const whole = rows.find((cells) =>
@@ -280,11 +361,12 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
         /the request's whole execution once it has been received and admitted/,
       );
       expect(whole?.[4]).toMatch(/the receipt limits/);
-      expect(whole?.[6]).toMatch(/no request has a budget until S0\.20/);
+      expect(whole?.[6]).toMatch(/S0\.20 makes a budget for every request/);
       expect(document).toMatch(
         /\*\*A receipt limit ends a slow sender; it does not stop a handler\.\*\*/,
       );
-      expect(document).toMatch(/\*\*until S0\.20 no request has a budget\*\*/);
+      expect(document).toMatch(/\*\*since S0\.20 every request has a budget\*\*/);
+      expect(document).not.toMatch(/until S0\.20 no request has a budget/);
     });
 
     // Break caught: two tasks claiming the same receipt limit, or the whole-request bound left without an owner (decision of
@@ -312,9 +394,12 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     });
 
     // Break caught: a limit described as applied that nothing reads, or an applied one still described as validation only.
-    it('says which are applied: the shutdown budget (B0.2) and the database deadlines and pool bound (S0.6), and no other', () => {
+    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), and the HTTP limits and the request budget (S0.20), and no other', () => {
       const applied = (setting: string): boolean =>
-        setting.includes('SHUTDOWN_TIMEOUT_MS') || setting.includes('DATABASE_');
+        setting.includes('SHUTDOWN_TIMEOUT_MS') ||
+        setting.includes('DATABASE_') ||
+        setting.includes('HTTP_') ||
+        setting.includes('REQUEST_EXECUTION_BUDGET_MS');
       for (const cells of rows) {
         const cell = cells[6] ?? '';
         expect(cell.startsWith(applied(cells[2] ?? '') ? 'yes' : 'no'), cells[2]).toBe(true);
@@ -322,6 +407,9 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
       expect(document).toMatch(/\*\*validation is not enforcement\*\*/);
       expect(document).toMatch(
         /\*\*S0\.6 \(resource deadlines\) has since applied the database deadlines/,
+      );
+      expect(document).toMatch(
+        /\*\*S0\.20 \(transport admission\) has applied the HTTP receipt limits/,
       );
     });
   });
@@ -402,7 +490,7 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     );
     expect(decision).toMatch(/calibrated in S0\.65/);
     expect(plan).toMatch(
-      /^\| OB-37\| Execution budget\|[^\n]*\| D\| Mechanism and database half done \(S0\.6\); pipeline half not built\|$/m,
+      /^\| OB-37\| Execution budget\|[^\n]*\| D\| Mechanism and database half done \(S0\.6\); pipeline half done \(S0\.20\)[^|\n]*\|$/m,
     );
     expect(plan).toMatch(
       /^\| 15\| Deadline ownership and the execution budget[^\n]*\*\*Decided\*\*/m,

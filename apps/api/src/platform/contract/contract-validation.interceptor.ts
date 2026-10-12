@@ -9,6 +9,7 @@ import type { Request, Response } from 'express';
 import { map, type Observable } from 'rxjs';
 
 import { ApiException } from '../http/api-exception.js';
+import { bodyParseFailed } from '../http/admission/parse-failure.js';
 import { ErrorCode } from '../http/error-codes.js';
 import { bodyBytesOf } from '../http/json-body.js';
 import { answerPrincipalOf } from './answer-context.js';
@@ -50,7 +51,12 @@ function hasBody(request: Request): boolean {
 /**
  * Validates every request to a handler bound to a contract operation, before the handler runs, and every
  * response outside production. It runs after the guards, so a caller who may not use the operation learns
- * nothing about its schema. Handlers that are not bound are not touched.
+ * nothing about its schema. Handlers that are not bound are not validated.
+ *
+ * **A body that could not be parsed is answered here, for every handler** (S0.20; permission-enforcement.md §5.1, step 8).
+ * Transport admission carries a bounded syntax error to this point instead of refusing it when the body is read, so the guards
+ * (rate limit, authentication, CSRF, permission, scope) have already had their say, and none of them depended on the body. A
+ * handler is never reached with a body that was not read.
  */
 @Injectable()
 export class ContractValidationInterceptor implements NestInterceptor {
@@ -61,6 +67,9 @@ export class ContractValidationInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
+    if (bodyParseFailed(context.switchToHttp().getRequest<Request>())) {
+      throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid');
+    }
     const operationId = this.reflector.get<string | undefined>(
       CONTRACT_OPERATION_KEY,
       context.getHandler(),

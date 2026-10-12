@@ -1,5 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
+import { NO_EVIDENCE, withoutPageSnapshots } from './harness/evidence-policy.ts';
+
+// Playwright writes a snapshot of the page, as text, into `error-context.md` for every failing test, whatever the recorders are set
+// to, unless told not to. The runner and each worker load this file, so the variable is set in all of them
+// (harness/evidence-policy.ts says why).
+withoutPageSnapshots();
+
 /**
  * The integrated harness: a real browser against the Ops build, the real API and a real, disposable PostgreSQL
  * database. Global setup starts them once; the specs share them and isolate themselves with deterministic data
@@ -26,8 +33,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      // The full Chromium in its new headless mode, as the Ops smoke test uses it.
+      // Every spec but the ones that show a secret. The full Chromium in its new headless mode, as the Ops smoke test uses it.
+      testMatch: '**/*.spec.ts',
       use: { ...devices['Desktop Chrome'], channel: 'chromium' },
+    },
+    {
+      // The specs that show a secret (`<name>.secret.test.ts`): the same browser with the trace, the video and the screenshots off
+      // (harness/evidence-policy.ts). No other project matches them, and this one matches nothing else.
+      name: 'chromium-secret',
+      testMatch: '**/*.secret.test.ts',
+      use: { ...devices['Desktop Chrome'], channel: 'chromium', ...NO_EVIDENCE },
     },
   ],
 });

@@ -5,7 +5,13 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
 
 import { API_PREFIX, TECHNICAL_ROUTE_PATHS } from '../http/routes.constants.js';
-import { ACCESS_DECLARATION_KEY, type AccessDeclaration } from './access-declaration.js';
+import type { RateLimitBucket } from '../auth/ports/rate-limiter.port.js';
+import {
+  ACCESS_DECLARATION_KEY,
+  ACCESS_DETAIL_KEY,
+  type AccessDeclaration,
+  type AccessDetail,
+} from './access-declaration.js';
 
 export interface RouteEntry {
   readonly method: string;
@@ -14,6 +20,10 @@ export interface RouteEntry {
 
 export interface DeclaredRoute extends RouteEntry {
   readonly access: AccessDeclaration | undefined;
+  /** The permission key of a `permission` route. */
+  readonly permission?: string;
+  /** The bucket of an `anonymous` route that is limited. */
+  readonly bucket?: RateLimitBucket;
 }
 
 export interface RouteInspection {
@@ -90,6 +100,8 @@ export function listDeclaredRoutes(app: INestApplication): DeclaredRoute[] {
       const controllerPaths = asPaths(Reflect.getMetadata(PATH_METADATA, controller));
       const classAccess = Reflect.getMetadata(ACCESS_DECLARATION_KEY, controller) as
         AccessDeclaration | undefined;
+      const classDetail = Reflect.getMetadata(ACCESS_DETAIL_KEY, controller) as
+        AccessDetail | undefined;
 
       for (const name of Object.getOwnPropertyNames(controller.prototype)) {
         const handler = (controller.prototype as Record<string, unknown>)[name];
@@ -100,6 +112,9 @@ export function listDeclaredRoutes(app: INestApplication): DeclaredRoute[] {
         const access =
           (Reflect.getMetadata(ACCESS_DECLARATION_KEY, handler) as AccessDeclaration | undefined) ??
           classAccess;
+        const detail =
+          (Reflect.getMetadata(ACCESS_DETAIL_KEY, handler) as AccessDetail | undefined) ??
+          classDetail;
         for (const controllerPath of controllerPaths) {
           for (const routePath of asPaths(Reflect.getMetadata(PATH_METADATA, handler))) {
             const relative = normalise(`${controllerPath}/${routePath}`);
@@ -107,6 +122,8 @@ export function listDeclaredRoutes(app: INestApplication): DeclaredRoute[] {
               method: RequestMethod[method],
               path: technical.has(relative) ? relative : normalise(`${API_PREFIX}/${relative}`),
               access,
+              ...(detail?.permission === undefined ? {} : { permission: detail.permission }),
+              ...(detail?.limit === undefined ? {} : { bucket: detail.limit.bucket }),
             });
           }
         }

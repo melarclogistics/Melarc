@@ -609,7 +609,12 @@ describe('the functions, as the catalogue and the posture check see them', () =>
     expect(APPROVED_DEFINER_EXECUTE[PROVISIONING_ROLE]?.toSorted()).toEqual(
       NAMES.map((name) => `melarc.${name}`).toSorted(),
     );
-    expect(Object.keys(APPROVED_DEFINER_EXECUTE)).toEqual([PROVISIONING_ROLE]);
+    // And the runtime's one: the read of a credential hash for the authentication capability (migration 0016). A definer function
+    // added to either list is a reviewed line here, and no other login is on the list.
+    expect(APPROVED_DEFINER_EXECUTE[API_RUNTIME_ROLE]).toEqual(['melarc.staff_credential_hash']);
+    expect(Object.keys(APPROVED_DEFINER_EXECUTE).toSorted()).toEqual(
+      [API_RUNTIME_ROLE, PROVISIONING_ROLE].toSorted(),
+    );
     const violations = await withClient(database.urlFor('postgres'), (client) =>
       catalogViolations(client),
     );

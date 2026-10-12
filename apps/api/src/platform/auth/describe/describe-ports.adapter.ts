@@ -141,7 +141,7 @@ export class DescribeSessionStore extends DescribeAdapter implements SessionStor
   recordActivity(): Promise<void> {
     return refuse('SessionStore', 'recordActivity');
   }
-  terminate(): Promise<number> {
+  terminate(): Promise<readonly string[]> {
     return refuse('SessionStore', 'terminate');
   }
 }
@@ -155,6 +155,9 @@ export class DescribeIdentityDirectory extends DescribeAdapter implements Identi
   }
   findRiderByCanonicalPhone(): Promise<PrincipalSummary | null> {
     return refuse('IdentityDirectory', 'findRiderByCanonicalPhone');
+  }
+  readIdentity(): Promise<PrincipalSummary | null> {
+    return refuse('IdentityDirectory', 'readIdentity');
   }
   lockIdentity(): Promise<PrincipalSummary | null> {
     return refuse('IdentityDirectory', 'lockIdentity');

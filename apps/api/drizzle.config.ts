@@ -9,7 +9,8 @@ import { defineConfig } from 'drizzle-kit';
  */
 export default defineConfig({
   dialect: 'postgresql',
-  schema: './src/platform/database/schema/index.ts',
+  // The platform's tables, and the tables of a permission domain beside them: `src/staff/` holds the staff identity (S0.24).
+  schema: ['./src/platform/database/schema/index.ts', './src/staff/staff-identity.schema.ts'],
   out: './migrations',
   strict: true,
 });

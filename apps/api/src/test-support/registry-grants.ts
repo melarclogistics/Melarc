@@ -83,6 +83,12 @@ export const GRANT_CEILINGS: ReadonlyMap<string, readonly Privilege[]> = new Map
   // on it (the retention of a finished job's metadata is OQ-028, the Product Owner's), and the registry's write cell reads `api`,
   // which the check reads as DELETE too. The worker's capability row lists SELECT and UPDATE and no INSERT.
   ['CredentialDeliveryJob', ['SELECT', 'INSERT', 'UPDATE']],
+  // A session ends and an identity is offboarded; neither is removed (domain-model.md §6.8: "OFFBOARDED is terminal ... does not
+  // delete"; "revocation is a state change on this record and nothing else"). No registry row gives any identity DELETE on either,
+  // although the write cell reads `api`, which the check reads as DELETE too. The grants are narrower still (migration 0016: an
+  // UPDATE of named columns only, and no INSERT on the identity until the task that inserts one).
+  ['Session', ['SELECT', 'INSERT', 'UPDATE']],
+  ['StaffIdentity', ['SELECT', 'INSERT', 'UPDATE']],
 ]);
 
 /** The privileges `login` may hold on `row`'s table. */

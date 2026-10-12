@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "tls:generate": "node harness/test-ca-main.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

@@ -1,17 +1,21 @@
 import { Global, Module, type DynamicModule } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
 import type { Logger } from 'pino';
 
 import type { AppConfig } from './config/load-config.js';
 import { ContractValidationModule } from './contract/contract-validation.module.js';
 import { fileContractSource, type ContractSource } from './contract/contract-source.js';
 import { DatabaseModule } from './database/database.module.js';
+import {
+  POLICY_COORDINATOR,
+  SESSION_ISSUER,
+  sessionProviders,
+} from './auth/sessions/session-providers.js';
 import { HealthModule } from './health/health.module.js';
 import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
-import { DenyByDefaultGuard } from './routes/deny-by-default.guard.js';
+import { guardChainProviders } from './routes/guard-chain.js';
 
 export interface PlatformModuleOptions {
   readonly config: AppConfig;
@@ -39,12 +43,24 @@ export class PlatformModule {
       providers: [
         { provide: APP_CONFIG, useValue: options.config },
         { provide: LOGGER, useValue: options.logger },
-        { provide: APP_GUARD, useClass: DenyByDefaultGuard },
+        // The guard chain, in the refusal order (S0.22): declaration, rate limit, authentication, CSRF and Origin, authorization.
+        ...guardChainProviders,
+        // The coordinator of policy-locked operations, the authenticator and the session-issue protocol (S0.24), each built from the
+        // ports the composition root bound and absent where one is missing.
+        ...sessionProviders,
         NotFoundFallback,
         LifecycleService,
         ShutdownRegistry,
       ],
-      exports: [APP_CONFIG, LOGGER, LifecycleService, ShutdownRegistry],
+      exports: [
+        APP_CONFIG,
+        LOGGER,
+        LifecycleService,
+        ShutdownRegistry,
+        // What the sign-in operations of the tasks after this one inject; the authenticator is the guard's and stays inside.
+        POLICY_COORDINATOR,
+        SESSION_ISSUER,
+      ],
     };
   }
 }

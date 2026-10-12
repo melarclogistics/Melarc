@@ -18,7 +18,9 @@ import {
 } from '../../src/platform/database/database.service.js';
 import { postgresConnectionSettings } from '../../src/platform/database/postgres-url.js';
 import { PgStatementCanceller } from '../../src/platform/database/statement-canceller.js';
+import { runExclusively } from '../../src/platform/database/transaction-gate.js';
 import {
+  BudgetClosedError,
   BudgetExpiredError,
   ExecutionBudget,
   runWithBudget,
@@ -588,6 +590,113 @@ describe('a budget that expires in the middle of work (OB-37)', () => {
 
       expect(await backends()).toHaveLength(0);
       expect(await notesWith('never committed (expired before)')).toBe(0);
+    } finally {
+      request.finish();
+      await closeAll();
+    }
+  });
+});
+
+describe('a request that is over while its transaction is open (found by the audit of 11 October 2026)', () => {
+  // Break caught: closure checked only at the start of a transaction, and expiry only at its statements and its COMMIT. The request is
+  // finished when its response is over (the client left, or it was answered); a transaction that was already open went on to issue
+  // statements and commit for a request nobody was waiting for.
+  it('refuses the next statement and commits nothing when the request is finished in the middle of the transaction', async () => {
+    const { service } = build(SLOW, 1);
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    try {
+      await expect(
+        runWithBudget(request, () =>
+          service.transactionWithContext(STAFF, async (tx) => {
+            await insertNote(tx, 'request over (before)');
+            request.finish();
+            await insertNote(tx, 'request over (after)');
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BudgetClosedError);
+
+      expect(await notesWith('request over (before)')).toBe(0);
+      expect(await notesWith('request over (after)')).toBe(0);
+      // The connection was rolled back and is usable again, or was destroyed and replaced: either way the next caller gets one.
+      const next = new ExecutionBudget(clock, 'request', 10_000);
+      try {
+        await runWithBudget(next, () =>
+          service.transactionWithContext(STAFF, (tx) => tx.execute(sql`select 1`)),
+        );
+      } finally {
+        next.finish();
+      }
+    } finally {
+      request.finish();
+      await closeAll();
+    }
+  });
+
+  // Break caught: no check between the last statement and the COMMIT, so that a request finished while the work awaited something
+  // else (an effect, a hash) still had its rows committed.
+  it('does not commit a transaction whose request was finished after its last statement', async () => {
+    const { service, logs } = build(SLOW, 1);
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    try {
+      await expect(
+        runWithBudget(request, () =>
+          service.transactionWithContext(STAFF, async (tx) => {
+            await insertNote(tx, 'request over (last statement)');
+            request.finish();
+            return 'work returned';
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BudgetClosedError);
+
+      expect(await notesWith('request over (last statement)')).toBe(0);
+      expect(
+        logs
+          .records()
+          .find((record) => String(record.msg).includes('nothing it did was committed')),
+      ).toMatchObject({ level: 'warn' });
+    } finally {
+      request.finish();
+      await closeAll();
+    }
+  });
+
+  // Break caught: the exclusive handle of the scope probe taking its statements without the checks the ordinary handle makes.
+  it('refuses a statement of the exclusive handle once the request is finished', async () => {
+    const { service } = build(SLOW, 1);
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    try {
+      await expect(
+        runWithBudget(request, () =>
+          service.transactionWithContext(STAFF, async (tx) => {
+            await runExclusively(tx, async (exclusive) => {
+              request.finish();
+              await insertNote(exclusive, 'request over (exclusive)');
+            });
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BudgetClosedError);
+
+      expect(await notesWith('request over (exclusive)')).toBe(0);
+    } finally {
+      request.finish();
+      await closeAll();
+    }
+  });
+
+  // The request stays open, so the same shapes commit: the check refuses a finished request and nothing else.
+  it('still commits a transaction whose request is open', async () => {
+    const { service } = build(SLOW, 1);
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    try {
+      await runWithBudget(request, () =>
+        service.transactionWithContext(STAFF, async (tx) => {
+          await insertNote(tx, 'request open (first)');
+          await insertNote(tx, 'request open (second)');
+        }),
+      );
+
+      expect(await notesWith('request open (first)')).toBe(1);
+      expect(await notesWith('request open (second)')).toBe(1);
     } finally {
       request.finish();
       await closeAll();

@@ -41,6 +41,10 @@ set MELARC_BROWSERS=chromium,firefox,webkit
 pnpm run test:browser
 ```
 
+The integrated run (`pnpm run test:e2e`) serves the Ops Portal over plain HTTP in Chromium only. The trusted HTTPS origin
+the identity slice needs, and the test CA behind it, are not set up on this machine: what exists, what is blocked and the
+command for a clean machine are in [e2e/README.md](e2e/README.md).
+
 ## 2. Create the local settings
 
 ```text
