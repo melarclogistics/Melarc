@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../../src/app.module.js';
 import { API_RUNTIME_ROLE, loadConfig } from '../../src/platform/config/load-config.js';
 import { Anonymous } from '../../src/platform/routes/access-declaration.js';
+import { clearIdentifierIn } from '../../src/test-support/clear-identifier.js';
 import { validEnv } from '../../src/test-support/config-env.js';
 import { startTestApp, type TestApp } from '../../src/test-support/test-app.js';
 import { observe, type Observer } from './support/observe.js';
@@ -116,7 +117,9 @@ describe('an anonymous route that names a bucket, over the authoritative limiter
     expect((await admissions()) - before).toBe(1);
   });
 
-  // Break caught (SECURITY_DESIGN.md §14.12): an identifier stored in clear, in any column of the limiter's table.
+  // Break caught (SECURITY_DESIGN.md §14.12): an identifier stored in clear, in any column of the limiter's table. The identifiers are
+  // looked for as whole words (`clear-identifier.ts`): the row is mostly a random digest and a uuid, and a word made of the letters a to f,
+  // "ada" here, turns up in one by chance, which failed the hosted run of 13 October 2026 with no identifier stored.
   it('stores a keyed digest and no identifier', async () => {
     await signIn('stored-check@example.test');
 
@@ -126,9 +129,9 @@ describe('an anonymous route that names a bucket, over the authoritative limiter
 
     expect(rows.length).toBeGreaterThan(0);
     for (const { row } of rows) {
-      expect(row).not.toContain('example.test');
-      expect(row).not.toContain('ada');
-      expect(row).not.toContain('grace');
+      expect(
+        clearIdentifierIn(row, ['example.test', 'ada', 'grace', 'stored-check']),
+      ).toBeUndefined();
     }
   });
 
