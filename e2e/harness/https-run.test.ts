@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -45,9 +45,18 @@ const BEFORE_CA = [
 /** The projects of the second run: WebKit's proofs that need its trust, with the CA in the system store. */
 const WITH_CA = ['https-webkit', 'https-webkit-secret'] as const;
 
-const args = (projects: readonly string[]) => [
+/**
+ * Where each run writes its artifacts. Playwright removes the output directory of every project it is about to run when a run starts,
+ * so two runs that share one directory erase the first run's evidence (traces, attachments) when the second begins: the first hosted
+ * run of the two-run command kept 10 KB of diagnostics for that reason, whatever the first run had found.
+ */
+const BEFORE_OUT = 'test-results/https-1-own-stores';
+const WITH_OUT = 'test-results/https-2-system-store';
+
+const args = (projects: readonly string[], output: string) => [
   'test',
   ...projects.map((name) => `--project=${name}`),
+  `--output=${output}`,
 ];
 
 function harness(
@@ -84,7 +93,9 @@ function harness(
     },
     openssl: () => undefined,
     playwright: (given, environment) => {
-      const projects = given.slice(1).map((argument) => argument.replace('--project=', ''));
+      const projects = given
+        .filter((argument) => argument.startsWith('--project='))
+        .map((argument) => argument.slice('--project='.length));
       events.push(`playwright ${projects.join(',')}`);
       runs.push({ args: given, environment });
       return (options.playwright ?? (() => 0))(projects);
@@ -167,7 +178,10 @@ describe('what it does, in order', () => {
       'system-trust remove',
       'remove /tmp/run',
     ]);
-    expect(run.runs.map((call) => call.args)).toEqual([args(BEFORE_CA), args(WITH_CA)]);
+    expect(run.runs.map((call) => call.args)).toEqual([
+      args(BEFORE_CA, BEFORE_OUT),
+      args(WITH_CA, WITH_OUT),
+    ]);
     for (const call of run.runs) {
       expect(call.environment.MELARC_E2E_TLS_DIR).toBe(TLS);
       expect(call.environment.CI).toBe('true');
@@ -176,8 +190,18 @@ describe('what it does, in order', () => {
 
   it('is two runs, the second with the CA in the system store, and every HTTPS project in exactly one', () => {
     expect(HTTPS_PHASES).toEqual([
-      { name: expect.any(String) as string, projects: BEFORE_CA, systemTrust: false },
-      { name: expect.any(String) as string, projects: WITH_CA, systemTrust: true },
+      {
+        name: expect.any(String) as string,
+        projects: BEFORE_CA,
+        systemTrust: false,
+        output: BEFORE_OUT,
+      },
+      {
+        name: expect.any(String) as string,
+        projects: WITH_CA,
+        systemTrust: true,
+        output: WITH_OUT,
+      },
     ]);
     expect(HTTPS_PROJECTS).toEqual([...BEFORE_CA, ...WITH_CA]);
     expect(new Set(HTTPS_PROJECTS).size).toBe(HTTPS_PROJECTS.length);
@@ -348,6 +372,163 @@ describe('how it ends', () => {
     expect(runHttpsSuite(run.deps)).toBe(2);
 
     expect(run.err.join('\n')).toContain('rm failed');
+  });
+});
+
+describe('what a failure leaves behind', () => {
+  const outputs = HTTPS_PHASES.map((phase) => phase.output);
+
+  // Break caught (the first hosted run of the two-run command, 13 October 2026): the second run clearing the first run's output
+  // directory when it began, so that the traces and attachments of a failure of the first run were gone before the artifact was kept,
+  // and the artifact said nothing of what had failed. Playwright removes the output directory of every project it runs at the start of a
+  // run; each run therefore writes to a directory of its own, and none is inside another or inside the plain run's.
+  it('gives each run an output directory of its own, none inside another and none the plain run’s', () => {
+    expect(outputs).toEqual([BEFORE_OUT, WITH_OUT]);
+    expect(new Set(outputs).size).toBe(outputs.length);
+    const plain = posix.normalize(String(config.outputDir));
+    for (const output of outputs) {
+      expect(output, 'is not the plain run’s').not.toBe(plain);
+      expect(output.startsWith(`${plain}/`), 'is not inside the plain run’s').toBe(false);
+      expect(plain.startsWith(`${output}/`), 'does not hold the plain run’s').toBe(false);
+      for (const other of outputs.filter((candidate) => candidate !== output)) {
+        expect(output.startsWith(`${other}/`), `${output} is not inside ${other}`).toBe(false);
+      }
+    }
+  });
+
+  it('hands each run its directory to Playwright, as the output of that run and no other', () => {
+    const run = harness();
+
+    runHttpsSuite(run.deps);
+
+    expect(
+      run.runs.map((call) => call.args.filter((argument) => argument.startsWith('--output='))),
+    ).toEqual([[`--output=${BEFORE_OUT}`], [`--output=${WITH_OUT}`]]);
+  });
+
+  // Break caught: a directory of a run written somewhere the failure artifact does not keep, so that a failing job loses the evidence
+  // of one of the runs. The workflow keeps `e2e/test-results`, and both directories are below it.
+  it('writes below the directory that the failure artifact keeps', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const start = workflow.indexOf('name: Keep the failure diagnostics');
+    expect(start, 'the workflow keeps the failure diagnostics').toBeGreaterThan(-1);
+    const step = workflow.slice(start, workflow.indexOf('if-no-files-found', start));
+
+    expect(step).toMatch(/^\s+e2e\/test-results\s*$/m);
+    for (const output of outputs) expect(output.startsWith('test-results/')).toBe(true);
+  });
+});
+
+describe('what it says of each run, and of all of them', () => {
+  const said = (run: ReturnType<typeof harness>) => run.out.join('\n');
+
+  it('says the exit status of each run when it ends, and sums them up at the end', () => {
+    const run = harness();
+
+    runHttpsSuite(run.deps);
+
+    expect(said(run)).toContain('HTTPS run 1 of 2 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 2 of 2 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run summary:');
+    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
+    expect(said(run)).toContain(`run 2 of 2: exit status 0; output ${WITH_OUT}`);
+    expect(said(run)).toContain('overall exit status 0');
+    expect(run.out.at(-1)).toBe('  overall exit status 0');
+  });
+
+  // Break caught: a failure of the first run reported as the second run's, or the second run's status hiding the first: the summary
+  // says what each run answered and which one the overall status comes from, the first that did not pass.
+  it('names the first run that failed as the source of the overall status, and says what the other did', () => {
+    const run = harness({ playwright: (projects) => (projects.includes('https-webkit') ? 2 : 1) });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain('HTTPS run 1 of 2 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 2 of 2 ended with exit status 2.');
+    expect(said(run)).toContain(`run 1 of 2: exit status 1; output ${BEFORE_OUT}`);
+    expect(said(run)).toContain(`run 2 of 2: exit status 2; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 2');
+  });
+
+  it('names the second run when only the second failed', () => {
+    const run = harness({ playwright: (projects) => (projects.includes('https-webkit') ? 1 : 0) });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
+    expect(said(run)).toContain(`run 2 of 2: exit status 1; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 2');
+  });
+
+  it('says that a run that threw did not complete, and that the next one was not run', () => {
+    const run = harness({
+      playwright: () => {
+        throw new Error('spawn failed');
+      },
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(
+      `run 1 of 2: did not complete (an error stopped it; see above); output ${BEFORE_OUT}`,
+    );
+    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 2');
+  });
+
+  it('says that the second run was not run when the CA could not be put in the system store', () => {
+    const run = harness({
+      install: () => {
+        throw new Error('update-ca-certificates failed (exit 1)');
+      },
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
+    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 2');
+  });
+
+  it('says that no run was made when the CA could not be made', () => {
+    const run = harness({
+      mint: () => {
+        throw new Error('The test CA was not made: openssl failed');
+      },
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 1 of 2: not run; output ${BEFORE_OUT}`);
+    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, no run was made (see above)');
+  });
+
+  // Break caught: a CA left in the system store reported as a pass that merely had nothing to say: the status comes from taking it out.
+  it('says the status came from taking the CA out when both runs passed', () => {
+    const run = harness({
+      remove: () => {
+        throw new Error('rm failed');
+      },
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 2 of 2: exit status 0; output ${WITH_OUT}`);
+    expect(run.out.at(-1)).toBe(
+      '  overall exit status 1, from taking the CA out of the system trust store (see above)',
+    );
+  });
+
+  it('says nothing of runs when it refuses to run at all', () => {
+    const run = harness({ platform: 'win32' });
+
+    expect(runHttpsSuite(run.deps)).toBe(2);
+
+    expect(run.out).toEqual([]);
   });
 });
 

@@ -73,7 +73,10 @@ passes in full.**
   persistent context keeps what a page stores), and **without test certificates a spec is skipped with the reason on a developer
   machine and fails in CI**, so a run that did not make the proofs is never green.
 - `tests/https-trust.spec.ts` is the **per-engine spike**: the Ops shell loads over HTTPS with the certificate validated, and a
-  browser of the same engine without the mechanism refuses the same origin **with that engine's own certificate diagnostic**
+  browser of the same engine without the mechanism (launched in an environment of its own, given explicitly: an empty disposable home, no
+  variable that names a store and none of the harness's own, `harness/untrusted-browser.ts`; **Playwright merges a project's launch
+  defaults under any option that is left out**, so deleting `env` from a copy of the project's options brings the trusted environment
+  back, which is how Chromium loaded the origin it must refuse in the first hosted run) refuses the same origin **with that engine's own certificate diagnostic**
   (`harness/trust-failure.ts`: a timeout, a name or connection that did not work, a blocked request, a crash and a closed page are not
   evidence, and a signature that is not on its list fails the test to be diagnosed, never accepted), beside a probe showing that the
   endpoint is up and its leaf validates against the CA for a client that trusts that CA (`harness/https-probe.ts`); each test attaches
@@ -93,8 +96,11 @@ passes in full.**
   CA in it, and runs the HTTPS projects with `MELARC_E2E_TLS_DIR` naming it in **two runs**: first Chromium, Firefox and WebKit's
   refusal, then, with the CA put in the system store of a GitHub-hosted runner, WebKit's other proofs. It takes the CA out of the
   system store and removes the directory in a `finally` whatever happened, runs both whatever the first did, and exits with the first
-  failure. Where the system store may not be changed (anywhere but a GitHub-hosted runner) the second run is made without it, says so,
-  and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
+  failure. Each run says its exit status when it ends, and the command ends with a summary of every run and of the one the overall
+  status comes from. Each run writes to an output directory of its own below `test-results` (`--output`), because Playwright clears the
+  output directory of the projects it runs at the start of a run, and the failure artifact of CI keeps `e2e/test-results`; the recorders
+  of the secret projects are unchanged. Where the system store may not be changed (anywhere but a GitHub-hosted runner) the second run
+  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
   installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.
