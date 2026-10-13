@@ -2,10 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { systemTrustRefusal } from './system-trust.ts';
+
 /**
- * How each browser engine is made to trust the disposable test CA (S0.23; implementation plan §11.5). **Nothing here changes a
- * trust store of the machine, the user or the system**: each engine is given a store of its own, in a directory made for the run,
- * that holds the CA certificate (public) and nothing else, and the engine is pointed at it. The run removes the directory.
+ * How each browser engine is made to trust the disposable test CA (S0.23; implementation plan §11.5). **Chromium and Firefox are each
+ * given a store of their own**, in a directory made for the run, that holds the CA certificate (public) and nothing else, and are
+ * pointed at it; the run removes the directory. **WebKit cannot be given one** (below), so on a GitHub-hosted runner alone its trust is
+ * the system store, which `system-trust.ts` changes for WebKit's proofs and restores. Nothing in this file changes any store: it plans.
  *
  * - **Chromium** (Playwright's build, on Linux) reads the NSS database at `$HOME/.pki/nssdb`. The database is made in a home
  *   directory of its own, and only the browser process is launched with that `HOME`.
@@ -13,9 +16,12 @@ import { join } from 'node:path';
  *   from**: each test is given a private copy of it for a persistent context and the copy is removed when the test ends
  *   (`fresh-profile.ts`, `https-test.ts`), because a persistent context keeps what a page stores, and a profile shared by tests would
  *   carry one test's cookies and storage into the next.
- * - **WebKit** (Playwright's build, on Linux, over libsoup and glib-networking): the candidate is the trust file the TLS library
- *   honours from the environment (`SSL_CERT_FILE`), set for the browser process only. **It is unproven**: whether this build honours
- *   it is exactly what the spike (`tests/https-trust.spec.ts`) is there to find out, and WebKit is reported blocked until it passes.
+ * - **WebKit** (Playwright's build, on Linux, over libsoup and glib-networking's GnuTLS backend) **has no mechanism for one process**.
+ *   The candidate was `SSL_CERT_FILE` for the browser process; the first hosted run (12 October 2026) showed it ignored, and the
+ *   build, glib-networking and GnuTLS 3.8.3 (Ubuntu 24.04) agree: that backend loads the system's trust list and reads no environment
+ *   variable for it. Its trust is therefore the *system* store. The owner decided on 12 October 2026 that, on a GitHub-hosted runner
+ *   only, the run puts the CA there for WebKit's proofs and removes it when they end (`system-trust.ts`, `https-run.ts`). Anywhere
+ *   else WebKit has no disposable form, and its proofs fail to trust, which is the correct report.
  * - **Branded Chrome and Edge** are Chromium, and trust the same way on Linux; they are not in the automated runs. On Windows and
  *   macOS, Chromium, Chrome and Edge use the operating system's store, which has no disposable form: a persistent machine-wide trust
  *   change needs the owner's exact installation and removal plan first, so the automated runs do not exist there (`e2e/README.md`).
@@ -38,6 +44,11 @@ export interface EngineTrust {
   readonly engine: Engine;
   /** What makes the engine trust the CA, as the spike records it. */
   readonly mechanism: string;
+  /**
+   * Where the trust lives: in a store of the run's own that only this engine's browser process is pointed at (`process`), or in the
+   * store of the whole machine (`system`), which the run changes for this engine's proofs and restores (`system-trust.ts`).
+   */
+  readonly scope: 'process' | 'system';
   /** The environment for the browser process, over the process's own. */
   readonly env: Readonly<Record<string, string>>;
   /**
@@ -70,7 +81,13 @@ const seed = (database: string, caPath: string): string[][] => [
 
 export function planEngineTrust(
   engine: Engine,
-  options: { readonly root: string; readonly caPath: string; readonly platform?: NodeJS.Platform },
+  options: {
+    readonly root: string;
+    readonly caPath: string;
+    readonly platform?: NodeJS.Platform;
+    /** What says whether this is a GitHub-hosted runner (WebKit's only form of trust is the system store of one). */
+    readonly environment?: NodeJS.ProcessEnv;
+  },
 ): EnginePlan {
   const platform = options.platform ?? process.platform;
   if (platform !== 'linux') {
@@ -91,6 +108,7 @@ export function planEngineTrust(
           engine,
           mechanism:
             'the NSS database of a home directory made for the run (HOME is set for the browser process only)',
+          scope: 'process',
           env: { HOME: home },
           basis: 'documented',
         },
@@ -106,6 +124,7 @@ export function planEngineTrust(
           engine,
           mechanism:
             'a profile seeded with the CA in cert9.db, copied for each test, from which a persistent context is launched',
+          scope: 'process',
           env: {},
           profileTemplate: profile,
           basis: 'documented',
@@ -114,19 +133,29 @@ export function planEngineTrust(
         certutil: seed(profile, caPath),
       };
     }
-    case 'webkit':
+    case 'webkit': {
+      const refusal = systemTrustRefusal(platform, options.environment ?? process.env);
+      if (refusal !== undefined) {
+        return {
+          supported: false,
+          engine,
+          reason: `WebKit trusts only the system trust store of the machine (its TLS library reads no environment variable for it), so it has no disposable form here: ${refusal}`,
+        };
+      }
       return {
         supported: true,
         trust: {
           engine,
           mechanism:
-            'SSL_CERT_FILE, set for the browser process only, naming the CA certificate (whether this build honours it is what the spike shows)',
-          env: { SSL_CERT_FILE: caPath },
-          basis: 'candidate',
+            'the system trust store of a GitHub-hosted runner, which WebKit reads and no environment variable overrides: the run puts the CA there for WebKit’s proofs only and removes it when they end',
+          scope: 'system',
+          env: {},
+          basis: 'documented',
         },
         directories: [],
         certutil: [],
       };
+    }
   }
 }
 

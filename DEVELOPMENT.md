@@ -44,7 +44,8 @@ pnpm run test:browser
 The integrated run (`pnpm run test:e2e`) serves the Ops Portal over plain HTTP in Chromium only. The trusted HTTPS origin
 the identity slice needs, with Firefox and WebKit, is `pnpm run test:e2e:https`: it makes a disposable test CA, so it runs in CI
 and on a machine cleared for key material, and it refuses on this workstation (Windows has no disposable trust store for Chromium or
-Edge). What exists, what is blocked and the steps for a clean machine are in [e2e/README.md](e2e/README.md).
+Edge). On a machine cleared for key material WebKit's proofs fail to trust, because WebKit's only trust is the system store, which the run
+changes only on a GitHub-hosted runner. What exists, what is blocked and the steps for a clean machine are in [e2e/README.md](e2e/README.md).
 
 ## 2. Create the local settings
 

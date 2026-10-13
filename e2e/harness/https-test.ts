@@ -19,9 +19,10 @@ import { TLS_FILES, tlsDirectoryFrom } from './tls-material.ts';
  *   as the harness's contexts may reach their own (`browser-guard.ts`); service workers are blocked.
  * - **Firefox is launched from a private copy of its seeded profile for each test** (a persistent context): its trust store is the
  *   profile's `cert9.db`, and a persistent context keeps what a page stores, so the seed is a template that is never launched from
- *   (`fresh-profile.ts`) and the copy is removed when the test ends. Chromium and WebKit are launched with the environment their
- *   trust mechanism needs, set in the project's launch options (`playwright.config.ts`) for the browser process only, and get a fresh
- *   context from Playwright as any test does.
+ *   (`fresh-profile.ts`) and the copy is removed when the test ends. Chromium is launched with the environment its trust mechanism needs
+ *   (`HOME`), set in the project's launch options (`playwright.config.ts`) for the browser process only, and WebKit with none (its
+ *   trust is the system store, which the run changes on a GitHub-hosted runner: `system-trust.ts`); both get a fresh context from
+ *   Playwright as any test does.
  *
  * Contexts are made here and not by Playwright's own fixture because Firefox's has to be persistent; the options of the project
  * that this test needs (the launch options, the context options) are read from the same fixtures Playwright reads them from.

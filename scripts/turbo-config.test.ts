@@ -96,6 +96,28 @@ describe('turbo.json', () => {
     assert.ok(passed.includes('PLAYWRIGHT_BROWSERS_PATH'));
     assert.equal(task.cache, false, 'a browser run is never replayed from the cache');
   });
+
+  // Break caught (the first hosted run, 12 October 2026): the variables that say "this is a GitHub-hosted runner" dropped by Turborepo's
+  // strict environment, so that the HTTPS run sees `CI` and not `GITHUB_ACTIONS` or `RUNNER_ENVIRONMENT`, refuses to put the CA in the
+  // system store, and WebKit's proofs fail to trust for a reason that has nothing to do with WebKit. The run decides what it may do on
+  // exactly these variables (`e2e/harness/https-run.ts`, `e2e/harness/system-trust.ts`).
+  it('passes the variables the HTTPS run decides on through to it', () => {
+    const task = turbo.tasks?.['test:e2e:https'];
+    assert.ok(task !== undefined, 'test:e2e:https is a task');
+    const passed = task.passThroughEnv ?? [];
+    for (const name of [
+      'CI',
+      'GITHUB_ACTIONS',
+      'RUNNER_ENVIRONMENT',
+      'MELARC_E2E_KEYS_CLEARED',
+      'OPENSSL',
+      'CERTUTIL',
+      'PLAYWRIGHT_BROWSERS_PATH',
+    ]) {
+      assert.ok(passed.includes(name), `${name} reaches the HTTPS run`);
+    }
+    assert.equal(task.cache, false, 'a run that makes a CA is never replayed from the cache');
+  });
 });
 
 /**

@@ -101,6 +101,7 @@ describe('the Playwright configuration', () => {
       'https-chromium-secret',
       'https-firefox',
       'https-firefox-secret',
+      'https-webkit-control',
       'https-webkit',
       'https-webkit-secret',
       'https-chrome',
@@ -120,6 +121,11 @@ describe('the Playwright configuration', () => {
       expect(secret?.use).toMatchObject(NO_EVIDENCE);
       expect(ordinary?.use).not.toHaveProperty('trace');
     }
+    // WebKit's refusal (`https-webkit-control`) runs ordinary specs only, in an ordinary project that records, like the others of its
+    // kind: it matches no secret spec and turns no recorder off.
+    const control = projects.find((project) => project.name === 'https-webkit-control');
+    expect(control?.testMatch).toBe('**/https-*.spec.ts');
+    expect(control?.use).not.toHaveProperty('trace');
     for (const name of ['chromium', 'chromium-secret']) {
       expect(projects.find((project) => project.name === name)?.testIgnore).toBe('**/https-*');
     }

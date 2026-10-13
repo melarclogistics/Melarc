@@ -47,6 +47,8 @@
         "MELARC_PG_RUNTIME_PASSWORD",
         "PLAYWRIGHT_BROWSERS_PATH",
         "CI",
+        "GITHUB_ACTIONS",
+        "RUNNER_ENVIRONMENT",
         "MELARC_E2E_KEYS_CLEARED",
         "OPENSSL",
         "CERTUTIL"

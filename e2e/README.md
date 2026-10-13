@@ -28,9 +28,11 @@ pnpm --filter @melarc/e2e test   # the harness's own tests; no database or brows
 
 The identity slice's cookies are `Secure`, which a plain-HTTP origin cannot prove in every engine, so the slice needs a browser-facing
 HTTPS origin whose certificate a browser really validates (never `ignoreHTTPSErrors`). **Everything below is built and its logic is
-tested without a certificate; none of it has been run against a certificate, a browser trust store or Firefox and WebKit, because no
-test CA may be made on the shared developer workstation (the owner's ruling of 11 October 2026). The first run in a clean
-environment is the proof, and S0.23 is not complete until it has passed.**
+tested without a certificate, because no test CA may be made on the shared developer workstation (the owner's ruling of 11 October
+2026). The first hosted run (12 October 2026) was the first time any of it met a real certificate and browser: 22 of its 33 tests
+passed, and the failures included every WebKit test that needs the CA trusted, because WebKit ignores `SSL_CERT_FILE` (its trust is
+now the system store of a GitHub-hosted runner, below; the plan, §7.21, has the record). S0.23 is not complete until a hosted run
+passes in full.**
 
 - `harness/tls-material.ts` is the policy for a directory of test certificates named by `MELARC_E2E_TLS_DIR`: outside the
   checkout wherever the path leads (links, junctions, other spellings and shares of the same folder are resolved and compared
@@ -50,15 +52,17 @@ environment is the proof, and S0.23 is not complete until it has passed.**
   `Set-Cookie` included, unchanged. The API is configured with its exact origin (`OPS_ORIGIN`), so its CSRF and CORS judgements are
   made against the origin the browser really sends. The values of its headers are the harness's own; the production edge's are
   release gate G2.
-- `harness/engine-trust.ts` plans, and makes, a store of its own for each engine below the TLS directory, in the run's directory
-  only, holding the CA certificate and nothing else; nothing of the machine, the user or the system is changed:
+- `harness/engine-trust.ts` plans, and makes, a store of its own for Chromium and Firefox below the TLS directory, in the run's
+  directory only, holding the CA certificate and nothing else. WebKit has no store of its own to be given (below): **on a
+  GitHub-hosted runner alone**, `harness/system-trust.ts` puts the CA in the system store for WebKit's proofs and takes it out when they
+  end. Nothing else of the machine, the user or the system is changed:
 
-  | Engine                 | Mechanism                                                                                                                                         | Basis                                                                                                                     |
-  | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-  | Chromium               | the NSS database of a home directory made for the run (`certutil`; `HOME` set for the browser process only)                                       | documented behaviour of Chromium on Linux                                                                                 |
-  | Firefox                | a profile seeded with the CA in `cert9.db` (`certutil`), kept as a template and copied for each test, from which a persistent context is launched | documented behaviour of Firefox                                                                                           |
-  | WebKit                 | `SSL_CERT_FILE` naming the CA certificate, for the browser process only                                                                           | **a candidate**: whether Playwright's WebKit build honours it is what the spike shows; WebKit stays blocked until it does |
-  | Chrome, Edge (branded) | as Chromium                                                                                                                                       | a smoke check by a person (below)                                                                                         |
+  | Engine                 | Mechanism                                                                                                                                         | Basis                                                                                                                                                                                                                                                                                               |
+  | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Chromium               | the NSS database of a home directory made for the run (`certutil`; `HOME` set for the browser process only)                                       | documented behaviour of Chromium on Linux                                                                                                                                                                                                                                                           |
+  | Firefox                | a profile seeded with the CA in `cert9.db` (`certutil`), kept as a template and copied for each test, from which a persistent context is launched | documented behaviour of Firefox                                                                                                                                                                                                                                                                     |
+  | WebKit                 | the system trust store of a GitHub-hosted runner (`sudo` and `update-ca-certificates`, for WebKit's proofs only, taken out when they end)         | WebKit's TLS library (libsoup over glib-networking's GnuTLS backend) reads the system's trust list and no environment variable: the first hosted run showed `SSL_CERT_FILE` ignored. The owner's decision of 12 October 2026. On any other machine WebKit has no disposable form and fails to trust |
+  | Chrome, Edge (branded) | as Chromium                                                                                                                                       | a smoke check by a person (below)                                                                                                                                                                                                                                                                   |
 
   On Windows and macOS Chromium, Chrome and Edge use the operating system's store, which has no disposable form, so there is no
   automated HTTPS run there; a persistent machine-wide trust change needs the owner's exact installation and removal plan first.
@@ -73,7 +77,10 @@ environment is the proof, and S0.23 is not complete until it has passed.**
   (`harness/trust-failure.ts`: a timeout, a name or connection that did not work, a blocked request, a crash and a closed page are not
   evidence, and a signature that is not on its list fails the test to be diagnosed, never accepted), beside a probe showing that the
   endpoint is up and its leaf validates against the CA for a client that trusts that CA (`harness/https-probe.ts`); each test attaches
-  the mechanism, the browser version and what it proves. `tests/https-isolation.spec.ts` shows on the real fixture that one test's
+  the mechanism, the browser version and what it proves. WebKit's only trust is the system store, so its browser "without the
+  mechanism" exists only before the CA is put there: its refusal is the test tagged `@untrusted-control`, run first in a project of its
+  own (`https-webkit-control`) while the store lacks the CA, and WebKit's other proofs run after (`https-webkit`,
+  `https-webkit-secret`). `tests/https-isolation.spec.ts` shows on the real fixture that one test's
   persistent cookie and local storage are not there in the next, and that the CA is still trusted. `tests/https-headers.spec.ts` shows the edge headers on
   the page and on an API response (`GBT-W9`) and the API's `Cache-Control: no-store` (`GBT-W8`). `tests/https-cookies.secret.test.ts`
   shows that each engine stores the product's session cookies as set (`Secure`, host-only, `Path=/`, `SameSite=Lax`, `HttpOnly` for
@@ -83,9 +90,12 @@ environment is the proof, and S0.23 is not complete until it has passed.**
   the harness's technical routes (`/api/v1/e2e/cookies/*`, `/api/v1/e2e/echo`), which exist only in the test entry point, so they
   are **fixture/platform evidence** and say nothing of a real sign-in.
 - **The command is `pnpm run test:e2e:https`** (`harness/https-run.ts`): it makes a private directory outside the checkout, makes the
-  CA in it, runs the six HTTPS projects (an ordinary and a secret one for each engine) with `MELARC_E2E_TLS_DIR` naming it, and removes
-  the directory in a `finally` whatever happened. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with
-  `libnss3-tools` installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
+  CA in it, and runs the HTTPS projects with `MELARC_E2E_TLS_DIR` naming it in **two runs**: first Chromium, Firefox and WebKit's
+  refusal, then, with the CA put in the system store of a GitHub-hosted runner, WebKit's other proofs. It takes the CA out of the
+  system store and removes the directory in a `finally` whatever happened, runs both whatever the first did, and exits with the first
+  failure. Where the system store may not be changed (anywhere but a GitHub-hosted runner) the second run is made without it, says so,
+  and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
+  installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.
 - **A smoke check in branded Chrome and Edge** is a person's, on a machine cleared for key material (a clean Linux machine or
@@ -108,7 +118,8 @@ tls:generate <a directory outside the checkout>`, then, with `MELARC_E2E_TLS_DIR
 
 **What is still blocked, and reported blocked, never green:** every proof above in a real browser, until the first run in CI or on a
 cleared machine passes (`pnpm run test:e2e:https` is the first real evidence that `openssl` accepts the generator's arguments, that
-`certutil` seeds the stores, that each engine trusts the CA by its mechanism, and that WebKit's candidate works or is replaced); the
+`certutil` seeds the stores, and that each engine trusts the CA by its mechanism: the first hosted run showed WebKit's first candidate
+does not work, and its replacement, the system store of a GitHub-hosted runner, is shown by the next); the
 branded Chrome and Edge smoke check; any HTTPS run on Windows or macOS; and the sign-in, MFA, revocation and rotation proofs of
 `AC-SLICE-000-127` and `GBT-W13` over a real sign-in, which need operations that are not built. The generator's name-constraint proof
 and the leaf's validation by each engine are claims about software this repository does not control: they are shown by the run, not by

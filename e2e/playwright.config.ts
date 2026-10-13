@@ -21,9 +21,10 @@ const DEVICES: Readonly<Record<Engine, Use>> = {
 
 /**
  * What a project of the trusted HTTPS origin (S0.23) uses: the engine's device, and the environment that engine's trust mechanism needs,
- * set in its launch options for the browser process alone (`harness/engine-trust.ts` plans it; global setup makes the stores). An engine
- * with no disposable store here (Windows, macOS) gets none and its specs fail to trust, which is the correct report. Without test
- * certificates the specs are skipped with the reason, or fail in CI (`harness/https-test.ts`), and are never green for not having run.
+ * set in its launch options for the browser process alone (`harness/engine-trust.ts` plans it; global setup makes the stores; WebKit
+ * needs none, its trust is the system store of a GitHub-hosted runner, `harness/system-trust.ts`). An engine with no disposable store
+ * here (Windows, macOS) gets none and its specs fail to trust, which is the correct report. Without test certificates the specs are
+ * skipped with the reason, or fail in CI (`harness/https-test.ts`), and are never green for not having run.
  */
 function httpsUse(engine: Engine): Use {
   const directory = tlsDirectoryFrom(process.env);
@@ -99,7 +100,22 @@ export default defineConfig({
       testMatch: '**/https-*.secret.test.ts',
       use: { ...httpsUse('firefox'), ...NO_EVIDENCE },
     },
-    { name: 'https-webkit', testMatch: '**/https-*.spec.ts', use: httpsUse('webkit') },
+    // WebKit has no trust to give one process (it reads the system store and nothing else), so its proofs are made in two stages
+    // (harness/https-run.ts): `https-webkit-control` runs only the refusal, the test tagged `@untrusted-control`, while the system store
+    // lacks the CA, and `https-webkit` runs every other spec once the CA is there. One tag and one pattern split the specs; a test
+    // (harness/https-run.test.ts) holds the two projects and the tag together, so that the refusal is never run in both or in neither.
+    {
+      name: 'https-webkit-control',
+      testMatch: '**/https-*.spec.ts',
+      grep: /@untrusted-control/,
+      use: httpsUse('webkit'),
+    },
+    {
+      name: 'https-webkit',
+      testMatch: '**/https-*.spec.ts',
+      grepInvert: /@untrusted-control/,
+      use: httpsUse('webkit'),
+    },
     {
       name: 'https-webkit-secret',
       testMatch: '**/https-*.secret.test.ts',

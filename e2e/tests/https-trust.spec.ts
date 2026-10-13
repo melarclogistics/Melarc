@@ -54,55 +54,59 @@ test.describe('the trusted HTTPS origin, in each engine', () => {
 
   // Break caught: trust that is not the CA's: a page that loads because validation was off, or because the machine's store held
   // the CA; and a refusal that is not the certificate's (F03): a deadline, a name that did not resolve, a blocked request, a crash.
-  test('refuses the same origin, with the engine’s certificate diagnostic, in a browser of this engine that does not have the mechanism', async ({
-    playwright,
-    browserName,
-    browserOrigin,
-    launchOptions,
-    externalRequests,
-  }, testInfo) => {
-    // The endpoint is up and its leaf validates against the CA, for a client that trusts that CA and nothing else: whatever the browser
-    // then does is attributable to trust, and a failure of this line is a failure of the origin, not of the engine.
-    const directory = tlsDirectoryFrom(process.env);
-    if (directory === undefined)
-      throw new Error('the test certificates are gone from the environment');
-    const answered = await originAnswers(
-      browserOrigin,
-      readFileSync(join(directory, TLS_FILES.ca)),
-    );
-    expect(answered, 'the origin must answer a client that trusts the test CA').toBe(200);
-
-    const withoutTrust = { ...launchOptions };
-    delete withoutTrust.env;
-    const untrusting = await playwright[browserName].launch(withoutTrust);
-    try {
-      const context = await untrusting.newContext({ serviceWorkers: 'block' });
-      await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
-      const page = await context.newPage();
-
-      const failure = await page.goto(browserOrigin).then(
-        () => undefined,
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  //
+  // The tag is how WebKit is given its two stages (`playwright.config.ts`, `harness/https-run.ts`): WebKit's only trust is the system
+  // store, so a browser "without the mechanism" exists only before the CA is put there, and this test is the one that runs before.
+  test(
+    'refuses the same origin, with the engine’s certificate diagnostic, in a browser of this engine that does not have the mechanism',
+    { tag: '@untrusted-control' },
+    async (
+      { playwright, browserName, browserOrigin, launchOptions, externalRequests },
+      testInfo,
+    ) => {
+      // The endpoint is up and its leaf validates against the CA, for a client that trusts that CA and nothing else: whatever the browser
+      // then does is attributable to trust, and a failure of this line is a failure of the origin, not of the engine.
+      const directory = tlsDirectoryFrom(process.env);
+      if (directory === undefined)
+        throw new Error('the test certificates are gone from the environment');
+      const answered = await originAnswers(
+        browserOrigin,
+        readFileSync(join(directory, TLS_FILES.ca)),
       );
+      expect(answered, 'the origin must answer a client that trusts the test CA').toBe(200);
 
-      expect(failure, 'an untrusted CA must be refused').toBeDefined();
-      const verdict = classifyNavigationFailure(browserName, failure ?? '');
-      await testInfo.attach('untrusted-refusal', {
-        contentType: 'application/json',
-        body: JSON.stringify({
-          engine: browserName,
-          version: untrusting.version(),
+      const withoutTrust = { ...launchOptions };
+      delete withoutTrust.env;
+      const untrusting = await playwright[browserName].launch(withoutTrust);
+      try {
+        const context = await untrusting.newContext({ serviceWorkers: 'block' });
+        await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
+        const page = await context.newPage();
+
+        const failure = await page.goto(browserOrigin).then(
+          () => undefined,
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+
+        expect(failure, 'an untrusted CA must be refused').toBeDefined();
+        const verdict = classifyNavigationFailure(browserName, failure ?? '');
+        await testInfo.attach('untrusted-refusal', {
+          contentType: 'application/json',
+          body: JSON.stringify({
+            engine: browserName,
+            version: untrusting.version(),
+            verdict,
+            refusedWith: failure?.split('\n')[0],
+          }),
+        });
+        // Only the engine's own certificate diagnostic is evidence. Any other signature is a failure to diagnose, with the message above.
+        expect(
           verdict,
-          refusedWith: failure?.split('\n')[0],
-        }),
-      });
-      // Only the engine's own certificate diagnostic is evidence. Any other signature is a failure to diagnose, with the message above.
-      expect(
-        verdict,
-        `the refusal is not this engine's certificate rejection; diagnose it: ${failure?.split('\n')[0] ?? ''}`,
-      ).toBe('CERTIFICATE_REJECTED');
-    } finally {
-      await untrusting.close();
-    }
-  });
+          `the refusal is not this engine's certificate rejection; diagnose it: ${failure?.split('\n')[0] ?? ''}`,
+        ).toBe('CERTIFICATE_REJECTED');
+      } finally {
+        await untrusting.close();
+      }
+    },
+  );
 });

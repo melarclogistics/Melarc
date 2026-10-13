@@ -192,10 +192,12 @@ jobs:
       - name: Browser, API and database journey
         run: pnpm run test:e2e
 
-      # The trusted HTTPS origin (S0.23): the disposable CA is made, every engine is given a store of its own that trusts it, the
-      # proofs run in Chromium, Firefox and WebKit, and the CA is removed, all by the one command, which is why it is a step on its
-      # own and not a script of several (e2e/README.md). certutil is the NSS tool that makes the Chromium and Firefox stores; nothing is
-      # installed into any trust store of the runner.
+      # The trusted HTTPS origin (S0.23): the disposable CA is made, Chromium and Firefox are each given a store of their own that trusts
+      # it, the proofs run in Chromium, Firefox and WebKit, and the CA is removed, all by the one command, which is why it is a step on
+      # its own and not a script of several (e2e/README.md). certutil is the NSS tool that makes the Chromium and Firefox stores. WebKit
+      # trusts only the system store, so on this GitHub-hosted runner (made for this job and discarded after it) the command puts the CA
+      # there with sudo for WebKit's proofs and takes it out when they end (e2e/harness/system-trust.ts; the owner's decision of 12
+      # October 2026); nothing else is installed into any trust store of the runner.
       - name: Install the NSS tools
         run: sudo apt-get install --no-install-recommends --yes libnss3-tools
 

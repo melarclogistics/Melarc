@@ -24,6 +24,12 @@ import {
  */
 let base = '';
 const CA = '/tls/ca.pem';
+/** What a GitHub-hosted runner says of itself: the only place where WebKit, whose trust is the system store's, has a disposable form. */
+const HOSTED = {
+  CI: 'true',
+  GITHUB_ACTIONS: 'true',
+  RUNNER_ENVIRONMENT: 'github-hosted',
+} as const;
 
 beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), 'melarc-trust-'));
@@ -32,8 +38,11 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true });
 });
 
-const linux = (engine: (typeof ENGINES)[number], root = join(base, 'engines')) =>
-  planEngineTrust(engine, { root, caPath: CA, platform: 'linux' });
+const linux = (
+  engine: (typeof ENGINES)[number],
+  root = join(base, 'engines'),
+  environment: NodeJS.ProcessEnv = HOSTED,
+) => planEngineTrust(engine, { root, caPath: CA, platform: 'linux', environment });
 const supported = (plan: EnginePlan) => {
   if (!plan.supported) throw new Error(`not supported: ${plan.reason}`);
   return plan;
@@ -95,16 +104,53 @@ describe('where the stores are, and what each engine is given', () => {
     ]);
   });
 
-  // Break caught: WebKit reported as established because a candidate was written down. It stays a candidate, which names the CA
-  // file for the browser process only and makes no store.
-  it('names the CA file to WebKit, makes no store for it, and says it is a candidate', () => {
+  // Break caught (the first hosted run, 12 October 2026): a mechanism written down for WebKit that Playwright's build does not have.
+  // `SSL_CERT_FILE` was the candidate, and the run showed it is ignored: WebKit on Linux reads the system's trust list through
+  // glib-networking's GnuTLS backend and no environment variable. The plan names no environment value for WebKit, makes no store of
+  // its own for it, and says its trust is the system store of a GitHub-hosted runner.
+  it('puts WebKit’s trust in the system store of a GitHub-hosted runner, and names no environment value', () => {
     const plan = supported(linux('webkit'));
 
-    expect(plan.trust.env).toEqual({ SSL_CERT_FILE: CA });
+    expect(plan.trust.env).toEqual({});
+    expect(plan.trust.scope).toBe('system');
     expect(plan.directories).toEqual([]);
     expect(plan.certutil).toEqual([]);
-    expect(plan.trust.basis).toBe('candidate');
-    expect(plan.trust.mechanism).toMatch(/what the spike shows/);
+    expect(plan.trust.basis).toBe('documented');
+    expect(plan.trust.mechanism).toMatch(/system trust store of a GitHub-hosted runner/);
+    expect(JSON.stringify(plan)).not.toMatch(/SSL_CERT_FILE/);
+  });
+
+  // Break caught: a trust change of the system planned for a machine that is not a disposable runner: a developer's machine, a
+  // self-hosted runner, a machine declared cleared for key material. WebKit then has no disposable form, and says so.
+  it.each([
+    ['no environment', {}],
+    ['CI alone', { CI: 'true' }],
+    ['CI on GitHub Actions without GitHub hosting it', { CI: 'true', GITHUB_ACTIONS: 'true' }],
+    [
+      'a self-hosted runner',
+      { CI: 'true', GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'self-hosted' },
+    ],
+    ['a machine declared cleared for key material', { MELARC_E2E_KEYS_CLEARED: '1' }],
+  ])('gives WebKit no store on %s, and says why', (_label, environment) => {
+    const plan = linux('webkit', join(base, 'engines'), environment);
+
+    expect(plan).toMatchObject({ supported: false, engine: 'webkit' });
+    expect(plan.supported ? '' : plan.reason).toMatch(/system trust store/);
+    expect(plan.supported ? '' : plan.reason).toMatch(/GitHub-hosted runner/);
+  });
+
+  // Break caught: Chromium or Firefox moved into the system store because WebKit is: each keeps a store of its own, the run's, whatever
+  // the machine is.
+  it('keeps Chromium and Firefox in stores of their own on any machine, and WebKit alone in the system’s', () => {
+    for (const environment of [HOSTED, {}]) {
+      expect(supported(linux('chromium', join(base, 'engines'), environment)).trust.scope).toBe(
+        'process',
+      );
+      expect(supported(linux('firefox', join(base, 'engines'), environment)).trust.scope).toBe(
+        'process',
+      );
+    }
+    expect(supported(linux('webkit')).trust.scope).toBe('system');
   });
 
   // Break caught: a CA trusted for more than server authentication (code signing, mail), or marked trusted as an end entity.
@@ -146,7 +192,10 @@ describe('making the stores', () => {
     const root = join(base, 'engines');
     const { calls, run } = recorder();
 
-    const trusts = prepareEngineTrust(planAllEngines({ root, caPath: CA, platform: 'linux' }), run);
+    const trusts = prepareEngineTrust(
+      planAllEngines({ root, caPath: CA, platform: 'linux', environment: HOSTED }),
+      run,
+    );
 
     expect(trusts.map((trust) => trust.engine)).toEqual(['chromium', 'firefox', 'webkit']);
     expect(existsSync(join(root, 'chromium-home', '.pki', 'nssdb'))).toBe(true);
@@ -175,10 +224,13 @@ describe('making the stores', () => {
     let count = 0;
 
     expect(() =>
-      prepareEngineTrust(planAllEngines({ root, caPath: CA, platform: 'linux' }), () => {
-        count += 1;
-        if (count === 3) throw new Error('certutil failed');
-      }),
+      prepareEngineTrust(
+        planAllEngines({ root, caPath: CA, platform: 'linux', environment: HOSTED }),
+        () => {
+          count += 1;
+          if (count === 3) throw new Error('certutil failed');
+        },
+      ),
     ).toThrow('certutil failed');
 
     expect(existsSync(root)).toBe(false);
