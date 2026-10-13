@@ -9,3 +9,6 @@ export * from './idempotency.js';
 export * from './rate-limit.js';
 // S0.17 adds the durable credential-delivery job.
 export * from './credential-delivery.js';
+// S0.24 adds the session. The staff identity it belongs to is `src/staff/staff-identity.schema.ts`, which the Drizzle configuration
+// reads beside this index.
+export * from './session.js';

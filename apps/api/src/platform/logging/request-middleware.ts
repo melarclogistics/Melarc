@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Logger } from 'pino';
 
+import { TRANSPORT_REFUSAL_KEY } from '../http/admission/response-keys.js';
 import { runWithRequestContext } from './request-context.js';
 
 export const REQUEST_ID_HEADER = 'X-Request-Id';
@@ -27,6 +28,8 @@ export function createRequestMiddleware(logger: Logger): RequestHandler {
       const route = request.route as { path?: unknown } | undefined;
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
       const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+      // Why transport admission refused the request, when it did: one of its own fixed words, never anything the client sent.
+      const refusal: unknown = response.locals[TRANSPORT_REFUSAL_KEY];
       logger[level](
         {
           request_id: requestId,
@@ -35,6 +38,7 @@ export function createRequestMiddleware(logger: Logger): RequestHandler {
           status,
           duration_ms: Math.round(durationMs * 10) / 10,
           aborted: !response.writableFinished,
+          ...(typeof refusal === 'string' ? { refusal } : {}),
         },
         'request completed',
       );

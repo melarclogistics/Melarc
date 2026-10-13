@@ -1,5 +1,10 @@
 import type { TaskCapability } from './task-capabilities.js';
-import { API_RUNTIME_ROLE, PROVISIONING_ROLE, WORKER_RUNTIME_ROLE } from './technical-roles.js';
+import {
+  API_RUNTIME_ROLE,
+  MIGRATION_ROLE,
+  PROVISIONING_ROLE,
+  WORKER_RUNTIME_ROLE,
+} from './technical-roles.js';
 
 /**
  * The access matrix per capability (data-scope-registry.md §5.2; SECURITY_DESIGN.md §14.1 and §14.17): for each task
@@ -16,11 +21,16 @@ import { API_RUNTIME_ROLE, PROVISIONING_ROLE, WORKER_RUNTIME_ROLE } from './tech
  * that legitimately needs it. `capabilityPermittedFor` refuses a context whose capability is not its connection's.
  */
 
-/** The technical identities that hold the grants of a capability (registry §5, `api`, `worker` and `provisioning`). */
+/**
+ * The technical identities that hold the grants of a capability (registry §5, `api`, `worker`, `provisioning` and `migration`).
+ * `migration` holds exactly one, `policy_change`, and no application process connects as it: the capability is asserted by the
+ * two database functions of migration 0017 for their own statements, and only this identity may execute them.
+ */
 export const IDENTITY_ROLES = {
   api: API_RUNTIME_ROLE,
   worker: WORKER_RUNTIME_ROLE,
   provisioning: PROVISIONING_ROLE,
+  migration: MIGRATION_ROLE,
 } as const;
 
 export type TechnicalIdentity = keyof typeof IDENTITY_ROLES;
@@ -190,6 +200,30 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     lookups:
       'The seeded bootstrap identities only, under the conditions of MIGRATION_AND_SEEDING.md §3.3a',
     returns: 'The raw secret once, to the controlled channel, and never logged',
+  },
+  policy_change: {
+    identity: 'migration',
+    opener:
+      'The two policy-change functions of migration 0017, which run as the owner for their own statements and are executable by the migration login alone',
+    // No application context is opened under it. The one directory is the TypeScript door to the functions, so that the check of
+    // source text has a place where the capability may be named, should one ever be.
+    openedUnder: ['platform/authorization/policy-change/'],
+    tables: [
+      ...on(
+        ['RoleBundle', 'FixedPermissionPolicy'],
+        ['SELECT', 'UPDATE'],
+        'only inside melarc.change_role_bundle and melarc.change_fixed_policy, under the exclusive policy lock: the revision, the floor and (for a bundle) the name; the identity holds no privilege of its own on these tables',
+      ),
+      ...on(
+        ['RoleBundleGrant'],
+        ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        'only inside melarc.change_role_bundle, under the exclusive policy lock: the complete new set of the grants of one bundle',
+      ),
+    ],
+    lookups:
+      'By the bundle id or the principal type the caller names, each under its exclusive advisory lock, taken before anything is read',
+    returns:
+      'The kind of change, the new revision and floor, and the ids of the sessions it ended; the sessions and their audit events are written under the authentication capability inside the same transaction',
   },
 };
 

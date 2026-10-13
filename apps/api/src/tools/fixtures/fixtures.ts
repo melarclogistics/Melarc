@@ -75,7 +75,7 @@ export function assertFixturesAllowed(appEnv: unknown): void {
  */
 export function fixturePlan(): SeedPlan {
   return {
-    locks: [],
+    policyKeys: { bundleIds: [], fixedPolicies: [] },
     entryPoint: 'add_reason_fixtures',
     payload: { reason_code: REASON_FIXTURES.map((each) => reasonCodeRow(each)) },
     labels: { reason_code: 'reason_code (fixtures)' },

@@ -36,6 +36,24 @@
         "PLAYWRIGHT_BROWSERS_PATH"
       ]
     },
+    "test:e2e:https": {
+      "cache": false,
+      "dependsOn": ["@melarc/api#build", "@melarc/ops-web#build"],
+      "passThroughEnv": [
+        "MELARC_PG_HOST",
+        "MELARC_PG_PORT",
+        "MELARC_PG_ADMIN_PASSWORD",
+        "MELARC_PG_MIGRATION_PASSWORD",
+        "MELARC_PG_RUNTIME_PASSWORD",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "CI",
+        "GITHUB_ACTIONS",
+        "RUNNER_ENVIRONMENT",
+        "MELARC_E2E_KEYS_CLEARED",
+        "OPENSSL",
+        "CERTUTIL"
+      ]
+    },
     "test:browser": {
       "cache": false,
       "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS"]

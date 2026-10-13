@@ -107,6 +107,8 @@ function goodShared(): Json {
         run(INSTALL_BROWSERS),
         { ...run(BROWSER_TESTS), env: { MELARC_BROWSERS: BROWSER_LIST } },
         run('pnpm run test:e2e'),
+        run('sudo apt-get install --no-install-recommends --yes libnss3-tools'),
+        run('pnpm run test:e2e:https'),
         DIAGNOSTICS,
         run(CLEAN_SCRIPT),
         run(MANIFEST_SCRIPT),
@@ -1060,7 +1062,7 @@ describe('artifacts', () => {
   // Break caught: the clean-tree check and the manifest run before the tests, so they describe a tree and a
   // build that the browser and journey tests have not yet run against (or touched).
   it('requires the clean-tree check and the manifest to come after the browser tests', () => {
-    for (const test of ['pnpm run test:browser', 'pnpm run test:e2e']) {
+    for (const test of ['pnpm run test:browser', 'pnpm run test:e2e', 'pnpm run test:e2e:https']) {
       assert.deepEqual(
         codesWith((_, jobs) => {
           const steps = stepsOf(jobs.integrated);

@@ -1,5 +1,7 @@
 import pg from 'pg';
 
+import { BudgetClosedError } from '../execution/execution-budget.js';
+
 /**
  * How the database layer names what went wrong with a transaction's time (S0.6; SECURITY_DESIGN.md §14.6), so no caller has to
  * recognise a SQLSTATE and so a lost commit is never described as a failure that rolled back.
@@ -84,6 +86,19 @@ export function serverErrorIn(error: unknown): pg.DatabaseError | undefined {
   let current: unknown = error;
   for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
     if (current instanceof pg.DatabaseError) return current;
+    current = current.cause;
+  }
+  return undefined;
+}
+
+/**
+ * The refusal of a finished request inside what was thrown: drizzle wraps whatever the connection object rejected a statement
+ * with, so the caller is given the refusal itself and not the failed query that carries it.
+ */
+export function closedIn(error: unknown): BudgetClosedError | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (current instanceof BudgetClosedError) return current;
     current = current.cause;
   }
   return undefined;

@@ -18,9 +18,11 @@ import {
 } from '../../execution/execution-budget.js';
 import { ReadinessRegistry } from '../../health/readiness.registry.js';
 import { ShutdownRegistry } from '../../lifecycle/shutdown.registry.js';
+import type { TransactionHandle } from '../../auth/ports/unit-of-work.port.js';
 import { DatabaseDeadlineError } from '../database-failures.js';
 import { DatabaseService, type DatabaseTransaction } from '../database.service.js';
 import type { SecurityContext } from '../transaction-context.js';
+import { securityContextOf, transactionOf } from '../transaction-handle.js';
 import {
   POLICY_MAX_ATTEMPTS,
   PolicyCoordinationError,
@@ -145,6 +147,48 @@ describe('PolicyCoordinator: discover, plan, lock, revalidate, act (SECURITY_DES
     expect(lockStatements(at(connections, 0))).toEqual([]);
     expect(lockStatements(at(connections, 1))).toHaveLength(1);
     expect(connections[1]?.statements.at(-1)).toBe('commit');
+  });
+
+  // Break caught (S0.24): a step handed a handle over another transaction than the one it runs in, or none, so that a port adapter it
+  // calls would work outside the transaction that holds the locks.
+  it('hands each step the handle of the transaction it runs in, and the same one to the revalidation and the act', async () => {
+    const { coordinator } = build();
+    const seen: { step: string; sameTransaction: boolean; context: string | undefined }[] = [];
+    const record = (step: string, tx: DatabaseTransaction, handle: TransactionHandle) =>
+      seen.push({
+        step,
+        sameTransaction: transactionOf(handle) === tx,
+        context: securityContextOf(handle).correlationId,
+      });
+    const handles: TransactionHandle[] = [];
+    const { spec } = operation({
+      current: () => ({ bundle: BUNDLE_A }),
+      discover: (tx, handle) => {
+        record('discover', tx, handle);
+        handles.push(handle);
+        return Promise.resolve({ bundle: BUNDLE_A });
+      },
+      revalidate: (tx, _discovered, handle) => {
+        record('revalidate', tx, handle);
+        handles.push(handle);
+        return Promise.resolve({ bundle: BUNDLE_A });
+      },
+      work: (tx, _revalidated, handle) => {
+        record('work', tx, handle);
+        handles.push(handle);
+        return Promise.resolve('done');
+      },
+    });
+
+    await coordinator.run(STAFF, spec);
+
+    expect(seen).toEqual([
+      { step: 'discover', sameTransaction: true, context: 'unit-test' },
+      { step: 'revalidate', sameTransaction: true, context: 'unit-test' },
+      { step: 'work', sameTransaction: true, context: 'unit-test' },
+    ]);
+    expect(handles[1]).toBe(handles[2]);
+    expect(handles[0]).not.toBe(handles[1]);
   });
 
   // Break caught: the revalidation read before the locks, so it is not a read under them.

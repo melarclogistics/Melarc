@@ -41,6 +41,12 @@ set MELARC_BROWSERS=chromium,firefox,webkit
 pnpm run test:browser
 ```
 
+The integrated run (`pnpm run test:e2e`) serves the Ops Portal over plain HTTP in Chromium only. The trusted HTTPS origin
+the identity slice needs, with Firefox and WebKit, is `pnpm run test:e2e:https`: it makes a disposable test CA, so it runs in CI
+and on a machine cleared for key material, and it refuses on this workstation (Windows has no disposable trust store for Chromium or
+Edge). On a machine cleared for key material WebKit's proofs fail to trust, because WebKit's only trust is the system store, which the run
+changes only on a GitHub-hosted runner. What exists, what is blocked and the steps for a clean machine are in [e2e/README.md](e2e/README.md).
+
 ## 2. Create the local settings
 
 ```text
@@ -158,6 +164,17 @@ pnpm test
 pnpm run test:db
 pnpm run test:browser
 pnpm run test:e2e
+```
+
+**A lower-concurrency local run.** `pnpm test` runs the package suites at the same time. On some developer machines the Ops
+Portal suite then fails to start its workers (`Timeout waiting for worker to respond`); the cause is not established, and
+nothing here explains it. `pnpm run test:local` runs the same root tests and the same package tests, with the same assertions
+and timeouts, one package suite at a time (`turbo run test --concurrency=1`). It stops at the first failure, retries nothing
+and is slower. It is bounded local scheduling and not a fix: CI keeps `pnpm test`, and a failure under either command is a
+failure to be explained, not retried.
+
+```text
+pnpm run test:local
 ```
 
 ## 7. Stop safely

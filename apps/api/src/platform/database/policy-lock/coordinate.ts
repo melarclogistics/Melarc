@@ -1,7 +1,9 @@
 import type { Clock } from '../../auth/ports/clock.port.js';
+import type { TransactionHandle } from '../../auth/ports/unit-of-work.port.js';
 import { ExecutionBudget, currentBudget, runWithBudget } from '../../execution/execution-budget.js';
 import type { DatabaseService, DatabaseTransaction } from '../database.service.js';
 import type { SecurityContext } from '../transaction-context.js';
+import { bindTransactionHandle } from '../transaction-handle.js';
 import { acquirePolicyLocks } from './acquire.js';
 import { planPolicyLocks, type PolicyLockRequest } from './plan.js';
 
@@ -38,16 +40,27 @@ export const POLICY_MAX_ATTEMPTS = 3;
 const MAX_ATTEMPTS_LIMIT = 10;
 
 export interface PolicyCoordination<Discovered, Result> {
-  /** Step 1: a non-authoritative read, in its own short transaction. It decides nothing and has no effect. */
-  discover(tx: DatabaseTransaction): Promise<Discovered>;
+  /**
+   * Step 1: a non-authoritative read, in its own short transaction. It decides nothing and has no effect. `handle` is the
+   * transaction as the ports take it (S0.24): the coordinator opens the transaction, so it is the one that makes the handle.
+   */
+  discover(tx: DatabaseTransaction, handle: TransactionHandle): Promise<Discovered>;
   /** Step 2: every lock the operation needs: from what was discovered, and from what the act reads or writes. */
   plan(discovered: Discovered): readonly PolicyLockRequest[];
   /** Step 3, under the locks: read again the facts the plan was built on, and return them. */
-  revalidate(tx: DatabaseTransaction, discovered: Discovered): Promise<Discovered>;
+  revalidate(
+    tx: DatabaseTransaction,
+    discovered: Discovered,
+    handle: TransactionHandle,
+  ): Promise<Discovered>;
   /** Step 3: true when what was read under the locks is what the plan was built on. */
   unchanged(discovered: Discovered, revalidated: Discovered): boolean;
   /** The act. Runs only after the revalidation passed, in the transaction that holds the locks. */
-  work(tx: DatabaseTransaction, revalidated: Discovered): Promise<Result>;
+  work(
+    tx: DatabaseTransaction,
+    revalidated: Discovered,
+    handle: TransactionHandle,
+  ): Promise<Result>;
 }
 
 /** The act found it needs more than it planned: roll back and plan these as well from the start. */
@@ -128,15 +141,16 @@ export class PolicyCoordinator {
         for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
           deadline.throwIfExpired();
           const discovered = await this.database.transactionWithContext(context, (tx) =>
-            operation.discover(tx),
+            operation.discover(tx, bindTransactionHandle(tx)),
           );
           const plan = planPolicyLocks([...operation.plan(discovered), ...required]);
           try {
             return await this.database.transactionWithContext(context, async (tx) => {
               await acquirePolicyLocks(tx, plan);
-              const current = await operation.revalidate(tx, discovered);
+              const handle = bindTransactionHandle(tx);
+              const current = await operation.revalidate(tx, discovered, handle);
               if (!operation.unchanged(discovered, current)) throw new PlanChanged();
-              return operation.work(tx, current);
+              return operation.work(tx, current, handle);
             });
           } catch (error) {
             if (error instanceof PolicyRestartRequired)

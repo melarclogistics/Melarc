@@ -96,4 +96,67 @@ describe('turbo.json', () => {
     assert.ok(passed.includes('PLAYWRIGHT_BROWSERS_PATH'));
     assert.equal(task.cache, false, 'a browser run is never replayed from the cache');
   });
+
+  // Break caught (the first hosted run, 12 October 2026): the variables that say "this is a GitHub-hosted runner" dropped by Turborepo's
+  // strict environment, so that the HTTPS run sees `CI` and not `GITHUB_ACTIONS` or `RUNNER_ENVIRONMENT`, refuses to put the CA in the
+  // system store, and WebKit's proofs fail to trust for a reason that has nothing to do with WebKit. The run decides what it may do on
+  // exactly these variables (`e2e/harness/https-run.ts`, `e2e/harness/system-trust.ts`).
+  it('passes the variables the HTTPS run decides on through to it', () => {
+    const task = turbo.tasks?.['test:e2e:https'];
+    assert.ok(task !== undefined, 'test:e2e:https is a task');
+    const passed = task.passThroughEnv ?? [];
+    for (const name of [
+      'CI',
+      'GITHUB_ACTIONS',
+      'RUNNER_ENVIRONMENT',
+      'MELARC_E2E_KEYS_CLEARED',
+      'OPENSSL',
+      'CERTUTIL',
+      'PLAYWRIGHT_BROWSERS_PATH',
+    ]) {
+      assert.ok(passed.includes(name), `${name} reaches the HTTPS run`);
+    }
+    assert.equal(task.cache, false, 'a run that makes a CA is never replayed from the cache');
+  });
+});
+
+/**
+ * The local test profile (decision D of the owner, 12 October 2026). `pnpm test` runs the four package suites at once, and on the
+ * developer machine the Ops Portal suite has more than once failed to start its workers ("Timeout waiting for worker to respond");
+ * the cause is not established. `pnpm run test:local` is **bounded local scheduling**, not an explanation: the same tests, the same
+ * assertions and the same timeouts, with one package suite at a time. CI keeps the canonical command.
+ */
+describe('the local test profile', () => {
+  const rootScripts = (): Record<string, string> => {
+    const parsed = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    return parsed.scripts;
+  };
+
+  // Break caught: the profile drifting into a different test run: a filter that skips a package, a retry that hides a flaky test,
+  // `--continue` that reports past the first failure, a raised timeout, or a missing root half.
+  it('runs the root tests and then every package suite, one at a time, and nothing else', () => {
+    assert.equal(
+      rootScripts()['test:local'],
+      'pnpm run test:root && turbo run test --concurrency=1',
+    );
+  });
+
+  // Break caught: the canonical command changed to make the local one look like a copy of it. CI and `pnpm test` stay as they were.
+  it('leaves the canonical test command as it was', () => {
+    assert.equal(rootScripts().test, 'pnpm run test:root && turbo run test');
+  });
+
+  // Break caught: CI quietly adopting the local profile, so that the hosted run no longer tests what the canonical command tests.
+  it('is never run by the CI workflow', () => {
+    const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8');
+    assert.ok(!workflow.includes('test:local'), 'ci.yml must run the canonical command');
+  });
+
+  // Break caught: a package-level retry, which is how a flaky test is made to look green.
+  it('adds no retry, no continue-on-failure and no timeout', () => {
+    const command = rootScripts()['test:local'] ?? '';
+    assert.doesNotMatch(command, /--retry|--continue|--timeout|--bail=0|--no-bail/);
+  });
 });

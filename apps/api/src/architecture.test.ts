@@ -10,6 +10,7 @@ import { findOwnClockViolations } from './test-support/budget-time.js';
 import {
   findCapabilityOpenerViolations,
   findDatabaseDoorViolations,
+  findHandleBinderViolations,
   findScopeProbeWriterViolations,
 } from './test-support/database-door.js';
 import {
@@ -60,7 +61,8 @@ const PORT_NAMES = [
  * production `Clock`, the first adapter the composition root binds itself. S0.11 adds the audit writer over PostgreSQL, S0.12 the idempotency store and S0.14 the two rate limiters (the authoritative one
  * and the in-memory one that unit tests use and a deployed environment refuses), S0.15 the bounded metrics registry and S0.16 the bounded hash admission.
  * S0.17 adds the durable delivery queue over PostgreSQL. S0.18 adds the two delivery providers of the worker: the capture adapter and
- * the allow-list that stands in front of a real provider (no real provider is built). The next adapter, a real one, is added here by
+ * the allow-list that stands in front of a real provider (no real provider is built). S0.24 adds the session store and the unit of
+ * work over PostgreSQL, and `staff/postgres.staff-identity-directory.adapter.ts`, the first adapter a domain provides. The next adapter, a real one, is added here by
  * the task that builds it, and a review sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
@@ -71,6 +73,8 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/auth/crypto/rfc6238.totp-verifier.adapter.ts',
   'platform/auth/crypto/sha256.token-service.adapter.ts',
   'platform/auth/describe/describe-ports.adapter.ts',
+  'platform/auth/sessions/postgres.session-store.adapter.ts',
+  'platform/database/postgres.unit-of-work.adapter.ts',
   'platform/delivery/postgres.delivery-queue.adapter.ts',
   'platform/delivery/worker/allow-listed.delivery-provider.adapter.ts',
   'platform/delivery/worker/capture.delivery-provider.adapter.ts',
@@ -79,6 +83,7 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/limiter/in-memory.rate-limiter.adapter.ts',
   'platform/limiter/postgres.rate-limiter.adapter.ts',
   'platform/metrics/bounded.metrics.adapter.ts',
+  'staff/postgres.staff-identity-directory.adapter.ts',
 ];
 
 /** The port each real adapter above implements, so that a test can say what the checker must see in each file. */
@@ -89,6 +94,8 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/auth/crypto/argon2.hasher.adapter.ts', 'Hasher'],
   ['platform/auth/crypto/rfc6238.totp-verifier.adapter.ts', 'TotpVerifier'],
   ['platform/auth/crypto/sha256.token-service.adapter.ts', 'TokenService'],
+  ['platform/auth/sessions/postgres.session-store.adapter.ts', 'SessionStore'],
+  ['platform/database/postgres.unit-of-work.adapter.ts', 'UnitOfWork'],
   ['platform/delivery/postgres.delivery-queue.adapter.ts', 'DeliveryQueue'],
   ['platform/delivery/worker/allow-listed.delivery-provider.adapter.ts', 'DeliveryProvider'],
   ['platform/delivery/worker/capture.delivery-provider.adapter.ts', 'DeliveryProvider'],
@@ -98,6 +105,13 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/limiter/postgres.rate-limiter.adapter.ts', 'RateLimiter'],
   ['platform/metrics/bounded.metrics.adapter.ts', 'Metrics'],
 ];
+
+/**
+ * The adapters a permission domain provides (S0.24 adds the first, the staff `IdentityDirectory`). They are outside `platform/`, so
+ * the checker that lists every port implementation inside `platform/` does not see them; they are named `*.adapter.ts`, listed in
+ * `ALLOWED_PORT_IMPLEMENTATIONS` like the others, and only the composition root imports them.
+ */
+const DOMAIN_ADAPTERS: readonly string[] = ['staff/postgres.staff-identity-directory.adapter.ts'];
 const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
 
 /**
@@ -980,9 +994,9 @@ export const x = Argon2Hasher;`;
       expect(found).toHaveLength(PORT_NAMES.length + ADAPTED_PORTS.length);
       for (const name of PORT_NAMES) expect(found).toContain(said(DESCRIBE_ADAPTERS, name));
       for (const [file, port] of ADAPTED_PORTS) expect(found).toContain(said(file, port));
-      expect([...ADAPTED_PORTS.map(([file]) => file), DESCRIBE_ADAPTERS].sort()).toEqual(
-        [...ALLOWED_PORT_IMPLEMENTATIONS].sort(),
-      );
+      expect(
+        [...ADAPTED_PORTS.map(([file]) => file), DESCRIBE_ADAPTERS, ...DOMAIN_ADAPTERS].sort(),
+      ).toEqual([...ALLOWED_PORT_IMPLEMENTATIONS].sort());
     }, 30_000);
 
     it('imports no adapter outside the composition root', () => {
@@ -1099,6 +1113,40 @@ describe('the database door (S0.4)', () => {
     });
   });
 
+  describe('only the unit of work makes a transaction handle (S0.24, OB-99)', () => {
+    // Break caught: an adapter or a use case binding its own handle to a transaction it did not open, which is a second door into
+    // the transaction and a way to act under a context other than the one the service applied.
+    it.each([
+      "import { bindTransactionHandle } from '../database/transaction-handle.js'; const handle = bindTransactionHandle(tx);",
+      'const bind = bindTransactionHandle;',
+    ])('refuses %j outside the unit of work', (text) => {
+      expect(findHandleBinderViolations([file('staff/staff.repository.ts', text)])).toEqual([
+        'staff/staff.repository.ts makes a transaction handle; only platform/database/transaction-handle.ts, platform/database/postgres.unit-of-work.adapter.ts, platform/database/policy-lock/coordinate.ts, platform/limiter/postgres.rate-limiter.adapter.ts may (bindTransactionHandle)',
+      ]);
+      expect(findHandleBinderViolations([file('platform/auth/sessions/x.ts', text)])).toHaveLength(
+        1,
+      );
+    });
+
+    it('accepts the unit of work, the binder, the limiter, test support and tests', () => {
+      const text = 'bindTransactionHandle(tx);';
+      expect(
+        findHandleBinderViolations([
+          file('platform/database/transaction-handle.ts', text),
+          file('platform/database/postgres.unit-of-work.adapter.ts', text),
+          file('platform/database/policy-lock/coordinate.ts', text),
+          file('platform/limiter/postgres.rate-limiter.adapter.ts', text),
+          file('test-support/x.ts', text),
+          file('staff/staff.repository.test.ts', text),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('holds for the application as it is', () => {
+      expect(findHandleBinderViolations(sourceFiles())).toEqual([]);
+    });
+  });
+
   describe('the pool and the driver stay behind DatabaseService (S0.4c)', () => {
     // Break caught: a second door to PostgreSQL. The context-free `db` handle and `transaction()` are closed so that
     // every protected query runs under a validated context; code that took the pool or built its own drizzle
@@ -1164,6 +1212,21 @@ describe('the database door (S0.4)', () => {
     ])('refuses %s in the database layer and the budget', (_label, text) => {
       expect(findOwnClockViolations([file('platform/database/x.ts', text)])).toHaveLength(1);
       expect(findOwnClockViolations([file('platform/execution/x.ts', text)])).toHaveLength(1);
+    });
+
+    it('refuses new Date() written with a space inside the parentheses', () => {
+      expect(
+        findOwnClockViolations([file('platform/database/x.ts', 'const t = new Date( );')]),
+      ).toHaveLength(1);
+    });
+
+    // A date built from a value it was given reads no clock: the database's text and a stored instant become dates this way.
+    it('accepts a date built from a value', () => {
+      expect(
+        findOwnClockViolations([
+          file('platform/database/x.ts', 'const t = new Date(text); const u = new Date(0);'),
+        ]),
+      ).toEqual([]);
     });
 
     it('names the file and what it read', () => {

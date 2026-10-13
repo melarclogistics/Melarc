@@ -769,6 +769,41 @@ each with an owner and the milestone it must meet. A waiver is not a proof: the 
    one keyboard-only pass and one screen-reader pass (a desktop screen reader with its usual browser, for example NVDA
    with Firefox or Chrome) of the showcase and the shell, with the versions used and what was done; a pass in Windows
    high-contrast mode; and Safari and Edge as products, and the previous major release of each browser, checked by hand.
+
+   **How to produce it (S0.28, written 12 October 2026).** This is independent owner evidence: it needs no database, no sign-in
+   and no change to the repository, it certifies nothing about S0.20 to S0.27 (Gate 3 is S0.27's exit) and has one dependant, S0.43,
+   which needs it. The agent that wrote these steps cannot perform, sign or claim any of them. Do the steps on the Windows
+   workstation, in order; write down what you see, and what you cannot do.
+
+   1. **Start the application.** From the repository root: `pnpm install` once, then `pnpm --filter @melarc/ops-web run dev`. Note
+      the address it prints (Vite's default is `http://localhost:5173`). The shell is `/`; the component showcase, which exists only
+      in the development server, is `/__showcase`. Nothing here calls the API.
+   2. **Write down the environment before you begin**: the date and your name; Windows (`winver`); each browser and its exact version
+      (`chrome://version`, `edge://version`, Firefox's About dialog); the screen reader and its version (NVDA: menu, Help, About);
+      the repository revision (`git rev-parse --short HEAD`).
+   3. **Keyboard only, on `/` and on `/__showcase`.** Put the mouse aside. Press Tab through everything: the order must be the
+      reading order, nothing may be skipped or trapped, and every stop must show a focus ring you can see without looking for it.
+      Shift+Tab must go back through the same stops. Enter and Space must activate buttons, Enter a link. In the showcase, submit
+      the form with a field wrong: focus must move to the first wrong field, its message must be read out or shown beside it, and
+      every field must have a label you can name. Do this in Edge and in Firefox.
+   4. **Screen reader.** With NVDA and Firefox, then NVDA and Chrome (or Edge): move by headings (H), by landmarks (D), by form
+      fields (F) and by links (K) on `/` and `/__showcase`. Check that the page title and the language are announced, that
+      "Melarc Ops Portal" is the one top-level heading, that the banner and main landmarks are found, that each input is announced
+      with its label, that an error or status message is announced when it appears, and that nothing is conveyed by colour alone.
+      Write down any deviation in the screen reader's own words.
+   5. **Windows contrast themes.** Settings, Accessibility, Contrast themes: switch on one dark and one light theme (for example
+      Night sky and Desert), and look at `/` and `/__showcase` in Edge, Chrome and Firefox: every control must keep a visible
+      boundary and a visible focus ring, text must stay legible, and nothing may disappear. Switch the theme off afterwards.
+   6. **Motion and size.** Settings, Accessibility, Visual effects: turn animation effects off and confirm nothing moves beyond what
+      is essential. In each browser, enlarge the text to 200% (browser zoom) and confirm nothing is cut off; narrow the window to
+      about 320 pixels and confirm there is no sideways scrolling; look at 768 and 1280 pixels too.
+   7. **Browsers as products.** Repeat the quick check (the page loads, the headline and the landmarks are there, the form behaves)
+      in the current and the previous major release of Edge, Chrome and Firefox. Safari cannot be run on Windows: record it as
+      **not covered** and say so; it needs a Mac, an iPhone or an iPad.
+   8. **Record it.** Add a note under this item: your name, the date, the repository revision, every browser and screen-reader
+      version, for each of the steps 3 to 7 what you did and found (including "not done" and why), and the findings as a
+      list. Sign it. Do not paste a screenshot that contains anything but the page. The working target is WCAG 2.2 level AA;
+      this evidence makes no claim of conformance, and an automated scan of the same pages already runs in CI.
 9. **The surface-document wording. Done 6 October 2026.** `surfaces/ops-portal.md` §11 and `surfaces/vendor-pwa.md` §9
    now say "WCAG 2.2 level AA is the working target; it is not a conformance claim", the one edit the Product Owner
    authorised. Two statements of `ops-portal.md` are stale and were left alone, because the document is approved: §11

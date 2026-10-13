@@ -82,3 +82,37 @@ export function findDatabaseDoorViolations(files: readonly SourceFile[]): string
         `${file.path} reaches PostgreSQL other than through DatabaseService (pg, drizzle-orm/node-postgres or DATABASE_POOL)`,
     );
 }
+
+const HANDLE_BINDER = /\bbindTransactionHandle\b/;
+
+/**
+ * The files that may make a `TransactionHandle`: the binder itself, the unit of work, the coordinator of policy-locked operations
+ * (it opens the transaction its steps run in, so it hands them the handle), and the limiter's own short transaction.
+ */
+export const HANDLE_BINDER_FILES: readonly string[] = [
+  'platform/database/transaction-handle.ts',
+  'platform/database/postgres.unit-of-work.adapter.ts',
+  'platform/database/policy-lock/coordinate.ts',
+  'platform/limiter/postgres.rate-limiter.adapter.ts',
+];
+
+/**
+ * Only the unit of work makes the handle that port operations take (S0.1: "only the unit-of-work adapter can make one"; plan
+ * obligation OB-99). A handle stands for a transaction under the context the database service applied; an adapter that bound its
+ * own would be a second door into a transaction it did not open. A production file that names `bindTransactionHandle` outside the
+ * listed files is a breach. (The limiter binds one inside its own short transaction, to read the limit of a bucket through the
+ * settings reader, and no other adapter does.)
+ */
+export function findHandleBinderViolations(
+  files: readonly SourceFile[],
+  allowed: readonly string[] = HANDLE_BINDER_FILES,
+): string[] {
+  return files
+    .filter(
+      (file) => isProduction(file) && !allowed.includes(file.path) && HANDLE_BINDER.test(file.text),
+    )
+    .map(
+      (file) =>
+        `${file.path} makes a transaction handle; only ${allowed.join(', ')} may (bindTransactionHandle)`,
+    );
+}

@@ -42,6 +42,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
   'pnpm run test:db',
   'pnpm run test:browser',
   'pnpm run test:e2e',
+  'pnpm run test:e2e:https',
   'pnpm audit --audit-level high',
 ];
 
@@ -539,7 +540,7 @@ function checkArtifacts(jobs: readonly Job[]): WorkflowProblem[] {
   return problems;
 }
 
-const TEST_COMMANDS = ['pnpm run test:browser', 'pnpm run test:e2e'];
+const TEST_COMMANDS = ['pnpm run test:browser', 'pnpm run test:e2e', 'pnpm run test:e2e:https'];
 const MANIFEST_FILE = 'build-manifest.json';
 
 /**

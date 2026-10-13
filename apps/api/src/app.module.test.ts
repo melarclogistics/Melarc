@@ -15,22 +15,42 @@ import {
   DescribeMetrics,
 } from './platform/auth/describe/describe-ports.adapter.js';
 import {
+  AUDIT_WRITER,
   CLOCK,
   HASHER,
+  IDENTITY_DIRECTORY,
   METRICS,
   PORTS,
   portProviders,
+  RATE_LIMITER,
+  SESSION_STORE,
+  TOKEN_SERVICE,
+  UNIT_OF_WORK,
   type Clock,
   type HashVerdict,
   type Hasher,
   type Metrics,
   type PortBindings,
+  type RateLimiter,
 } from './platform/auth/ports/index.js';
 import { AdapterRefusedError } from './platform/config/adapter-refusals.js';
-import { inertConfig } from './platform/config/inert-config.js';
+import { INERT_DEADLINES, inertConfig } from './platform/config/inert-config.js';
 import type { KeyPurpose, PurposeKeys } from './platform/config/key-material.js';
 import type { AppConfig } from './platform/config/load-config.js';
 import { Secret } from './platform/config/secret.js';
+import { Sha256TokenService } from './platform/auth/crypto/sha256.token-service.adapter.js';
+import { PostgresSessionStore } from './platform/auth/sessions/postgres.session-store.adapter.js';
+import {
+  SESSION_AUTHENTICATOR,
+  SessionAuthenticator,
+} from './platform/auth/sessions/session-authenticator.js';
+import { SessionIssuer } from './platform/auth/sessions/session-issuer.js';
+import { POLICY_COORDINATOR, SESSION_ISSUER } from './platform/auth/sessions/session-providers.js';
+import { PostgresAuditWriter } from './platform/audit/postgres.audit-writer.adapter.js';
+import { PolicyCoordinator } from './platform/database/policy-lock/coordinate.js';
+import { PostgresUnitOfWork } from './platform/database/postgres.unit-of-work.adapter.js';
+import { PostgresRateLimiter } from './platform/limiter/postgres.rate-limiter.adapter.js';
+import { PostgresStaffIdentityDirectory } from './staff/postgres.staff-identity-directory.adapter.js';
 import { createLogger } from './platform/logging/create-logger.js';
 import { APP_CONFIG } from './platform/platform.tokens.js';
 import { randomKey } from './test-support/config-env.js';
@@ -165,21 +185,124 @@ const resolve = <T>(token: symbol | (new (...parameters: never[]) => T)): T => {
 };
 
 describe('the composition root binds adapters to the port tokens (S0.1)', () => {
-  // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application. The
-  // runtime composition binds the production Clock (S0.6, which needs it for its deadlines) and nothing else: each other port is
-  // bound by the first task that consumes it (OB-38). This pin changed deliberately at S0.6.
-  it('binds only the production Clock in the runtime composition while no other real adapter is bound', async () => {
+  // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application. Without a
+  // database the runtime composition binds the production Clock (S0.6, which needs it for its deadlines) and the SHA-256 token
+  // service (S0.24, which needs no key and no database), and nothing else: each other port is bound by the first task that
+  // consumes it (OB-38). This pin changed deliberately at S0.6 and again at S0.24.
+  it('binds only the production Clock and the token service in the runtime composition without a database', async () => {
     running = await startTestApp({ config: RUNTIME_CONFIG });
 
-    for (const entry of PORTS.filter((port) => port.name !== 'Clock')) {
+    for (const entry of PORTS.filter(
+      (port) => port.name !== 'Clock' && port.name !== 'TokenService',
+    )) {
       expect(() => resolve(entry.token), entry.name).toThrow();
     }
     const clock = resolve<Clock>(CLOCK);
     expect(clock).toBeInstanceOf(SystemClock);
     expect(Number.isFinite(clock.monotonicMilliseconds())).toBe(true);
     expect(Math.abs(clock.now().getTime() - Date.now())).toBeLessThan(5_000);
+    expect(resolve(TOKEN_SERVICE)).toBeInstanceOf(Sha256TokenService);
     expect(portProviders()).toEqual([]);
     expect(portProviders({})).toEqual([]);
+  });
+
+  // Break caught (S0.24): a credential judged by a store that is not there, or the session machinery built over the inert adapters.
+  // With no database none of the session services exists, and the authentication guard answers a credential with the operational
+  // failure.
+  it('has no coordinator, no authenticator and no issuer without a database', async () => {
+    running = await startTestApp({ config: RUNTIME_CONFIG });
+
+    expect(resolve(POLICY_COORDINATOR)).toBeUndefined();
+    expect(resolve(SESSION_AUTHENTICATOR)).toBeUndefined();
+    expect(resolve(SESSION_ISSUER)).toBeUndefined();
+  });
+
+  // Break caught (S0.22): the rate-limit guard asking a port nobody bound, or a limiter that is not the authoritative one bound by
+  // default. The composition binds the PostgreSQL limiter where it can be built (a database to decide in, key material to digest
+  // the identifiers under) and is the one the configuration asks for, and nothing falls back to the in-memory one.
+  describe('the rate limiter (S0.22)', () => {
+    const DATABASE = {
+      url: 'postgres://melarc_api_runtime:secret@127.0.0.1:1/melarc_test',
+      poolMax: 1,
+      deadlines: INERT_DEADLINES,
+    };
+    const CAN_BUILD: AppConfig = inertConfig({
+      composition: 'runtime',
+      nodeEnv: 'test',
+      http: Object.freeze({ ...TEST_CONFIG.http, port: 0 }),
+      keys: Object.freeze({ custody: 'local', purposes: runtimeKeys() }),
+      database: DATABASE,
+    });
+
+    it('binds the PostgreSQL limiter, as an application singleton, in the runtime composition that can build it', async () => {
+      running = await startTestApp({ config: CAN_BUILD });
+
+      const limiter = resolve<RateLimiter>(RATE_LIMITER);
+      expect(limiter).toBeInstanceOf(PostgresRateLimiter);
+      expect(limiter).toBe(resolve<RateLimiter>(RATE_LIMITER));
+    });
+
+    it('exports the limiter token beside the Clock and the session machinery ports', () => {
+      const module = AppModule.register({
+        config: CAN_BUILD,
+        logger: createLogger({ config: TEST_CONFIG }),
+      });
+
+      expect(module.exports).toEqual([
+        CLOCK,
+        TOKEN_SERVICE,
+        UNIT_OF_WORK,
+        SESSION_STORE,
+        IDENTITY_DIRECTORY,
+        AUDIT_WRITER,
+        RATE_LIMITER,
+      ]);
+    });
+
+    it.each([
+      [
+        'the configuration asks for the in-memory limiter',
+        { adapters: { ...CAN_BUILD.adapters, limiter: 'memory' as const } },
+      ],
+      ['there is no database to decide in', { database: undefined }],
+      [
+        'there is no key material to digest under',
+        { keys: Object.freeze({ custody: 'describe' as const }) },
+      ],
+    ])('does not bind a limiter when %s', async (_label, override) => {
+      running = await startTestApp({ config: { ...CAN_BUILD, ...override } });
+
+      expect(() => resolve(RATE_LIMITER)).toThrow();
+    });
+
+    // Break caught: a key purpose that is missing found at the first request instead of at start.
+    it('stops the application at start when the limiter’s key purpose is missing', async () => {
+      const purposes = runtimeKeys() as Partial<Record<KeyPurpose, PurposeKeys>>;
+      delete purposes.limiter_digest;
+      const config = {
+        ...CAN_BUILD,
+        keys: Object.freeze({
+          custody: 'local' as const,
+          purposes: purposes as Record<KeyPurpose, PurposeKeys>,
+        }),
+      };
+
+      await expect(startTestApp({ config })).rejects.toThrow();
+    });
+
+    // Break caught: the in-memory limiter supplied by a test being replaced by the composition's own.
+    it('lets a test supply its own limiter through ports', async () => {
+      const own: RateLimiter = { admit: () => Promise.resolve({ allowed: true }) };
+      running = await startTestApp({
+        config: CAN_BUILD,
+        rootModule: (options) => ({
+          module: TestRootModule,
+          imports: [AppModule.register({ ...options, ports: { rateLimiter: { useValue: own } } })],
+        }),
+      });
+
+      expect(resolve<RateLimiter>(RATE_LIMITER)).toBe(own);
+    });
   });
 
   // Break caught: the production Clock reaching the describe composition, where every port must stay inert so that building the
@@ -316,6 +439,56 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
   });
 });
 
+describe('the session machinery (S0.24)', () => {
+  const DATABASE = {
+    url: 'postgres://melarc_api_runtime:secret@127.0.0.1:1/melarc_test',
+    poolMax: 1,
+    deadlines: INERT_DEADLINES,
+  };
+  const WITH_DATABASE: AppConfig = inertConfig({
+    composition: 'runtime',
+    nodeEnv: 'test',
+    http: Object.freeze({ ...TEST_CONFIG.http, port: 0 }),
+    database: DATABASE,
+  });
+
+  // Break caught: the guard asking for a port the root did not bind, or the real session adapters not being the ones bound, or one
+  // that is not an application singleton. The composition builds them over the database service.
+  it('binds the unit of work, the session store, the staff identity directory and the audit writer over a database', async () => {
+    running = await startTestApp({ config: WITH_DATABASE });
+
+    expect(resolve(UNIT_OF_WORK)).toBeInstanceOf(PostgresUnitOfWork);
+    expect(resolve(SESSION_STORE)).toBeInstanceOf(PostgresSessionStore);
+    expect(resolve(IDENTITY_DIRECTORY)).toBeInstanceOf(PostgresStaffIdentityDirectory);
+    expect(resolve(AUDIT_WRITER)).toBeInstanceOf(PostgresAuditWriter);
+    expect(resolve(UNIT_OF_WORK)).toBe(resolve(UNIT_OF_WORK));
+    expect(resolve(TOKEN_SERVICE)).toBeInstanceOf(Sha256TokenService);
+  });
+
+  // Break caught (OB-63): a coordinator not built from the configuration, or an issuer built without the pieces it needs.
+  it('provides the coordinator, the authenticator and the issuer, built from those ports', async () => {
+    running = await startTestApp({ config: WITH_DATABASE });
+
+    expect(resolve(POLICY_COORDINATOR)).toBeInstanceOf(PolicyCoordinator);
+    expect(resolve(SESSION_AUTHENTICATOR)).toBeInstanceOf(SessionAuthenticator);
+    expect(resolve(SESSION_ISSUER)).toBeInstanceOf(SessionIssuer);
+  });
+
+  // Break caught: a test that supplies a port being overridden by the composition's own.
+  it('lets a test supply its own session store through ports', async () => {
+    const own = new PostgresSessionStore({ now: () => new Date(0) });
+    running = await startTestApp({
+      config: WITH_DATABASE,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [AppModule.register({ ...options, ports: { sessionStore: { useValue: own } } })],
+      }),
+    });
+
+    expect(resolve(SESSION_STORE)).toBe(own);
+  });
+});
+
 describe('the root module exposes the port tokens and nothing else (S0.1)', () => {
   const options = { config: TEST_CONFIG, logger: createLogger({ config: TEST_CONFIG }) };
   const runtime = { config: RUNTIME_CONFIG, logger: options.logger };
@@ -329,19 +502,20 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     });
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK, METRICS]);
-    // The two bindings and the check that no inert describe adapter was bound; the check is not exported.
-    expect(module.providers).toHaveLength(3);
+    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS]);
+    // The three bindings and the check that no inert describe adapter was bound; the check is not exported.
+    expect(module.providers).toHaveLength(4);
     expect(module.imports).toHaveLength(1);
   });
 
-  // Changed deliberately at S0.6: the runtime composition binds the production Clock itself, and exports that one token.
-  it('exports the Clock token and nothing else in the runtime composition', () => {
+  // Changed deliberately at S0.6 and at S0.24: the runtime composition binds the production Clock and the token service itself, and
+  // exports those two tokens (and, with a database, the ports of the session machinery).
+  it('exports the Clock and the token service and nothing else in the runtime composition without a database', () => {
     const module = AppModule.register(runtime);
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK]);
-    expect(module.providers).toHaveLength(2);
+    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE]);
+    expect(module.providers).toHaveLength(3);
   });
 
   // Break caught: the describe composition exporting more than the sixteen tokens, or fewer.

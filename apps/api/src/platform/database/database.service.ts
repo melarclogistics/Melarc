@@ -29,6 +29,7 @@ import {
   CommitOutcomeUnknownError,
   TransactionRolledBackError,
   asError,
+  closedIn,
   commandTagOf,
   deadlineFrom,
   isDefiniteRefusal,
@@ -277,11 +278,18 @@ export class DatabaseService {
     };
     const ended = () =>
       Promise.reject(new Error('The transaction has ended: its connection is no longer its own'));
-    // Nothing reaches the connection once the budget has run out: the work may still be running, the connection is not its own.
+    // Nothing reaches the connection once the budget has run out, or once the request above it is over (answered, or the client
+    // left): the work may still be running, the connection is not its own, and nobody is waiting for what it would do.
     const refused = (): Promise<never> | undefined => {
       const gone = budget.expiredWith;
       if (gone !== undefined) return Promise.reject(gone);
-      return open ? undefined : ended();
+      if (!open) return ended();
+      try {
+        budget.assertOpen();
+      } catch (closed) {
+        return Promise.reject(asError(closed));
+      }
+      return undefined;
     };
     // Only `query` is what the transaction needs of a connection, and only while the transaction is open and not held.
     const guarded = {
@@ -308,8 +316,8 @@ export class DatabaseService {
     let destroyBecause: Error | undefined;
 
     const body = (async (): Promise<T> => {
-      // A request that ran out while this was getting its connection sends nothing at all.
-      budget.throwIfExpired();
+      // A request that ran out, or was over, while this was getting its connection sends nothing at all.
+      budget.assertOpen();
       // One round trip: BEGIN, and the server's own bound on the transaction. It is the budget plus the disposal bound, so the
       // server ends a transaction by itself only when this process could not clean up in time.
       const serverBound = Math.ceil(budget.remainingMilliseconds()) + DISPOSAL_BOUND_MS;
@@ -370,6 +378,15 @@ export class DatabaseService {
           'database work finished after its budget ran out; nothing it did was committed',
         );
         throw late;
+      }
+      // A request that is over (answered, or the client left) has nobody waiting for what this did: it is rolled back, not committed.
+      // A statement already running is not cancelled by this (finishing is not expiry; the transaction's own bound still ends it).
+      if (budget.closed) {
+        this.logger.warn(
+          {},
+          'database work finished after its request was over; nothing it did was committed',
+        );
+        budget.assertOpen();
       }
       run.phase = 'committing';
       let completion: unknown;
@@ -451,7 +468,7 @@ export class DatabaseService {
         rollbackFailure ??
         (run.phase === 'working' ? undefined : asError(error)) ??
         (deadline === undefined ? undefined : asError(error));
-      throw deadline ?? error;
+      throw closedIn(error) ?? deadline ?? error;
     } finally {
       open = false;
       budget.finish();

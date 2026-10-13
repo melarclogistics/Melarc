@@ -12,21 +12,30 @@ import {
   type HarnessDatabase,
 } from './database.ts';
 import { failWithCleanup } from './cleanup.ts';
+import { startHttpsFront } from './https-front.ts';
 import { ManagedProcess } from './managed-process.ts';
 import { repositoryPaths, requireBuilds } from './paths.ts';
 import { freePort } from './ports.ts';
+import type { TlsMaterial } from './tls-material.ts';
 
 export interface StartStackOptions {
   /** Where logs and the sandbox capture go. Emptied first. Defaults to e2e/test-results/stack. */
   readonly runDirectory?: string;
   /** Extra API settings. The ones that make a run local and safe cannot be replaced (see apiEnvironment). */
   readonly apiEnvironment?: Readonly<Record<string, string>>;
+  /**
+   * The test certificates of the trusted HTTPS origin (S0.23), already judged by `checkTlsMaterial`. With them, a TLS front is
+   * started in front of the Ops origin and the API is configured with its origin; without them the run is the plain HTTP one.
+   */
+  readonly tls?: Pick<TlsMaterial, 'leafPath' | 'leafKeyPath'>;
 }
 
 /** The real system under test: a database of its own, the API process, and the Ops build behind a same-origin proxy. */
 export interface Stack {
   /** What a browser opens: the Ops origin. Its /api/v1 is proxied to the API, as the production edge does. */
   readonly origin: string;
+  /** The trusted HTTPS origin in front of it, when the run was given test certificates. */
+  readonly httpsOrigin?: string;
   /** The API's own address. Tests go through `origin`; this is for the checks that must not. */
   readonly apiOrigin: string;
   readonly database: HarnessDatabase;
@@ -64,7 +73,7 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
   const captureFile = join(runDirectory, 'outbound-capture.jsonl');
 
   const database = await createDatabase();
-  const started: ManagedProcess[] = [];
+  const started: { readonly name: string; stop(): Promise<void> }[] = [];
   let stopped = false;
 
   const stop = async (): Promise<void> => {
@@ -91,6 +100,11 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
   try {
     await provisionHarnessSchema(database);
 
+    // The HTTPS front's port is chosen first, so that the API can be started knowing the exact origin the browser will send.
+    const frontPort = options.tls === undefined ? undefined : await freePort();
+    const httpsOrigin =
+      frontPort === undefined ? undefined : `https://localhost:${String(frontPort)}`;
+
     const apiPort = await freePort();
     const apiOrigin = `http://127.0.0.1:${String(apiPort)}`;
     const api = await ManagedProcess.start({
@@ -102,7 +116,14 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
         port: apiPort,
         runtimeUrl: database.runtimeUrl,
         captureFile,
-        ...(options.apiEnvironment === undefined ? {} : { extra: options.apiEnvironment }),
+        ...(options.apiEnvironment === undefined && httpsOrigin === undefined
+          ? {}
+          : {
+              extra: {
+                ...options.apiEnvironment,
+                ...(httpsOrigin === undefined ? {} : { OPS_ORIGIN: httpsOrigin }),
+              },
+            }),
       }),
       logDirectory,
       ready: { url: `${apiOrigin}/readyz`, timeoutMs: 30_000 },
@@ -131,8 +152,17 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
     });
     started.push(ops);
 
+    if (options.tls !== undefined && frontPort !== undefined) {
+      const front = await startHttpsFront({ upstream: origin, tls: options.tls, port: frontPort });
+      started.push({ name: 'https-front', stop: () => front.stop() });
+      if (front.origin !== httpsOrigin) {
+        throw new Error('The HTTPS front is not at the origin the API was configured with.');
+      }
+    }
+
     const connection = (): StackConnection => ({
       origin,
+      ...(httpsOrigin === undefined ? {} : { httpsOrigin }),
       apiOrigin,
       runDirectory,
       captureFile,
@@ -145,6 +175,7 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
 
     return {
       origin,
+      ...(httpsOrigin === undefined ? {} : { httpsOrigin }),
       apiOrigin,
       database,
       captureFile,

@@ -2,8 +2,9 @@ import { API_RUNTIME_ROLE } from '../config/load-config.js';
 
 /**
  * The database roles of the technical identities (SECURITY_DESIGN.md §14.6, §14.17, §14.17b; data-scope-registry.md §5).
- * The owner and the migration roles are in `tools/database` (`OWNER_ROLE`, `MIGRATION_ROLE`): nothing at run time uses
- * them. These are the roles a running process connects as, or a grant set a process is given.
+ * The owner role is in `tools/database` (`OWNER_ROLE`): nothing at run time uses it. The migration role is named here because
+ * the access matrix gives it the one capability no application context is opened under (`policy_change`, S0.27); no process of
+ * the application connects as it. The rest are the roles a running process connects as, or a grant set a process is given.
  *
  * - The API runtime is the only login the API's configuration may name (`load-config.ts` refuses any other).
  * - The worker base identity holds no protected-business-table grant of its own. A worker runs as the base identity plus
@@ -20,6 +21,11 @@ export { API_RUNTIME_ROLE };
 export const WORKER_RUNTIME_ROLE = 'melarc_worker_runtime';
 export const WORKER_CREDENTIAL_DELIVERY_ROLE = 'melarc_worker_cap_credential_delivery';
 export const PROVISIONING_ROLE = 'melarc_provisioning';
+/**
+ * The role migrations run as (SECURITY_DESIGN.md §14.17a). `tools/database/safety.ts` holds the same string, because it cannot
+ * import from the platform (a root script imports it under Node's type stripping); `safety.test.ts` holds the two equal.
+ */
+export const MIGRATION_ROLE = 'melarc_migration_elevated';
 
 /** The roles that may log in to an application database besides the migration identity, for a process of their own. */
 export const RUNTIME_LOGIN_ROLES = [

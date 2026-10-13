@@ -49,7 +49,7 @@ export interface DatabaseDeadlines {
 
 /**
  * The per-request execution budget (plan section 11.8): the longest one request may run once it has been received and admitted,
- * database work and everything else included. The database layer consumes it now; S0.20 wraps every request in one. It is not
+ * database work and everything else included. The database layer consumes it, and S0.20 wraps every request in one. It is not
  * an HTTP receipt limit (those end a slow sender) and not a database timeout (those bound waiting inside the database).
  */
 export interface ExecutionConfig {

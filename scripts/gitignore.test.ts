@@ -105,6 +105,26 @@ describe('.gitignore', () => {
     });
   }
 
+  // Break caught: the output of the local code-graph tool (graphify) reaching a commit or a source package: it is
+  // generated per machine, holds a cache of what it read and is rebuilt from the source, never a source file itself.
+  it('ignores the output folder of the local code-graph tool, and only that folder', () => {
+    const output = [
+      'graphify-out/graph.json',
+      'graphify-out/GRAPH_REPORT.md',
+      'graphify-out/cache/0a1b2c3d.json',
+      'graphify-out/wiki/index.md',
+    ];
+    assert.deepEqual(
+      output.filter((path) => !ignored([path]).includes(path)),
+      [],
+      'not ignored',
+    );
+    assert.deepEqual(
+      ignored(['docs/graphify-out.md', 'src/graphify-outline.ts', '.graphifyignore']),
+      [],
+    );
+  });
+
   // Break caught: a pattern so broad that it hides source, a migration or a committed example.
   it('does not ignore source, migrations, examples or names that only resemble the ignored ones', () => {
     const source = [

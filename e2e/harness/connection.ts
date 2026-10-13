@@ -8,6 +8,12 @@ import { readNotes, type HarnessDatabase } from './database.ts';
  */
 export interface StackConnection {
   readonly origin: string;
+  /**
+   * The trusted HTTPS origin in front of `origin` (S0.23): present only when the run was given test certificates
+   * (`MELARC_E2E_TLS_DIR`). The API's `OPS_ORIGIN` is this origin, exactly, so that its CSRF and CORS judgements are made against
+   * the origin the browser really sends.
+   */
+  readonly httpsOrigin?: string;
   readonly apiOrigin: string;
   readonly runDirectory: string;
   readonly captureFile: string;

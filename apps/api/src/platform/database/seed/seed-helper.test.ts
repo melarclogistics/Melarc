@@ -11,7 +11,6 @@ import {
 import { ReadinessRegistry } from '../../health/readiness.registry.js';
 import { ShutdownRegistry } from '../../lifecycle/shutdown.registry.js';
 import { DatabaseService } from '../database.service.js';
-import { bundleLock, fixedLock } from '../policy-lock/plan.js';
 import { PROVISIONING_ROLE } from '../technical-roles.js';
 import {
   SEED_PRINCIPAL_ID,
@@ -47,13 +46,14 @@ function build(options: { role?: string; report?: Record<string, number>; fail?:
   return { service, connection };
 }
 
-const LOCKS = [
-  bundleLock('5eed0001-0000-4000-8000-000000000001', 'exclusive'),
-  fixedLock('VENDOR', 'exclusive'),
-];
+const POLICY_KEYS: SeedPlan['policyKeys'] = {
+  bundleIds: ['5eed0001-0000-4000-8000-000000000001', '5eed0002-0000-4000-8000-000000000002'],
+  fixedPolicies: ['VENDOR', 'RIDER'],
+};
+const NO_KEYS: SeedPlan['policyKeys'] = { bundleIds: [], fixedPolicies: [] };
 
 const PLAN: SeedPlan = {
-  locks: LOCKS,
+  policyKeys: POLICY_KEYS,
   entryPoint: 'initialize_reference_data',
   payload: {
     hub: [{ id: '5eed0100-0000-4000-8000-000000000001', name: 'Accra' }],
@@ -112,7 +112,7 @@ describe('runSeed: one transaction, as SYSTEM under the seed capability, applied
     const { service, connection } = build({ report: { reason_code: 2 } });
 
     const report = await runSeed(service, {
-      locks: [],
+      policyKeys: NO_KEYS,
       entryPoint: 'add_reason_fixtures',
       payload: { reason_code: [{ code: 'FIXTURE_ONE' }, { code: 'FIXTURE_TWO' }] },
       labels: { reason_code: 'reason_code (fixtures)' },
@@ -137,40 +137,59 @@ describe('runSeed: one transaction, as SYSTEM under the seed capability, applied
     expect(connection.statements.at(-1)).toBe('rollback');
   });
 
-  // Break caught: the seed's keys taken shared, or after the function has run (SECURITY_DESIGN.md section 13.10a: "the seed that inserts
-  // the first bundles ... exclusive on each key it creates; one protocol has no special case").
-  it('takes every policy key exclusively, first, before it calls the function', async () => {
+  // Break caught: the seed's keys not taken, taken by something other than the primitive's one statement, or taken after the function
+  // has run (SECURITY_DESIGN.md section 13.10a: "the seed that inserts the first bundles ... exclusive on each key it creates; one
+  // protocol has no special case"). The lock is the first statement after the context, and it is the SQL of S0.27 and not this file.
+  it('takes every policy key with the primitive lock function, first, before it calls the function', async () => {
     const { service, connection } = build({ report: REPORT });
 
     await runSeed(service, PLAN);
 
     const statements = connection.workStatements;
-    const firstLock = statements.findIndex((text) => text.includes('pg_advisory_xact_lock'));
-    const call = statements.findIndex((text) => text.includes('melarc.initialize_reference_data'));
-    expect(firstLock).toBeGreaterThan(0);
-    expect(call).toBeGreaterThan(firstLock);
-    const locks = statements.filter((text) => text.includes('pg_advisory_xact_lock'));
-    expect(locks).toHaveLength(LOCKS.length);
-    expect(locks.every((text) => text.startsWith('select pg_advisory_xact_lock('))).toBe(true);
-    expect(statements.some((text) => text.includes('_shared'))).toBe(false);
+    const lockAt = statements.findIndex((text) => text.includes('melarc.lock_policy_keys'));
+    const callAt = statements.findIndex((text) =>
+      text.includes('melarc.initialize_reference_data'),
+    );
+    expect(lockAt).toBeGreaterThanOrEqual(0);
+    expect(callAt).toBeGreaterThan(lockAt);
+    expect(statements[lockAt]).toBe('select melarc.lock_policy_keys($1::uuid[], $2::text[])');
+    const values = connection.values[connection.statements.indexOf(statements[lockAt] ?? '')];
+    expect(values).toEqual([
+      '{5eed0001-0000-4000-8000-000000000001,5eed0002-0000-4000-8000-000000000002}',
+      '{VENDOR,RIDER}',
+    ]);
+    // This file asks for no advisory lock of its own and has no way to ask for a shared one: the function takes them all exclusively.
+    expect(statements.some((text) => text.includes('pg_advisory'))).toBe(false);
   });
 
-  // Break caught: a plan that names a key shared, which the seed would then hold in the weaker mode beside a sign-in that also
-  // holds it shared (SECURITY_DESIGN.md section 13.10a: the seed is exclusive on every key it creates).
-  it('takes a key a plan asked for shared exclusively all the same', async () => {
-    const { service, connection } = build({ report: REPORT });
+  // Break caught: a plan with nothing to lock calling the lock function, or a plan's key becoming more than an id or an audience
+  // inside the literal that travels as a parameter.
+  it('calls the lock function for a plan that names a key, and for no other', async () => {
+    const { service, connection } = build({ report: { reason_code: 1 } });
 
     await runSeed(service, {
-      ...PLAN,
-      locks: [
-        bundleLock('5eed0001-0000-4000-8000-000000000001', 'shared'),
-        fixedLock('RIDER', 'shared'),
-      ],
+      policyKeys: NO_KEYS,
+      entryPoint: 'add_reason_fixtures',
+      payload: { reason_code: [{ code: 'FIXTURE_ONE' }] },
     });
 
-    const locks = connection.workStatements.filter((text) => text.includes('pg_advisory'));
-    expect(locks).toHaveLength(2);
-    expect(locks.every((text) => !text.includes('_shared'))).toBe(true);
+    expect(connection.statements.some((text) => text.includes('lock_policy_keys'))).toBe(false);
+  });
+
+  it.each([
+    ['a bundle that is not an id', { bundleIds: ['x}, {y'], fixedPolicies: [] }],
+    ['an audience with no fixed policy', { bundleIds: [], fixedPolicies: ['STAFF'] }],
+  ] as const)('refuses %s in a plan, before any statement is sent', async (_label, keys) => {
+    const { service, connection } = build({ report: REPORT });
+
+    await expect(
+      runSeed(service, { ...PLAN, policyKeys: keys as unknown as SeedPlan['policyKeys'] }),
+    ).rejects.toBeInstanceOf(RangeError);
+
+    expect(connection.statements.some((text) => text.includes('lock_policy_keys'))).toBe(false);
+    expect(connection.statements.some((text) => text.includes('initialize_reference_data'))).toBe(
+      false,
+    );
   });
 
   // Break caught: a seed that adds to a table that already has rows, or that keeps what it wrote. The database refuses (55000, naming
@@ -235,13 +254,17 @@ describe('runSeed: one transaction, as SYSTEM under the seed capability, applied
     await expect(runSeed(service, PLAN)).rejects.toThrow(/taskCapability/);
 
     expect(callOf(connection).at).toBe(-1);
-    expect(connection.statements.some((text) => text.includes('pg_advisory'))).toBe(false);
+    expect(connection.statements.some((text) => text.includes('lock_policy_keys'))).toBe(false);
   });
 
   it('refuses a plan with no table: a seed that seeds nothing is a mistake', async () => {
     const { service } = build();
     await expect(
-      runSeed(service, { locks: [], entryPoint: 'initialize_reference_data', payload: {} }),
+      runSeed(service, {
+        policyKeys: NO_KEYS,
+        entryPoint: 'initialize_reference_data',
+        payload: {},
+      }),
     ).rejects.toThrow(/nothing to seed/);
   });
 
@@ -250,7 +273,7 @@ describe('runSeed: one transaction, as SYSTEM under the seed capability, applied
     const { service } = build();
     await expect(
       runSeed(service, {
-        locks: [],
+        policyKeys: NO_KEYS,
         entryPoint: 'initialize_reference_data',
         payload: { hub: [] },
       }),
