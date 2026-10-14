@@ -208,7 +208,7 @@ jobs:
       # the passwords it describes; the job's own credentials are throwaway.
       - name: Keep the failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
           path: |
@@ -231,7 +231,7 @@ jobs:
       # manifest's source.ref is refs/heads/main. To check it, unpack
       # it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
       - name: Keep the build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-build-${{ github.sha }}-${{ github.run_attempt }}
           path: |
