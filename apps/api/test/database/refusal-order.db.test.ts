@@ -186,7 +186,7 @@ const CONTRACT = {
   },
 } as unknown as JsonObject;
 
-/** The defect the retained requirement describes: a record still in progress under its key. It is not mapped to any answer. */
+/** The defect the retained requirement describes: a record still in progress under its key. It has no answer of its own: it is the invariant failure of OB-100, which the pipeline answers with the fixed code-less `500`. */
 class StrandedCommandError extends Error {
   constructor() {
     super('a committed idempotency record is still in progress');
@@ -950,11 +950,11 @@ describe('a command is one unit of work (SECURITY_DESIGN.md section 14.16; OB-10
     expect(await orderOf(ORDER)).toEqual({ state: 'APPROVED', version: 2, amount: 5 });
   });
 
-  // OB-100, the scenario that is NOT resolved (SECURITY_DESIGN.md section 14.16): a record that was committed still in progress,
-  // which only a command assembled wrongly can leave. The owner has not named an answer or a code for it. What the pipeline must
-  // not do is answer it as a success or a replay; until the owner decides, it fails closed with the platform's fixed unexpected
-  // failure (`500`, no code), which is a placeholder and not a decision. The acceptance item stays blocked.
-  it('fails closed, and does not answer as a success or a replay, for a stranded record that is still in progress (OB-100: blocked)', async () => {
+  // OB-100 (SECURITY_DESIGN.md section 14.16; decided by the owner on 12 October 2026, plan section 7.20): a record that was
+  // committed still in progress, which only a command assembled wrongly can leave, is an internal invariant failure. It is answered
+  // with the platform's fixed unexpected failure (`500`, no code: no contract code is added), never as a success or a replay, with
+  // nothing changed, and nothing reclaims it automatically.
+  it('fails closed, and does not answer as a success or a replay, for a stranded record that is still in progress', async () => {
     const staff = await reviewer();
     await arrange(ORDER);
     const key = freshKey();
@@ -986,8 +986,4 @@ describe('a command is one unit of work (SECURITY_DESIGN.md section 14.16; OB-10
       )?.state,
     ).toBe('IN_PROGRESS');
   });
-
-  it.todo(
-    'OB-100: the HTTP answer and the contract code for a command found in progress under its key (the owner’s decision)',
-  );
 });
