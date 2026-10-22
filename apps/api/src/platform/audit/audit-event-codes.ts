@@ -141,6 +141,7 @@ export const AUDIT_EVENT_CODES = [
   'auth.mfa.revoked',
   'auth.mfa.reset',
   'auth.bootstrap.completed',
+  'auth.bootstrap.resumed',
   'auth.bootstrap.succeeded',
   'auth.device.proof_failed',
   'auth.session.authority_revoked',

@@ -630,8 +630,10 @@ describe('what the API login reaches, by context', () => {
     expect(await idsOf(context('STAFF', same), 'session')).toEqual([]);
   });
 
-  // Break caught: a human principal inserting or ending a session, which only the authentication capability may do.
-  it('refuses a session to a human principal, whether it inserts one or ends one', async () => {
+  // Break caught: a human principal inserting a session, or ending one that it does not act in, which only the authentication capability
+  // may do. (A principal ends the session it acts in with SIGNED_OUT since S0.34, migration 0023: `sign-out-authority.db.test.ts`; these
+  // contexts name no session, so they end none.)
+  it('refuses a session to a human principal that names no session, whether it inserts one or ends one', async () => {
     const insert = (ctx: SecurityContext): Promise<string | undefined> =>
       refusal(() =>
         withHandle(built.service, ctx, async (_handle, tx) => {
@@ -677,7 +679,7 @@ describe('what the API login reaches, by context', () => {
   });
 
   // Break caught: the API's login able to rewrite what makes a session what it is, or to delete a session or an identity.
-  it('holds an UPDATE of exactly the three columns of a session’s life, and of the three credential columns, and no DELETE', async () => {
+  it('holds an UPDATE of exactly the three columns of a session’s life, and of the three credential columns and the two of their lockout, and no DELETE', async () => {
     const columns = async (table: string): Promise<{ column: string; update: boolean }[]> => {
       const result = await admin.query<{ column: string; update: boolean }>(
         `select a.attname as column, has_column_privilege('melarc_api_runtime', c.oid, a.attnum, 'UPDATE') as update
@@ -700,6 +702,9 @@ describe('what the API login reaches, by context', () => {
       'credential_hash',
       'credential_established_at',
       'credential_generation',
+      // S0.32: the credential's failed-attempt count and lock time (migration 0020), and nothing else.
+      'failed_attempt_count',
+      'locked_until',
     ]);
     for (const table of ['session', 'staff_identity']) {
       const privileges = await admin.query<{

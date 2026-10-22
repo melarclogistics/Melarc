@@ -163,6 +163,19 @@ export interface SessionStore {
     selector: SessionSelector,
     reason: SessionTerminationReason,
   ): Promise<readonly string[]>;
+  /**
+   * Ends one session as `EXPIRED` **if, on the database's own clock after the row lock, its time has run out**: it is not ended, and
+   * is at or past its absolute end or (a browser session, `idleMinutes` not null) at or past its idle limit (equality is expired,
+   * SECURITY_DESIGN.md §13.3a). It is the request-time expiry of AC-SLICE-000-35, and it judges for itself rather than act on what a
+   * request read a moment before: a session that was recorded as active while the expiry waited for its row is left alone, and one
+   * whose end came during the wait is ended. Resolves with whether this call ended it; `false` is a session that is live, that
+   * already ended (it keeps its first reason) or that does not exist, and is never an error.
+   */
+  expire(
+    transaction: TransactionHandle,
+    sessionId: string,
+    idleMinutes: number | null,
+  ): Promise<boolean>;
 }
 
 export const SESSION_STORE = Symbol('SESSION_STORE');
@@ -200,6 +213,15 @@ export const SESSION_STORE_DESCRIPTOR: PortDescriptor<SessionStore> = {
         "the transaction, which sessions (one, a principal's, or a bundle's) and the termination reason",
       outputs:
         'the ids of the sessions that were ended, in id order; sessions already ended keep their reason',
+      outcomes: 'none',
+      raises: 'none',
+      transaction: 'inside-callers-transaction',
+    },
+    expire: {
+      inputs:
+        'the transaction, the session and the idle limit of its tier in minutes (none for a rider)',
+      outputs:
+        'whether this call ended the session as EXPIRED: judged by the statement on the database time after the row lock; a session that is live, already ended or missing is left as it is',
       outcomes: 'none',
       raises: 'none',
       transaction: 'inside-callers-transaction',

@@ -25,10 +25,16 @@ import { runExclusively } from './transaction-gate.js';
  * - A list never probes: the caller of a list does not call this.
  */
 
-/** Where a hub-scoped entity lives. `responsible_hub_id` is the registry's name for the column that carries its hub. */
+/**
+ * Where a hub-scoped entity lives. `responsible_hub_id` is the registry's name for the column that carries its hub, and the probe
+ * reads that column unless the entity names another: a staff identity belongs to the hub of its `primary_hub_id` (S0.35), and the
+ * table is not given a second column to say it twice.
+ */
 export interface HubScopedEntity {
   readonly schema: string;
   readonly table: string;
+  /** The column that carries the record's hub, when it is not `responsible_hub_id`. A plain identifier, quoted when used. */
+  readonly hubColumn?: string;
 }
 
 /**
@@ -50,8 +56,14 @@ export function createScopeProbe(
   entities: Readonly<Record<string, HubScopedEntity>>,
 ): ExistingRecordHub {
   for (const entity of Object.values(entities)) {
-    if (!IDENTIFIER.test(entity.schema) || !IDENTIFIER.test(entity.table)) {
-      throw new Error('A hub-scoped entity names its schema and table by a plain identifier');
+    if (
+      !IDENTIFIER.test(entity.schema) ||
+      !IDENTIFIER.test(entity.table) ||
+      (entity.hubColumn !== undefined && !IDENTIFIER.test(entity.hubColumn))
+    ) {
+      throw new Error(
+        'A hub-scoped entity names its schema, its table and its hub column by a plain identifier',
+      );
     }
   }
 
@@ -71,8 +83,13 @@ export function createScopeProbe(
 
       let found;
       try {
+        // The statement keeps its own text for an entity that names no column; one that does names it and answers it as the hub.
+        const hubColumn =
+          target.hubColumn === undefined
+            ? sql`responsible_hub_id`
+            : sql`${sql.identifier(target.hubColumn)} as responsible_hub_id`;
         found = await held.execute(
-          sql`select id, responsible_hub_id from ${sql.identifier(target.schema)}.${sql.identifier(target.table)} where id = ${recordId}::uuid`,
+          sql`select id, ${hubColumn} from ${sql.identifier(target.schema)}.${sql.identifier(target.table)} where id = ${recordId}::uuid`,
         );
       } catch (error) {
         // An aborted transaction cannot run the clear, and the setting ends with it; the failure to report is the read's.

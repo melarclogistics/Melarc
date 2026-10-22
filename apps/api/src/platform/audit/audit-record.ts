@@ -16,6 +16,7 @@ import {
   tierOf,
   type EventRequirements,
 } from './audit-classification.js';
+import { validateBootstrapResumedFacts } from './audit-bootstrap-resumed.js';
 import { validateMfaResetFacts } from './audit-mfa-reset.js';
 import { isAuditEventCode, type AuditEventCode } from './audit-event-codes.js';
 import {
@@ -354,6 +355,21 @@ function enforceRequirements(
       : undefined;
   if (whenObject !== undefined && !hasKeys(facts.relatedIds, whenObject)) {
     refuseEvent('relatedIds');
+  }
+
+  if (input.code === 'auth.bootstrap.resumed') {
+    validateBootstrapResumedFacts(
+      {
+        outcome: input.outcome,
+        objectType: facts.objectType,
+        objectId: facts.objectId,
+        actorId: facts.actorId,
+        detail: input.detail,
+        relatedIds: facts.relatedIds,
+        beforeAfter: facts.beforeAfter,
+      },
+      refuseEvent,
+    );
   }
 
   if (input.code === 'auth.mfa.reset') {

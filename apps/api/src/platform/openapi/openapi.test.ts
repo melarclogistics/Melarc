@@ -135,11 +135,29 @@ describe('diffRoutes', () => {
 describe('the generated description of the real application', () => {
   // Break caught: a business route documented that does not exist, or the technical probes leaking into
   // a description that is compared with the product contract.
-  it('documents no operations, because there are no business routes', async () => {
+  it('documents the three credential setup operations, the two staff sign-in steps, the two operations on the caller’s own session and the four reads of S0.35, and nothing else', async () => {
     const { app } = await start();
     const document = buildOpenApiDocument(app);
 
-    expect(document.paths).toEqual({});
+    expect(
+      Object.entries(document.paths).map(([path, item]) => [
+        path,
+        Object.keys(item),
+        item.post?.operationId ?? [item.get?.operationId, item.delete?.operationId],
+      ]),
+    ).toEqual([
+      ['/auth/staff/setup/credential', ['post'], 'completeStaffCredentialSetup'],
+      ['/auth/staff/setup/mfa', ['post'], 'completeMfaEnrolment'],
+      ['/auth/staff/setup/mfa/begin', ['post'], 'beginMfaReenrolment'],
+      ['/auth/staff/sign-in', ['post'], 'staffSignIn'],
+      ['/auth/staff/sign-in/mfa', ['post'], 'completeStaffMfaSignIn'],
+      ['/auth/session', ['get', 'delete'], ['getCurrentSession', 'signOut']],
+      // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
+      ['/staff-role-bundles/assignable', ['get'], ['listAssignableStaffRoleBundles', undefined]],
+      ['/reason-definitions', ['get'], ['listReasonDefinitions', undefined]],
+      ['/staff-identities', ['get'], ['listStaffIdentities', undefined]],
+      ['/staff-identities/{id}', ['get'], ['getStaffIdentity', undefined]],
+    ]);
     expect(document.servers).toEqual([{ url: '/api/v1' }]);
     expect(document.info.title).toContain('derived from the implementation');
   });

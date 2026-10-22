@@ -1,4 +1,6 @@
 import { AppModule } from '../../../src/app.module.js';
+import type { CompiledFixedPolicy } from '../../../src/platform/auth/sessions/session-authority.js';
+import type { VendorOrganizationResolver } from '../../../src/platform/authorization/operation-contexts.js';
 import { API_RUNTIME_ROLE, loadConfig } from '../../../src/platform/config/load-config.js';
 import type {
   CapturedMessage,
@@ -15,6 +17,7 @@ import { Opened } from '../../../src/test-support/cleanup.js';
 import { ManualClock } from '../../../src/test-support/manual-clock.js';
 import { startTestApp, type TestApp } from '../../../src/test-support/test-app.js';
 import { TestClient } from '../../../src/test-support/test-client.js';
+import { registerWatch, watchServerFailures } from '../../../src/test-support/failure-evidence.js';
 import { traceStatements } from '../../../src/test-support/work-shape.js';
 import { openAdmin, type Admin } from './admin.js';
 import { observe, type Observer } from './observe.js';
@@ -67,6 +70,13 @@ export interface IntegrationOptions {
   readonly poolMax?: number;
   /** Settings beyond the defaults of `validEnv`; a key mapped to `undefined` is removed. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The fixed-policy revisions this build declares, as the tasks that build the Vendor and Rider sign-ins will (S0.48, S0.59). None by
+   * default, so an application of this slice serves no Vendor or Rider session; a test of a session of either composes its own.
+   */
+  readonly compiledFixedPolicy?: CompiledFixedPolicy;
+  /** Where a Vendor session's organisation comes from (the vendor domain's, S0.47); none by default. */
+  readonly vendorOrganization?: VendorOrganizationResolver;
 }
 
 export async function startIntegrationKit(
@@ -97,7 +107,16 @@ export async function startIntegrationKit(
       await startTestApp({
         config: loaded.config,
         rootModule: (moduleOptions) =>
-          AppModule.register({ ...moduleOptions, ports: { clock: { useValue: clock } } }),
+          AppModule.register({
+            ...moduleOptions,
+            ports: { clock: { useValue: clock } },
+            ...(options.compiledFixedPolicy === undefined
+              ? {}
+              : { compiledFixedPolicy: options.compiledFixedPolicy }),
+            ...(options.vendorOrganization === undefined
+              ? {}
+              : { vendorOrganization: options.vendorOrganization }),
+          }),
       }),
       (running) => running.stop(),
     );
@@ -109,6 +128,13 @@ export async function startIntegrationKit(
     );
     const { reader: capture, sink: captureSink } = createCapture<CapturedMessage>();
     const client = new TestClient({ baseUrl: app.baseUrl, now: () => clock.now() });
+    opened.add(
+      'the server-error watch',
+      registerWatch(watchServerFailures(client, app.logs)),
+      (forget) => {
+        forget();
+      },
+    );
 
     return {
       app,

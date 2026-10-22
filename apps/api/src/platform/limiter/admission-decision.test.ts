@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideAgainstLimit, retryAfterSeconds } from './admission-decision.js';
+import {
+  CLOCK_SKEW_TOLERANCE_SECONDS,
+  decideAgainstLimit,
+  retryAfterSeconds,
+} from './admission-decision.js';
 import { MAX_BUCKET_LIMIT, WINDOW_SECONDS } from './limiter-parameters.js';
 
 describe('the seconds to wait', () => {
@@ -49,9 +53,37 @@ describe('the decision against a bucket’s limit', () => {
   });
 
   // Break caught: rows that are not in order, or a time outside the window, deciding a wait.
-  it('refuses live times that are not ascending, positive and within the window', () => {
-    for (const times of [[5, 3], [0, 1], [-1], [WINDOW_SECONDS + 1], [Number.NaN]]) {
+  it('refuses live times that are not ascending, positive and within the window and its clock tolerance', () => {
+    for (const times of [
+      [5, 3],
+      [0, 1],
+      [-1],
+      [WINDOW_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS + 1],
+      [Number.NaN],
+    ]) {
       expect(() => decideAgainstLimit(2, times)).toThrow(TypeError);
     }
+  });
+
+  // Break caught: a row stamped a little ahead of the statement's own clock (the clock of the database server can read some tenths of a
+  // second behind a stamp it has already written: a virtual machine whose clock is corrected, or a server stepped by its time service)
+  // turned into a failed request, so that the sign-in of someone whose attempt landed on that instant is answered with a failure. Such a
+  // row is read as leaving at the end of the window, which is as late as it can leave and the longest a caller is told to wait.
+  it('reads a row stamped slightly ahead of the clock as leaving at the end of the window, and decides on it', () => {
+    const ahead = WINDOW_SECONDS + 0.12;
+
+    expect(decideAgainstLimit(1, [ahead])).toEqual({
+      allowed: false,
+      retryAfterSeconds: WINDOW_SECONDS,
+    });
+    expect(decideAgainstLimit(3, [10, ahead])).toEqual({ allowed: true });
+    expect(decideAgainstLimit(2, [10, ahead, ahead + 0.02])).toEqual({
+      allowed: false,
+      retryAfterSeconds: WINDOW_SECONDS,
+    });
+    expect(decideAgainstLimit(1, [WINDOW_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS])).toEqual({
+      allowed: false,
+      retryAfterSeconds: WINDOW_SECONDS,
+    });
   });
 });

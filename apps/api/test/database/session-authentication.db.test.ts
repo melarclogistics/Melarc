@@ -338,6 +338,146 @@ describe('a session that is not live', () => {
   });
 });
 
+describe('the request that finds a session out of time ends it (AC-SLICE-000-35)', () => {
+  interface Expiry {
+    readonly actor_type: string;
+    readonly actor_id: string | null;
+    readonly surface_context: string;
+    readonly object_type: string;
+    readonly reason_code: string | null;
+    readonly enhanced: boolean;
+    readonly outcome: string;
+    readonly detail: Record<string, unknown>;
+  }
+  const expiriesOf = (id: string): Promise<Expiry[]> =>
+    observer.rows<Expiry>(
+      `select actor_type, actor_id, surface_context, object_type, reason_code, enhanced, outcome, detail
+         from audit_event where event_code = 'auth.session.terminated' and object_id = $1`,
+      [id],
+    );
+  const stateOf = (id: string) =>
+    observer.one<{ terminated_at: Date | null; termination_reason: string | null }>(
+      `select terminated_at, termination_reason from session where id = $1`,
+      [id],
+    );
+
+  // Break caught: the idle limit refusing a request and leaving the record ACTIVE, which AC-SLICE-000-35 forbids ("the session is
+  // terminated with EXPIRED"), so that the table, the audit and a later reader disagree with what every request was told.
+  it.each([
+    ['standard', 31, OPS_STAFF_SNAPSHOT, 'IDLE'],
+    ['privileged', 16, { ...OPS_STAFF_SNAPSHOT, name: 'Senior Ops', privileged: true }, 'IDLE'],
+  ] as const)(
+    'ends an idle %s browser session (%i minutes) as EXPIRED, once, and records it as the system',
+    async (_tier, minutes, snapshot, cause) => {
+      const idle = await arranged({
+        snapshot,
+        issuedAt: minutesAgo(100),
+        lastActivityAt: minutesAgo(minutes),
+      });
+
+      expect(refusal(await authenticate(cookie(idle.token)))).toEqual({
+        code: 'SESSION_INVALID',
+        cause: 'SESSION_EXPIRED_IDLE',
+      });
+
+      expect(await stateOf(idle.row.id)).toMatchObject({ termination_reason: 'EXPIRED' });
+      expect((await stateOf(idle.row.id))?.terminated_at).toBeInstanceOf(Date);
+      expect(await expiriesOf(idle.row.id)).toEqual([
+        {
+          actor_type: 'SYSTEM',
+          actor_id: null,
+          surface_context: 'SYSTEM',
+          object_type: 'Session',
+          reason_code: 'EXPIRED',
+          enhanced: false,
+          outcome: 'SUCCEEDED',
+          detail: { cause },
+        },
+      ]);
+      // The next request finds it ended, says so, and writes no second event: the first record is the record.
+      expect(refusal(await authenticate(cookie(idle.token)))).toEqual({
+        code: 'SESSION_INVALID',
+        cause: 'SESSION_TERMINATED',
+      });
+      expect(await expiriesOf(idle.row.id)).toHaveLength(1);
+    },
+  );
+
+  // Break caught: only the idle limit marking, so that the absolute end stays ACTIVE in the table for ever.
+  it('ends a session past its absolute end as EXPIRED, naming the absolute end', async () => {
+    const pastEnd = await arranged({
+      issuedAt: minutesAgo(800),
+      lastActivityAt: minutesAgo(1),
+      expiresAt: minutesAgo(5),
+    });
+
+    expect(refusal(await authenticate(cookie(pastEnd.token)))).toEqual({
+      code: 'SESSION_INVALID',
+      cause: 'SESSION_EXPIRED_ABSOLUTE',
+    });
+
+    expect(await stateOf(pastEnd.row.id)).toMatchObject({ termination_reason: 'EXPIRED' });
+    expect((await expiriesOf(pastEnd.row.id)).map((event) => event.detail)).toEqual([
+      { cause: 'ABSOLUTE' },
+    ]);
+  });
+
+  // Break caught (AC-SLICE-000-35: "an equivalent rider session with no idle rule is unaffected"): an idle rider ended and recorded.
+  it('leaves an idle rider and a live session as they are, and writes nothing for them', async () => {
+    const idleRider = await arranged({
+      principalType: 'RIDER',
+      registeredDeviceId: randomUUID(),
+      policyRevision: 1,
+      bundleId: BUNDLE_IDS.rider,
+      snapshot: { ...OPS_STAFF_SNAPSHOT, name: 'Rider', audience: 'RIDER' },
+      issuedAt: minutesAgo(1_000),
+      lastActivityAt: minutesAgo(900),
+      expiresAt: minutesAgo(-400),
+    });
+    const live = await arranged({ issuedAt: minutesAgo(100), lastActivityAt: minutesAgo(2) });
+
+    expect((await authenticate(bearer(idleRider.token))).kind).toBe('AUTHENTICATED');
+    expect((await authenticate(cookie(live.token))).kind).toBe('AUTHENTICATED');
+
+    expect((await stateOf(idleRider.row.id))?.terminated_at).toBeNull();
+    expect((await stateOf(live.row.id))?.terminated_at).toBeNull();
+    expect(await expiriesOf(idleRider.row.id)).toEqual([]);
+    expect(await expiriesOf(live.row.id)).toEqual([]);
+  });
+
+  // Break caught: a refusal that is not an expiry (a token that is not one, a session that is unknown or ended another way, a session
+  // presented the wrong way) writing an expiry.
+  it('writes nothing for a request that is refused for another reason', async () => {
+    const signedOut = await arranged({
+      issuedAt: minutesAgo(100),
+      lastActivityAt: minutesAgo(90),
+      terminatedAt: minutesAgo(80),
+      terminationReason: 'SIGNED_OUT',
+    });
+    const asRider = await arranged({
+      principalType: 'RIDER',
+      registeredDeviceId: randomUUID(),
+      policyRevision: 1,
+      bundleId: BUNDLE_IDS.rider,
+      snapshot: { ...OPS_STAFF_SNAPSHOT, name: 'Rider', audience: 'RIDER' },
+      issuedAt: minutesAgo(1_500),
+      lastActivityAt: minutesAgo(2),
+      expiresAt: minutesAgo(10),
+    });
+
+    expect((await authenticate(cookie(signedOut.token))).kind).toBe('REFUSED');
+    // An expired rider session presented in a cookie is "the wrong way", and is refused before its time is looked at.
+    expect(refusal(await authenticate(cookie(asRider.token)))).toEqual({
+      code: 'SESSION_INVALID',
+      cause: 'WRONG_CREDENTIAL_FOR_SESSION',
+    });
+
+    expect(await expiriesOf(signedOut.row.id)).toEqual([]);
+    expect(await expiriesOf(asRider.row.id)).toEqual([]);
+    expect((await stateOf(asRider.row.id))?.terminated_at).toBeNull();
+  });
+});
+
 describe('the three authentication models never mix', () => {
   const rider = (overrides: Partial<SessionRow> = {}) =>
     arranged({

@@ -15,6 +15,7 @@ import { validEnv } from '../../src/test-support/config-env.js';
 import { RawClient } from '../../src/test-support/raw-http.js';
 import { startTestApp, type TestApp } from '../../src/test-support/test-app.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { challengeRow, insertChallenge } from './support/credentials.js';
 import {
   OPS_STAFF_SNAPSHOT,
   insertSessionRow,
@@ -173,6 +174,35 @@ describe('a request with no usable session', () => {
       async () => ({
         authorization: `Bearer ${(await staffPersona(machinery, admin)).issued.token}`,
       }),
+    ],
+    // AC-SLICE-000-03: "when the challenge id is presented to any business operation, it is refused 401 SESSION_INVALID, because a
+    // challenge is not a session". The reference of a live challenge, which is what the password step hands a privileged identity,
+    // is no credential in either of the two places a credential is taken from.
+    [
+      'the reference of a live MFA challenge, as the session cookie',
+      async () => {
+        const persona = await staffPersona(machinery, admin);
+        const challenge = await insertChallenge(
+          admin,
+          challengeRow(persona.identity.id, {
+            credentialGeneration: Math.max(1, persona.identity.credentialGeneration),
+          }),
+        );
+        return { cookie: `melarc_session=${challenge.id}` };
+      },
+    ],
+    [
+      'the reference of a live MFA challenge, as a bearer credential',
+      async () => {
+        const persona = await staffPersona(machinery, admin);
+        const challenge = await insertChallenge(
+          admin,
+          challengeRow(persona.identity.id, {
+            credentialGeneration: Math.max(1, persona.identity.credentialGeneration),
+          }),
+        );
+        return { authorization: `Bearer ${challenge.id}` };
+      },
     ],
     [
       'an ended session',

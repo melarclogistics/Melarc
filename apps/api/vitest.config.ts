@@ -45,6 +45,8 @@ export default defineConfig({
           name: 'database',
           include: ['test/database/**/*.test.ts'],
           globalSetup: ['test/database/support/global-setup.ts'],
+          // A failed test prints the evidence of the server errors its kit's clients saw (C03 of the closeout of 22 October 2026).
+          setupFiles: ['test/database/support/failure-evidence-setup.ts'],
           // The roles are cluster-wide, and some tests change them and put them back, so files take turns.
           fileParallelism: false,
           sequence: { groupOrder: 2 },

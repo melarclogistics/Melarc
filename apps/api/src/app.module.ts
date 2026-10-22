@@ -9,18 +9,31 @@ import {
 } from './platform/auth/describe/port-binding-check.js';
 import { LimiterDigest } from './platform/auth/crypto/limiter-digest.js';
 import { Sha256TokenService } from './platform/auth/crypto/sha256.token-service.adapter.js';
+import { AesGcmSecretCipher } from './platform/auth/crypto/aes-gcm.secret-cipher.adapter.js';
+import { Argon2Hasher } from './platform/auth/crypto/argon2.hasher.adapter.js';
+import { Rfc6238TotpVerifier } from './platform/auth/crypto/rfc6238.totp-verifier.adapter.js';
 import { CLOCK, type Clock } from './platform/auth/ports/clock.port.js';
 import { portProviders, type PortBindings } from './platform/auth/ports/port-bindings.js';
+import { SECRET_CIPHER, type SecretCipher } from './platform/auth/ports/secret-cipher.port.js';
 import { PostgresSessionStore } from './platform/auth/sessions/postgres.session-store.adapter.js';
 import { assertAdaptersAllowed } from './platform/config/adapter-refusals.js';
 import type { AppConfig } from './platform/config/load-config.js';
 import { DatabaseService } from './platform/database/database.service.js';
 import { PostgresUnitOfWork } from './platform/database/postgres.unit-of-work.adapter.js';
+import { PostgresDeliveryQueue } from './platform/delivery/postgres.delivery-queue.adapter.js';
 import { SettingsBucketLimits } from './platform/limiter/bucket-limits.js';
+import {
+  BoundedHashAdmission,
+  libuvThreadpoolSize,
+  planHashAdmission,
+} from './platform/limiter/bounded.hash-admission.adapter.js';
 import { PostgresRateLimiter } from './platform/limiter/postgres.rate-limiter.adapter.js';
 import { PlatformModule, type PlatformModuleOptions } from './platform/platform.module.js';
 import { SettingsReader } from './platform/settings/settings-reader.js';
+import { PermissionModule } from './permission/permission.module.js';
 import { PostgresStaffIdentityDirectory } from './staff/postgres.staff-identity-directory.adapter.js';
+import { SettingsModule } from './settings/settings.module.js';
+import { StaffModule } from './staff/staff.module.js';
 
 export interface AppModuleOptions extends PlatformModuleOptions {
   /**
@@ -42,6 +55,13 @@ export interface AppModuleOptions extends PlatformModuleOptions {
  * - **With a database (S0.24):** the `UnitOfWork`, the `SessionStore`, the staff `IdentityDirectory` and the `AuditWriter`, which
  *   the authentication guard, the policy coordinator and the session-issue protocol are built from (`sessionProviders`). Without a
  *   database none is bound, and the services built from them are absent: a credential is then `503` and nobody can be signed in.
+ * - **With a database and local key custody (S0.29):** the `SecretCipher` (serving the TOTP seed and the delivery payload) and the issuing
+ *   side of the `DeliveryQueue`, which the stores of MFA factors and of setup grants are built from (`mfaProviders`,
+ *   `setupGrantProviders`). A configuration without a database or without local key material binds neither and has neither store.
+ * - **With a database and local key custody (S0.31):** the Argon2id `Hasher` (the password pepper must be held: a missing one stops the
+ *   application at start, with no degraded mode), the bounded `HashAdmission` (the slots the configuration states, fitted to the memory
+ *   budget and to the libuv pool the process has) and the RFC 6238 `TotpVerifier`, which the three credential setup operations are built
+ *   from (`staffSetupProviders`). Where any is missing the service is absent and its routes fail closed (`503`).
  * - **The limiter (S0.22) is bound only where it can be built and is the one the configuration asks for**: `RATE_LIMITER=postgres`,
  *   a database to decide in, and key material to digest the identifiers under (`limiter_digest`). `RATE_LIMITER=memory` is for a
  *   local run and for unit tests and is never bound by the composition itself (a test supplies it through `ports`): the in-memory
@@ -71,16 +91,50 @@ function runtimePortBindings(config: AppConfig): PortBindings {
           },
         }),
   };
-  if (
-    config.adapters.limiter !== 'postgres' ||
-    config.database === undefined ||
-    config.keys.custody !== 'local'
-  ) {
-    return bindings;
-  }
+  if (config.database === undefined || config.keys.custody !== 'local') return bindings;
   const { keys } = config;
-  return {
+  // The first consumers of the secret cipher and of the issuing side of the delivery queue (S0.29; OB-38, OB-107): the MFA factor store
+  // seals a TOTP seed and the setup grant store queues the message that carries a grant. The API's cipher serves those two purposes
+  // and no other: the sealed replay of an idempotent answer is opened by the operation that keeps one (S0.53), and the worker holds the
+  // delivery key under a cipher of its own (`delivery-worker-runtime.ts`).
+  const withCredentials: PortBindings = {
     ...bindings,
+    secretCipher: {
+      useFactory: () => new AesGcmSecretCipher(keys, { serves: ['TOTP_SEED', 'DELIVERY_PAYLOAD'] }),
+    },
+    deliveryQueue: {
+      useFactory: (cipher: SecretCipher, clock: Clock) =>
+        new PostgresDeliveryQueue({ cipher, clock }),
+      inject: [SECRET_CIPHER, CLOCK],
+    },
+    // The first consumers of the hasher, the hash admission and the TOTP verifier (S0.31; OB-38): the credential setup operations.
+    hasher: {
+      useFactory: () =>
+        new Argon2Hasher(
+          keys,
+          config.credentialHashing.profile,
+          config.credentialHashing.acceptedProfiles,
+        ),
+    },
+    hashAdmission: {
+      useFactory: () => {
+        const threadpoolSize = libuvThreadpoolSize(process.env);
+        const plan = planHashAdmission({
+          hashAdmission: config.hashAdmission,
+          credentialHashing: config.credentialHashing,
+          threadpoolSize,
+        });
+        return new BoundedHashAdmission({ slots: plan.slots, threadpoolSize });
+      },
+    },
+    totpVerifier: {
+      useFactory: (clock: Clock) => new Rfc6238TotpVerifier(clock),
+      inject: [CLOCK],
+    },
+  };
+  if (config.adapters.limiter !== 'postgres') return withCredentials;
+  return {
+    ...withCredentials,
     rateLimiter: {
       useFactory: (clock: Clock, database: DatabaseService) =>
         new PostgresRateLimiter({
@@ -106,7 +160,8 @@ function overlay(base: PortBindings, over: PortBindings = {}): PortBindings {
  * The root of the module graph and the composition root: the one place where adapters are bound to the injection tokens of the
  * ports. A platform service asks for a token and never imports an adapter; a domain module implements its persistence adapter
  * and the root binds it. Domain modules are imported here as product slices add them, as siblings of platform/
- * (SOLUTION_ARCHITECTURE.md §5). There are none yet, and so no business route.
+ * (SOLUTION_ARCHITECTURE.md §5). There are none yet; the only business routes are the three credential setup operations of
+ * `platform/auth/staff/` (S0.31), which the platform module registers and `productRoutes: false` leaves out of a test composition.
  *
  * **Two compositions.** When the configuration selects `describe` (the OpenAPI generator, the contract check, the default test
  * application) every port resolves to an inert describe adapter, so the application can be built and described with no
@@ -153,7 +208,12 @@ export class AppModule {
     return {
       module: AppModule,
       global: true,
-      imports: [PlatformModule.register(options)],
+      // The domain modules (S0.35: `settings` first), whose routes are the product's and are left out with the platform's by
+      // `productRoutes: false`: a test that brings its own routes and contract composes the application without them.
+      imports: [
+        PlatformModule.register(options),
+        ...(options.productRoutes === false ? [] : [PermissionModule, SettingsModule, StaffModule]),
+      ],
       providers: check === undefined ? bound : [...bound, check],
       exports: bound.map((provider) => provider.provide),
     };

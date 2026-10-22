@@ -66,6 +66,7 @@ export const ENHANCED_CODES = [
   'auth.mfa.revoked',
   'auth.mfa.reset',
   'auth.bootstrap.completed',
+  'auth.bootstrap.resumed',
   'auth.bootstrap.succeeded',
   'auth.session.authority_revoked',
   'auth.mfa.reenrolment_begun',
@@ -135,7 +136,9 @@ export const CONDITIONAL_CODES = {
   'staff.identity.created': {
     BOOTSTRAP_SEED: {
       enhanced: true,
-      systemCapability: 'seed',
+      // The two administrators are written under the `bootstrap` capability (data-scope-registry.md §5.2); `seed` is the reference
+      // data's, which writes no identity. S0.30 corrected this from `seed`, the only capability the first draft knew.
+      systemCapability: 'bootstrap',
       meaning: 'the bootstrap seed, whose identities have no independent checker',
     },
     OPERATION: {
@@ -277,6 +280,14 @@ export const EVENT_REQUIREMENTS: Readonly<Partial<Record<AuditEventCode, EventRe
     resultingState: ['ISSUED', 'COALESCED'],
     relatedIdsPresent: true,
     actorTypes: ['STAFF'],
+  },
+  // 5.4: "The provisioning-only resume command issued a fresh setup secret to one stranded bootstrap Platform Admin"; "Written once per
+  // committed resume"; "Enhanced". Written by SYSTEM (a null actor); the reserved bootstrap actor, the principal and the grant issued are
+  // named in `related_ids`. The facts are held to the shape of `audit-bootstrap-resumed.ts`, which `enforceRequirements` calls for this
+  // event, and the event is not in `NO_DIFF_CODES`: it changes grants and factors, and carries the before and after of them.
+  'auth.bootstrap.resumed': {
+    relatedIdsAnyOf: [['principal_id', 'reserved_system_actor_id', 'setup_grant_id']],
+    actorTypes: ['SYSTEM'],
   },
   // 5.4: "terminated because the principal's authority changed, carrying the reason"; "naming the bundle with its new revision and
   // reduction_floor in related_ids (a compiled-policy reduction names the principal type and the new minimum_revision)".

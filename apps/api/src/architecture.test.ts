@@ -123,6 +123,7 @@ const COMPOSITION_ROOT: readonly string[] = [
   'app.module.ts',
   'delivery-worker-runtime.ts',
   'tools/seed/seed-runtime.ts',
+  'tools/bootstrap/bootstrap-runtime.ts',
 ];
 
 /**
@@ -641,11 +642,14 @@ describe('the ports of platform/auth (S0.1)', () => {
 
     // S0.9 added the second: the `db:seed` process binds the production clock for the seed's database service, in a file of its own.
     // S0.18 added the third: the delivery worker is its own process, and binds its adapters in a file of its own.
-    it('names the composition root explicitly: the application module, the delivery worker and the seed process wiring', () => {
+    // S0.30 added the fourth: the bootstrap seed and the resume command are processes of their own, and bind the clock, the token
+    // service and the custody adapters in a file of their own.
+    it('names the composition root explicitly: the application module, the delivery worker and the seed and bootstrap process wiring', () => {
       expect(COMPOSITION_ROOT).toEqual([
         'app.module.ts',
         'delivery-worker-runtime.ts',
         'tools/seed/seed-runtime.ts',
+        'tools/bootstrap/bootstrap-runtime.ts',
       ]);
     });
 

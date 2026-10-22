@@ -127,6 +127,83 @@
       "when": 1791806657072,
       "tag": "0017_bundle_change_primitive",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792519480329,
+      "tag": "0018_setup_grant_and_mfa_factor",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792542522720,
+      "tag": "0019_bootstrap_seed",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792575019224,
+      "tag": "0020_mfa_challenge_and_lockout",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792623423129,
+      "tag": "0021_guard_expiry_reasons",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792624123970,
+      "tag": "0022_bootstrap_resumed_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792642654951,
+      "tag": "0023_sign_out_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792647495005,
+      "tag": "0024_staff_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792670115656,
+      "tag": "0025_mfa_factor_ordinal",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792670722382,
+      "tag": "0026_sign_out_boundaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792671379455,
+      "tag": "0027_staff_reset_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792672696630,
+      "tag": "0028_bootstrap_role",
+      "breakpoints": true
     }
   ]
 }

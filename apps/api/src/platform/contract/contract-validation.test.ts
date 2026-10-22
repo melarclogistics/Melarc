@@ -1132,12 +1132,12 @@ describe('headers and cookies, over real HTTP (audit F04)', () => {
 });
 
 describe('the contract is read only when something is bound to it', () => {
-  // Break caught: every start paying for a 700 KB parse of a document nothing uses. With no bound operation,
-  // which is today's application, the contract is never read.
+  // Break caught: every start paying for a 700 KB parse of a document nothing uses. With no bound operation (the application with
+  // none of the product's routes, which the first routes of S0.31 are now part of), the contract is never read.
   it('is not loaded at all when no operation is bound', async () => {
     const source = fixtureSource();
 
-    await start({ contractSource: source });
+    await start({ rootModule: appWith(), contractSource: source });
 
     expect(source.loads).toBe(0);
   });

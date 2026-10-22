@@ -3,6 +3,7 @@ import {
   bigint,
   check,
   foreignKey,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -33,9 +34,9 @@ const quoted = (values: readonly string[]): string =>
  * The staff identity, **minimal** (S0.24; domain-model.md §6.8 `StaffIdentity`; data-scope-registry.md `StaffIdentity`): the columns
  * that authentication and the session-issue protocol read, and the ones whose absence would make a later task rewrite the table.
  * It is the first use of the `staff` domain folder, an existing permission domain. What later tasks add is theirs to say in their
- * own migrations: the failed-attempt count and lock time of the credential (S0.32), `phone`, the record version and the permission
- * review history (the staff operations from S0.35 on). Nothing writes a row in this task: the bootstrap seed (S0.30) and
- * `createStaffIdentity` do, and the tests arrange identities as the administrator.
+ * own migrations: the failed-attempt count and lock time of the credential (S0.32), `phone` and the record version (S0.35, migration
+ * 0024) and the permission review history (the staff operations after it). Nothing writes a row in this task: the bootstrap seed (S0.30)
+ * and `createStaffIdentity` do, and the tests arrange identities as the administrator.
  *
  * - **`origin` is immutable** (`BOOTSTRAP` or `MAKER_CHECKER`, set once at creation and never inferred). The API runtime holds no
  *   `UPDATE` on it and a trigger refuses a change by any login.
@@ -73,6 +74,8 @@ export const staffIdentity = pgTable(
     /** Trimmed, NFKC, lower-cased: the form that is unique and that the sign-in rate limit is keyed on. */
     workEmailCanonical: text('work_email_canonical').notNull(),
     fullName: text('full_name').notNull(),
+    /** Where the person can be reached, as entered; null until a maker gives one. Part of the record's version. */
+    phone: text('phone'),
     status: text('status').notNull(),
     /** The one bundle whose permissions the identity holds; authorization tests the permission, never this id. */
     roleBundleId: uuid('role_bundle_id').notNull(),
@@ -83,6 +86,21 @@ export const staffIdentity = pgTable(
     credentialEstablishedAt: timestamp('credential_established_at', { withTimezone: true }),
     /** 0 while there is no credential; 1 or more once there is, raised by one on every replacement and unchanged by a rehash. */
     credentialGeneration: bigint('credential_generation', { mode: 'number' }).notNull().default(0),
+    /**
+     * The wrong passwords, and the wrong codes of a second factor, since the credential last succeeded or was last set (S0.32;
+     * SECURITY_DESIGN.md §13.4b). It belongs to the credential, so an identifier that does not exist has none. Never returned by any
+     * operation and never part of the record's version.
+     */
+    failedAttemptCount: integer('failed_attempt_count').notNull().default(0),
+    /** While in the future, the credential is locked: null when it never was and after a reset. The database's clock decides. */
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    /**
+     * The record's version, which is its ETag (domain-model.md §6.8): it starts at 1 and **the database alone moves it**, by one, when
+     * anything a read of the record returns changes (the status, bundle, name, email, phone, hub, the establishment or replacement of the
+     * credential, the approver) and never for a failed attempt, a lock or a rehash. A trigger sets it whatever an update says. The
+     * ETag a read carries adds the factor events of the identity (an enrolment, a revocation), which are rows of another table.
+     */
+    version: integer('version').notNull().default(1),
     createdBy: uuid('created_by').notNull(),
     approvedBy: uuid('approved_by'),
     origin: text('origin').notNull(),
@@ -141,6 +159,13 @@ export const staffIdentity = pgTable(
     check(
       'staff_identity_credential_bounded',
       sql`${table.credentialHash} IS NULL OR length(${table.credentialHash}) BETWEEN 1 AND 1024`,
+    ),
+    // A count never goes below zero, and a lock is a consequence of failures: it exists only while the count is above zero, and only
+    // for an identity that holds a credential to lock.
+    check('staff_identity_failed_attempts_non_negative', sql`${table.failedAttemptCount} >= 0`),
+    check(
+      'staff_identity_lock_has_failures',
+      sql`${table.lockedUntil} IS NULL OR (${table.failedAttemptCount} > 0 AND ${table.credentialGeneration} > 0)`,
     ),
   ],
 );

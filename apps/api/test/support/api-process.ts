@@ -16,6 +16,9 @@ export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
 export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
+/** The two bootstrap commands (S0.30): processes an operator starts as the provisioning login, which nothing in the application runs. */
+export const BOOTSTRAP_SEED = resolve(API_ROOT, 'dist/tools/bootstrap-seed.js');
+export const BOOTSTRAP_RESUME = resolve(API_ROOT, 'dist/tools/bootstrap-resume.js');
 /** The delivery worker's entry point, and a test-only entry that composes it with a provider that stalls (S0.18). */
 export const WORKER_MAIN = resolve(API_ROOT, 'dist/delivery-worker-main.js');
 export const WORKER_FIXTURE = resolve(API_ROOT, 'test/support/worker-process-fixture.mjs');
@@ -66,6 +69,8 @@ export function requireBuild(): void {
     DB_RESET,
     DB_SEED,
     DB_ORPHANS,
+    BOOTSTRAP_SEED,
+    BOOTSTRAP_RESUME,
     WORKER_MAIN,
     BUILT_SHUTDOWN_HANDLERS,
   ]) {

@@ -92,6 +92,26 @@ export function serverErrorIn(error: unknown): pg.DatabaseError | undefined {
 }
 
 /**
+ * The reason a guard trigger gave its refusal: SQLSTATE 23514 with the DETAIL `reason=<WORD>`, which a trigger states only for a refusal
+ * the application answers as what it is (the consumption of a grant or a challenge whose expiry passed while the statement waited for a
+ * lock). `undefined` for every other failure: a check violation without that detail, any other SQLSTATE, a lost commit (which is no
+ * statement's refusal and carries no server error of its own) and anything that is not the server's error at all. A caller that gets
+ * `undefined` rethrows what it caught.
+ */
+export function guardReasonIn(error: unknown): string | undefined {
+  // A commit that was lost or that the server rolled back is no statement's refusal, whatever statement failure it carries as its cause.
+  if (error instanceof CommitOutcomeUnknownError || error instanceof TransactionRolledBackError) {
+    return undefined;
+  }
+  const server = serverErrorIn(error);
+  if (server?.code !== '23514') return undefined;
+  const { detail } = server;
+  return typeof detail === 'string' && /^reason=[A-Z_]+$/.test(detail)
+    ? detail.slice('reason='.length)
+    : undefined;
+}
+
+/**
  * The refusal of a finished request inside what was thrown: drizzle wraps whatever the connection object rejected a statement
  * with, so the caller is given the refusal itself and not the failed query that carries it.
  */

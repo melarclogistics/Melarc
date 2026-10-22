@@ -62,18 +62,28 @@ export type PostureFlag = (typeof POSTURE_FLAGS)[number];
  * And the one function of migration 0017 that the seed takes its policy locks with (`melarc.lock_policy_keys`, S0.27): it takes the
  * exclusive advisory locks of the bundles and the fixed policies named, in the canonical order, and reads and writes no table. The
  * change functions of the same migration are on no line: only the migration login, which is not a runtime identity, may execute them.
- * And the API runtime and the one function of migration 0016 that reads a credential hash for the authentication capability. The
- * workers are on no line, so EXECUTE on any definer is a finding for them, and for the API runtime on any other.
+ * And the API runtime and two functions: the one of migration 0016 that reads a credential hash for the authentication capability, and
+ * the one of migration 0027 that gives a staff read the second-factor facts of the identities its scope shows (and nothing else of the
+ * factor, grant and delivery tables). The workers are on no line, so EXECUTE on any definer is a finding for them, and for the API
+ * runtime on any other.
  */
 export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {
   [PROVISIONING_ROLE]: [
     'melarc.initialize_reference_data',
     'melarc.add_reason_fixtures',
     'melarc.lock_policy_keys',
+    // The bootstrap seed and the resume command (migration 0019, S0.30): the only way the provisioning login reaches the identity,
+    // grant, factor and audit tables, which it holds no privilege on.
+    'melarc.bootstrap_status',
+    'melarc.seed_bootstrap_administrators',
+    'melarc.bootstrap_identity_state',
+    'melarc.resume_bootstrap_identity',
   ],
   // The one way to read the credential hash of a staff identity (migration 0016): the runtime has no SELECT on the column, and the
   // function refuses any context but a SYSTEM one under the authentication capability.
-  [API_RUNTIME_ROLE]: ['melarc.staff_credential_hash'],
+  // And the facts of a staff identity's second factor (migration 0027, F02 of the audit of 22 October 2026): for a staff read of
+  // `staff.read` in one snapshot, or the authentication capability; it returns facts and no secret, hash, token or record identifier.
+  [API_RUNTIME_ROLE]: ['melarc.staff_credential_hash', 'melarc.staff_reset_facts'],
 };
 
 /** Schemas that are the server's own and not ours to inspect. */

@@ -261,4 +261,34 @@ export class PostgresSessionStore implements SessionStore {
       returning s.id`);
     return (result.rows as { id: string }[]).map((row) => row.id).toSorted();
   }
+
+  async expire(
+    transaction: TransactionHandle,
+    sessionId: string,
+    idleMinutes: number | null,
+  ): Promise<boolean> {
+    if (!isUuid(sessionId)) throw new TypeError('A session is identified by its id (a UUID)');
+    if (idleMinutes !== null && (!Number.isInteger(idleMinutes) || idleMinutes < 1)) {
+      throw new RangeError('An idle limit is a positive whole number of minutes, or none');
+    }
+    // The lock first, the judgement after it, in two statements, for the reason `recordActivity` gives: one UPDATE that waited for a
+    // row would judge on the clock it read before the wait, and a holder that only locked the row would leave it that qualification.
+    // Here the mistake would leave a session live whose end came during the wait; the statement that judges runs on the clock as it is
+    // once the lock is held. An ended session is not selected, so it keeps its first reason.
+    const database = transactionOf(transaction);
+    const locked = await database.execute(
+      sql`select 1 from session where id = ${sessionId} and terminated_at is null for update`,
+    );
+    if (locked.rows.length === 0) return false;
+    const result = await database.execute(sql`
+      update session
+         set terminated_at = greatest(clock_timestamp(), issued_at), termination_reason = 'EXPIRED'
+       where id = ${sessionId}
+         and terminated_at is null
+         and (expires_at <= clock_timestamp()
+              or (${idleMinutes}::int is not null
+                  and last_activity_at + make_interval(mins => ${idleMinutes}::int) <= clock_timestamp()))
+      returning 1`);
+    return result.rows.length === 1;
+  }
 }

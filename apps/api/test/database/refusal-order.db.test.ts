@@ -355,7 +355,13 @@ beforeAll(async () => {
     rootModule: (options) => {
       Module({
         imports: [
-          AppModule.register({ ...options, recordEntities: ENTITIES, tierRules: TIER_RULES }),
+          AppModule.register({
+            ...options,
+            // The fixture contract holds none of the product's operations, and this test brings its own routes.
+            productRoutes: false,
+            recordEntities: ENTITIES,
+            tierRules: TIER_RULES,
+          }),
           OrderModule,
         ],
       })(Root);

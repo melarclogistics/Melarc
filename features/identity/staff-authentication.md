@@ -162,7 +162,7 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 
 ## 11. Audit events — *pointer*
 
-[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.session.authority_revoked` and `auth.csrf.rejected`.** The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `MFA_ENROLMENT_REQUIRED` for staff — and **never a password, a code or a token**.
+[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.bootstrap.resumed`, `auth.session.authority_revoked` and `auth.csrf.rejected`.** The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `MFA_ENROLMENT_REQUIRED` for staff — and **never a password, a code or a token**.
 
 **This section cited `auth.mfa.elevated` until 23 August — an event that no longer exists.** `MSC-DEC-228` withdrew elevation on 21 August and `audit.md` renamed the code to `auth.mfa.completed`, which records a second factor accepted **at sign-in**. The stale name survived because a suffix-abbreviated list is not checkable: nothing could compare it to the catalogue.
 
@@ -544,7 +544,9 @@ And none of these operations issues a session.
 ```text
 Given either bootstrap Platform Admin, who set a password and whose MFA_ENROLMENT continuation grant expired with the factor still PENDING,
 When the provisioning-only resume command is run,
-Then a fresh MFA_REENROLMENT authorisation is delivered through the controlled provisioning channel and an enhanced audit record is written under the reserved system actor,
+Then a fresh MFA_REENROLMENT authorisation is delivered through the controlled provisioning channel,
+And exactly one enhanced audit record, auth.bootstrap.resumed, is written in the same transaction, by SYSTEM with a null actor and the reserved bootstrap actor as a named fact (reserved_system_actor_id), naming the identity, the path, the grant issued, the grants ended and the factors revoked, with a bounded, secret-free before and after of their states,
+And the same record is written when the administrator lost the setup secret before a password existed (the unconsumed BOOTSTRAP_SETUP is superseded by a new one), and none is written for a resume that is refused,
 And beginMfaReenrolment consumes it, supersedes the unusable PENDING factor and issues a new continuation grant,
 And no session is granted, the password is neither reset nor revealed and BOOTSTRAP_SETUP is not resurrected,
 And no API operation and no Ops Portal screen can invoke the command,

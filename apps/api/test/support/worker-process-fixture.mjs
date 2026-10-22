@@ -5,7 +5,8 @@
 // It starts the real worker from the built output through the same start-up the real entry point uses (startDeliveryWorker, which
 // installs the same fault and stop-signal handlers), and adds what a test needs and production does not have:
 //
-//   plain       the worker as composed: the capture adapter and the reader that confirms nothing
+//   plain       the worker as composed: the capture adapter and the reader of setup grants (S0.29); a message that serves a record whose
+//               reader is not built (a recovery request, S0.50) is not confirmed and is not sent
 //   stalling    a provider that is given a message and never answers, and a reader that says every record is pending, so that a
 //               message is claimed and its send is in flight when the process is told to stop. As the provider receives the message
 //               it writes one line to stdout, {"msg":"fixture: the provider received a message"}, for a test to wait for before it
@@ -16,13 +17,16 @@
 //   --signal-itself-on-send    (stalling) sends itself a stop signal as the provider receives its first message
 //   --signal-after=<ms>        sends itself a stop signal after that many milliseconds
 //   --retention=<ms>           runs the retention cleanup at that interval instead of the real one
+//   --unbuilt-readers          (plain) gives the worker the reader that confirms nothing, as it was composed before S0.29: it then
+//                              claims no message at all
 //
 // usage: node worker-process-fixture.mjs <plain|stalling> [--signal-itself] [--signal-itself-on-send] [--signal-after=<ms>]
-//                                        [--retention=<ms>]
+//                                        [--retention=<ms>] [--unbuilt-readers]
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
 
 import { startDeliveryWorker } from '../../dist/delivery-worker-process.js';
+import { UNBUILT_REDEMPTION_READER } from '../../dist/platform/delivery/worker/redemption-record-reader.js';
 
 const [mode, ...flags] = process.argv.slice(2);
 if (mode !== 'plain' && mode !== 'stalling') {
@@ -47,7 +51,9 @@ const signalAfter = flagValue('signal-after');
 const options = {
   ...(retention === undefined ? {} : { retentionIntervalMs: retention }),
   ...(mode === 'plain'
-    ? {}
+    ? flags.includes('--unbuilt-readers')
+      ? { redemptionReader: UNBUILT_REDEMPTION_READER }
+      : {}
     : {
         providerFactory: () => ({
           send: () => {

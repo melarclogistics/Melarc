@@ -6,8 +6,9 @@ or Git Bash), WSL2 and Linux. `scripts/local-setup.test.ts` fails if this page n
 does not exist.
 
 When you are done you have the database on `127.0.0.1:5432`, the API on `127.0.0.1:3000` and the Ops Portal dev
-server proxying `/api/v1` to it. There are no product screens or business routes yet: the API serves its technical
-probes and the Ops Portal is the application shell.
+server proxying `/api/v1` to it. There are no product screens yet and only five business routes, the credential setup
+operations of S0.31, the staff sign-in of S0.32 and its second step of S0.33 (`src/tools/contract/implemented-scope.ts`): the API
+serves its technical probes and those, and the Ops Portal is the application shell.
 
 ## Prerequisites
 
@@ -109,6 +110,29 @@ to run it twice: it refuses a database that already holds any of it, and changes
 For another database set `DATABASE_SEED_URL` (the provisioning login) and `APP_ENV`; the API refuses to start with either
 `DATABASE_SEED_URL` or `DATABASE_MIGRATION_URL` in its environment. `db:reset` (section 8) returns the database to migrated and empty, which allows a new seed.
 
+```text
+pnpm --filter @melarc/api run bootstrap:seed -- --custodian "Full Name <work@email>" --custodian "Full Name <work@email>"
+pnpm --filter @melarc/api run bootstrap:resume -- --custodian <work@email>
+```
+
+`bootstrap:seed` makes the two bootstrap administrators of an empty staff table and writes one custody bundle for each into
+`BOOTSTRAP_CUSTODY_DIRECTORY` (an absolute folder outside the checkout, with no default); `bootstrap:resume` gives one stranded
+administrator a fresh secret in a new bundle. They run as the provisioning login after the reference seed, under the same
+`DATABASE_SEED_URL` and `APP_ENV` rules, and they are processes you start: no API operation or screen can run them. A bundle holds
+a setup secret in clear: give it to its custodian alone, delete it after handover, keep the folder out of any synchronised or shared
+location (a cloud-synced profile folder copies it), and never create one on a machine you do not trust (the plan's open item
+names this one). Neither command prints a secret, a work email or a path
+([MIGRATION_AND_SEEDING.md](architecture/MIGRATION_AND_SEEDING.md) §3.2 and §3.3a).
+
+Setting the folder: name it in the shell the command is started from (`set BOOTSTRAP_CUSTODY_DIRECTORY=...` in `cmd`; the scripts read no
+`.env` file for it, so a line in `apps/api/.env` does nothing). **Use one folder for each environment.** Each bundle records which
+database it was written for, and a run removes only the earlier bundles of its own database (a run that did not commit leaves such
+a bundle); it leaves any other in the folder alone and says how many. The folder must be private before the command is started, and the
+command refuses one that is not: on POSIX it is owned by you with no access for group or others, and on Windows its access list names
+no one but you, the local system and the administrators (a folder under your user profile does; a folder directly on a data drive
+usually does not, because the drive grants Users and Authenticated Users access). The command only reads the list of the folder; it
+never changes it. A bundle that is found in the checkout is refused by `pnpm run package:source` by its name and by what it begins with.
+
 ## 5. Run the applications
 
 In two terminals:
@@ -142,8 +166,8 @@ the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays 
 set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
 yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
 by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
-Until the redemption records it must read exist (SLICE-000 S0.29 and S0.50) it confirms none, so it sends nothing and
-says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+It reads a setup grant's standing before each send (SLICE-000 S0.29). The reader of recovery requests arrives with S0.50,
+and until then a message that serves one is not sent, and the worker says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
 
 ## 6. Run the checks and the smoke tests
 

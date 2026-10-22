@@ -2,6 +2,7 @@ import pino from 'pino';
 
 import { SystemClock } from '../../platform/auth/clock/system.clock.adapter.js';
 import { INERT_DEADLINES } from '../../platform/config/inert-config.js';
+import type { DatabaseDeadlines } from '../../platform/config/load-config.js';
 import { createPool } from '../../platform/database/database.module.js';
 import { DatabaseService } from '../../platform/database/database.service.js';
 import { postgresConnectionSettings } from '../../platform/database/postgres-url.js';
@@ -25,20 +26,24 @@ export interface SeedTarget {
 
 /**
  * One connection, made the way the API makes its pool, as whoever the URL names: a pool of one, the engineering default deadlines
- * (the transaction inserts a few hundred rows), no log output, and a pool that is ended when the run ends.
+ * (the transaction inserts a few hundred rows) unless the command that opens it needs others, no log output, and a pool that is ended
+ * when the run ends.
  */
-export function openSeedTarget(url: string): SeedTarget {
+export function openSeedTarget(
+  url: string,
+  deadlines: DatabaseDeadlines = INERT_DEADLINES,
+): SeedTarget {
   const shutdown = new ShutdownRegistry();
   const clock = new SystemClock();
   const database = new DatabaseService(
-    createPool({ url, poolMax: 1, deadlines: INERT_DEADLINES }),
+    createPool({ url, poolMax: 1, deadlines }),
     pino({ level: 'silent' }),
     shutdown,
     new ReadinessRegistry(),
     {
       clock,
       poolMax: 1,
-      deadlines: INERT_DEADLINES,
+      deadlines,
       canceller: new PgStatementCanceller(postgresConnectionSettings(url), {
         timeoutMilliseconds: DISPOSAL_BOUND_MS,
         clock,

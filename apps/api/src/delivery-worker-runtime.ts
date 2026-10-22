@@ -40,8 +40,10 @@ import {
 } from './platform/delivery/worker/outside-checkout.js';
 import {
   UNBUILT_REDEMPTION_READER,
+  redemptionReaderOver,
   type RedemptionRecordReader,
 } from './platform/delivery/worker/redemption-record-reader.js';
+import { SetupGrantRedemptionReader } from './platform/delivery/worker/setup-grant-redemption-reader.js';
 import {
   assertWorkerConfigAccepted,
   type WorkerConfig,
@@ -166,8 +168,10 @@ export interface RuntimeOptions {
   /** Builds a provider; the capture adapter by default. A test gives one, to see what stands in front of it. */
   readonly providerFactory?: ProviderFactory;
   /**
-   * How the worker reads a redemption record before it sends. The reader that confirms nothing by default, because the record tables
-   * arrive with S0.29 and S0.50 and their readers with them; a test gives one that answers, to see a message sent.
+   * How the worker reads a redemption record before it sends. By default the reader of setup grants (S0.29), over the worker's own
+   * database; the reader of recovery requests arrives with S0.50, and until then a message that serves one is not confirmed and is not
+   * sent. A test gives one that answers, to see a message sent, or `UNBUILT_REDEMPTION_READER`, which confirms nothing: the worker
+   * then claims no message at all.
    */
   readonly redemptionReader?: RedemptionRecordReader;
   /** How often the retention cleanup runs: `RETENTION_INTERVAL_MS` by default. A test gives a short one. */
@@ -209,7 +213,6 @@ export function createDeliveryWorkerRuntime(
     appEnv: config.appEnv,
     ...(options.destination === undefined ? {} : { destination: options.destination }),
   });
-  const redemptionReader = options.redemptionReader ?? UNBUILT_REDEMPTION_READER;
   const providers = composeProviders(config, clock, options.providerFactory);
   const timeouts = providerTimeouts(config);
   const { leaseMs, jobBudgetMs } = leaseFor(timeouts);
@@ -231,6 +234,11 @@ export function createDeliveryWorkerRuntime(
       }),
     },
   );
+  // The worker reads a setup grant's standing through its own database and its own capability (S0.29). A kind of record whose reader is
+  // not built (the recovery request, S0.50) is not confirmed, so nothing is sent for it.
+  const redemptionReader =
+    options.redemptionReader ??
+    redemptionReaderOver({ SETUP_GRANT: new SetupGrantRedemptionReader({ database, clock }) });
   const queue = new PostgresDeliveryQueue({ cipher: workerCipher(config), clock, work: database });
   const metrics = new BoundedMetrics({
     policy: labelPolicyFor(config.nodeEnv),
@@ -254,7 +262,8 @@ export function createDeliveryWorkerRuntime(
     leaseMs,
     jobBudgetMs,
     // With no reader that can confirm a redemption record, every claim would end without a send: the worker claims nothing, so no queued
-    // message is spent, and its lanes start when the readers are built (S0.29, S0.50). The periodic tasks run either way.
+    // message is spent. Since S0.29 the worker as composed has the reader of setup grants, so its lanes run; a worker given the reader that
+    // confirms nothing (a test, and no deployment) still claims nothing. The periodic tasks run either way.
     consume: redemptionReader !== UNBUILT_REDEMPTION_READER,
     // Credential material whose time has passed is erased on a schedule, in the worker (S0.19).
     periodic: [
@@ -277,6 +286,11 @@ export function createDeliveryWorkerRuntime(
       if (redemptionReader === UNBUILT_REDEMPTION_READER) {
         logger.warn(
           'redemption record readers are not built yet: the worker claims no message, and every queued message waits unspent until they are',
+        );
+      } else if (options.redemptionReader === undefined) {
+        // As composed, the worker reads setup grants. A message that serves a recovery request is not confirmed (S0.50), and is not sent.
+        logger.warn(
+          'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
         );
       }
       worker.start();

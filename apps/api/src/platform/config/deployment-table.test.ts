@@ -789,7 +789,11 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
     expect(applied).toMatch(/Indicative figures, not a benchmark/);
     const limits = section.slice(section.indexOf(limitsHeading));
     expect(limits).toMatch(/no real provider/);
-    expect(limits).toMatch(/S0\.29 and S0\.50/);
+    // The redemption readers (S0.29 built the setup grant's; the recovery request's is S0.50's): the paragraph must say which kind the
+    // worker reads and which it still does not, and that an unread kind is not sent.
+    expect(limits).toMatch(/since S0\.29 it reads one kind: a setup grant's state and expiry/);
+    expect(limits).toMatch(/recovery request arrives with S0\.50/);
+    expect(limits).toMatch(/is not confirmed and is not sent/);
     expect(limits).toMatch(/Windows/);
     expect(limits).toMatch(/required before Gate 2 passes/);
     expect(limits).toMatch(/OB-24/);

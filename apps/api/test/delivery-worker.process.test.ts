@@ -180,7 +180,7 @@ describe('a real worker process and its stop signal (S0.18; OB-24)', () => {
     expect(said).toEqual(
       expect.arrayContaining([
         'delivery worker started',
-        'redemption record readers are not built yet: the worker claims no message, and every queued message waits unspent until they are',
+        'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
         'signal received',
         'delivery worker stopping',
         'delivery worker stopped',

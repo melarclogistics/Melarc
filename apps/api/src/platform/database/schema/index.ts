@@ -12,3 +12,5 @@ export * from './credential-delivery.js';
 // S0.24 adds the session. The staff identity it belongs to is `src/staff/staff-identity.schema.ts`, which the Drizzle configuration
 // reads beside this index.
 export * from './session.js';
+// S0.29 adds the setup grant. The MFA factor that a grant leads to is `src/staff/mfa-factor.schema.ts`, beside the identity it belongs to.
+export * from './setup-grant.js';

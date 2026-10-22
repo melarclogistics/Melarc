@@ -39,7 +39,9 @@ const AUTHENTICATION: SecurityContext = {
   taskCapability: 'authentication',
   correlationId: 'request-2',
 };
-const SEED: SecurityContext = { ...AUTHENTICATION, taskCapability: 'seed' };
+// The bootstrap seed writes the two administrators under the `bootstrap` capability; the reference seed (`seed`) writes no identity.
+const BOOTSTRAP: SecurityContext = { ...AUTHENTICATION, taskCapability: 'bootstrap' };
+const REFERENCE_SEED: SecurityContext = { ...AUTHENTICATION, taskCapability: 'seed' };
 
 const build = (input: AuditEventInput, context: SecurityContext = STAFF) =>
   buildAuditRecord(input, context, NOW, ID);
@@ -91,10 +93,10 @@ describe('the tier of each event is the catalogue’s, read from the document (G
 
   // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
   // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 76 enhanced, 5 that depend on the act, 109 ordinary, of 190', () => {
-    expect(ENHANCED_CODES).toHaveLength(76);
+  it('counts the tiers: 77 enhanced, 5 that depend on the act, 109 ordinary, of 191', () => {
+    expect(ENHANCED_CODES).toHaveLength(77);
     expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(190);
+    expect(AUDIT_EVENT_CODES).toHaveLength(191);
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
     expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(109);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
@@ -263,7 +265,7 @@ describe('the writer holds an event to its tier (G2-06)', () => {
   it.each([
     ['auth.recovery.requested', 'ADMINISTRATOR_INITIATED', true, STAFF],
     ['auth.recovery.requested', 'SELF_SERVICE', false, AUTHENTICATION],
-    ['staff.identity.created', 'BOOTSTRAP_SEED', true, SEED],
+    ['staff.identity.created', 'BOOTSTRAP_SEED', true, BOOTSTRAP],
     ['staff.identity.created', 'OPERATION', false, STAFF],
   ] as const)('holds %s to its basis %s: the tier is %s', (code, basis, enhanced, context) => {
     const extras =
@@ -309,6 +311,9 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     };
     expect(refusalOf(() => build(seed, STAFF)).field).toBe('enhancedBasis');
     expect(refusalOf(() => build(seed, AUTHENTICATION)).field).toBe('enhancedBasis');
+    // The reference seed is not the bootstrap: a transaction under the seed capability cannot claim the bootstrap basis (S0.30).
+    expect(refusalOf(() => build(seed, REFERENCE_SEED)).field).toBe('enhancedBasis');
+    expect(build(seed, BOOTSTRAP).enhanced).toBe(true);
     const recovery: AuditEventInput = {
       code: 'auth.recovery.requested',
       enhanced: true,

@@ -311,7 +311,9 @@ describe('the worker capability role', () => {
   // Break caught: the capability role being a login, owning something, holding a grant no task needs, or being given to anyone
   // but the worker's login in a form that lets it switch into the role. It is a grant set: nothing logs in as it, it owns
   // nothing, it holds the grants of the one task it serves (the delivery job: SELECT on the row, UPDATE on the columns a lease
-  // and an outcome change; and, for the retention cleanup, the erase of an idempotency record's sealed columns) and no other, and its only member is the worker login, which inherits it and cannot SET ROLE.
+  // and an outcome change; for the retention cleanup, the erase of an idempotency record's sealed columns; and, to confirm a grant is
+  // still pending before a send, the three columns of a setup grant that say so) and no other, and its only member is the worker
+  // login, which inherits it and cannot SET ROLE.
   it('is a grant set that holds only the delivery grants and has the worker login as its one member', async () => {
     const facts = await withClient(database.urlFor('postgres'), async (client) => {
       const role = await client.query<Record<string, unknown>>(
@@ -390,6 +392,13 @@ describe('the worker capability role', () => {
           'idempotency_record.sealed_expires_at:UPDATE',
           'idempotency_record.sealed_key_version:UPDATE',
           'idempotency_record.sealed_nonce:UPDATE',
+        ])
+        // S0.29: the worker confirms that the setup grant a message serves is still pending, and reads only what says so: the grant's
+        // identity, its state and its expiry (registry section 5.2: "state and expiry only, never the hash").
+        .concat([
+          'setup_grant.expires_at:SELECT',
+          'setup_grant.id:SELECT',
+          'setup_grant.state:SELECT',
         ]),
     );
     expect(facts.members).toEqual([

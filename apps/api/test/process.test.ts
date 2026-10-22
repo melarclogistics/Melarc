@@ -325,10 +325,33 @@ describe('the OpenAPI generation command', () => {
     ) as { live: { method: string; path: string }[] };
 
     expect(document.info.title).toContain('derived from the implementation');
-    expect(document.paths).toEqual({});
+    // The three credential setup operations (S0.31), the staff sign-in and its second step (S0.32, S0.33) the read and the end of the caller's own session (S0.34) and the four reads of S0.35 are the routes of the product; nothing else is described.
+    expect(Object.keys(document.paths).toSorted()).toEqual([
+      '/auth/session',
+      '/auth/staff/setup/credential',
+      '/auth/staff/setup/mfa',
+      '/auth/staff/setup/mfa/begin',
+      '/auth/staff/sign-in',
+      '/auth/staff/sign-in/mfa',
+      '/reason-definitions',
+      '/staff-identities',
+      '/staff-identities/{id}',
+      '/staff-role-bundles/assignable',
+    ]);
     expect(inventory.live).toEqual([
+      { method: 'DELETE', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/reason-definitions' },
+      { method: 'GET', path: '/api/v1/staff-identities' },
+      { method: 'GET', path: '/api/v1/staff-identities/:id' },
+      { method: 'GET', path: '/api/v1/staff-role-bundles/assignable' },
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/credential' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa/begin' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in/mfa' },
     ]);
     expect(existsSync(join(outDir, 'openapi.generated.json'))).toBe(true);
   });

@@ -1,6 +1,8 @@
+import { StaffSetupUnavailableError } from '../auth/staff/staff-setup-errors.js';
 import {
   AuthenticationUnavailableError,
   FixedPolicyUnavailableError,
+  SessionOperationsUnavailableError,
   SessionSnapshotUnreadableError,
 } from '../auth/sessions/session-errors.js';
 import {
@@ -11,6 +13,7 @@ import {
 import { CommitOutcomeUnknownError, DatabaseDeadlineError } from '../database/database-failures.js';
 import { PolicyCoordinationError } from '../database/policy-lock/coordinate.js';
 import { VendorOrganizationUnavailableError } from '../authorization/operation-contexts.js';
+import { OperationUnavailableError } from '../authorization/operation-unavailable-error.js';
 import { BudgetExpiredError } from '../execution/execution-budget.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
 import { RecordScopeUnavailableError } from '../routes/authorization.guard.js';
@@ -72,6 +75,13 @@ const OPERATIONAL: readonly (abstract new (...args: never[]) => Error)[] = [
   // organisation its account belongs to: the application is composed without a part the request needs, and nothing was done.
   RecordScopeUnavailableError,
   VendorOrganizationUnavailableError,
+  // S0.31. A credential setup operation is asked for in an application composed without a database, key material or a port it needs.
+  StaffSetupUnavailableError,
+  // S0.34. The current-session read or the sign-out is asked for in an application composed without a part it needs.
+  SessionOperationsUnavailableError,
+  // S0.35. An operation of a domain module (the staff reads, the assignable bundles, the reason catalogue) is asked for in an application
+  // composed without what it needs.
+  OperationUnavailableError,
 ];
 
 export function classifyFailure(error: unknown): FailureKind {

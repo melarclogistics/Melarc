@@ -177,6 +177,8 @@ async function start(options: { limit?: number } = {}): Promise<TestApp> {
         imports: [
           AppModule.register({
             ...moduleOptions,
+            // The fixture contract holds none of the product's operations, and this test brings its own routes.
+            productRoutes: false,
             ...(options.limit === undefined
               ? {}
               : {

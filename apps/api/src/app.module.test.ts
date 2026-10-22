@@ -1,3 +1,6 @@
+import { PermissionModule } from './permission/permission.module.js';
+import { SettingsModule } from './settings/settings.module.js';
+import { StaffModule } from './staff/staff.module.js';
 import net from 'node:net';
 
 import { Global, Inject, Injectable, Module, Scope, type ModuleMetadata } from '@nestjs/common';
@@ -17,22 +20,39 @@ import {
 import {
   AUDIT_WRITER,
   CLOCK,
+  DELIVERY_QUEUE,
+  HASH_ADMISSION,
   HASHER,
   IDENTITY_DIRECTORY,
   METRICS,
   PORTS,
   portProviders,
   RATE_LIMITER,
+  SECRET_CIPHER,
   SESSION_STORE,
   TOKEN_SERVICE,
+  TOTP_VERIFIER,
   UNIT_OF_WORK,
   type Clock,
+  type DeliveryQueue,
   type HashVerdict,
   type Hasher,
   type Metrics,
   type PortBindings,
   type RateLimiter,
+  type SecretCipher,
 } from './platform/auth/ports/index.js';
+import { AesGcmSecretCipher } from './platform/auth/crypto/aes-gcm.secret-cipher.adapter.js';
+import { Argon2Hasher } from './platform/auth/crypto/argon2.hasher.adapter.js';
+import { Rfc6238TotpVerifier } from './platform/auth/crypto/rfc6238.totp-verifier.adapter.js';
+import { BoundedHashAdmission } from './platform/limiter/bounded.hash-admission.adapter.js';
+import { STAFF_SETUP_SERVICE } from './platform/auth/staff/staff-setup-providers.js';
+import { StaffSetupService } from './platform/auth/staff/staff-setup.service.js';
+import { MFA_FACTOR_STORE } from './platform/auth/mfa/mfa-providers.js';
+import { MfaFactorStore } from './platform/auth/mfa/mfa-factor-store.js';
+import { SETUP_GRANT_STORE } from './platform/auth/setup-grants/setup-grant-providers.js';
+import { SetupGrantStore } from './platform/auth/setup-grants/setup-grant-store.js';
+import { PostgresDeliveryQueue } from './platform/delivery/postgres.delivery-queue.adapter.js';
 import { AdapterRefusedError } from './platform/config/adapter-refusals.js';
 import { INERT_DEADLINES, inertConfig } from './platform/config/inert-config.js';
 import type { KeyPurpose, PurposeKeys } from './platform/config/key-material.js';
@@ -248,6 +268,8 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         logger: createLogger({ config: TEST_CONFIG }),
       });
 
+      // S0.29 adds the secret cipher and the issuing side of the delivery queue, and S0.31 the hasher, the hash admission and the TOTP
+      // verifier, bound over a database and local key custody.
       expect(module.exports).toEqual([
         CLOCK,
         TOKEN_SERVICE,
@@ -255,6 +277,11 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         SESSION_STORE,
         IDENTITY_DIRECTORY,
         AUDIT_WRITER,
+        SECRET_CIPHER,
+        DELIVERY_QUEUE,
+        HASHER,
+        HASH_ADMISSION,
+        TOTP_VERIFIER,
         RATE_LIMITER,
       ]);
     });
@@ -489,6 +516,215 @@ describe('the session machinery (S0.24)', () => {
   });
 });
 
+describe('the credential stores (S0.29)', () => {
+  const DATABASE = {
+    url: 'postgres://melarc_api_runtime:secret@127.0.0.1:1/melarc_test',
+    poolMax: 1,
+    deadlines: INERT_DEADLINES,
+  };
+  const WITH_KEYS: AppConfig = inertConfig({
+    composition: 'runtime',
+    nodeEnv: 'test',
+    http: Object.freeze({ ...TEST_CONFIG.http, port: 0 }),
+    keys: Object.freeze({ custody: 'local', purposes: runtimeKeys() }),
+    database: DATABASE,
+  });
+
+  // Break caught (OB-38, OB-107): the first consumers of the secret cipher and of the delivery queue (the factor store seals a seed,
+  // the grant store queues a message) finding no adapter bound, or the queue sealing under a cipher that is not the one bound.
+  it('binds the secret cipher and the issuing side of the delivery queue over a database and local key custody', async () => {
+    running = await startTestApp({ config: WITH_KEYS });
+
+    const cipher = resolve<SecretCipher>(SECRET_CIPHER);
+    expect(cipher).toBeInstanceOf(AesGcmSecretCipher);
+    expect(cipher).toBe(resolve<SecretCipher>(SECRET_CIPHER));
+    expect(resolve<DeliveryQueue>(DELIVERY_QUEUE)).toBeInstanceOf(PostgresDeliveryQueue);
+    expect(resolve<DeliveryQueue>(DELIVERY_QUEUE)).toBe(resolve<DeliveryQueue>(DELIVERY_QUEUE));
+  });
+
+  // Break caught (least privilege, SECURITY_DESIGN.md §14.9): the API's cipher serving a purpose no API code needs yet. It seals the
+  // seeds and the delivery payloads and opens no sealed replay, which the idempotency store brings with the first operation that keeps one.
+  it('serves the TOTP seed and the delivery payload and no other purpose', async () => {
+    running = await startTestApp({ config: WITH_KEYS });
+    const cipher = resolve<SecretCipher>(SECRET_CIPHER);
+
+    await expect(
+      cipher.seal('TOTP_SEED', new Uint8Array([1, 2, 3]), new Uint8Array([9])),
+    ).resolves.toBeDefined();
+    await expect(
+      cipher.seal('DELIVERY_PAYLOAD', new Uint8Array([1]), new Uint8Array([9])),
+    ).resolves.toBeDefined();
+    await expect(
+      cipher.seal('REPLAY_SECRET', new Uint8Array([1]), new Uint8Array([9])),
+    ).rejects.toThrow();
+  });
+
+  // Break caught: a store the credential operations will ask for that is missing, or built over something other than the bound ports.
+  it('provides the setup grant store and the MFA factor store, as application singletons', async () => {
+    running = await startTestApp({ config: WITH_KEYS });
+
+    expect(resolve(SETUP_GRANT_STORE)).toBeInstanceOf(SetupGrantStore);
+    expect(resolve(MFA_FACTOR_STORE)).toBeInstanceOf(MfaFactorStore);
+    expect(resolve(SETUP_GRANT_STORE)).toBe(resolve(SETUP_GRANT_STORE));
+  });
+
+  // Break caught: the credential bindings made to depend on which limiter the configuration asks for, so that a local run on the
+  // in-memory limiter has a store of grants and no cipher to seal with, or no store at all.
+  it('binds the cipher, the queue and both stores whichever limiter the configuration asks for', async () => {
+    running = await startTestApp({
+      config: { ...WITH_KEYS, adapters: { ...WITH_KEYS.adapters, limiter: 'memory' as const } },
+    });
+
+    expect(resolve<SecretCipher>(SECRET_CIPHER)).toBeInstanceOf(AesGcmSecretCipher);
+    expect(resolve<DeliveryQueue>(DELIVERY_QUEUE)).toBeInstanceOf(PostgresDeliveryQueue);
+    expect(resolve(SETUP_GRANT_STORE)).toBeInstanceOf(SetupGrantStore);
+    expect(resolve(MFA_FACTOR_STORE)).toBeInstanceOf(MfaFactorStore);
+    expect(() => resolve(RATE_LIMITER)).toThrow();
+  });
+
+  // Break caught: a stand-in cipher or queue bound where the real one cannot be built, so a credential is "issued" with nothing
+  // sealed. Without a database, or without local key material, nothing is bound and the stores are absent (an operation that asks for
+  // one fails closed, as the session services do).
+  it.each([
+    ['there is no database', { database: undefined }],
+    ['there is no local key material', { keys: Object.freeze({ custody: 'describe' as const }) }],
+  ])(
+    'binds neither the cipher nor the queue, and provides no store, when %s',
+    async (_label, override) => {
+      running = await startTestApp({ config: { ...WITH_KEYS, ...override } });
+
+      expect(() => resolve(SECRET_CIPHER)).toThrow();
+      expect(() => resolve(DELIVERY_QUEUE)).toThrow();
+      expect(resolve(SETUP_GRANT_STORE)).toBeUndefined();
+      expect(resolve(MFA_FACTOR_STORE)).toBeUndefined();
+    },
+  );
+
+  // Break caught: a missing key found at the first seal instead of at start.
+  it.each([['totp_seed' as const], ['credential_delivery' as const]])(
+    'stops the application at start when the %s key is missing',
+    async (purpose) => {
+      // The key material of every purpose but the one under test.
+      const purposes = Object.fromEntries(
+        Object.entries(runtimeKeys()).filter(([name]) => name !== purpose),
+      ) as Record<KeyPurpose, PurposeKeys>;
+      const config = {
+        ...WITH_KEYS,
+        keys: Object.freeze({ custody: 'local' as const, purposes }),
+      };
+
+      await expect(startTestApp({ config })).rejects.toThrow();
+    },
+  );
+
+  // Break caught: the composition's own cipher replacing the one a test supplies through `ports`.
+  it('lets a test supply its own cipher and queue through ports', async () => {
+    const cipher: SecretCipher = {
+      seal: () => Promise.reject(new Error('own cipher')),
+      open: () => Promise.reject(new Error('own cipher')),
+    };
+    const queue = {} as DeliveryQueue;
+    running = await startTestApp({
+      config: WITH_KEYS,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [
+          AppModule.register({
+            ...options,
+            ports: { secretCipher: { useValue: cipher }, deliveryQueue: { useValue: queue } },
+          }),
+        ],
+      }),
+    });
+
+    expect(resolve<SecretCipher>(SECRET_CIPHER)).toBe(cipher);
+    expect(resolve<DeliveryQueue>(DELIVERY_QUEUE)).toBe(queue);
+  });
+});
+
+describe('the credential setup operations (S0.31)', () => {
+  const DATABASE = {
+    url: 'postgres://melarc_api_runtime:secret@127.0.0.1:1/melarc_test',
+    poolMax: 1,
+    deadlines: INERT_DEADLINES,
+  };
+  const WITH_KEYS: AppConfig = inertConfig({
+    composition: 'runtime',
+    nodeEnv: 'test',
+    http: Object.freeze({ ...TEST_CONFIG.http, port: 0 }),
+    keys: Object.freeze({ custody: 'local', purposes: runtimeKeys() }),
+    database: DATABASE,
+  });
+
+  // Break caught (OB-38): the first consumers of the hasher, the hash admission and the TOTP verifier finding no adapter bound, or
+  // the verifier reading a clock other than the one bound, or hashing admitted by something that is not the bounded count.
+  it('binds the Argon2id hasher, the bounded hash admission and the RFC 6238 verifier, as singletons', async () => {
+    running = await startTestApp({ config: WITH_KEYS });
+
+    expect(resolve<Hasher>(HASHER)).toBeInstanceOf(Argon2Hasher);
+    expect(resolve<Hasher>(HASHER)).toBe(resolve<Hasher>(HASHER));
+    expect(resolve(HASH_ADMISSION)).toBeInstanceOf(BoundedHashAdmission);
+    expect(resolve(TOTP_VERIFIER)).toBeInstanceOf(Rfc6238TotpVerifier);
+  });
+
+  it('provides the staff setup service, built from those ports, as an application singleton', async () => {
+    running = await startTestApp({ config: WITH_KEYS });
+
+    expect(resolve(STAFF_SETUP_SERVICE)).toBeInstanceOf(StaffSetupService);
+    expect(resolve(STAFF_SETUP_SERVICE)).toBe(resolve(STAFF_SETUP_SERVICE));
+  });
+
+  // Break caught: the new bindings made to depend on which limiter the configuration asks for.
+  it('binds them whichever limiter the configuration asks for', async () => {
+    running = await startTestApp({
+      config: { ...WITH_KEYS, adapters: { ...WITH_KEYS.adapters, limiter: 'memory' as const } },
+    });
+
+    expect(resolve<Hasher>(HASHER)).toBeInstanceOf(Argon2Hasher);
+    expect(resolve(STAFF_SETUP_SERVICE)).toBeInstanceOf(StaffSetupService);
+  });
+
+  // Break caught: a stand-in hasher or verifier bound where the real one cannot be built, so a password is "set" with nothing
+  // derived. Without a database, or without local key material (the pepper), nothing is bound and the service is absent: its
+  // routes fail closed.
+  it.each([
+    ['there is no database', { database: undefined }],
+    ['there is no local key material', { keys: Object.freeze({ custody: 'describe' as const }) }],
+  ])('binds none of the three and provides no service when %s', async (_label, override) => {
+    running = await startTestApp({ config: { ...WITH_KEYS, ...override } });
+
+    expect(() => resolve(HASHER)).toThrow();
+    expect(() => resolve(HASH_ADMISSION)).toThrow();
+    expect(() => resolve(TOTP_VERIFIER)).toThrow();
+    expect(resolve(STAFF_SETUP_SERVICE)).toBeUndefined();
+  });
+
+  // Break caught: a missing pepper found at the first password and not at start (SECURITY_DESIGN.md §14.9: no degraded mode).
+  it('stops the application at start when the password pepper is missing', async () => {
+    const purposes = Object.fromEntries(
+      Object.entries(runtimeKeys()).filter(([name]) => name !== 'password_pepper'),
+    ) as Record<KeyPurpose, PurposeKeys>;
+    const config = { ...WITH_KEYS, keys: Object.freeze({ custody: 'local' as const, purposes }) };
+
+    await expect(startTestApp({ config })).rejects.toThrow();
+  });
+
+  it('lets a test supply its own hasher through ports', async () => {
+    const hasher = new FakeHasher(WITH_KEYS, FIXED);
+    running = await startTestApp({
+      config: WITH_KEYS,
+      rootModule: (options) => ({
+        module: TestRootModule,
+        imports: [AppModule.register({ ...options, ports: { hasher: { useValue: hasher } } })],
+      }),
+    });
+
+    expect(resolve<Hasher>(HASHER)).toBe(hasher);
+  });
+});
+
+const DOMAIN_MODULES = [PermissionModule, SettingsModule, StaffModule];
+
 describe('the root module exposes the port tokens and nothing else (S0.1)', () => {
   const options = { config: TEST_CONFIG, logger: createLogger({ config: TEST_CONFIG }) };
   const runtime = { config: RUNTIME_CONFIG, logger: options.logger };
@@ -505,7 +741,10 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS]);
     // The three bindings and the check that no inert describe adapter was bound; the check is not exported.
     expect(module.providers).toHaveLength(4);
-    expect(module.imports).toHaveLength(1);
+    // The platform and the domain modules of the product (S0.35: permission, settings, staff), which depend on it and which it never
+    // imports: a domain module is added here as its slice builds it, and `productRoutes: false` leaves them out.
+    expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
+    expect(module.imports?.slice(1)).toEqual(DOMAIN_MODULES);
   });
 
   // Changed deliberately at S0.6 and at S0.24: the runtime composition binds the production Clock and the token service itself, and
@@ -526,6 +765,15 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     expect(module.exports).toEqual(PORTS.map((entry) => entry.token));
     // The sixteen bindings and the check that each is a singleton; the check is not exported.
     expect(module.providers).toHaveLength(PORTS.length + 1);
+    expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
+    expect(module.imports?.slice(1)).toEqual(DOMAIN_MODULES);
+  });
+
+  // Break caught: a test composition that brings its own routes and contract getting the product's domain modules too, which a route
+  // of the product bound to an operation its contract does not hold would refuse at start.
+  it('leaves the domain modules out with the product routes', () => {
+    const module = AppModule.register({ ...options, productRoutes: false });
+
     expect(module.imports).toHaveLength(1);
   });
 });

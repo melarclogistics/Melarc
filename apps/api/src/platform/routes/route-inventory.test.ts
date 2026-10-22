@@ -26,20 +26,125 @@ afterEach(async () => {
   running = undefined;
 });
 
+/** The credential setup operations and the staff sign-in are pages of the Ops Portal, limited in the recovery and the staff sign-in buckets. */
+const OPS_BROWSER = { kind: 'browser', surfaces: ['OPS_PORTAL'] };
+
 describe('the real application', () => {
   // Break caught: a business route appearing by accident, whether through a new controller or a raw
   // registration. Adding a route must change this list on purpose, in the same commit.
-  it('answers exactly the two technical probes and declares nothing else', async () => {
+  it('answers exactly the two technical probes, the three credential setup operations, the two staff sign-in steps and the two operations on the caller’s own session and the four reads of S0.35, and declares nothing else', async () => {
     const { app } = await start();
     const inspection = inspectRoutes(app);
 
     expect(inspection.live).toEqual([
+      { method: 'DELETE', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/reason-definitions' },
+      { method: 'GET', path: '/api/v1/staff-identities' },
+      { method: 'GET', path: '/api/v1/staff-identities/:id' },
+      { method: 'GET', path: '/api/v1/staff-role-bundles/assignable' },
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/credential' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa/begin' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in/mfa' },
     ]);
     expect(inspection.declared).toEqual([
+      {
+        method: 'DELETE',
+        path: '/api/v1/auth/session',
+        access: 'self',
+        authenticated: {
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          activity: 'qualifying',
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/auth/session',
+        access: 'self',
+        authenticated: {
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          activity: 'background',
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/reason-definitions',
+        access: 'permission',
+        permission: 'settings.reason.read',
+        authenticated: { surfaces: ['OPS_PORTAL', 'RIDER_ANDROID'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/staff-identities',
+        access: 'permission',
+        permission: 'staff.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/staff-identities/:id',
+        access: 'permission',
+        permission: 'staff.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/staff-role-bundles/assignable',
+        access: 'permission',
+        permission: 'permission.assignable_bundle.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
       { method: 'GET', path: '/livez', access: 'technical' },
       { method: 'GET', path: '/readyz', access: 'technical' },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/staff/setup/credential',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: OPS_BROWSER,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/staff/setup/mfa',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: OPS_BROWSER,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/staff/setup/mfa/begin',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: OPS_BROWSER,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/staff/sign-in',
+        access: 'anonymous',
+        bucket: 'rate_limit_staff_signin',
+        client: OPS_BROWSER,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/staff/sign-in/mfa',
+        access: 'anonymous',
+        bucket: 'rate_limit_privileged_mfa',
+        client: OPS_BROWSER,
+      },
     ]);
     expect(inspection.undeclared).toEqual([]);
     expect(inspection.outsideNest).toEqual([]);

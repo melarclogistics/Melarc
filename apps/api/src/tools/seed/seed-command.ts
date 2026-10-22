@@ -73,10 +73,13 @@ function parseArguments(argv: readonly string[]): { fixtures: boolean } {
   throw new CliUsageError(`unexpected arguments. ${USAGE}`);
 }
 
-/** The environment and the URL of a run, judged together; nothing is opened here. */
-function resolveTarget(
+/**
+ * The environment and the URL of a run, judged together; nothing is opened here. The bootstrap seed and the resume command
+ * (`tools/bootstrap/`, S0.30) name their database the same way and under the same refusals, because they run as the same login.
+ */
+export function resolveTarget(
   env: Readonly<Record<string, string | undefined>>,
-  dependencies: SeedCommandDependencies,
+  dependencies: Pick<SeedCommandDependencies, 'localUrl'>,
 ): { appEnv: (typeof APP_ENVS)[number]; url: string } {
   const given = env.DATABASE_SEED_URL ?? '';
   const named = env.APP_ENV ?? '';

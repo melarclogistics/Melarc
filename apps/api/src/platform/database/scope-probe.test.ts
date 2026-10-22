@@ -395,6 +395,51 @@ describe('createScopeProbe: what it refuses before it sends anything', () => {
   });
 });
 
+describe('createScopeProbe: an entity whose hub is carried by a column of another name (S0.35)', () => {
+  // Break caught: the probe assuming that every hub-scoped table calls its hub `responsible_hub_id`. A staff identity belongs to the hub
+  // of its `primary_hub_id`, and the registry's name for the hub column is the probe's to read, not a column to add to the table.
+  it('reads the hub from the column the entity names, and answers it as the hub', async () => {
+    const named = createScopeProbe({
+      staff_identity: { schema: 'public', table: 'staff_identity', hubColumn: 'primary_hub_id' },
+    });
+    const { run, inside } = harness((statement) =>
+      statement.text.startsWith('select id, "primary_hub_id" as responsible_hub_id')
+        ? [{ id: RECORD, responsible_hub_id: HUB }]
+        : undefined,
+    );
+
+    const hub = await run((tx) => named(tx, 'staff_identity', RECORD));
+
+    expect(hub).toBe(HUB);
+    expect(inside()[1]?.text).toBe(
+      'select id, "primary_hub_id" as responsible_hub_id from "public"."staff_identity" where id = $1::uuid',
+    );
+  });
+
+  // Break caught: a hub column spliced into SQL as it stands, which would make a name in a registry row a statement.
+  it.each([['primary hub'], ['primary_hub_id"; drop table x; --'], ['Hub'], [''], ['a.b']])(
+    'refuses to be built from the hub column %j',
+    (hubColumn) => {
+      expect(() =>
+        createScopeProbe({
+          staff_identity: { schema: 'public', table: 'staff_identity', hubColumn },
+        }),
+      ).toThrow(/identifier/);
+    },
+  );
+
+  // Break caught: the default changing for the entities that name no column: the statement of every other table stays as it was.
+  it('reads `responsible_hub_id` by name for an entity that names no column', async () => {
+    const { run, inside } = harness();
+
+    await run((tx) => probe(tx, 'hub_record', RECORD));
+
+    expect(inside()[1]?.text).toBe(
+      'select id, responsible_hub_id from "rls_fixture"."hub_records" where id = $1::uuid',
+    );
+  });
+});
+
 describe('existingRecordHub, the one the application uses', () => {
   // Break caught: a hub-scoped entity being probed before the slice that owns its table registered it. Every
   // slice that adds a hub-scoped table adds its row to the registry in the same change.

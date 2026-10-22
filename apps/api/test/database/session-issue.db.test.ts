@@ -331,6 +331,7 @@ class RecordingStore implements SessionStore {
     this.inner.findByTokenHash(...args);
   recordActivity: SessionStore['recordActivity'] = (...args) => this.inner.recordActivity(...args);
   terminate: SessionStore['terminate'] = (...args) => this.inner.terminate(...args);
+  expire: SessionStore['expire'] = (...args) => this.inner.expire(...args);
 }
 
 describe('the policy locks', () => {
@@ -384,6 +385,22 @@ class ReassigningDirectory implements IdentityDirectory {
     this.locks += 1;
     return this.inner.lockIdentity(handle, ref);
   }
+  establishCredential: IdentityDirectory['establishCredential'] = (...args) =>
+    this.inner.establishCredential(...args);
+  accountLabel: IdentityDirectory['accountLabel'] = (...args) => this.inner.accountLabel(...args);
+  findStaffForSignIn: IdentityDirectory['findStaffForSignIn'] = (...args) =>
+    this.inner.findStaffForSignIn(...args);
+  readCredentialHash: IdentityDirectory['readCredentialHash'] = (...args) =>
+    this.inner.readCredentialHash(...args);
+  recordFailedAttempt: IdentityDirectory['recordFailedAttempt'] = (...args) =>
+    this.inner.recordFailedAttempt(...args);
+  clearFailedAttempts: IdentityDirectory['clearFailedAttempts'] = (...args) =>
+    this.inner.clearFailedAttempts(...args);
+  rehashCredential: IdentityDirectory['rehashCredential'] = (...args) =>
+    this.inner.rehashCredential(...args);
+  isCredentialLocked: IdentityDirectory['isCredentialLocked'] = (...args) =>
+    this.inner.isCredentialLocked(...args);
+  displayName: IdentityDirectory['displayName'] = (...args) => this.inner.displayName(...args);
 }
 
 /** A directory that runs something once the identity lock is held, to show what the lock keeps out. */
@@ -407,6 +424,22 @@ class AfterLockDirectory implements IdentityDirectory {
     await this.afterLock();
     return locked;
   }
+  establishCredential: IdentityDirectory['establishCredential'] = (...args) =>
+    this.inner.establishCredential(...args);
+  accountLabel: IdentityDirectory['accountLabel'] = (...args) => this.inner.accountLabel(...args);
+  findStaffForSignIn: IdentityDirectory['findStaffForSignIn'] = (...args) =>
+    this.inner.findStaffForSignIn(...args);
+  readCredentialHash: IdentityDirectory['readCredentialHash'] = (...args) =>
+    this.inner.readCredentialHash(...args);
+  recordFailedAttempt: IdentityDirectory['recordFailedAttempt'] = (...args) =>
+    this.inner.recordFailedAttempt(...args);
+  clearFailedAttempts: IdentityDirectory['clearFailedAttempts'] = (...args) =>
+    this.inner.clearFailedAttempts(...args);
+  rehashCredential: IdentityDirectory['rehashCredential'] = (...args) =>
+    this.inner.rehashCredential(...args);
+  isCredentialLocked: IdentityDirectory['isCredentialLocked'] = (...args) =>
+    this.inner.isCredentialLocked(...args);
+  displayName: IdentityDirectory['displayName'] = (...args) => this.inner.displayName(...args);
 }
 
 describe('an identity reassigned between discovery and lock (§13.10a obligation 11, OB-11)', () => {
@@ -684,6 +717,17 @@ function fixedDirectory(summary: PrincipalSummary): IdentityDirectory {
     findVendorAccountByIdentifier: () => Promise.resolve(null),
     findRiderByCanonicalPhone: () => Promise.resolve(null),
     readIdentity: answer,
+    // A fixed principal of an audience with no table has no credential to write and no account to name (S0.31).
+    establishCredential: () => Promise.resolve(null),
+    accountLabel: () => Promise.resolve(null),
+    // The sign-in operations of S0.32 read these; a session-issue test does not.
+    findStaffForSignIn: () => Promise.resolve(null),
+    readCredentialHash: () => Promise.resolve(null),
+    recordFailedAttempt: () => Promise.resolve({ counted: false, reason: 'LOCKED' }),
+    clearFailedAttempts: () => Promise.resolve(),
+    rehashCredential: () => Promise.resolve(false),
+    isCredentialLocked: () => Promise.resolve(false),
+    displayName: () => Promise.resolve(null),
     lockIdentity: answer,
   };
 }

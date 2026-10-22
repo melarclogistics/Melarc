@@ -187,6 +187,46 @@ describe('the check can fire (it is not satisfied by an empty database)', () => 
       'credential_delivery_job',
       'a provisioning login able to read delivery jobs',
     ],
+    // The setup grant and the MFA factor (S0.29): a grant ends and a factor is revoked, and neither is removed, whatever the registry's
+    // write cell (`api`) reads as. The delivery worker reads a grant's state and expiry and writes nothing; no worker reads a factor.
+    [API_RUNTIME_ROLE, 'DELETE', 'setup_grant', 'a runtime login able to remove setup grants'],
+    [API_RUNTIME_ROLE, 'DELETE', 'mfa_factor', 'a runtime login able to remove MFA factors'],
+    [WORKER_RUNTIME_ROLE, 'UPDATE', 'setup_grant', 'a worker able to consume a setup grant'],
+    [WORKER_RUNTIME_ROLE, 'INSERT', 'setup_grant', 'a worker able to issue a setup grant'],
+    [WORKER_RUNTIME_ROLE, 'SELECT', 'mfa_factor', 'a worker able to read a factor’s sealed secret'],
+    [PROVISIONING_ROLE, 'SELECT', 'setup_grant', 'a provisioning login able to read grants back'],
+    // The bootstrap (S0.30): the registry lists the identity, grant, factor, session, audit and setting rows for the `bootstrap` capability,
+    // and the provisioning login still holds nothing on them: the four definer functions of migration 0019 write and read them as the
+    // owner, so a login that asserts the label has no privilege to assert it against.
+    [PROVISIONING_ROLE, 'SELECT', 'staff_identity', 'a provisioning login able to read identities'],
+    [
+      PROVISIONING_ROLE,
+      'INSERT',
+      'staff_identity',
+      'a provisioning login able to insert an identity of its own',
+    ],
+    [
+      PROVISIONING_ROLE,
+      'INSERT',
+      'setup_grant',
+      'a provisioning login able to issue a grant of its own',
+    ],
+    [PROVISIONING_ROLE, 'UPDATE', 'setup_grant', 'a provisioning login able to end a grant'],
+    [
+      PROVISIONING_ROLE,
+      'SELECT',
+      'mfa_factor',
+      'a provisioning login able to read a factor’s sealed secret',
+    ],
+    [PROVISIONING_ROLE, 'UPDATE', 'mfa_factor', 'a provisioning login able to revoke a factor'],
+    [
+      PROVISIONING_ROLE,
+      'INSERT',
+      'audit_event',
+      'a provisioning login able to write audit history of its own',
+    ],
+    [PROVISIONING_ROLE, 'SELECT', 'session', 'a provisioning login able to read sessions'],
+    [PROVISIONING_ROLE, 'DELETE', 'mfa_factor', 'a provisioning login able to remove factors'],
     [WORKER_RUNTIME_ROLE, 'UPDATE', 'audit_event', 'a base worker able to rewrite audit history'],
     [
       PROVISIONING_ROLE,
