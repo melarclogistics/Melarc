@@ -23,25 +23,28 @@ import {
  * 1. refuse unless it is allowed to make key material (below);
  * 2. make a directory of its own outside the checkout, and in it the disposable CA and leaf (`test-ca.ts`: the CA's key is deleted as
  *    soon as the leaf is signed, after `openssl verify` has shown that the CA refuses a name outside the loopback);
- * 3. run Playwright's HTTPS projects in **two runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
- *    judges the material, makes the per-engine stores below it, and starts the HTTPS front):
- *    - the first, with the system store lacking the CA: Chromium and Firefox, which trust it by a store of their own, and **WebKit's
- *      refusal**, the control that shows WebKit does not trust the origin until the CA is trusted;
- *    - the second, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
+ * 3. run Playwright's HTTPS projects in **three runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
+ *    judges the material, makes the per-engine stores below it, and starts the HTTPS front) and **each with a stack of its own**: a run is
+ *    one Playwright invocation, so one global setup, so one database, one set of one-time bootstrap bundles, one capture folder and one
+ *    worker, and the journeys of an engine are never run against what another engine has used (audit G01):
+ *    - the first, with the system store lacking the CA: Chromium, which trusts it by a store of its own, and **WebKit's refusal**, the
+ *      control that shows WebKit does not trust the origin until the CA is trusted;
+ *    - the second, also with the system store lacking the CA: Firefox, which trusts it by a store of its own;
+ *    - the third, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
  *      WebKit's other proofs. WebKit has no way to trust a CA for one process (the first hosted run showed `SSL_CERT_FILE` ignored), so
  *      the order is what makes its control honest: refused before, trusted after, and nothing else differs;
  * 4. remove the CA from the system store if it was put there, and the directory, whatever happened, and exit with the status of the
  *    first run that failed. Each run says its exit status when it ends, and the command ends with a summary of every run and of the one
  *    the overall status comes from. Each run writes its artifacts to an output directory of its own below `test-results`
  *    (`HttpsPhase.output`), because Playwright clears the output directory of the projects it runs at the start of a run: with one
- *    directory for both, the second run erased the first run's evidence. The recorders of the secret projects are not touched.
+ *    directory for all of them, a later run erased an earlier run's evidence. The recorders of the secret projects are not touched.
  *
  * **It makes a CA and a private key, so it does not run where it is not allowed to.** It runs on Linux only (Chromium, Chrome and Edge
  * use the operating system's store on Windows and macOS, which has no disposable form), and only in CI or where the person who runs it
  * has said the machine is cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`). The shared developer workstation is not such a
  * machine (the owner's ruling of 11 October 2026). **No trust store of the machine, the user or a browser is changed, with one
  * exception**: on a GitHub-hosted runner alone, a machine made for one job and discarded after it, WebKit's proofs run with the CA in the
- * system store, which is the only trust WebKit has (the owner's decision of 12 October 2026). Anywhere else the second run is made
+ * system store, which is the only trust WebKit has (the owner's decision of 12 October 2026). Anywhere else WebKit's run is made
  * without it, says so, and WebKit's proofs fail to trust, which is the correct report.
  */
 export interface HttpsPhase {
@@ -60,24 +63,31 @@ export interface HttpsPhase {
   readonly output: string;
 }
 
+/**
+ * **One run for each engine that runs the journeys** (the audit of 26 October 2026, G01). A Playwright run has one global setup and so one
+ * stack: one database, one set of bootstrap bundles, one capture folder and one worker. The journeys of S0.46 are one story that starts
+ * from the two bootstrap administrators, whose one-time bundles and setup grants a first reading consumes, so a second engine sent through
+ * the same stack would meet a story that has already been told. Each engine therefore has a run, and a stack, of its own. The control of
+ * WebKit's refusal runs no journey and has nothing to consume, so it shares the first run, which keeps it ahead of the system store.
+ */
 export const HTTPS_PHASES: readonly HttpsPhase[] = [
   {
-    name: 'the engines that trust the CA by a store of their own, and WebKit refusing it while the system store lacks it',
-    projects: [
-      'https-chromium',
-      'https-chromium-secret',
-      'https-firefox',
-      'https-firefox-secret',
-      'https-webkit-control',
-    ],
+    name: 'Chromium, which trusts the CA by a store of its own, and WebKit refusing it while the system store lacks it',
+    projects: ['https-chromium', 'https-chromium-secret', 'https-webkit-control'],
     systemTrust: false,
-    output: 'test-results/https-1-own-stores',
+    output: 'test-results/https-1-chromium',
+  },
+  {
+    name: 'Firefox, which trusts the CA by a store of its own',
+    projects: ['https-firefox', 'https-firefox-secret'],
+    systemTrust: false,
+    output: 'test-results/https-2-firefox',
   },
   {
     name: 'WebKit, with the CA in the system store',
     projects: ['https-webkit', 'https-webkit-secret'],
     systemTrust: true,
-    output: 'test-results/https-2-system-store',
+    output: 'test-results/https-3-webkit-system-store',
   },
 ];
 

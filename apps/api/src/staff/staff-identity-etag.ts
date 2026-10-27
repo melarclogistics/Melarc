@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { StaffIdentityView } from './staff-identities.service.js';
+import type { StaffIdentityView } from './staff-identity-view.js';
 
 /**
  * The ETag of a staff identity (F02 of the audit of 22 October 2026; domain-model.md section 6.8): an **opaque strong validator of what

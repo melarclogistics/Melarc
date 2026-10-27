@@ -123,26 +123,50 @@ export async function loadResetFacts(
     sql`select * from melarc.staff_reset_facts(${list}::uuid[])`,
   );
   for (const row of result.rows as unknown as FactRow[]) {
-    facts.set(row.identity_id, {
-      status: row.status,
-      origin: row.origin,
-      privileged: row.privileged,
-      hasCredential: row.has_credential,
-      hasActiveFactor: row.has_active_factor,
-      hasPendingFactor: row.has_pending_factor,
-      hasUsableGrant: row.has_usable_grant,
-      hasPendingDelivery: row.has_pending_delivery,
-      latestFactor:
-        row.latest_status === null
-          ? null
-          : {
-              status: row.latest_status,
-              revokedByAdministrator: row.latest_revoked_by_admin === true,
-              hasRevocationEpisode: row.latest_has_episode === true,
-            },
-    });
+    facts.set(row.identity_id, factsOfRow(row));
   }
   return facts;
+}
+
+function factsOfRow(row: FactRow): ResetFacts {
+  return {
+    status: row.status,
+    origin: row.origin,
+    privileged: row.privileged,
+    hasCredential: row.has_credential,
+    hasActiveFactor: row.has_active_factor,
+    hasPendingFactor: row.has_pending_factor,
+    hasUsableGrant: row.has_usable_grant,
+    hasPendingDelivery: row.has_pending_delivery,
+    latestFactor:
+      row.latest_status === null
+        ? null
+        : {
+            status: row.latest_status,
+            revokedByAdministrator: row.latest_revoked_by_admin === true,
+            hasRevocationEpisode: row.latest_has_episode === true,
+          },
+  };
+}
+
+/**
+ * The facts of **one** identity, read by a mutation **under the identity's lock** (S0.36, S0.37; migration 0029, `melarc.staff_locked_facts`).
+ * The function takes the lock itself, in the caller's own context and scope, at READ COMMITTED under the key of the operation, and
+ * returns the same closed list as the read does, so the ETag a mutation recomputes here is the ETag the read gave. `null` is an identity
+ * the caller's scope does not show, or that does not exist: the function says nothing more of it, and neither does this. After this
+ * call the transaction holds the identity's lock, and a comparison of `If-Match` made now is made against the facts of the row it then
+ * acts on.
+ */
+export async function loadLockedFacts(
+  handle: TransactionHandle,
+  id: string,
+): Promise<ResetFacts | null> {
+  if (!isUuid(id)) throw new TypeError('A staff identity is named by its id (a UUID)');
+  const result = await transactionOf(handle).execute(
+    sql`select * from melarc.staff_locked_facts(${id.toLowerCase()}::uuid)`,
+  );
+  const row = (result.rows as unknown as FactRow[])[0];
+  return row === undefined ? null : factsOfRow(row);
 }
 
 /** The posture of each identity named that the caller's context shows: the facts, decided by the one rule. */

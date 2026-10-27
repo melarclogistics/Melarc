@@ -136,7 +136,12 @@ const rowOf = (id: string) =>
     payload_ciphertext: Buffer | null;
   }>('select * from credential_delivery_job where id = $1', [id]);
 
-async function until(condition: () => Promise<boolean> | boolean, what: string, ms = 8_000) {
+/** Waits for what a worker process just started does first: a start, so it waits as long as one may take (api-process.ts). */
+async function until(
+  condition: () => Promise<boolean> | boolean,
+  what: string,
+  ms: number = DEADLINES.ready,
+) {
   const deadline = Date.now() + ms;
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);

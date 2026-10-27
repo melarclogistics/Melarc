@@ -8,6 +8,7 @@ import { parse, stringify } from 'yaml';
 import {
   CUSTOMISATION_FILES,
   findPolicyProblems,
+  OVERRIDE_EXCEPTIONS,
   readPolicyInputs,
   type PolicyInputs,
 } from './dependency-policy.ts';
@@ -602,6 +603,198 @@ describe('what the lockfile resolves', () => {
         JSON.stringify(text),
       );
     }
+  });
+});
+
+describe('the one recorded exception: multer under @nestjs/platform-express (decision 7 of 24 October 2026)', () => {
+  const SELECTOR = '@nestjs/platform-express@12.1.2>multer';
+  const PARENT = '@nestjs/platform-express@12.1.2';
+
+  /** Puts the exception in place the way pnpm records it: in the workspace file, the lockfile's `overrides`, and the snapshots it changes. */
+  function withException(
+    inputs: PolicyInputs,
+    lock: Json,
+    options: { workspace?: boolean; lockfile?: boolean; resolved?: string; parent?: string } = {},
+  ): void {
+    const { workspace = true, lockfile = true, resolved = '2.5.0', parent = PARENT } = options;
+    if (workspace) inputs.workspaceYaml = `${GOOD_WORKSPACE}\noverrides:\n  '${SELECTOR}': 2.5.0\n`;
+    if (lockfile) lock.overrides = { [SELECTOR]: '2.5.0' };
+    lockOf(lock, 'packages')[parent] = { resolution: { integrity: INTEGRITY } };
+    lockOf(lock, 'packages')[`multer@${resolved}`] = { resolution: { integrity: INTEGRITY } };
+    lockOf(lock, 'snapshots')[`${parent}(peer@4.5.6)`] = { dependencies: { multer: resolved } };
+    lockOf(lock, 'snapshots')[`multer@${resolved}`] = {};
+  }
+
+  // Break caught: the exception refused, so that the advisory can be cleared only by leaving the audit stage red.
+  it('is accepted when it is exactly the recorded one, in the workspace file and in the lockfile, and takes effect', () => {
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withException(inputs, lock);
+      }),
+      [],
+    );
+  });
+
+  it('is recorded with the advisory it answers and the condition on which it goes', () => {
+    // `find`, not an index: the compiler (noUncheckedIndexedAccess) and the linter disagree about whether an indexed entry may be absent.
+    const recorded = Object.entries(OVERRIDE_EXCEPTIONS).find(
+      ([selector]) => selector === SELECTOR,
+    )?.[1];
+    assert.ok(recorded, 'the recorded exception is present');
+    assert.equal(recorded.dependency, 'multer');
+    assert.equal(recorded.version, '2.5.0');
+    assert.equal(recorded.parent, PARENT);
+    assert.equal(recorded.advisory, 'GHSA-q7qp-rjg7-q26m');
+    assert.match(recorded.removeWhen, /@nestjs\/platform-express/);
+    assert.deepEqual(Object.keys(OVERRIDE_EXCEPTIONS), [SELECTOR]);
+  });
+
+  // Break caught: the policy loosened for overrides in general. Each of these is something other than the recorded exception.
+  const notTheException: [label: string, overrides: Record<string, string>][] = [
+    ['another version of multer', { [SELECTOR]: '2.5.1' }],
+    ['a range for multer', { [SELECTOR]: '^2.5.0' }],
+    ['the vulnerable version', { [SELECTOR]: '2.4.0' }],
+    ['multer for every dependent', { multer: '2.5.0' }],
+    ['another parent version', { '@nestjs/platform-express@12.1.3>multer': '2.5.0' }],
+    ['a range of parent versions', { '@nestjs/platform-express@^12.1.2>multer': '2.5.0' }],
+    [
+      'another package under the same parent',
+      { '@nestjs/platform-express@12.1.2>express': '5.2.1' },
+    ],
+    ['the exception beside another override', { [SELECTOR]: '2.5.0', left: '9.9.9' }],
+    ['nothing at all', {}],
+  ];
+  for (const [label, overrides] of notTheException) {
+    it(`refuses ${label}, in the workspace file and in the lockfile`, () => {
+      assert.deepEqual(
+        codesWith((inputs, lock) => {
+          withException(inputs, lock, { workspace: false, lockfile: false });
+          inputs.workspaceYaml = `${GOOD_WORKSPACE}\n${stringify({ overrides })}`;
+        }).includes('FORBIDDEN_SETTING'),
+        true,
+        `workspace: ${label}`,
+      );
+      assert.deepEqual(
+        codesWith((inputs, lock) => {
+          withException(inputs, lock, { workspace: false, lockfile: false });
+          lock.overrides = overrides;
+        }).includes('FORBIDDEN_SETTING'),
+        true,
+        `lockfile: ${label}`,
+      );
+    });
+  }
+
+  // Break caught: the exception honoured wherever an override can be written, which would let a manifest rewrite what is resolved.
+  it('is allowed in the workspace file and the lockfile only: a manifest, or a settings map, may not hold it', () => {
+    for (const path of ['package.json', 'apps/a/package.json']) {
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withException(inputs, lock);
+          packageJson(inputs, path).overrides = { [SELECTOR]: '2.5.0' };
+        }).includes('FORBIDDEN_SETTING'),
+        `${path}: overrides`,
+      );
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withException(inputs, lock);
+          packageJson(inputs, path).pnpm = { overrides: { [SELECTOR]: '2.5.0' } };
+        }).includes('FORBIDDEN_SETTING'),
+        `${path}: pnpm.overrides`,
+      );
+    }
+    assert.ok(
+      codesWith((inputs, lock) => {
+        withException(inputs, lock);
+        lock.settings = { ...(lock.settings as Json), overrides: { [SELECTOR]: '2.5.0' } };
+      }).includes('FORBIDDEN_SETTING'),
+      'lockfile settings.overrides',
+    );
+  });
+
+  // Break caught: the exception opening the door to the other ways of rewriting what an install does.
+  for (const key of ['resolutions', 'patchedDependencies', 'packageExtensions', 'pnpmfile']) {
+    it(`leaves ${key} forbidden beside it`, () => {
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withException(inputs, lock);
+          inputs.workspaceYaml = `${inputs.workspaceYaml}\n${key}:\n  left: 9.9.9\n`;
+        }).includes('FORBIDDEN_SETTING'),
+        key,
+      );
+    });
+  }
+
+  // Break caught: an exception that goes stale unseen, which would stay in the repository after Nest has moved on.
+  it('is stale when only one of the two files records it', () => {
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withException(inputs, lock, { lockfile: false });
+      }),
+      ['STALE_EXCEPTION'],
+    );
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withException(inputs, lock, { workspace: false });
+      }),
+      ['STALE_EXCEPTION'],
+    );
+  });
+
+  /** The messages of the problems found after `change` has edited good inputs. */
+  function messagesWith(change: (inputs: PolicyInputs, lock: Json) => void): string[] {
+    const inputs = goodInputs();
+    const lock = goodLock();
+    change(inputs, lock);
+    return findPolicyProblems({ ...inputs, lockfile: stringify(lock) }).map(
+      (problem) => problem.message,
+    );
+  }
+
+  // Break caught: the reason lost: a Nest upgrade that leaves the selector matching nothing must say that, and not only that something
+  // is stale.
+  it('is stale when the lockfile no longer resolves the Nest version it names, and says so', () => {
+    const messages = messagesWith((inputs, lock) => {
+      withException(inputs, lock, { parent: '@nestjs/platform-express@12.1.3' });
+    });
+
+    assert.equal(messages.length, 1);
+    assert.match(
+      messages[0] ?? '',
+      /names @nestjs\/platform-express@12\.1\.2, which pnpm-lock\.yaml no longer resolves/,
+    );
+  });
+
+  it('is stale when it does not change what Nest resolves, and says so', () => {
+    const messages = messagesWith((inputs, lock) => {
+      withException(inputs, lock, { resolved: '2.4.0' });
+    });
+
+    assert.equal(messages.length, 1);
+    assert.match(
+      messages[0] ?? '',
+      /does not change what @nestjs\/platform-express@12\.1\.2 resolves multer to/,
+    );
+  });
+
+  // Break caught: only some of the parent's snapshots checked, so that one resolution still on the vulnerable version passes.
+  it('is stale when only some of the snapshots of the parent hold the version it sets', () => {
+    const messages = messagesWith((inputs, lock) => {
+      withException(inputs, lock);
+      lockOf(lock, 'snapshots')[`${PARENT}(other@1.0.0)`] = { dependencies: { multer: '2.4.0' } };
+    });
+
+    assert.equal(messages.length, 1);
+    assert.match(messages[0] ?? '', /does not change what/);
+  });
+
+  it('says in the problem which advisory it answers and when it goes', () => {
+    const inputs = goodInputs();
+    const lock = goodLock();
+    withException(inputs, lock, { lockfile: false });
+    const [problem] = findPolicyProblems({ ...inputs, lockfile: stringify(lock) });
+    assert.match(problem?.message ?? '', /GHSA-q7qp-rjg7-q26m/);
+    assert.match(problem?.message ?? '', /@nestjs\/platform-express/);
   });
 });
 

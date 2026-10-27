@@ -12,6 +12,8 @@ import { localLoginPassword } from '../database/local-logins.js';
 import { buildDatabaseUrl } from '../database/provisioning.js';
 import { assertLocalHost } from '../database/safety.js';
 import { assertFixturesAllowed, fixturePlan } from '../fixtures/fixtures.js';
+import { riderFixturePlan } from '../fixtures/rider-fixture.js';
+import { vendorFixturePlan } from '../fixtures/vendor-fixture.js';
 import { referenceSeedPlan } from './reference-seed.js';
 import { openSeedTarget, type SeedTarget } from './seed-runtime.js';
 
@@ -21,6 +23,8 @@ import { openSeedTarget, type SeedTarget } from './seed-runtime.js';
  *
  * - `db:seed` writes the reference data (`reference-seed.ts`) into an empty database. It refuses a database that has any of it.
  * - `db:seed --fixtures` writes the test-only fixtures (`tools/fixtures`) and refuses in production, before it connects.
+ * - `db:seed --vendor-fixture` writes the demonstration vendor of MIGRATION_AND_SEEDING.md section 4b (S0.47), under the same refusal.
+ * - `db:seed --rider-fixture` writes the demonstration riders of MIGRATION_AND_SEEDING.md section 4a (S0.53), under the same refusal.
  *
  * **Which database.** `DATABASE_SEED_URL` names it, as `DATABASE_MIGRATION_URL` names the migration target: a deployment gives the
  * provisioning login's connection there, and the user must be the provisioning login. Both variables are forbidden in the API's
@@ -65,12 +69,29 @@ const DEFAULTS: SeedCommandDependencies = {
   runSeed,
 };
 
-const USAGE = 'usage: db:seed [--fixtures]';
+const USAGE = 'usage: db:seed [--fixtures | --vendor-fixture | --rider-fixture]';
 
-function parseArguments(argv: readonly string[]): { fixtures: boolean } {
-  if (argv.length === 0) return { fixtures: false };
-  if (argv.length === 1 && argv[0] === '--fixtures') return { fixtures: true };
+type SeedRun = 'reference' | 'fixtures' | 'vendor-fixture' | 'rider-fixture';
+
+function parseArguments(argv: readonly string[]): SeedRun {
+  if (argv.length === 0) return 'reference';
+  if (argv.length === 1 && argv[0] === '--fixtures') return 'fixtures';
+  if (argv.length === 1 && argv[0] === '--vendor-fixture') return 'vendor-fixture';
+  if (argv.length === 1 && argv[0] === '--rider-fixture') return 'rider-fixture';
   throw new CliUsageError(`unexpected arguments. ${USAGE}`);
+}
+
+function planOf(run: SeedRun): SeedPlan {
+  switch (run) {
+    case 'reference':
+      return referenceSeedPlan();
+    case 'fixtures':
+      return fixturePlan();
+    case 'vendor-fixture':
+      return vendorFixturePlan();
+    case 'rider-fixture':
+      return riderFixturePlan();
+  }
 }
 
 /**
@@ -124,17 +145,14 @@ export async function runSeedCommand(
   write: (line: string) => void,
   dependencies: SeedCommandDependencies = DEFAULTS,
 ): Promise<void> {
-  const { fixtures } = parseArguments(argv);
+  const run = parseArguments(argv);
   const { appEnv, url } = resolveTarget(env, dependencies);
   // Before anything is opened: production has no way to reach the fixtures.
-  if (fixtures) assertFixturesAllowed(appEnv);
+  if (run !== 'reference') assertFixturesAllowed(appEnv);
 
   const target = dependencies.open(url);
   try {
-    const report = await dependencies.runSeed(
-      target.database,
-      fixtures ? fixturePlan() : referenceSeedPlan(),
-    );
+    const report = await dependencies.runSeed(target.database, planOf(run));
     for (const [table, rows] of Object.entries(report)) {
       write(`seeded ${table}: ${String(rows)} ${rows === 1 ? 'row' : 'rows'}`);
     }

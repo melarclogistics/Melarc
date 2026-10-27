@@ -43,6 +43,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
   'pnpm run test:browser',
   'pnpm run test:e2e',
   'pnpm run test:e2e:https',
+  'pnpm run verifier:test',
   'pnpm audit --audit-level high',
 ];
 

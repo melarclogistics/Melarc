@@ -9,7 +9,7 @@ Wire types generated from [contracts/openapi.yaml](../../contracts/openapi.yaml)
 - `src/browser/` is the browser transport (cookies, CSRF, same origin). A call may use only `params`, `body`, `parseAs`, `signal` and `headers` (`CALL_OPTIONS` in `src/browser/call-options.ts`); any other option is a type error and is refused at run time. Add one to `CALL_OPTIONS` deliberately, with a test.
 - Read a result with `unwrap` (`src/browser/api-error.ts`): it throws an `ApiError` from the response status, because `error` is falsy for an empty or `null` body. The send boundary also refuses a success answer that is not JSON (or empty) and turns a request that got no answer into an `ApiError` of kind `network`; `contract-conformance.test.ts` pins its premise, that every success of the contract is JSON.
 - The Rider bearer transport and the evidence-upload transport are not built, and the browser transport refuses to reach them. Do not add another origin to it.
-- The types require `Idempotency-Key` and `If-Match` where the contract does, but nothing generates or retains them yet: the slice that sends the command does.
+- The types require `Idempotency-Key` and `If-Match` where the contract does, and the client itself generates and retains neither: the Ops Portal does (`useCommandKeySlot` makes and keeps the key; `useConfirmedCommand` holds the command with the version of the read, the `ETag` kept exactly, across a retry). An operation that declares no `Idempotency-Key` is sent none: the nine reason operations declare only `If-Match` or nothing.
 - The generator (`openapi-typescript`) is pinned and runs under TypeScript 6, past its declared range ([pnpm-workspace.yaml](../../pnpm-workspace.yaml)). Review the regenerated diff after changing either.
 
 ## Tests

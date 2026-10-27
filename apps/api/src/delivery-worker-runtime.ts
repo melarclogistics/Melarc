@@ -43,6 +43,7 @@ import {
   redemptionReaderOver,
   type RedemptionRecordReader,
 } from './platform/delivery/worker/redemption-record-reader.js';
+import { RecoveryRequestRedemptionReader } from './platform/delivery/worker/recovery-request-redemption-reader.js';
 import { SetupGrantRedemptionReader } from './platform/delivery/worker/setup-grant-redemption-reader.js';
 import {
   assertWorkerConfigAccepted,
@@ -234,11 +235,14 @@ export function createDeliveryWorkerRuntime(
       }),
     },
   );
-  // The worker reads a setup grant's standing through its own database and its own capability (S0.29). A kind of record whose reader is
-  // not built (the recovery request, S0.50) is not confirmed, so nothing is sent for it.
+  // The worker reads a setup grant's standing (S0.29) and a recovery request's (S0.50) through its own database and its own capability.
+  // A kind of record it does not know is not confirmed, so nothing is sent for it.
   const redemptionReader =
     options.redemptionReader ??
-    redemptionReaderOver({ SETUP_GRANT: new SetupGrantRedemptionReader({ database, clock }) });
+    redemptionReaderOver({
+      SETUP_GRANT: new SetupGrantRedemptionReader({ database, clock }),
+      RECOVERY_REQUEST: new RecoveryRequestRedemptionReader({ database, clock }),
+    });
   const queue = new PostgresDeliveryQueue({ cipher: workerCipher(config), clock, work: database });
   const metrics = new BoundedMetrics({
     policy: labelPolicyFor(config.nodeEnv),

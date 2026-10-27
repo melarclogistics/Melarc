@@ -13,5 +13,6 @@ export const MFA_SIGN_IN_BODY = described({
   properties: {
     challenge_id: { type: 'string', format: 'uuid' },
     code: { type: 'string', pattern: '^[0-9]{6}$' },
+    trust_browser: { type: 'boolean', default: false },
   },
 });

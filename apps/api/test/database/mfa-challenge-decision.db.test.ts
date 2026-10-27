@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MfaChallengeExpiredError } from '../../src/platform/auth/mfa/mfa-challenge-errors.js';
 import { MfaChallengeStore } from '../../src/platform/auth/mfa/mfa-challenge-store.js';
 import type { TransactionHandle } from '../../src/platform/auth/ports/unit-of-work.port.js';
+import { INERT_DEADLINES } from '../../src/platform/config/inert-config.js';
 import { serverErrorIn } from '../../src/platform/database/database-failures.js';
 import { PostgresStaffIdentityDirectory } from '../../src/staff/postgres.staff-identity-directory.adapter.js';
 import { ManualClock } from '../../src/test-support/manual-clock.js';
@@ -13,6 +14,7 @@ import { challengeRow, insertChallenge } from './support/credentials.js';
 import { delayConsumption, refuseConsumption } from './support/guard-race.js';
 import { withHandle } from './support/handle.js';
 import { insertStaff, staffRow, type StaffRow } from './support/identities.js';
+import { backendPidOf, waitUntilBlockedBy, waitUntilTrue } from './support/lock-wait.js';
 import { systemContext } from './support/rls-fixture.js';
 import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
@@ -36,7 +38,18 @@ beforeAll(async () => {
   await seedReferenceData(database);
   admin = clientFor(database.urlFor('postgres'));
   await admin.connect();
-  api = buildService(database, { poolMax: 8 });
+  // The races of this file end when the test says so (it sees the decision wait, and for a challenge that lapses it waits for the database's
+  // clock): the lock bound is lengthened for this service alone, and the bounds of production are untouched (audit of 26 October 2026,
+  // decision 9).
+  api = buildService(database, {
+    poolMax: 8,
+    deadlines: {
+      ...INERT_DEADLINES,
+      lockTimeoutMs: 10_000,
+      statementTimeoutMs: 12_000,
+      transactionTimeoutMs: 15_000,
+    },
+  });
   store = new MfaChallengeStore({ clock: new ManualClock() });
 });
 
@@ -90,7 +103,9 @@ describe('lockForDecision', () => {
   it('holds the row until the transaction ends, and reads what another transaction committed while it waited', async () => {
     const id = await live();
     const holder = clientFor(database.urlFor('postgres'));
+    const watcher = clientFor(database.urlFor('postgres'));
     await holder.connect();
+    await watcher.connect();
     try {
       await holder.query('begin');
       await holder.query('select id from mfa_challenge where id = $1 for no key update', [id]);
@@ -99,7 +114,8 @@ describe('lockForDecision', () => {
         finished = true;
         return found;
       });
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      // Seen waiting for the row, which is what "holds the row" says; nothing is slept.
+      await waitUntilBlockedBy(watcher, await backendPidOf(holder), 'the decision', waiting);
       expect(finished).toBe(false);
 
       await holder.query(`update mfa_challenge set state = 'CONSUMED' where id = $1`, [id]);
@@ -108,6 +124,7 @@ describe('lockForDecision', () => {
       expect((await waiting)?.challenge.state).toBe('CONSUMED');
     } finally {
       await holder.end();
+      await watcher.end();
     }
   });
 
@@ -117,22 +134,38 @@ describe('lockForDecision', () => {
   // next.
   it('judges whether the time has passed on the time after a wait for a lock held on an unchanged row', async () => {
     const owner = await identity();
-    const lapsing = (
-      await insertChallenge(
-        admin,
-        challengeRow(owner.id, {
-          issuedAt: new Date(Date.now() - 60_000),
-          expiresAt: new Date(Date.now() + 1_200),
-        }),
-      )
-    ).id;
+    const lapsing = (await insertChallenge(admin, challengeRow(owner.id))).id;
+    // Ends two seconds from now on the database's clock (arranged on it, and not on this process's), past the guards.
+    await admin.query('begin');
+    await admin.query('set local session_replication_role = replica');
+    await admin.query(
+      `update mfa_challenge set issued_at = clock_timestamp() - interval '60 seconds', expires_at = clock_timestamp() + interval '2 seconds' where id = $1`,
+      [lapsing],
+    );
+    await admin.query('commit');
     const holder = clientFor(database.urlFor('postgres'));
+    const watcher = clientFor(database.urlFor('postgres'));
     await holder.connect();
+    await watcher.connect();
     try {
       await holder.query('begin');
       await holder.query('select id from mfa_challenge where id = $1 for no key update', [lapsing]);
       const waiting = inTransaction((handle) => store.lockForDecision(handle, lapsing));
-      await new Promise((resolve) => setTimeout(resolve, 1_800));
+      await waitUntilBlockedBy(watcher, await backendPidOf(holder), 'the decision', waiting);
+      // It began to wait before the challenge ended, which is what makes this a race and not a challenge that had already lapsed.
+      const before = await watcher.query<{ ready: boolean }>(
+        'select clock_timestamp() < expires_at as ready from mfa_challenge where id = $1',
+        [lapsing],
+      );
+      expect(before.rows[0]?.ready, 'the decision began to wait before the challenge ended').toBe(
+        true,
+      );
+      await waitUntilTrue(
+        watcher,
+        'select clock_timestamp() > expires_at as ready from mfa_challenge where id = $1',
+        [lapsing],
+        'the end of the challenge',
+      );
       await holder.query('commit');
 
       const found = await waiting;
@@ -140,6 +173,7 @@ describe('lockForDecision', () => {
       expect(found?.challenge.state).toBe('PENDING');
     } finally {
       await holder.end();
+      await watcher.end();
     }
   });
 

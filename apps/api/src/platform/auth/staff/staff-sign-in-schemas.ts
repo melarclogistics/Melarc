@@ -19,11 +19,12 @@ export const STAFF_SIGN_IN_BODY = described({
 /** What a privileged sign-in returns instead of a session: it grants nothing and is not a partial session. */
 export const MFA_CHALLENGE_SCHEMA = described({
   type: 'object',
-  required: ['challenge_id', 'expires_at'],
+  required: ['challenge_id', 'expires_at', 'trusted_browser_days'],
   additionalProperties: false,
   properties: {
     challenge_id: { type: 'string', format: 'uuid' },
     expires_at: { type: 'string', format: 'date-time' },
+    trusted_browser_days: { type: 'integer', minimum: 1 },
   },
 });
 

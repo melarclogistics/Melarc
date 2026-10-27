@@ -75,7 +75,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.query('truncate mfa_challenge, mfa_factor, setup_grant, session, staff_identity');
+  await admin.query(
+    'truncate trusted_browser, mfa_challenge, mfa_factor, setup_grant, session, staff_identity',
+  );
 });
 
 const correlation = (): string => `bootstrap-test-${randomUUID()}`;
@@ -250,6 +252,22 @@ describe('who can reach the bootstrap, and by what', () => {
     expect(APPROVED_DEFINER_EXECUTE[API_RUNTIME_ROLE]).toEqual([
       'melarc.staff_credential_hash',
       'melarc.staff_reset_facts',
+      'melarc.staff_locked_facts',
+      'melarc.session_by_token_hash',
+      'melarc.mfa_factor_sealed_seed',
+      'melarc.use_trusted_browser',
+      'melarc.trusted_browser_id_for',
+      // S0.47 (migration 0034): the vendor's secret hash and browser for the authentication capability, a secret's facts for the reads,
+      // and the lock and facts of an account for the administrators' acts.
+      'melarc.vendor_secret_hash',
+      'melarc.vendor_device_by_credential',
+      'melarc.vendor_credential_facts',
+      'melarc.vendor_locked_facts',
+      // S0.53 (migration 0040): the rider's PIN hash and sole `ACTIVE` device for the authentication capability, and the lock and facts of a
+      // rider for the administrators' acts.
+      'melarc.rider_pin_hash',
+      'melarc.rider_active_device',
+      'melarc.rider_locked_facts',
     ]);
   });
 
@@ -1119,13 +1137,16 @@ describe('the resume function: the stranded identity (conditions 1 to 6)', () =>
 
     it('condition 1: an identity whose origin is not BOOTSTRAP, though it holds a password and a pending factor and the reserved actor as maker', async () => {
       const failure = await refusedWith(async ({ first }) => {
-        // Origin is immutable (a trigger), so the identity is arranged with the trigger off: a MAKER_CHECKER identity whose maker is
-        // the reserved actor, to show that the rule reads the column and never the actor.
+        // Origin is immutable (a trigger), and so is a checker once written (the state machine of S0.36), so the identity is arranged with
+        // both triggers off: a MAKER_CHECKER identity whose maker is the reserved actor, to show that the rule reads the column and never
+        // the actor.
         await admin.query('alter table staff_identity disable trigger staff_identity_guard');
+        await admin.query('alter table staff_identity disable trigger staff_identity_transition');
         await admin.query(
           "update staff_identity set origin = 'MAKER_CHECKER', approved_by = $2 where id = $1",
           [first, randomUUID()],
         );
+        await admin.query('alter table staff_identity enable trigger staff_identity_transition');
         await admin.query('alter table staff_identity enable trigger staff_identity_guard');
       });
       expect(failure.detail).toBe('reason=NOT_BOOTSTRAP_IDENTITY');
@@ -2051,7 +2072,9 @@ describe('the resume function: what it refuses in the document', () => {
       ),
     ).toBe(0);
 
-    await admin.query('truncate mfa_challenge, mfa_factor, setup_grant, session, staff_identity');
+    await admin.query(
+      'truncate trusted_browser, mfa_challenge, mfa_factor, setup_grant, session, staff_identity',
+    );
     const stranded = await strandedDocument();
     stranded.document.audit.push({
       ...eventOf(stranded.document, 'auth.setup_grant.issued'),

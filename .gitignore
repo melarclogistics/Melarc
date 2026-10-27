@@ -79,3 +79,7 @@ graphify-out/
 *.tar
 *.tar.gz
 *.7z
+
+# Gradle, the attestation verifier (apps/attestation-verifier): the daemon's and the Kotlin compiler's local state. Its build output is build/ above.
+.gradle/
+.kotlin/

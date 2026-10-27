@@ -137,7 +137,7 @@ Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resol
 | `hub.intake.close`| Ops, Senior Ops, Platform Admin| own hub||
 | `hub.intake.close_exception`| **Senior Ops, Platform Admin**| own hub||
 | `pricing.correction.create`| Ops| own hub||
-| `pricing.correction.approve`| **Senior Ops**| own hub, approver ≠ creator||
+| `pricing.correction.approve`| **Senior Ops**| own hub, approver ≠ creator, a Platform Admin excepted||
 | `pricing.reprice.request`| Ops| own hub||
 | `pricing.reprice.approve`| **Senior Ops**| own hub||
 
@@ -312,7 +312,7 @@ Given an order whose price is not yet frozen,
 When the vendor or authorized Ops edits the payer arrangement,
 Then the edit succeeds,
 And after freeze the same edit requires an Ops correction approved by Senior Ops,
-And the approver may not be the requester,
+And the approver may not be the requester, unless the approver is a Platform Admin,
 And complete before and after history is retained.
 ```
 

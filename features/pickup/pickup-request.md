@@ -110,7 +110,7 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 |---|---|---|
 | Fewer than 2 packages, no exception| Refused. Self-booking a single package is barred for both customer types (§21.1)| `PICKUP_MINIMUM_NOT_MET`|
 | Corridor destination off its batch day| **Accepted and priced at `corridor_off_day_fee`**, not refused. Only a day with no batch run *and* no configured off-day fee is refused| `CORRIDOR_DAY_NOT_PERMITTED`|
-| One-package exception| Ops requests; **any holder of `pickup.exception.approve` approves** — Senior Ops, Platform Admin, or Ops Staff explicitly granted it, and never the requester. **Recipient name, phone and delivery address become mandatory** (§21.1). **Additionally carries `single_package_pickup_fee`, GH₵20** — approval decides whether Melarc goes, the fee prices the dedicated trip. The two are independent: approval does not waive the fee| `SELF_APPROVAL_FORBIDDEN`|
+| One-package exception| Ops requests; **any holder of `pickup.exception.approve` approves** — Senior Ops, Platform Admin, or Ops Staff explicitly granted it, and never the requester unless the approver is a Platform Admin. **Recipient name, phone and delivery address become mandatory** (§21.1). **Additionally carries `single_package_pickup_fee`, GH₵20** — approval decides whether Melarc goes, the fee prices the dedicated trip. The two are independent: approval does not waive the fee| `SELF_APPROVAL_FORBIDDEN`|
 | Sunday, or zone not serviced that day| Refused. Uniform Monday–Saturday calendar, no zone variation (§21.1, `MSC-DEC-149`)| `SERVICE_DATE_NOT_PERMITTED`, `ZONE_NOT_SERVICED_ON_DATE`|
 | **Past the hub booking cutoff**| **Confirms and queues for Ops review** — neither auto-scheduled nor blocked (§21.1). Ops approves a same-day exception or reschedules to the next operating day| **none** — a late booking is not an error|
 | Suspended sender| Refused; existing non-terminal requests go on controlled hold, preserved not cancelled| `SENDER_SUSPENDED`|
@@ -258,7 +258,7 @@ Then the backend rejects the approval with PERMISSION_DENIED,
 And when any holder of pickup.exception.approve approves it - Senior Ops, Platform Admin,
   or an Ops Staff member explicitly granted it - recipient name, phone and delivery
   address are mandatory,
-And the drafting user may not approve their own request,
+And a drafting user who is not a Platform Admin may not approve their own request,
 And the approved GH20 single-package fee becomes due on acceptance.
 ```
 

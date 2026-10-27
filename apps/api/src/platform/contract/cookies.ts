@@ -67,6 +67,11 @@ export interface ExpectedCookie {
    * lifetime it may ever be sent with is an expiry (see `isExpiry`), which is how a browser is told to remove it.
    */
   readonly browserSession: boolean;
+  /**
+   * A persistent cookie that a response may also send with an expiry (`Max-Age=0`) in place of its lifetime, to remove it: the
+   * trusted-browser credential, removed when the browser asking is removed. Every other attribute is still held to.
+   */
+  readonly expirable: boolean;
 }
 
 /**
@@ -105,7 +110,18 @@ export function expectedCookie(name: string, definition: Json | undefined): Expe
       `The contract's x-cookies gives ${name} a browser_session that is neither true nor false.`,
     );
   }
+  if (definition.expirable !== undefined && typeof definition.expirable !== 'boolean') {
+    throw new Error(
+      `The contract's x-cookies gives ${name} an expirable that is neither true nor false.`,
+    );
+  }
+  const expirable = definition.expirable === true;
   const browserSession = definition.browser_session === true;
+  if (expirable && browserSession) {
+    throw new Error(
+      `The contract's x-cookies says ${name} is a browser-session cookie and also expirable: a browser-session cookie is already removed by an expiry.`,
+    );
+  }
   if (browserSession && (values.has('max-age') || values.has('expires'))) {
     throw new Error(
       `The contract's x-cookies says ${name} is a browser-session cookie and also gives it a Max-Age or Expires, which cannot both hold.`,
@@ -117,6 +133,7 @@ export function expectedCookie(name: string, definition: Json | undefined): Expe
     hostOnly: definition.host_only === true,
     readableByScript,
     browserSession,
+    expirable,
   };
 }
 
@@ -141,7 +158,13 @@ export function brokenAttributes(actual: SetCookie, expected: ExpectedCookie): s
   const broken = new Set<string>();
   for (const flag of expected.flags) if (!actual.flags.has(flag)) broken.add(flag);
   if (expected.readableByScript && actual.flags.has('httponly')) broken.add('httponly');
+  // A cookie defined as expirable may be sent as its own removal: the lifetime is then the expiry, and every other attribute still holds.
+  const removal =
+    expected.expirable &&
+    actual.values.has('max-age') &&
+    isExpiry('max-age', actual.values.get('max-age') ?? '');
   for (const [key, value] of expected.values) {
+    if (removal && key === 'max-age') continue;
     const got = actual.values.get(key);
     const same = key === 'samesite' ? got?.toLowerCase() === value.toLowerCase() : got === value;
     if (!same) broken.add(key);

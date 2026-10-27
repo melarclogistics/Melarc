@@ -103,6 +103,11 @@ const TOPICS: [topic: string, heading: string, commands: string[]][] = [
     '6. Run the checks and the smoke tests',
     ['pnpm test', 'pnpm run test:db', 'pnpm run test:browser', 'pnpm run test:e2e'],
   ],
+  [
+    'the development loop and the gate',
+    '6. Run the checks and the smoke tests',
+    ['pnpm run precheck', 'pnpm run gate', 'pnpm run gate:status', 'pnpm run gate:stop'],
+  ],
   ['safe shutdown', '7. Stop safely', ['pnpm run infra:stop']],
   [
     'disposable local reset',
@@ -227,6 +232,11 @@ describe('DEVELOPMENT.md', () => {
       'a command moved out of its code block into running text',
       (text) => text.replace('```text\npnpm run setup:env\n```', 'Run `pnpm run setup:env`.'),
       /local settings: "pnpm run setup:env"/,
+    ],
+    [
+      'a gate command removed from its code block',
+      (text) => text.replace('pnpm run precheck\npnpm run gate\n', 'pnpm run gate\n'),
+      /the development loop and the gate: "pnpm run precheck"/,
     ],
     [
       'the packaging command removed',
@@ -378,6 +388,7 @@ describe('the committed files a developer is sent to', () => {
     'infrastructure/postgres/.env.example',
     'apps/api/.env.example',
     'apps/ops-web/.env.example',
+    'apps/attestation-verifier/.env.example',
     'e2e/README.md',
   ];
   for (const file of files) {

@@ -22,19 +22,32 @@ export async function tabReachesLinks(page: Page): Promise<boolean> {
   return reached;
 }
 
-/** The accessible-ish name of every element a keyboard can reach, in document order, with or without the links. */
+/**
+ * The accessible-ish name of every element a keyboard can reach, in document order, with or without the links. An element that is not
+ * drawn (`display: none`, `visibility: hidden`, as a menu that has slid out of sight is) or that lies inside something inert is not a stop.
+ */
 export function reachableNames(page: Page, includeLinks: boolean): Promise<string[]> {
   return page.evaluate(
     (withLinks) =>
       [
         ...document.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
         ),
       ]
         .filter((element) => withLinks || element.tagName !== 'A')
+        .filter(
+          (element) =>
+            element.getClientRects().length > 0 &&
+            getComputedStyle(element).visibility !== 'hidden' &&
+            element.closest('[inert]') === null,
+        )
         .map((element) => {
           const labelled =
-            element instanceof HTMLInputElement ? element.labels?.[0]?.textContent : null;
+            element instanceof HTMLInputElement ||
+            element instanceof HTMLSelectElement ||
+            element instanceof HTMLTextAreaElement
+              ? element.labels?.[0]?.textContent
+              : null;
           return (element.getAttribute('aria-label') ?? labelled ?? element.textContent).trim();
         }),
     includeLinks,
@@ -47,16 +60,15 @@ export function watchPage(page: Page) {
   const requests: string[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error' && message.type() !== 'warning') return;
-    // Browsers ask for /favicon.ico on their own. No brand assets exist yet, so it is a 404 and the
-    // browser logs it. Delete this allowance when an icon is added.
-    if (message.location().url.endsWith('/favicon.ico')) return;
     problems.push(`console ${message.type()}: ${message.text()} (${message.location().url})`);
   });
   page.on('pageerror', (error) => {
     problems.push(`uncaught: ${error.message}`);
   });
   page.on('requestfailed', (request) => {
-    problems.push(`request failed: ${request.url()}`);
+    problems.push(
+      `request failed: ${request.url()} (${request.failure()?.errorText ?? 'no reason given'})`,
+    );
   });
   page.on('response', (response) => {
     if (response.status() >= 400)

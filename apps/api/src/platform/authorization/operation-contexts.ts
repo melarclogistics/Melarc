@@ -20,8 +20,8 @@ export const VENDOR_ORGANIZATION_RESOLVER = Symbol('VENDOR_ORGANIZATION_RESOLVER
 
 /**
  * A Vendor session reached an operation and nothing is composed to say which organisation its account belongs to. The operation is
- * not served by guess: the platform answers the operational failure (`503`, no code) and ends no session. (No Vendor directory is
- * built in this slice until S0.47; a fixture supplies the resolver.)
+ * not served by guess: the platform answers the operational failure (`503`, no code) and ends no session. The vendor directory answers
+ * it from S0.47 (`vendorOrganizationFromDirectory`); a test may supply its own resolver.
  */
 export class VendorOrganizationUnavailableError extends Error {
   constructor() {

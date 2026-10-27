@@ -342,7 +342,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**172 operations: 109 `CRITICAL_WRITE` · 0 `ASYNC` · 63 `NORMAL`.**
+**176 operations: 111 `CRITICAL_WRITE` · 0 `ASYNC` · 65 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -450,6 +450,8 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `listVendorDevices`| `NORMAL`| —|
 | `listRiders`| `NORMAL`| — A hub-scoped roster read|
 | `listSessions`| `NORMAL`| — The read `revokeSession` needs; no credential, hash or bundle contents|
+| `listStaffTrustedBrowsers`| `NORMAL`| — The read `revokeStaffTrustedBrowsers` needs; labels and dates, no credential|
+| `listTrustedBrowsers`| `NORMAL`| — A person's own trusted browsers; labels and dates, no credential|
 | `listStaffIdentities`| `NORMAL`| — The approver's queue|
 | `listVendorAccounts`| `NORMAL`| — A hub-scoped account read|
 | `listReasonDefinitions`| `NORMAL`| —|
@@ -498,6 +500,8 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `revokeVendorDevice`| `CRITICAL_WRITE`| security authority — removes a registered browser credential and terminates the session bound to it|
 | `revokeRiderDevice`| `CRITICAL_WRITE`| security authority — revokes a device binding|
 | `revokeSession`| `CRITICAL_WRITE`| security authority — revokes a Session|
+| `revokeStaffTrustedBrowsers`| `CRITICAL_WRITE`| security authority — removes the trusted browsers of a staff identity|
+| `revokeTrustedBrowser`| `CRITICAL_WRITE`| security authority — removes a trusted browser|
 | `riderSignIn`| `CRITICAL_WRITE`| authentication authority|
 | `scheduleRedelivery`| `CRITICAL_WRITE`| creates a redelivery obligation with snapshotted charges|
 | `setDeliveryStopOrder`| `NORMAL`| —|

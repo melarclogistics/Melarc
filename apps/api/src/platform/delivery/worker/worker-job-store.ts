@@ -214,6 +214,9 @@ export class WorkerJobStore {
           channel: row.channel,
           destination: content.destination,
           link: content.link,
+          ...(content.accountIdentifier === undefined
+            ? {}
+            : { accountIdentifier: content.accountIdentifier }),
           expiresAt: new Date(Math.round(row.expires_at_ms)),
         },
       };

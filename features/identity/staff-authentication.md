@@ -48,7 +48,7 @@ This exists as its own feature because **the second factor is a gate on obtainin
 
 - The staff record exists, is **active**, and has an assigned permission bundle (§30.3).
 - **The identity is authentication-ready**: a credential has been established by the employee through a `SetupGrant`, and — for Senior Ops or Platform Admin — an **`ACTIVE` `MfaFactor`** exists.
-- **Being approved is not being able to sign in.** An `ACTIVE` identity that has not completed setup grants **zero authenticated access**, and no session may be issued against it. **Reaching that state has been possible since 24 August and was not before** — no operation created a staff identity and none granted a bundle, so this precondition named a state the product could not produce. It is reached through §30.8's maker-checker: `createStaffIdentity` then `approveStaffIdentity` by a different actor ([state-machines.md](../../contracts/state-machines.md) §13.3, `MSC-DEC-247`). A `PENDING_APPROVAL` record **fails this precondition** and no session is issued against it.
+- **Being approved is not being able to sign in.** An `ACTIVE` identity that has not completed setup grants **zero authenticated access**, and no session may be issued against it. **Reaching that state has been possible since 24 August and was not before** — no operation created a staff identity and none granted a bundle, so this precondition named a state the product could not produce. It is reached through §30.8's maker-checker: `createStaffIdentity` then `approveStaffIdentity` by a different actor, or by the maker when the maker is a Platform Admin ([state-machines.md](../../contracts/state-machines.md) §13.3, `MSC-DEC-247`). A `PENDING_APPROVAL` record **fails this precondition** and no session is issued against it.
 - The staff member has a **verified work email** — it is also the recovery channel (§37.2). **Version 1 has no separate email-verification lifecycle or state, by decision**: the address is accurate because the authorised create-and-approve process established it — the maker entered it and the independent approver passed it at §30.8 approval — and every setup grant, recovery link and re-enrolment link goes to it and nowhere else. **No verification state of any name exists and no criterion tests one**, and a failed delivery is a delivery and recovery outcome, not an identity state. This feature specifies no further verification. **The address is compared in its canonical form** ([domain-model.md](../../contracts/domain-model.md) §6.8).
 - For Senior Ops and Platform Admin, an **`ACTIVE` `MfaFactor`** exists — a **record that was proven**, not the `mfa_enrolled` boolean, which is now derived from it and is never accepted as evidence.
 
@@ -60,8 +60,8 @@ This exists as its own feature because **the second factor is a gate on obtainin
 2. **A session is established**, carrying the staff identity, the assigned bundle **snapshotted at issue**, and the authorized hub set (§37.3).
 3. **For Ops Staff, work begins.** No further step.
 4. **For Senior Ops and Platform Admin, no session is issued yet.** The response is **`202 Accepted` with an `MfaChallenge`** — a different status code from the Ops Staff `200`, and **no cookie of any kind is set**. It grants nothing and is not a partial session. One `200` returning either shape could not distinguish a session correctly withheld from one wrongly issued; two codes make **"no privileged Session before proven MFA"** a property a test asserts against the contract. It lives for `authentication_challenge_ttl_minutes` (**5**, `MSC-DEC-268`), survives up to `mfa_max_attempts` wrong codes and then becomes permanently unusable — `CHALLENGE_EXPIRED` and `CHALLENGE_UNUSABLE` are separate codes because they tell the user different things: **start again, versus this one is finished.** **The same `202` is the answer when the identity holds no `ACTIVE` factor**: the password step says nothing about the factor, and the second step ends in `MFA_ENROLMENT_REQUIRED` (§5.3).
-5. **Presenting a valid factor issues the session**, already privileged to whatever the bundle allows.
-6. **The session arrives as an `HttpOnly` `melarc_session` cookie**, with a readable `melarc_csrf` cookie alongside it; unsafe requests echo it in `X-CSRF-Token` or fail with `CSRF_VALIDATION_FAILED`. **Senior Ops and Platform Admin, and no other bundle, are `Privileged`-tier for session lifetime and idle timeout** — 480 and 15 minutes, not the standard figures. **Fleet Manager and Finance/Reconciliation are standard tier**: 720 minutes absolute, 30 idle and no mandatory second factor ([settings.md](../../contracts/settings.md) §7.5). **Both cookies are browser-session cookies**, with no `Max-Age` and no `Expires`: the server's absolute and idle timeouts decide whether a session is valid ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2).
+5. **Presenting a valid factor issues the session**, already privileged to whatever the bundle allows. **A person who asks for it (§5.8) is also given a trusted browser**: a credential that, for the next seven days and for this browser alone, stands in for the code of step 4.
+6. **The session arrives as an `HttpOnly` `melarc_session` cookie**, with a readable `melarc_csrf` cookie alongside it; unsafe requests echo it in `X-CSRF-Token` or fail with `CSRF_VALIDATION_FAILED`. **Senior Ops and Platform Admin, and no other bundle, are `Privileged`-tier for session lifetime and idle timeout** — 480 and 15 minutes, not the standard figures. **Fleet Manager and Finance/Reconciliation are standard tier**: 720 minutes absolute, 30 idle and no mandatory second factor ([settings.md](../../contracts/settings.md) §7.5). **Both cookies are browser-session cookies**, with no `Max-Age` and no `Expires`: the server's absolute and idle timeouts decide whether a session is valid ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.2). **The trusted-browser cookie of §5.8 is the one persistent cookie of the staff sign-in**, and it is not a session: it is read at the password step and by nothing else.
 
 ### 5.2 The reading behind this, and the one it replaced
 
@@ -91,6 +91,8 @@ This exists as its own feature because **the second factor is a gate on obtainin
 | Key held, tier too low (a privileged bundle approved **or rejected** by Senior Ops)| Refused| `INSUFFICIENT_AUTHORITY`|
 | An existing record outside the actor's hubs (§37.3)| Refused, and the staff member **is told** why — authenticated staff may know a record exists elsewhere| `HUB_SCOPE_VIOLATION`|
 | No such record| Refused| `NOT_FOUND`|
+| Senior Ops or Platform Admin with the correct password **and a valid trusted-browser credential** (§5.8)| Not a challenge: `200` and the privileged session, exactly the one a proven code would issue (480 minutes, 15 idle). The second factor is skipped and nothing else is; a wrong password with the same credential is `INVALID_CREDENTIALS` as any other| —|
+| Senior Ops or Platform Admin with the correct password and a trusted-browser credential that is **unknown, expired, revoked, another identity's, or bound to an authenticator or a password that has since been replaced**| The credential is ignored, without a word and without a cookie: the answer is the ordinary `202` challenge, indistinguishable from the answer to a browser that holds none| `MFA_REQUIRED` *(the challenge)*|
 | Rate limit exceeded| Refused first, before any factor is verified or counted — sign-in has its own bucket (`rate_limit_staff_signin`, keyed on the email the request carries, whether or not it matches a staff identity), and an authenticated staff session's API ceiling is **moderate** so that a busy hub's intake is not throttled| `RATE_LIMITED`|
 | Password shorter than 12 or longer than 128 characters at setup or recovery; a sign-in password longer than 128| Refused by the schema. The message names the field and **never the value**| `VALIDATION_FAILED`|
 
@@ -104,6 +106,8 @@ This exists as its own feature because **the second factor is a gate on obtainin
 - **Never treat the MFA challenge as a session.** It grants nothing, carries no authority, and is single-use. A partial session issued before the factor is presented would defeat the gate entirely.
 - **Never log a password, an MFA code, or a session token** — §20.4's rule for OTPs applies identically. Audit records that authentication occurred, never the material.
 - **Never grant cross-hub access by default.** §37.3 restricts ordinary staff to authorized hubs; cross-hub is Platform Admin and approved HQ roles, **and it is audited**.
+- **Never let a trusted browser stand in for the password, or mint another trusted browser.** It replaces the code of the second step and nothing else, and it is issued only in the transaction that accepts a code: a session that was itself issued through a trusted browser never offers to trust one, so the seven days are absolute and cannot be renewed by signing in again with the credential.
+- **Never read the trusted-browser credential anywhere but the password step and the person's own list.** It is not a session credential, it is sent only to the sign-in routes (`Path=/api/v1/auth/staff`), and no business operation looks at it.
 
 ### 5.5 Lockout, credential strength and the order of checks
 
@@ -118,13 +122,29 @@ This exists as its own feature because **the second factor is a gate on obtainin
 
 ### 5.6 Reads and versions — how an approver finds the record and its version
 
-The maker learns the new identity's id from the creation response. **A different person, the approver, finds it with `listStaffIdentities` and reads `getStaffIdentity`**; each staff-targeted mutation takes its `If-Match` from that read, and a stale version is `STATE_CONFLICT`. Both reads are gated by `staff.read`, which **Ops Staff do not hold** — so the maker, who may be Ops Staff, cannot read the record back, and that is deliberate. `proposeBundleChange` takes its `ETag` from the same read, and `SLICE-009` builds it.
+The maker learns the new identity's id from the creation response. **The approver (a different person, or the maker when the maker is a Platform Admin) finds it with `listStaffIdentities` and reads `getStaffIdentity`**; each staff-targeted mutation takes its `If-Match` from that read, and a stale version is `STATE_CONFLICT`. Both reads are gated by `staff.read`, which **Ops Staff do not hold** — so the maker, who may be Ops Staff, cannot read the record back, and that is deliberate. `proposeBundleChange` takes its `ETag` from the same read, and `SLICE-009` builds it.
 
 **The maker chooses the bundle from a read, not from a list the screen carries**. `listAssignableStaffRoleBundles` returns to any holder of `permission.assignable_bundle.read` (`MSC-DEC-443` — Ops Staff, Senior Ops and Platform Admin, the bundles that hold `staff.identity.create`), at any hub, only the staff bundles currently valid for assignment to human staff — each with its identifier, its display name and whether a Platform Admin must approve the assignment, **never its permissions or its holders**. The key is global configuration with no hub scope, it does not itself permit creation, assignment or approval, and `createStaffIdentity` stays gated by `staff.identity.create`. **Choosing a privileged bundle grants nothing**: the profile is created `PENDING_APPROVAL` and a Platform Admin must approve a privileged target. `createStaffIdentity` validates the id itself, and one that names no assignable bundle is `VALIDATION_FAILED` — **validation inside the signed §13.3 `→ PENDING_APPROVAL` row**, which already requires a bundle to be named and already carries that code, and which the Product Owner confirmed this does not amend.
 
 ### 5.7 Rejecting a pending profile
 
-Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) — the same call, the same version check and the same maker-checker rule (Product decision, 6 October 2026). **A reason is mandatory**: a `reason_code` of the staff-profile-rejection domain ([domain-model.md](../../contracts/domain-model.md) §3.9), `REASON_REQUIRED` when empty and `REASON_NOT_ACTIVE` when it is unknown, retired or from another domain. **The rejecting approver is not the maker** (`SELF_APPROVAL_FORBIDDEN`), and **a profile that carries a privileged bundle is rejected only by a Platform Admin other than the maker**: a Senior Ops caller is `INSUFFICIENT_AUTHORITY` and an Ops Staff caller `PERMISSION_DENIED`. Rejection is terminal and **releases the work email**, so a new profile may use the address (`AC-SLICE-000-122`).
+Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) — the same call, the same version check and the same maker-checker rule (Product decision, 6 October 2026). **A reason is mandatory**: a `reason_code` of the staff-profile-rejection domain ([domain-model.md](../../contracts/domain-model.md) §3.9), `REASON_REQUIRED` when empty and `REASON_NOT_ACTIVE` when it is unknown, retired or from another domain. **The rejecting approver is not the maker, unless the approver is a Platform Admin** (`SELF_APPROVAL_FORBIDDEN` for anyone else; Product decision, 25 October 2026), and **a profile that carries a privileged bundle is rejected only by a Platform Admin, the maker included**: a Senior Ops caller is `INSUFFICIENT_AUTHORITY` and an Ops Staff caller `PERMISSION_DENIED`. Rejection is terminal and **releases the work email**, so a new profile may use the address (`AC-SLICE-000-122`).
+
+### 5.8 Trusted browser — "remember this browser"
+
+**The Product Owner's instruction of 25 October 2026**, answered by three decisions in the same session: *remember me* means a **trusted browser that skips the authenticator step**; it lasts **seven days, absolutely**; and it is offered to **Senior Ops and Platform Admin**, the two bundles that sign in with a second factor. Each person manages their own trusted browsers, and a Platform Admin can remove another person's. It changes no other rule of this feature: the password is still asked at every sign-in, the lockout still counts, the session is still 480 minutes and 15 idle, and an Ops Staff sign-in is not touched at all.
+
+**What it is.** A `TrustedBrowser` ([domain-model.md](../../contracts/domain-model.md) §6.8): an opaque random secret, stored only as a hash, delivered once as the cookie `melarc_trusted_browser` (`HttpOnly; Secure; SameSite=Lax; Path=/api/v1/auth/staff; Max-Age=604800`, host-only), and bound to **the authenticator that was proved and to the password that was proved** (the `ACTIVE` factor and the credential generation at issue).
+
+**How it is made.** The code step offers a choice, *Remember this browser for 7 days*, unchecked. `completeStaffMfaSignIn` takes `trust_browser: true`; if, and only if, the code is accepted and the session is issued, the same transaction records the trusted browser and the answer sets the cookie. A refused code, an expired challenge and a lock issue nothing. The seven comes from the contract and not from the browser: the challenge the password step returns says how many days the choice would last (`trusted_browser_days`), so the screen never hard-codes it. A person holds **at most five** trusted browsers: issuing a sixth removes the oldest (`REPLACED`).
+
+**How it is used.** At `staffSignIn`, after the password is proved and only then, a privileged identity whose browser presents a valid trusted-browser credential is answered `200` and the session, with no challenge. The credential is valid when, judged on the database's clock after its own row is locked and under the identity's lock, it is not revoked, `now < expires_at`, the identity is `ACTIVE` and unlocked, its `ACTIVE` factor is the one the credential was issued for, and its credential generation is the one it was issued for. Every other case is the ordinary `202`, and an invalid credential is never mentioned. Using it records when (`last_used_at`) and nothing else: **it does not move `expires_at`**.
+
+**What ends it.** Seven days; the person removing it; a Platform Admin removing the person's; a reset of the authenticator or a new one enrolled (the factor is no longer the one it was issued for, and `resetStaffMfa` also removes the person's trusted browsers in its own transaction); a new password (the generation moved); an identity that is no longer `ACTIVE`. Signing out does **not** end it, which is the point of it. **A task that suspends or offboards a person must end their trusted browsers in the transaction that changes the status**, with a cause it adds to the closed list, so that a reactivation inside the seven days does not bring one back; that is owed to that task, with an acceptance criterion of its own, and is not met by anything built today (the audit of 26 October 2026, decision 7).
+
+**Managing it.** *The person:* `listTrustedBrowsers` lists their own valid ones (a short description such as "Chrome on Windows", when it was added, when it was last used, when it ends, and which one is the browser asking) and `revokeTrustedBrowser` removes one, clearing the cookie if it is the browser asking. *The administrator:* `listStaffTrustedBrowsers` and `revokeStaffTrustedBrowsers` (`staff.session.revoke` at tier `P`, with a reason of the session-revocation domain) list and remove **all** of another person's. Each removal is audited, and the administrator's is enhanced. **The removal takes an `Idempotency-Key`**: "all the valid browsers" is not a fixed set, so repeating it under a new key removes a browser the person was remembered on in between, while a retry under the same key replays the first count and removes nothing issued since. **A removal ends what exists and is not a ban**: a person who proves a code afterwards is remembered again if they ask. **The administrator's list of another person's browsers is an authorised cross-hub read** and is audited as such when the person belongs to a hub other than the caller's own ([audit.md](../../contracts/audit.md) §5.4).
+
+**What it must never do.** Skip the password; survive a reset of the authenticator or a new password; be renewed by use; be created by a session that did not prove a code; be offered to or read for an Ops Staff sign-in; be visible in a body, a log, an audit event or a query cache after the response that set it; or let a lock, a rate limit or a refusal of the password behave differently because the cookie is present.
 
 ## 6. Entities — *pointer*
 
@@ -155,6 +175,7 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 | `mfa_max_attempts`| §7.5 — **3**, counted **per challenge**, and each wrong code also adds one to the identity's lockout count. Deliberately **lower** than `signin_max_attempts`: a user at this step has already proved the password, so a wrong code is more suspicious than a wrong password|
 | `session_lifetime_minutes`| §7.5 — **480 minutes** for Senior Ops and Platform Admin; per-tier since `MSC-DEC-234`|
 | `session_idle_timeout_minutes`| §7.5 — **15 minutes** privileged. Added by `MSC-DEC-234`; **this is the control on unattended-browser exposure**, not the absolute lifetime|
+| the seven days of a trusted browser| **Not a setting, deliberately** ([settings.md](../../contracts/settings.md) §7.5): a constant of the contract, as the length of a password is. The project has no way to add a setting to a database that was seeded before the key existed, and a missing setting is a `503` at the sign-in of the two roles that need it|
 
 ## 10. Errors — *pointer*
 
@@ -162,7 +183,7 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 
 ## 11. Audit events — *pointer*
 
-[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.bootstrap.resumed`, `auth.session.authority_revoked` and `auth.csrf.rejected`.** The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `MFA_ENROLMENT_REQUIRED` for staff — and **never a password, a code or a token**.
+[audit.md](../../contracts/audit.md) §5.4 — the **`auth` family**. `auth.session.issued`, `auth.session.failed`, `auth.session.superseded`, `auth.session.terminated`; **`auth.mfa.completed`**, `auth.mfa.failed`; `auth.lockout.applied`; `auth.device.registered`, `auth.device.revoked`; `auth.credential.changed`. **`auth.session.failed` records the precise cause while the response stays undifferentiated** — otherwise nobody can tell a typo from an attack. **Also `auth.setup_grant.issued`, `auth.setup_grant.consumed`, `auth.mfa.enrolled`, `auth.mfa.reset`, `auth.bootstrap.resumed`, `auth.session.authority_revoked` and `auth.csrf.rejected`, and, for §5.8, `auth.trusted_browser.issued`, `auth.trusted_browser.revoked` and `auth.trusted_browser.admin_revoked`** (a sign-in that skipped the code is `auth.session.issued` with the fact `second_factor` `TRUSTED_BROWSER`). The cause on `auth.session.failed` is one of a closed set the catalogue names — `UNKNOWN_PRINCIPAL`, `INELIGIBLE_PRINCIPAL`, `WRONG_PASSWORD`, `WRONG_MFA_CODE`, `LOCKED_OUT`, `CHALLENGE_EXPIRED`, `CHALLENGE_UNUSABLE`, `MFA_ENROLMENT_REQUIRED` for staff — and **never a password, a code or a token**.
 
 **This section cited `auth.mfa.elevated` until 23 August — an event that no longer exists.** `MSC-DEC-228` withdrew elevation on 21 August and `audit.md` renamed the code to `auth.mfa.completed`, which records a second factor accepted **at sign-in**. The stale name survived because a suffix-abbreviated list is not checkable: nothing could compare it to the catalogue.
 
@@ -174,7 +195,7 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 
 **Establishment and re-enrolment:** `completeStaffCredentialSetup`, `completeMfaEnrolment`, `resetStaffMfa`, **`beginMfaReenrolment`** (R1), **`recoverStaffCredential`** (R1, split out of the former `performOpsRecovery`) and **`reissueStaffCredentialSetup`** (MED-10 audit remediation).
 
-**Onboarding — creating and approving the identity:** **`createStaffIdentity`** (`staff.identity.create`) and **`approveStaffIdentity`** (`staff.identity.approve`), §30.8, **and `listAssignableStaffRoleBundles`** (`permission.assignable_bundle.read`, `MSC-DEC-439` and `MSC-DEC-443`) — the read that gives the maker's form its bundle choices. **Built in `SLICE-000`**: the script's first rows are made of them and `AC-SLICE-000-33` tests the creation. The maker supplies no credential, and the approver must be a different person (`SELF_APPROVAL_FORBIDDEN`); approval issues the single `STAFF_CREDENTIAL_SETUP` grant described below.
+**Onboarding — creating and approving the identity:** **`createStaffIdentity`** (`staff.identity.create`) and **`approveStaffIdentity`** (`staff.identity.approve`), §30.8, **and `listAssignableStaffRoleBundles`** (`permission.assignable_bundle.read`, `MSC-DEC-439` and `MSC-DEC-443`) — the read that gives the maker's form its bundle choices. **Built in `SLICE-000`**: the script's first rows are made of them and `AC-SLICE-000-33` tests the creation. The maker supplies no credential, and the approver must be a different person unless the maker is a Platform Admin (`SELF_APPROVAL_FORBIDDEN` otherwise); approval issues the single `STAFF_CREDENTIAL_SETUP` grant described below.
 
 **Reads (Gate PD-3R1, `PDA-47`):** `listStaffIdentities` and `getStaffIdentity` (`staff.read`) and `listSessions` — the reads every staff-targeted mutation takes its `If-Match` from and the revocation screen needs. `approveStaffIdentity`, `resetStaffMfa`, `reissueStaffCredentialSetup` and `recoverStaffCredential` each name `getStaffIdentity` as the source of their `ETag`; `proposeBundleChange` does too and belongs to `SLICE-009` with `approveBundleChange`, which this slice does not build.
 
@@ -183,6 +204,8 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 **`MFA_ENROLMENT` is the only grant purpose that activates a factor**, whatever created the pending one. The contract accepted `BOOTSTRAP_SETUP` at `completeMfaEnrolment` until R1.2 — which would have left the **one grant with no expiry** able to install a factor at any later date.
 
 **`beginMfaReenrolment` is the step the reset lifecycle was missing.** `resetStaffMfa` revoked the factor and issued a re-enrolment grant, and **nothing in the contract ever returned a new TOTP secret** — so a reset identity held an authorisation to re-enrol and no means of doing it. It provisions a `PENDING` factor and issues a short-lived `MFA_ENROLMENT` continuation grant; **only that second grant with a proven code activates anything**, so a reset authorisation can never stand in for possession of the new authenticator.
+
+**Trusted browsers (§5.8):** `completeStaffMfaSignIn` takes `trust_browser`; `staffSignIn` reads the cookie; and four operations manage them: `listTrustedBrowsers` and `revokeTrustedBrowser` (the person's own: a session and no permission, as `signOut` is) and `listStaffTrustedBrowsers` and `revokeStaffTrustedBrowsers` (`staff.session.revoke`, tier `P`: the key and the tier of ending a staff session, because it ends the same kind of standing access).
 
 **The browser session's raw credential travels only as `Set-Cookie`** — which is why staff sign-in needs no equivalent of the rider's `RiderSessionIssued`. The precise rule is that a raw credential never appears in an **ordinary Session resource representation**; rider issuance returns one **exactly once** because a native client has no `Set-Cookie` equivalent.
 
@@ -205,7 +228,7 @@ And the session grants no authority beyond the bundle's contents.
 ### `AC-SLICE-000-02` — A privileged role cannot sign in without a second factor
 
 ```text
-Given a Senior Ops user submitting a correct email and password,
+Given a Senior Ops user submitting a correct email and password from a browser that presents no valid trusted-browser credential,
 When the sign-in is attempted,
 Then no session is issued and no cookie is set,
 And the response is 202 with an MFA challenge, the outcome the catalogue calls MFA_REQUIRED,
@@ -288,7 +311,7 @@ And listStaffIdentities returns only the hub-A identity.
 ```text
 Given a Senior Ops identity that is ACTIVE with its bundle assigned,
 And whose password has been established through a setup grant,
-And which has no ACTIVE MfaFactor,
+And which has no ACTIVE MfaFactor (so that no trusted browser can be valid for it),
 When the correct email and password are submitted,
 Then the same 202 MFA challenge is returned as for an identity with an ACTIVE factor,
 And no Session is created and no cookie is set,
@@ -429,7 +452,7 @@ And a safe read needs no token.
 
 **Governs:** `MSC-DEC-261`, `MSC-DEC-270` · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** API · **Code:** `CSRF_VALIDATION_FAILED`
 
-### `AC-SLICE-000-85` — The maker cannot approve, and a bundle above the approver's tier needs a Platform Admin
+### `AC-SLICE-000-85` — A maker below the Platform Admin tier cannot approve, a Platform Admin can, and a bundle above the approver's tier needs a Platform Admin
 
 ```text
 Given a Senior Ops user who created a staff identity in PENDING_APPROVAL,
@@ -437,10 +460,11 @@ When the same user calls approveStaffIdentity for it,
 Then it is refused with SELF_APPROVAL_FORBIDDEN and the identity stays PENDING_APPROVAL,
 And when a different Senior Ops user approves an identity whose role_bundle_id names a privileged bundle, it is refused with INSUFFICIENT_AUTHORITY,
 And when a Platform Admin approves it, the identity becomes ACTIVE and exactly one STAFF_CREDENTIAL_SETUP grant is issued,
+And a Platform Admin who created a staff identity approves it themselves, whatever its role_bundle_id: it becomes ACTIVE with that Platform Admin as both created_by and approved_by, exactly one STAFF_CREDENTIAL_SETUP grant is issued, and the audit event names the same identity twice,
 And an Ops Staff user, who does not hold staff.identity.approve, is refused with PERMISSION_DENIED.
 ```
 
-**Governs:** §30.8, `MSC-DEC-247`, `MSC-DEC-248` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `SELF_APPROVAL_FORBIDDEN`, `INSUFFICIENT_AUTHORITY`, `PERMISSION_DENIED`
+**Governs:** §30.8, [permissions.md](../../contracts/permissions.md) §6, `MSC-DEC-247`, `MSC-DEC-248` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `SELF_APPROVAL_FORBIDDEN`, `INSUFFICIENT_AUTHORITY`, `PERMISSION_DENIED`
 
 ### `AC-SLICE-000-86` — An approver finds a pending identity and approves the version they read
 
@@ -599,7 +623,7 @@ And a request with no session is answered SESSION_INVALID.
 ```text
 Given the list marks the Senior Ops and Platform Admin bundles with requires_platform_admin_approval true,
 When a Senior Ops maker creates a staff profile naming one of them from the list,
-Then the profile is PENDING_APPROVAL, no session can be issued for it, and only a Platform Admin other than the maker can approve it,
+Then the profile is PENDING_APPROVAL, no session can be issued for it, and only a Platform Admin can approve it (the Senior Ops maker is not one, so it is another person),
 And a different Senior Ops user, not the maker, who tries to approve it is refused with INSUFFICIENT_AUTHORITY,
 And no response from the list carries a permission key, a permission count or the holder of any bundle,
 And createStaffIdentity naming a Rider or Vendor bundle, which is not on the list, is refused with VALIDATION_FAILED.
@@ -607,7 +631,7 @@ And createStaffIdentity naming a Rider or Vendor bundle, which is not on the lis
 
 **Governs:** `MSC-DEC-439`, `MSC-DEC-443`, `MSC-DEC-248`, `MSC-DEC-253` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `INSUFFICIENT_AUTHORITY`, `VALIDATION_FAILED`
 
-### `AC-SLICE-000-118` — The bootstrap is exactly two identities, and the first profile one makes only the other approves
+### `AC-SLICE-000-118` — The bootstrap is exactly two identities, and the first profile one makes either may approve
 
 ```text
 Given an empty staff table and a provisioning run that names two distinct work emails,
@@ -615,12 +639,12 @@ When the seed runs and is then run a second time,
 Then exactly two StaffIdentity records exist, each ACTIVE with a Platform Admin bundle, an explicit all-hub grant that is not inferred from the bundle's name, its own work email and its own single-use BOOTSTRAP_SETUP secret held only as a hash, and neither holds a password or an MFA factor,
 And each records the reserved system actor as created_by and approved_by and writes staff.identity.created and staff.identity.approved as enhanced records,
 And the second run creates nothing,
-And once both administrators have completed the steps of AC-SLICE-000-92 and signed in, one creates a staff profile and is refused with SELF_APPROVAL_FORBIDDEN when they try to approve it with the version they read with getStaffIdentity,
-And the other administrator finds it with listStaffIdentities, reads its version with getStaffIdentity and approves it with that version,
+And once both administrators have completed the steps of AC-SLICE-000-92 and signed in, one creates a staff profile and approves it themselves with the version they read with getStaffIdentity, the profile becoming ACTIVE with that administrator as both created_by and approved_by,
+And the other administrator finds a second profile the first one made with listStaffIdentities, reads its version with getStaffIdentity and approves it with that version,
 And, in a separate environment that starts with an empty staff table, a run that names one email, three emails or the same email twice creates no identity and leaves the table empty.
 ```
 
-**Governs:** `MSC-DEC-440`, `MSC-DEC-443`, [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3 · **Surface:** backend · **Test level:** integration · **Code:** `SELF_APPROVAL_FORBIDDEN`
+**Governs:** `MSC-DEC-440`, `MSC-DEC-443`, [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §3 · **Surface:** backend · **Test level:** integration · **Code:** none (the refusal and its Platform Admin exception are `AC-SLICE-000-85`)
 
 ### `AC-SLICE-000-122` — A pending profile is rejected by a different approver, at the tier its bundle needs, and its email is released
 
@@ -629,8 +653,8 @@ Given a profile in PENDING_APPROVAL naming a privileged bundle and another namin
 When a different Senior Ops user rejects the privileged one, and then rejects the other with a reason_code,
 Then the first is refused with INSUFFICIENT_AUTHORITY and stays PENDING_APPROVAL,
 And the second becomes REJECTED, terminal and still queryable, with approved_by naming the rejecting user,
-And a Platform Admin other than the maker rejects the privileged one, which becomes REJECTED,
-And the maker rejecting their own profile is refused with SELF_APPROVAL_FORBIDDEN, an empty reason_code with REASON_REQUIRED and a retired, unknown or not-permitted-for-this-operation one with REASON_NOT_ACTIVE,
+And a Platform Admin rejects the privileged one, which becomes REJECTED, whether or not they made it,
+And a maker below the Platform Admin tier who rejects their own profile is refused with SELF_APPROVAL_FORBIDDEN (a Platform Admin may reject theirs), an empty reason_code with REASON_REQUIRED and a retired, unknown or not-permitted-for-this-operation one with REASON_NOT_ACTIVE,
 And an Ops Staff user is refused with PERMISSION_DENIED,
 And a new profile naming a rejected profile's work email is accepted, while a profile that is not rejected still answers WORK_EMAIL_IN_USE.
 ```
@@ -692,6 +716,98 @@ And the staff sign-in rate limit counts sign-ins that spell the first address ei
 ```
 
 **Governs:** [domain-model.md](../../contracts/domain-model.md) §6.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `WORK_EMAIL_IN_USE`, `VALIDATION_FAILED`
+
+### `AC-SLICE-000-133` — A proven code, asked to be remembered, issues a bounded trusted-browser credential
+
+```text
+Given a Senior Ops or Platform Admin user holding a live MFA challenge and an ACTIVE factor,
+When completeStaffMfaSignIn is called with a correct code and trust_browser true,
+Then the answer is 200 with the session cookies and also melarc_trusted_browser, set HttpOnly, Secure, SameSite=Lax, host-only, Path=/api/v1/auth/staff and Max-Age=604800,
+And one TrustedBrowser row exists for the identity, holding only the hash of the credential, the ACTIVE factor and the credential generation at issue, and an expiry seven days after its creation,
+And auth.trusted_browser.issued is written in the same transaction, naming no credential,
+And a wrong code, an expired challenge, a locked credential and a trust_browser false issue no trusted browser and set no such cookie,
+And the 202 challenge says how many days the choice lasts (trusted_browser_days: 7), and no response body contains the credential.
+```
+
+**Governs:** [staff-authentication.md](staff-authentication.md) §5.8, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.5a · **Surface:** Melarc Ops · **Test level:** API · **Code:** `MFA_PROOF_INVALID`, `CHALLENGE_EXPIRED`, `CREDENTIAL_LOCKED`
+
+### `AC-SLICE-000-134` — A trusted browser skips the second factor and nothing else
+
+```text
+Given a Senior Ops or Platform Admin user and a browser holding a valid trusted-browser credential issued to them,
+When the correct email and password are submitted at staffSignIn with that cookie,
+Then the answer is 200 with the session cookies and no MFA challenge, and the session is privileged for its whole life with the privileged lifetimes (480 minutes, 15 idle),
+And auth.session.issued records the fact second_factor TRUSTED_BROWSER, and last_used_at moves while expires_at does not,
+And a wrong password with the same cookie is INVALID_CREDENTIALS, counted and locked exactly as without it, and a locked credential is INVALID_CREDENTIALS with the correct password,
+And a cookie issued to another identity, or an unknown, expired or revoked one, gets the ordinary 202 challenge and no mention of the cookie, and so does one whose seven days end while the sign-in waits for the browser's row (it is judged on the clock after the wait),
+And an Ops Staff sign-in presenting the cookie is answered as it always is and never reads it,
+And the session so issued cannot create a trusted browser: no operation does but the acceptance of a code.
+```
+
+**Governs:** [staff-authentication.md](staff-authentication.md) §5.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `INVALID_CREDENTIALS`
+
+### `AC-SLICE-000-135` — A trusted browser ends when the thing it vouched for changes
+
+```text
+Given a valid trusted browser,
+When seven days have passed on the database's clock, or the authenticator is reset or replaced, or the credential generation changes, or the identity stops being ACTIVE, or the person or a Platform Admin removes it,
+Then the next sign-in with that cookie is the ordinary 202 challenge, whichever of those it was,
+And the expiry is absolute: signing in through it any number of times never moves expires_at,
+And a reset of the authenticator removes the person's trusted browsers in its own transaction and records why,
+And an identity holds at most five valid trusted browsers: issuing a sixth removes the oldest, recorded as REPLACED.
+```
+
+**Governs:** [staff-authentication.md](staff-authentication.md) §5.8, [state-machines.md](../../contracts/state-machines.md) §23 · **Surface:** Melarc Ops · **Test level:** API
+
+### `AC-SLICE-000-136` — A person lists and removes their own trusted browsers
+
+```text
+Given a Senior Ops or Platform Admin user with trusted browsers,
+When they call listTrustedBrowsers,
+Then they get their own valid ones, each with an identifier, a short description, when it was added, when it was last used, when it ends and whether it is the browser asking, and no credential, no hash and no other person's,
+And revokeTrustedBrowser removes one of their own (204), clearing the cookie with Max-Age=0 when it is the browser asking, and removing it again, or one that is another person's, or one that does not exist, is NOT_FOUND,
+And an Ops Staff user gets an empty list,
+And each removal writes auth.trusted_browser.revoked with the cause SELF.
+```
+
+**Governs:** [staff-authentication.md](staff-authentication.md) §5.8 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `NOT_FOUND`
+
+### `AC-SLICE-000-137` — A Platform Admin removes another person's trusted browsers, with a reason
+
+```text
+Given a Platform Admin holding staff.session.revoke at tier P,
+When they call listStaffTrustedBrowsers for another staff identity in their scope, they see its valid ones,
+And when they call revokeStaffTrustedBrowsers with a reason of the session-revocation domain, every valid trusted browser of that identity is removed in one transaction under the identity's lock, and the answer says how many,
+And a Senior Ops caller holds the key and not the tier and is INSUFFICIENT_AUTHORITY, a caller without the key is PERMISSION_DENIED, an identity outside the caller's scope is HUB_SCOPE_VIOLATION or NOT_FOUND, and a missing or unknown reason is REASON_REQUIRED or REASON_NOT_ACTIVE,
+And the removal writes the enhanced auth.trusted_browser.admin_revoked with the reason and the count, and the person's next sign-in from each of those browsers is the ordinary 202 challenge,
+And the removal takes an Idempotency-Key: a retry under the same key replays the first count and removes no browser issued since, the same key for another identity, reason or note is IDEMPOTENCY_KEY_CONFLICT, and a request that failed keeps no receipt,
+And listing the browsers of a person of another hub than the caller's own writes one enhanced auth.hub_boundary.crossed naming that hub and the operation and nothing of the browsers, and a list inside the caller's own hub, of a person with no hub, or an empty one writes none.
+```
+
+**Governs:** [permissions.md](../../contracts/permissions.md) `staff.session.revoke` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `IDEMPOTENCY_KEY_CONFLICT`, `INSUFFICIENT_AUTHORITY`, `PERMISSION_DENIED`, `REASON_REQUIRED`, `REASON_NOT_ACTIVE`
+
+### `AC-SLICE-000-138` — The screens offer the choice, honour it and let the person manage it
+
+```text
+Given a Senior Ops or Platform Admin user at the code step of the Ops Portal,
+When the screen is drawn, it offers "Remember this browser for 7 days" unchecked, the number being the one the challenge carried,
+And when the person ticks it and signs in, the next sign-in from the same browser goes from the password straight to the landing,
+And the page "Trusted browsers" lists this person's, marks the one in use and removes one on a confirmation, and an Ops Staff user is told plainly that the choice is for roles that use an authenticator,
+And a Platform Admin's view of another person's profile shows how many trusted browsers they hold and offers one act, removing all of them, with a reason.
+```
+
+**Governs:** [surfaces/ops-portal.md](../../surfaces/ops-portal.md) section 7 · **Surface:** Melarc Ops · **Test level:** e2e
+
+### `AC-SLICE-000-139` — The credential is never kept where it can be read
+
+```text
+Given any trusted-browser operation,
+When its responses, the Ops Portal's memory, the logs and the audit events are searched for a planted credential,
+Then it appears only in the Set-Cookie of the response that issued it, and the database holds its hash alone,
+And the cookie is sent only to the staff sign-in routes (Path=/api/v1/auth/staff) and never to a business operation.
+```
+
+**Governs:** [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.5a · **Surface:** Melarc Ops · **Test level:** API and e2e
 
 ## 14. Open questions blocking this feature
 

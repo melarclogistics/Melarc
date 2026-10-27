@@ -137,7 +137,7 @@ export const EXPECTED = {
   ATTESTATION_VERIFIER_TIMEOUT_MS:
     'an integer from 100 to 60000; required with service, absent with substitute',
   ATTESTATION_VERIFIER_CALLER_SECRET:
-    'a 32-byte key as 43 unpadded base64url characters; required with service when the URL is not on a loopback host, absent with substitute',
+    'a 32-byte key as 43 unpadded base64url characters; required with service when APP_ENV is production or the URL is not on a loopback host, absent with substitute',
 } as const satisfies Record<string, string>;
 
 export type ConfigKey = keyof typeof EXPECTED;

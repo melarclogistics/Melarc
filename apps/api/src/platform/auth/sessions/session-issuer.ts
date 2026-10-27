@@ -91,6 +91,11 @@ export interface IssueSessionRequest<View = undefined> {
   readonly registeredDeviceId?: string;
   /** A Rider's own root-detection result, recorded as a risk signal; never for staff or a Vendor. */
   readonly clientRootSignal?: ClientRootSignal;
+  /**
+   * How a staff sign-in met the second step, recorded as the fact `second_factor` of `auth.session.issued` (audit.md §5.4): `NONE` for
+   * a role that needs none, `TOTP` for a code that was accepted, `TRUSTED_BROWSER` for a trusted browser that stood in for it. Staff only.
+   */
+  readonly secondFactor?: 'NONE' | 'TOTP' | 'TRUSTED_BROWSER';
   /** The writes of the sign-in that commit with the session (see `SignInStep`), in the order they run. */
   readonly steps?: readonly SignInStep[];
   /**
@@ -179,6 +184,16 @@ function checked(request: IssueSessionRequest<unknown>): void {
   if (request.clientRootSignal !== undefined) {
     if (principal.type !== 'RIDER' || !CLIENT_ROOT_SIGNALS.includes(request.clientRootSignal)) {
       throw new TypeError('Only a rider session records a client root signal, one of the three');
+    }
+  }
+  if (request.secondFactor !== undefined) {
+    if (
+      principal.type !== 'STAFF' ||
+      !(['NONE', 'TOTP', 'TRUSTED_BROWSER'] as readonly string[]).includes(request.secondFactor)
+    ) {
+      throw new TypeError(
+        'Only a staff session records how it met the second step, one of the three',
+      );
     }
   }
   const project: unknown = request.project;
@@ -352,9 +367,18 @@ export class SessionIssuer {
           ...(request.registeredDeviceId === undefined
             ? {}
             : { deviceContext: { registered_device_id: request.registeredDeviceId } }),
-          ...(request.clientRootSignal === undefined
+          ...(request.clientRootSignal === undefined && request.secondFactor === undefined
             ? {}
-            : { detail: { client_root_signal: request.clientRootSignal } }),
+            : {
+                detail: {
+                  ...(request.clientRootSignal === undefined
+                    ? {}
+                    : { client_root_signal: request.clientRootSignal }),
+                  ...(request.secondFactor === undefined
+                    ? {}
+                    : { second_factor: request.secondFactor }),
+                },
+              }),
         });
 
         // What ended the earlier session, named by the catalogue (audit.md section 5.4): the vendor's displacement is

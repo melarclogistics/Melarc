@@ -1,0 +1,509 @@
+{
+  "format": "melarc.enrolment-uri-vectors.v1",
+  "source": "generate-enrolment-uri-vectors.mjs; deterministic, see the README",
+  "payload": "melarc-rider://enrol/v1#token=<43 characters of base64url>&challenge=<43 characters of base64url>, exactly 127 ASCII characters",
+  "vectors": [
+    {
+      "name": "the valid payload",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": true
+    },
+    {
+      "name": "another valid payload",
+      "payload": "melarc-rider://enrol/v1#token=mi8PbBioHM3LRWktkHAv6YJkDKni4gOd58uOIbpea64&challenge=HBavsnK31GuMH57koRFPMBZvtj62tNZcz_NHrjxbZFU",
+      "valid": true
+    },
+    {
+      "name": "another version",
+      "payload": "melarc-rider://enrol/v2#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "only version 1"
+    },
+    {
+      "name": "version zero",
+      "payload": "melarc-rider://enrol/v0#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "only version 1"
+    },
+    {
+      "name": "an upper-case version",
+      "payload": "melarc-rider://enrol/V1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a dotted version",
+      "payload": "melarc-rider://enrol/v1.0#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the path is exactly v1"
+    },
+    {
+      "name": "another scheme",
+      "payload": "melarc-vendor://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the exact scheme"
+    },
+    {
+      "name": "a shorter scheme",
+      "payload": "melarc://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the exact scheme"
+    },
+    {
+      "name": "an HTTPS URL",
+      "payload": "https://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the exact scheme: the URI never names a host to call"
+    },
+    {
+      "name": "an upper-case scheme",
+      "payload": "MELARC-RIDER://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a mixed-case scheme",
+      "payload": "Melarc-Rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "one slash after the scheme",
+      "payload": "melarc-rider:/enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the authority form"
+    },
+    {
+      "name": "no slashes after the scheme",
+      "payload": "melarc-rider:enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the authority form"
+    },
+    {
+      "name": "another host",
+      "payload": "melarc-rider://enroll/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the host is exactly enrol"
+    },
+    {
+      "name": "an upper-case host",
+      "payload": "melarc-rider://ENROL/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a capitalised host",
+      "payload": "melarc-rider://Enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a host with a domain",
+      "payload": "melarc-rider://enrol.example.test/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the host is exactly enrol"
+    },
+    {
+      "name": "an API origin as the host",
+      "payload": "melarc-rider://api.example.test/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the URI never tells the app which host to call"
+    },
+    {
+      "name": "a double slash before the version",
+      "payload": "melarc-rider://enrol//v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the path is exactly /v1"
+    },
+    {
+      "name": "a trailing slash after the version",
+      "payload": "melarc-rider://enrol/v1/#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the path is exactly /v1"
+    },
+    {
+      "name": "a further path segment",
+      "payload": "melarc-rider://enrol/v1/x#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the path is exactly /v1"
+    },
+    {
+      "name": "no version",
+      "payload": "melarc-rider://enrol#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the path is exactly /v1"
+    },
+    {
+      "name": "user-info",
+      "payload": "melarc-rider://user@enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no user-info"
+    },
+    {
+      "name": "user-info with a password",
+      "payload": "melarc-rider://user:secret@enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no user-info"
+    },
+    {
+      "name": "a port",
+      "payload": "melarc-rider://enrol:443/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no port"
+    },
+    {
+      "name": "a high port",
+      "payload": "melarc-rider://enrol:8443/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no port"
+    },
+    {
+      "name": "a query instead of the fragment",
+      "payload": "melarc-rider://enrol/v1?token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "a fragment, never a query"
+    },
+    {
+      "name": "a query before the fragment",
+      "payload": "melarc-rider://enrol/v1?x=1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "a fragment, never a query"
+    },
+    {
+      "name": "a trailing ampersand",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&",
+      "valid": false,
+      "why": "exactly two parameters"
+    },
+    {
+      "name": "a leading ampersand",
+      "payload": "melarc-rider://enrol/v1#&token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "exactly two parameters"
+    },
+    {
+      "name": "a space after the fragment mark",
+      "payload": "melarc-rider://enrol/v1# token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "whitespace"
+    },
+    {
+      "name": "no parameters",
+      "payload": "melarc-rider://enrol/v1#",
+      "valid": false,
+      "why": "both parameters are required"
+    },
+    {
+      "name": "no fragment",
+      "payload": "melarc-rider://enrol/v1",
+      "valid": false,
+      "why": "both parameters are required"
+    },
+    {
+      "name": "a missing challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY",
+      "valid": false,
+      "why": "both parameters are required"
+    },
+    {
+      "name": "a missing token",
+      "payload": "melarc-rider://enrol/v1#challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "both parameters are required"
+    },
+    {
+      "name": "a token with an empty challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=",
+      "valid": false,
+      "why": "both parameters are required"
+    },
+    {
+      "name": "a duplicate token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&token=mi8PbBioHM3LRWktkHAv6YJkDKni4gOd58uOIbpea64&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "exactly one token"
+    },
+    {
+      "name": "a duplicate challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&challenge=HBavsnK31GuMH57koRFPMBZvtj62tNZcz_NHrjxbZFU",
+      "valid": false,
+      "why": "exactly one challenge"
+    },
+    {
+      "name": "the parameters reordered",
+      "payload": "melarc-rider://enrol/v1#challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY",
+      "valid": false,
+      "why": "the token first"
+    },
+    {
+      "name": "an extra parameter",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&extra=1",
+      "valid": false,
+      "why": "no extra field"
+    },
+    {
+      "name": "a callback parameter",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&callback=https://api.example.test/cb",
+      "valid": false,
+      "why": "no callback"
+    },
+    {
+      "name": "a redirect parameter",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&redirect=https://api.example.test/",
+      "valid": false,
+      "why": "no redirect"
+    },
+    {
+      "name": "an API origin parameter",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U&api=https://api.example.test",
+      "valid": false,
+      "why": "no API origin"
+    },
+    {
+      "name": "another separator of the same length",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY;challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the parameters are joined by an ampersand"
+    },
+    {
+      "name": "a separator in another case",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&Challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a separator that does not assign",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge:r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the name and the value are joined by an equals sign"
+    },
+    {
+      "name": "a second fragment mark as the separator",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY#challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "exactly one fragment"
+    },
+    {
+      "name": "a space as the separator",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a renamed token",
+      "payload": "melarc-rider://enrol/v1#tok=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the parameter names"
+    },
+    {
+      "name": "a renamed challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&chal=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the parameter names"
+    },
+    {
+      "name": "an upper-case parameter name",
+      "payload": "melarc-rider://enrol/v1#TOKEN=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "compared case-sensitively"
+    },
+    {
+      "name": "a token one character short",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6j&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "exactly 43 characters"
+    },
+    {
+      "name": "a token one character long",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYA&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "exactly 43 characters"
+    },
+    {
+      "name": "a challenge one character short",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8",
+      "valid": false,
+      "why": "exactly 43 characters"
+    },
+    {
+      "name": "a challenge one character long",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8UA",
+      "valid": false,
+      "why": "exactly 43 characters"
+    },
+    {
+      "name": "padding on the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6j=&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "unpadded"
+    },
+    {
+      "name": "padding after the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U=",
+      "valid": false,
+      "why": "unpadded"
+    },
+    {
+      "name": "a plus sign in the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUU+M-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "base64url, not standard base64"
+    },
+    {
+      "name": "a slash in the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUU/M-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "base64url, not standard base64"
+    },
+    {
+      "name": "a plus sign in the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-+dqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "base64url, not standard base64"
+    },
+    {
+      "name": "a slash in the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-/dqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "base64url, not standard base64"
+    },
+    {
+      "name": "a non-zero spare bit in the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jB&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "one value, one spelling: the last character carries two spare bits that must be zero"
+    },
+    {
+      "name": "a non-zero spare bit in the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8B",
+      "valid": false,
+      "why": "one value, one spelling: the last character carries two spare bits that must be zero"
+    },
+    {
+      "name": "a percent-encoded character in the token",
+      "payload": "melarc-rider://enrol/v1#token=%41pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no percent-encoding"
+    },
+    {
+      "name": "a percent-encoded character in the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDap%41",
+      "valid": false,
+      "why": "no percent-encoding"
+    },
+    {
+      "name": "a leading space",
+      "payload": " melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "trims nothing"
+    },
+    {
+      "name": "a trailing space",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U ",
+      "valid": false,
+      "why": "trims nothing"
+    },
+    {
+      "name": "a space inside the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUU M-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a tab inside the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-\tdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a newline inside the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUU\nM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a trailing newline",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U\n",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a trailing carriage return and line feed",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U\r\n",
+      "valid": false,
+      "why": "no whitespace"
+    },
+    {
+      "name": "a non-ASCII letter in the token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUéM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "ASCII only"
+    },
+    {
+      "name": "a zero-width space inside the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-​dqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "ASCII only"
+    },
+    {
+      "name": "a full-width letter in the scheme",
+      "payload": "ｍelarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "ASCII only"
+    },
+    {
+      "name": "128 characters",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8UA",
+      "valid": false,
+      "why": "no more than 127 characters are read before it is refused"
+    },
+    {
+      "name": "a very long input",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "valid": false,
+      "why": "refused after a bounded read"
+    },
+    {
+      "name": "a very long token",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jYab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "refused after a bounded read"
+    },
+    {
+      "name": "a callback as the challenge",
+      "payload": "melarc-rider://enrol/v1#token=ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY&challenge=https://api.example.test/cb",
+      "valid": false,
+      "why": "the URI never names a host to call"
+    },
+    {
+      "name": "an API origin as the token",
+      "payload": "melarc-rider://enrol/v1#token=https://api.example.test/x&challenge=r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U",
+      "valid": false,
+      "why": "the URI never names a host to call"
+    },
+    {
+      "name": "only an API origin",
+      "payload": "https://api.example.test/v1/auth/rider/device/enrol",
+      "valid": false,
+      "why": "not the form"
+    },
+    {
+      "name": "an empty text",
+      "payload": "",
+      "valid": false,
+      "why": "nothing is a payload"
+    },
+    {
+      "name": "the word null",
+      "payload": "null",
+      "valid": false,
+      "why": "not the form"
+    },
+    {
+      "name": "a JSON object",
+      "payload": "{\"token\":\"ab8pBlNfBFSyB7FLQaUUkM-np5BiZtBFIq2AzWBw6jY\",\"challenge\":\"r5j0REGBMu11X7p4-o8-wdqraGboGPeSOCJjhDapJ8U\"}",
+      "valid": false,
+      "why": "not the form"
+    }
+  ]
+}

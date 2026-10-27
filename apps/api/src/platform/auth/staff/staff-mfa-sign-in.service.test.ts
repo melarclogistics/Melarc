@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MfaChallengeExpiredError } from '../mfa/mfa-challenge-errors.js';
 import type { MfaChallengeStore, StoredChallenge } from '../mfa/mfa-challenge-store.js';
 import type { MfaFactorStore, StoredFactor } from '../mfa/mfa-factor-store.js';
-import type { AuditWriter } from '../ports/audit-writer.port.js';
+import type { AuditEventInput, AuditWriter } from '../ports/audit-writer.port.js';
 import type {
   FailedAttempt,
   IdentityDirectory,
@@ -11,7 +11,8 @@ import type {
 } from '../ports/identity-directory.port.js';
 import type { TotpVerdict, TotpVerifier } from '../ports/totp-verifier.port.js';
 import type { TransactionHandle, UnitOfWork } from '../ports/unit-of-work.port.js';
-import type { SessionIssuer } from '../sessions/session-issuer.js';
+import type { IssueSessionRequest, SessionIssuer } from '../sessions/session-issuer.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { StaffMfaSignInService } from './staff-mfa-sign-in.service.js';
 
 /**
@@ -91,6 +92,10 @@ interface Scenario {
   readonly failedAttempt?: FailedAttempt;
   /** The consuming statement fails with this (the table's guard refusing it, or any other failure), instead of answering. */
   readonly consumeError?: Error;
+  /** The trusted browsers the sixth one gives way to (the oldest of five). */
+  readonly replacedIds?: readonly string[];
+  /** Whether the role bundle is privileged when the session is issued (true unless a test says it stopped being). */
+  readonly privileged?: boolean;
 }
 
 const accepted = (): TotpVerdict => ({ outcome: 'ACCEPTED', step: STEP });
@@ -98,11 +103,21 @@ const accepted = (): TotpVerdict => ({ outcome: 'ACCEPTED', step: STEP });
 /** A sentinel that no refusal looks like: the issue was reached and every step passed. */
 class SessionWasIssued extends Error {}
 
+const BROWSER = '0192f0a1-7b3c-7d2e-8f41-a5b6c7d8e9f3';
+const OLDEST = '0192f0a1-7b3c-7d2e-8f41-a5b6c7d8e9f4';
+
 function serviceWith(
   calls: string[],
   scenario: Scenario = {},
-): { service: StaffMfaSignInService; verified: (number | null)[] } {
+): {
+  service: StaffMfaSignInService;
+  verified: (number | null)[];
+  events: AuditEventInput[];
+  issued: IssueSessionRequest<unknown>[];
+} {
   const verified: (number | null)[] = [];
+  const events: AuditEventInput[] = [];
+  const issued: IssueSessionRequest<unknown>[] = [];
   const record =
     <T>(name: string, value: T) =>
     (): Promise<T> => {
@@ -173,6 +188,25 @@ function serviceWith(
     openSeed: record('openSeed', new Uint8Array(20)),
     recordAcceptedStep: record('recordAcceptedStep', scenario.stepRecorded ?? true),
   };
+  const trustedBrowsers: Pick<TrustedBrowserStore, 'issue'> = {
+    issue: (_handle, request) => {
+      calls.push('trustedBrowsers.issue');
+      return Promise.resolve({
+        browser: {
+          id: BROWSER,
+          staffIdentityId: request.staffIdentityId,
+          factorId: request.factorId,
+          label: request.label,
+          createdAt: new Date('2026-10-21T08:00:00Z'),
+          expiresAt: new Date('2026-10-28T08:00:00Z'),
+          lastUsedAt: null,
+          revokedAt: null,
+          revocationCause: null,
+        },
+        replacedIds: scenario.replacedIds ?? [],
+      });
+    },
+  };
   const totp: TotpVerifier = {
     newSeed: () => new Uint8Array(20),
     verify: (_seed, _code, last) => {
@@ -180,11 +214,18 @@ function serviceWith(
       return (scenario.verify ?? accepted)(last);
     },
   };
-  const audit: AuditWriter = { write: record('audit', undefined) };
+  const audit: AuditWriter = {
+    write: (_handle, event) => {
+      calls.push('audit');
+      events.push(event);
+      return Promise.resolve();
+    },
+  };
   // The protocol, as far as this operation can tell: it runs the steps under the identity lock and, when they all pass, issues.
   const issuer: Pick<SessionIssuer, 'issue'> = {
     issue: async (input) => {
       calls.push('issue');
+      issued.push(input);
       for (const step of input.steps ?? []) await step.run(HANDLE, active);
       throw new SessionWasIssued('every step passed');
     },
@@ -198,12 +239,114 @@ function serviceWith(
     issuer,
     audit,
     settings: { integer: () => Promise.resolve(5) },
+    trustedBrowsers,
+    tokens: { issue: () => ({ token: 'T'.repeat(43), hash: new Uint8Array(32) }) },
+    isPrivileged: () => Promise.resolve(scenario.privileged ?? true),
   });
-  return { service, verified };
+  return { service, verified, events, issued };
 }
 
 const complete = (service: StaffMfaSignInService): Promise<unknown> =>
   service.completeSignIn({ challengeId: CHALLENGE, code: '123456' });
+
+describe('the trusted browser of the second step (staff-authentication.md §5.8), against fakes that record what was asked', () => {
+  const remember = (service: StaffMfaSignInService): Promise<unknown> =>
+    service.completeSignIn({
+      challengeId: CHALLENGE,
+      code: '123456',
+      trustBrowser: true,
+      browserLabel: 'Chrome on Windows',
+    });
+
+  // Break caught: a trusted browser made before the proofs are spent, so that a refusal after it (a race for the challenge or the step)
+  // could leave one behind, or one made by a request that did not ask for it.
+  it('makes the trusted browser after the code is spent and the count cleared, in the transaction of the session, and records both events', async () => {
+    const calls: string[] = [];
+    const { service, events, issued } = serviceWith(calls, { replacedIds: [OLDEST] });
+
+    await expect(remember(service)).rejects.toBeInstanceOf(SessionWasIssued);
+
+    const order = ['consume', 'recordAcceptedStep', 'clearFailedAttempts', 'trustedBrowsers.issue'];
+    expect(order.map((name) => calls.indexOf(name))).toEqual(
+      order.map((name) => calls.indexOf(name)).toSorted((a, b) => a - b),
+    );
+    expect(order.every((name) => calls.includes(name))).toBe(true);
+    expect(issued).toHaveLength(1);
+    expect(issued[0]?.secondFactor).toBe('TOTP');
+    expect(events.map((event) => event.code)).toEqual([
+      'auth.mfa.completed',
+      'auth.trusted_browser.revoked',
+      'auth.trusted_browser.issued',
+    ]);
+    expect(events[1]).toMatchObject({
+      actor: { type: 'STAFF', id: IDENTITY },
+      relatedIds: { trusted_browser_id: OLDEST },
+      detail: { cause: 'REPLACED' },
+    });
+    expect(events[2]).toMatchObject({
+      actor: { type: 'STAFF', id: IDENTITY },
+      relatedIds: { trusted_browser_id: BROWSER, factor_id: FACTOR },
+      detail: { label: 'Chrome on Windows' },
+    });
+    // the events carry no credential
+    expect(JSON.stringify(events)).not.toContain('T'.repeat(43));
+  });
+
+  it('makes none unless the person asked, and none for a request that does not say', async () => {
+    const calls: string[] = [];
+    const { service, events } = serviceWith(calls);
+
+    await expect(complete(service)).rejects.toBeInstanceOf(SessionWasIssued);
+    await expect(
+      service.completeSignIn({ challengeId: CHALLENGE, code: '123456', trustBrowser: false }),
+    ).rejects.toBeInstanceOf(SessionWasIssued);
+
+    expect(calls).not.toContain('trustedBrowsers.issue');
+    expect(events.every((event) => !event.code.startsWith('auth.trusted_browser'))).toBe(true);
+  });
+
+  // Break caught: a trusted browser issued although the challenge was spent by another request, or the code's step was already accepted
+  // (a replay), or the credential was locked in the meantime.
+  it.each([
+    ['a challenge another request consumed', { consumed: false }],
+    ['a step another request recorded', { stepRecorded: false }],
+    ['a lock set since the decision', { lockedInTheIssue: true }],
+  ] as const)('makes none for %s', async (_name, scenario) => {
+    const calls: string[] = [];
+    const { service, events } = serviceWith(calls, scenario);
+
+    await expect(remember(service)).rejects.not.toBeInstanceOf(SessionWasIssued);
+
+    expect(calls).not.toContain('trustedBrowsers.issue');
+    expect(events.every((event) => !event.code.startsWith('auth.trusted_browser'))).toBe(true);
+  });
+
+  // Break caught: a role that stopped being privileged between the two steps failing the sign-in with a refused insert (a 500 for a person who
+  // proved their code) instead of being signed in as it is, with no trusted browser.
+  it('makes none for a role that is no longer privileged, and still reaches the session', async () => {
+    const calls: string[] = [];
+    const { service, events } = serviceWith(calls, { privileged: false });
+
+    await expect(remember(service)).rejects.toBeInstanceOf(SessionWasIssued);
+
+    expect(calls).toContain('issue');
+    expect(calls).not.toContain('trustedBrowsers.issue');
+    expect(events.every((event) => !event.code.startsWith('auth.trusted_browser'))).toBe(true);
+  });
+
+  // Break caught: a wrong code that remembers the browser anyway.
+  it('makes none for a wrong code', async () => {
+    const calls: string[] = [];
+    const { service } = serviceWith(calls, {
+      verify: () => ({ outcome: 'REJECTED' }) as unknown as TotpVerdict,
+    });
+
+    await expect(remember(service)).rejects.toMatchObject({ code: 'MFA_PROOF_INVALID' });
+
+    expect(calls).not.toContain('issue');
+    expect(calls).not.toContain('trustedBrowsers.issue');
+  });
+});
 
 describe('the second step of the staff sign-in, against fakes that record what was asked (S0.33)', () => {
   // Break caught: the challenge locked before the identity, which can deadlock against the session issue of a request for the same

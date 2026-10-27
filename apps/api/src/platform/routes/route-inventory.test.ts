@@ -28,28 +28,63 @@ afterEach(async () => {
 
 /** The credential setup operations and the staff sign-in are pages of the Ops Portal, limited in the recovery and the staff sign-in buckets. */
 const OPS_BROWSER = { kind: 'browser', surfaces: ['OPS_PORTAL'] };
+/** The vendor's setup, its additional browser's enrolment and its sign-in are pages of the Vendor PWA. */
+const VENDOR_BROWSER = { kind: 'browser', surfaces: ['VENDOR_PWA'] };
+/** The rider's enrolment, challenge and sign-in are operations of the native Rider app: no `Origin`, no cookie. */
+const RIDER_NATIVE = { kind: 'native' };
 
 describe('the real application', () => {
   // Break caught: a business route appearing by accident, whether through a new controller or a raw
   // registration. Adding a route must change this list on purpose, in the same commit.
-  it('answers exactly the two technical probes, the three credential setup operations, the two staff sign-in steps and the two operations on the caller’s own session and the four reads of S0.35, and declares nothing else', async () => {
+  it('answers exactly the two technical probes, the three credential setup operations, the two staff sign-in steps, the two operations on the caller’s own session, the four reads of S0.35, the three operations of S0.36, the three of S0.37, the four of the trusted browser (staff-authentication.md §5.8), the four of S0.47, the vendor sign-in of S0.48, the four of S0.49, the recovery request of S0.50, its completion (S0.51a), the two administrator recoveries (S0.51b), the two reads of the rider roster (S0.53a), the three acts on a rider’s device (S0.53b, S0.53c, S0.58), the completion of its enrolment (S0.57) and the rider’s sign-in with its challenge (S0.59), and declares nothing else', async () => {
     const { app } = await start();
     const inspection = inspectRoutes(app);
 
     expect(inspection.live).toEqual([
       { method: 'DELETE', path: '/api/v1/auth/session' },
+      { method: 'DELETE', path: '/api/v1/auth/staff/trusted-browsers/:id' },
       { method: 'GET', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/auth/sessions' },
+      { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
+      { method: 'GET', path: '/api/v1/auth/vendor/devices' },
+      { method: 'GET', path: '/api/v1/ops/riders' },
+      { method: 'GET', path: '/api/v1/ops/riders/:riderId' },
+      { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
+      { method: 'GET', path: '/api/v1/ops/vendors' },
+      { method: 'GET', path: '/api/v1/ops/vendors/:id' },
       { method: 'GET', path: '/api/v1/reason-definitions' },
       { method: 'GET', path: '/api/v1/staff-identities' },
       { method: 'GET', path: '/api/v1/staff-identities/:id' },
       { method: 'GET', path: '/api/v1/staff-role-bundles/assignable' },
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
+      { method: 'POST', path: '/api/v1/auth/recovery/complete' },
+      { method: 'POST', path: '/api/v1/auth/recovery/request' },
+      { method: 'POST', path: '/api/v1/auth/rider/device/enrol' },
+      { method: 'POST', path: '/api/v1/auth/rider/sign-in' },
+      { method: 'POST', path: '/api/v1/auth/rider/sign-in/challenge' },
+      { method: 'POST', path: '/api/v1/auth/sessions/:id/revoke' },
       { method: 'POST', path: '/api/v1/auth/staff/setup/credential' },
       { method: 'POST', path: '/api/v1/auth/staff/setup/mfa' },
       { method: 'POST', path: '/api/v1/auth/staff/setup/mfa/begin' },
       { method: 'POST', path: '/api/v1/auth/staff/sign-in' },
       { method: 'POST', path: '/api/v1/auth/staff/sign-in/mfa' },
+      { method: 'POST', path: '/api/v1/auth/vendor/device/enrol' },
+      { method: 'POST', path: '/api/v1/auth/vendor/device/grant' },
+      { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
+      { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
+      { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/revoke' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/credential/recover' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/credential/setup/reissue' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/mfa/reset' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/trusted-browsers/revoke' },
+      { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/recover' },
+      { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/setup/reissue' },
+      { method: 'POST', path: '/api/v1/staff-identities' },
+      { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
     ]);
     expect(inspection.declared).toEqual([
       {
@@ -63,6 +98,13 @@ describe('the real application', () => {
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       {
+        method: 'DELETE',
+        path: '/api/v1/auth/staff/trusted-browsers/:id',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
         method: 'GET',
         path: '/api/v1/auth/session',
         access: 'self',
@@ -71,6 +113,92 @@ describe('the real application', () => {
           activity: 'background',
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/auth/sessions',
+        access: 'permission',
+        permission: 'staff.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          // The tier of the principal's type, decided from the query before it is validated (F03 of 23 October 2026).
+          tier: {
+            byQuery: { param: 'principal_type', tiers: { STAFF: 'P', VENDOR: 'P', RIDER: 'S' } },
+          },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/auth/staff/trusted-browsers',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // S0.49: the vendor's own browsers, from a session of the Vendor PWA.
+      {
+        method: 'GET',
+        path: '/api/v1/auth/vendor/devices',
+        access: 'self',
+        authenticated: { surfaces: ['VENDOR_PWA'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // S0.53a: the two reads of the rider roster, `dispatch.read` at the hubs of the grant, on the browser surface alone: the Rider bundle holds
+      // the key as well, and a rider's bearer credential is not one these operations take.
+      {
+        method: 'GET',
+        path: '/api/v1/ops/riders',
+        access: 'permission',
+        permission: 'dispatch.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/ops/riders/:riderId',
+        access: 'permission',
+        permission: 'dispatch.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'rider_identity', param: 'riderId' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/ops/staff/:id/trusted-browsers',
+        access: 'permission',
+        permission: 'staff.session.revoke',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+          tier: { minimum: 'P' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // S0.47: the two vendor reads, scoped through the organisation's responsible hub.
+      {
+        method: 'GET',
+        path: '/api/v1/ops/vendors',
+        access: 'permission',
+        permission: 'vendor.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/ops/vendors/:id',
+        access: 'permission',
+        permission: 'vendor.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'vendor_account', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
       },
       {
         method: 'GET',
@@ -110,6 +238,59 @@ describe('the real application', () => {
       },
       { method: 'GET', path: '/livez', access: 'technical' },
       { method: 'GET', path: '/readyz', access: 'technical' },
+      // S0.51a: the completion of a recovery link, a page of both surfaces, limited per token in the recovery bucket.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/recovery/complete',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: { kind: 'browser', surfaces: ['OPS_PORTAL', 'VENDOR_PWA'] },
+      },
+      // S0.50: a self-service recovery request, a page of both surfaces, limited per principal type and identifier in the recovery bucket.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/recovery/request',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: { kind: 'browser', surfaces: ['OPS_PORTAL', 'VENDOR_PWA'] },
+      },
+      // S0.57: the handset completes the binding with the grant of the QR code, an operation of the native Rider app limited per token in the
+      // recovery bucket. It issues no session.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/rider/device/enrol',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: RIDER_NATIVE,
+      },
+      // S0.59: the rider's sign-in and the challenge it answers draw on one bucket, keyed on the canonical number whether or not it is a rider's.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/rider/sign-in',
+        access: 'anonymous',
+        bucket: 'rate_limit_rider_challenge',
+        client: RIDER_NATIVE,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/rider/sign-in/challenge',
+        access: 'anonymous',
+        bucket: 'rate_limit_rider_challenge',
+        client: RIDER_NATIVE,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/sessions/:id/revoke',
+        access: 'permission',
+        permission: 'staff.session.revoke',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'session', param: 'id' },
+          tier: { rule: 'session_principal' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       {
         method: 'POST',
         path: '/api/v1/auth/staff/setup/credential',
@@ -144,6 +325,188 @@ describe('the real application', () => {
         access: 'anonymous',
         bucket: 'rate_limit_privileged_mfa',
         client: OPS_BROWSER,
+      },
+      // S0.49: an additional browser redeems its grant, a page of the Vendor PWA, limited in the recovery bucket; a signed-in browser asks
+      // for that grant, and ends another of the account's browsers.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/vendor/device/enrol',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: VENDOR_BROWSER,
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/vendor/device/grant',
+        access: 'self',
+        authenticated: { surfaces: ['VENDOR_PWA'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/auth/vendor/devices/:id/revoke',
+        access: 'self',
+        authenticated: {
+          surfaces: ['VENDOR_PWA'],
+          activity: 'qualifying',
+          record: { entity: 'registered_device', param: 'id' },
+        },
+        // The contract's default security (no override): the surface keeps a Rider's bearer out.
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S0.47: the vendor's own setup, a page of the Vendor PWA, limited in the recovery bucket.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/vendor/setup/credential',
+        access: 'anonymous',
+        bucket: 'rate_limit_recovery',
+        client: VENDOR_BROWSER,
+      },
+      // S0.48: the vendor sign-in, limited per account identifier and browser in its own bucket.
+      {
+        method: 'POST',
+        path: '/api/v1/auth/vendor/sign-in',
+        access: 'anonymous',
+        bucket: 'rate_limit_vendor_signin',
+        client: VENDOR_BROWSER,
+      },
+      // S0.53b, S0.53c: the in-person start of a rider's device binding. The first registration is `staff.device.register` (Senior Ops, or a
+      // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the actor's own hub, for both tiers).
+      {
+        method: 'POST',
+        path: '/api/v1/ops/riders/:riderId/device/register',
+        access: 'permission',
+        permission: 'staff.device.register',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'rider_identity', param: 'riderId' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/ops/riders/:riderId/device/reregister',
+        access: 'permission',
+        permission: 'staff.device.reregister',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'rider_identity', param: 'riderId' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S0.58: the report of a lost or stolen device, `staff.device.revoke` (Ops Staff, Senior Ops or a Platform Admin at the rider's own hub).
+      {
+        method: 'POST',
+        path: '/api/v1/ops/riders/:riderId/device/revoke',
+        access: 'permission',
+        permission: 'staff.device.revoke',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'rider_identity', param: 'riderId' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S0.51b: the administrator's recovery of a staff member's password, Platform Admin at every hub.
+      {
+        method: 'POST',
+        path: '/api/v1/ops/staff/:id/credential/recover',
+        access: 'permission',
+        permission: 'staff.credential.recover',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/ops/staff/:id/credential/setup/reissue',
+        access: 'permission',
+        permission: 'staff.identity.approve',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+          tier: { rule: 'staff_identity_bundle' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/ops/staff/:id/mfa/reset',
+        access: 'permission',
+        permission: 'staff.mfa.reset',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/ops/staff/:id/trusted-browsers/revoke',
+        access: 'permission',
+        permission: 'staff.session.revoke',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+          tier: { minimum: 'P' },
+        },
+        // A browser session with its token, like the read beside it (the audit of 26 October 2026, decision 5): a Rider's bearer is no credential.
+        credentialModes: new Set(['COOKIE']),
+      },
+      // S0.51b: the administrator's recovery of a vendor account's shared secret, Platform Admin at every hub.
+      {
+        method: 'POST',
+        path: '/api/v1/ops/vendors/:id/credential/recover',
+        access: 'permission',
+        permission: 'vendor.credential.recover',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'vendor_account', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S0.47: the re-issue of a vendor's setup grant, the approval authority at the vendor's own hub.
+      {
+        method: 'POST',
+        path: '/api/v1/ops/vendors/:id/credential/setup/reissue',
+        access: 'permission',
+        permission: 'vendor.organization.approve',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'vendor_account', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/staff-identities',
+        access: 'permission',
+        permission: 'staff.identity.create',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/staff-identities/:id/approve',
+        access: 'permission',
+        permission: 'staff.identity.approve',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'staff_identity', param: 'id' },
+          tier: { rule: 'staff_identity_bundle' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
       },
     ]);
     expect(inspection.undeclared).toEqual([]);

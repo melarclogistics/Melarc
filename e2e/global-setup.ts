@@ -50,7 +50,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         certutilRunner(named === undefined || named === '' ? 'certutil' : named),
       );
     }
-    const stack = await startStack(material === undefined ? {} : { tls: material });
+    // The shared stack is the stack of the journeys: the bootstrap administrators, the delivery worker and the capture sink (S0.45).
+    const stack = await startStack({
+      journeys: true,
+      ...(material === undefined ? {} : { tls: material }),
+    });
     describeConnectionForWorkers(stack.connection());
     return async () => {
       try {

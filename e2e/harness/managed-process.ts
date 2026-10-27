@@ -12,8 +12,13 @@ export interface StartOptions {
   /** Everything the process sees. Nothing is inherited from this process. */
   readonly env: Readonly<Record<string, string>>;
   readonly logDirectory: string;
-  /** The process is ready when this URL answers with a success status. */
-  readonly ready: { readonly url: string; readonly timeoutMs: number };
+  /**
+   * The process is ready when this URL answers with a success status, or, for a process with no listener (the delivery worker), when
+   * its standard output holds a line that matches.
+   */
+  readonly ready:
+    | { readonly url: string; readonly timeoutMs: number }
+    | { readonly log: RegExp; readonly timeoutMs: number };
 }
 
 /** The most output kept in memory per stream. The files hold all of it. */
@@ -185,15 +190,23 @@ export class ManagedProcess {
             `${options.name} exited before it was ready (${instance.exitDescription}).${instance.tail()}`,
           );
         }
-        try {
-          const response = await fetch(options.ready.url, { signal: AbortSignal.timeout(1_000) });
-          if (response.ok) return instance;
-        } catch {
-          // Not answering yet.
+        if ('log' in options.ready) {
+          if (options.ready.log.test(instance.out)) return instance;
+        } else {
+          try {
+            const response = await fetch(options.ready.url, { signal: AbortSignal.timeout(1_000) });
+            if (response.ok) return instance;
+          } catch {
+            // Not answering yet.
+          }
         }
         if (Date.now() >= deadline) {
+          const never =
+            'log' in options.ready
+              ? `no line of its output matched ${String(options.ready.log)}`
+              : `${options.ready.url} never answered`;
           throw new Error(
-            `${options.name} was not ready after ${String(options.ready.timeoutMs)} ms: ${options.ready.url} never answered.${instance.tail()}`,
+            `${options.name} was not ready after ${String(options.ready.timeoutMs)} ms: ${never}.${instance.tail()}`,
           );
         }
         await sleep(POLL_MS);

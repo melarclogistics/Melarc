@@ -21,6 +21,7 @@ import {
   SetupGrantExpiredError,
   SetupGrantRequestError,
 } from './setup-grant-errors.js';
+import { mayEndGrant, mayIssueGrant } from './issuing-authority.js';
 import {
   CONTINUATION_PURPOSE,
   EPISODE_PURPOSES,
@@ -28,6 +29,7 @@ import {
   GRANT_TOKEN_HASH_BYTES,
   NO_EXPIRY_PURPOSE,
   PURPOSES_OF_PRINCIPAL,
+  REPLAYED_GRANT_PURPOSE,
   RIDER_DEVICE_PURPOSES,
   SETUP_GRANT_LIFETIME_SETTING,
   isMessagePurpose,
@@ -109,6 +111,8 @@ export interface GrantDelivery {
   readonly destination: string;
   /** The link the principal follows, made from the token that exists nowhere else: the queue seals it with the destination. */
   readonly link: (token: string) => string;
+  /** A vendor's account identifier, which its message carries beside the link (S0.47); absent for every other principal. */
+  readonly accountIdentifier?: string;
 }
 
 export interface IssueGrantRequest {
@@ -122,6 +126,12 @@ export interface IssueGrantRequest {
   readonly continuedFromGrantId?: string | null;
   /** The hash of the attestation challenge issued beside a rider's device grant (32 bytes). */
   readonly attestationChallengeHash?: Uint8Array | null;
+  /**
+   * The idempotency record of the `registerRiderDevice` call whose sealed response holds this grant's token and challenge (S0.53b;
+   * SECURITY_DESIGN.md §14.16). For the first-registration grant alone: the table refuses it on any other purpose, and the database ends
+   * the replay in the statement that takes the grant out of `PENDING`.
+   */
+  readonly idempotencyRecordId?: string | null;
   readonly delivery?: GrantDelivery;
 }
 
@@ -170,6 +180,26 @@ const isOneOf = <T extends string>(values: readonly T[], value: unknown): value 
 function assertAuthentication(handle: TransactionHandle): void {
   const context = securityContextOf(handle);
   if (context.principalType !== 'SYSTEM' || context.taskCapability !== 'authentication') {
+    throw new SetupGrantContextError();
+  }
+}
+
+/**
+ * Issuing a grant is the authentication capability's and, for the grants an administrator issues to another person, the staff member's
+ * own under the key of the operation (S0.36, S0.37; migrations 0029, 0030). The store refuses any other context for the same reason as
+ * above, and consumes and looks up as the authentication capability alone.
+ */
+function assertIssuer(handle: TransactionHandle, purposes: readonly unknown[]): void {
+  const context = securityContextOf(handle);
+  if (!purposes.every((purpose) => mayIssueGrant(context, purpose as SetupGrantPurpose))) {
+    throw new SetupGrantContextError();
+  }
+}
+
+/** Reading the pending grants of purposes and ending them in the transaction of the act that does it: the same two contexts, and each key for the grants of its own acts. */
+function assertEnder(handle: TransactionHandle, purposes: readonly unknown[]): void {
+  const context = securityContextOf(handle);
+  if (!purposes.every((purpose) => mayEndGrant(context, purpose as SetupGrantPurpose))) {
     throw new SetupGrantContextError();
   }
 }
@@ -232,12 +262,12 @@ export class SetupGrantStore {
   }
 
   async issue(handle: TransactionHandle, request: IssueGrantRequest): Promise<IssuedGrant> {
-    assertAuthentication(handle);
+    assertIssuer(handle, [request.purpose]);
     const checked = this.#checked(request);
     const lifetimeMinutes = await this.#lifetime(handle, checked.purpose);
 
     const ended = await this.#endLive(handle, checked.principal, [checked.purpose]);
-    for (const id of ended.superseded) await this.#cancelMessage(handle, id);
+    for (const id of ended.messaged) await this.#cancelMessage(handle, id);
     const supersededGrantId = ended.superseded[0] ?? null;
     // A grant names one lineage, and a continuation's is its source (the table holds it to that: `setup_grant_one_lineage`). The live
     // grant a continuation ends is still ended and still reported, for the event that says so, but it is not named as a predecessor.
@@ -248,13 +278,15 @@ export class SetupGrantStore {
     const inserted = await database.execute(sql`
       with at as (select clock_timestamp() as now)
       insert into setup_grant (id, principal_type, principal_id, purpose, token_hash, issued_at, expires_at, state, issued_by,
-                               episode_id, supersedes_grant_id, continued_from_grant_id, attestation_challenge_hash)
+                               episode_id, supersedes_grant_id, continued_from_grant_id, attestation_challenge_hash,
+                               idempotency_record_id)
       select ${randomUUIDv7(this.#clock)}::uuid, ${checked.principal.type}, ${checked.principal.id}::uuid, ${checked.purpose},
              ${Buffer.from(issued.hash)}::bytea, at.now,
              case when ${lifetimeMinutes}::int is null then null else at.now + make_interval(mins => ${lifetimeMinutes}::int) end,
              'PENDING', ${checked.issuedBy}::uuid, ${checked.episodeId}::uuid, ${predecessorGrantId}::uuid,
              ${checked.continuedFromGrantId}::uuid,
-             ${checked.attestationChallengeHash === null ? null : Buffer.from(checked.attestationChallengeHash)}::bytea
+             ${checked.attestationChallengeHash === null ? null : Buffer.from(checked.attestationChallengeHash)}::bytea,
+             ${checked.idempotencyRecordId}::uuid
         from at
       returning ${COLUMNS}`);
     const grant = grantOf(inserted.rows[0] as unknown as GrantColumns);
@@ -268,6 +300,9 @@ export class SetupGrantStore {
         channel: request.delivery.channel,
         destination: request.delivery.destination,
         link: request.delivery.link(issued.token),
+        ...(request.delivery.accountIdentifier === undefined
+          ? {}
+          : { accountIdentifier: request.delivery.accountIdentifier }),
         expiresAt: grant.expiresAt,
       });
     }
@@ -341,15 +376,38 @@ export class SetupGrantStore {
     principal: PrincipalRef,
     purposes: readonly SetupGrantPurpose[],
   ): Promise<EndedGrants> {
-    assertAuthentication(handle);
+    assertEnder(handle, Array.isArray(purposes) ? purposes : []);
     assertPrincipal(principal);
     if (!Array.isArray(purposes) || purposes.length === 0) {
       throw new SetupGrantRequestError('purposes');
     }
     for (const purpose of purposes) assertPurposeOf(principal, purpose);
     const ended = await this.#endLive(handle, principal, [...new Set(purposes)]);
-    for (const id of ended.superseded) await this.#cancelMessage(handle, id);
-    return ended;
+    for (const id of ended.messaged) await this.#cancelMessage(handle, id);
+    return { superseded: ended.superseded, expired: ended.expired };
+  }
+
+  /**
+   * The `PENDING` grants of a principal of the purposes named, oldest first, whatever their expiry (a lapsed grant stays `PENDING` until
+   * the next issue rewrites it): what a reset that coalesces reports the expiry of. No hash is read.
+   */
+  async findPendingOf(
+    handle: TransactionHandle,
+    principal: PrincipalRef,
+    purposes: readonly SetupGrantPurpose[],
+  ): Promise<readonly StoredGrant[]> {
+    assertEnder(handle, Array.isArray(purposes) ? purposes : []);
+    assertPrincipal(principal);
+    if (!Array.isArray(purposes) || purposes.length === 0) {
+      throw new SetupGrantRequestError('purposes');
+    }
+    for (const purpose of purposes) assertPurposeOf(principal, purpose);
+    const result = await transactionOf(handle).execute(sql`
+      select ${COLUMNS} from setup_grant
+       where principal_type = ${principal.type} and principal_id = ${principal.id}::uuid
+         and purpose = any(${textArray([...new Set(purposes)])}) and state = 'PENDING'
+       order by issued_at, id`);
+    return (result.rows as unknown as GrantColumns[]).map(grantOf);
   }
 
   async findById(handle: TransactionHandle, id: string): Promise<StoredGrant | null> {
@@ -380,6 +438,31 @@ export class SetupGrantStore {
          and (expires_at is null or expires_at > clock_timestamp())`);
     const row = result.rows[0] as unknown as GrantColumns | undefined;
     return row === undefined ? null : grantOf(row);
+  }
+
+  /**
+   * The SHA-256 of the attestation challenge issued with a rider's device grant (S0.57), **for a grant that can be used now**: `PENDING`,
+   * not past its expiry on the database's clock, and of one of the two rider purposes. It is the one thing of a grant that a `StoredGrant`
+   * never carries, and it is read for the one caller that needs it, which gives it to the verifier to find in the evidence (the challenge
+   * itself went to the handset in the QR and is kept nowhere). The grant is found by the token a request presents; an unknown, spent,
+   * superseded or lapsed grant, and a grant of another purpose, is `null`, and which of them it was is not for a caller to learn.
+   * It takes no lock: the challenge of a grant never changes (the table's guard keeps it), so what is read here is what the locked
+   * grant holds, and the transaction of the act judges the grant again under its lock.
+   */
+  async attestationChallengeHashOf(
+    handle: TransactionHandle,
+    tokenHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
+    assertAuthentication(handle);
+    assertTokenHash(tokenHash);
+    const result = await transactionOf(handle).execute(sql`
+      select attestation_challenge_hash from setup_grant
+       where token_hash = ${Buffer.from(tokenHash)} and state = 'PENDING'
+         and purpose = any(${textArray(RIDER_DEVICE_PURPOSES)})
+         and attestation_challenge_hash is not null
+         and (expires_at is null or expires_at > clock_timestamp())`);
+    const row = result.rows[0] as { attestation_challenge_hash: Uint8Array } | undefined;
+    return row === undefined ? null : new Uint8Array(row.attestation_challenge_hash);
   }
 
   /**
@@ -427,6 +510,7 @@ export class SetupGrantStore {
     episodeId: string | null;
     continuedFromGrantId: string | null;
     attestationChallengeHash: Uint8Array | null;
+    idempotencyRecordId: string | null;
   } {
     assertPrincipal(request.principal);
     assertPurposeOf(request.principal, request.purpose);
@@ -435,6 +519,7 @@ export class SetupGrantStore {
     const episodeId = request.episodeId ?? null;
     const continuedFromGrantId = request.continuedFromGrantId ?? null;
     const challenge = request.attestationChallengeHash ?? null;
+    const idempotencyRecordId = request.idempotencyRecordId ?? null;
 
     if (issuedBy !== null && !isUuid(issuedBy)) throw new SetupGrantRequestError('issuedBy');
     if (episodeId !== null && (!isOneOf(EPISODE_PURPOSES, purpose) || !isUuid(episodeId))) {
@@ -454,6 +539,12 @@ export class SetupGrantStore {
     ) {
       throw new SetupGrantRequestError('attestationChallengeHash');
     }
+    if (
+      idempotencyRecordId !== null &&
+      (purpose !== REPLAYED_GRANT_PURPOSE || !isUuid(idempotencyRecordId))
+    ) {
+      throw new SetupGrantRequestError('idempotencyRecordId');
+    }
     if (request.delivery !== undefined) {
       const { delivery } = request;
       if (
@@ -471,6 +562,7 @@ export class SetupGrantStore {
       episodeId,
       continuedFromGrantId,
       attestationChallengeHash: challenge,
+      idempotencyRecordId,
     };
   }
 
@@ -493,7 +585,7 @@ export class SetupGrantStore {
     handle: TransactionHandle,
     principal: PrincipalRef,
     purposes: readonly SetupGrantPurpose[],
-  ): Promise<{ superseded: string[]; expired: string[] }> {
+  ): Promise<{ superseded: string[]; expired: string[]; messaged: string[] }> {
     const result = await transactionOf(handle).execute(sql`
       with locked as (
         select id, expires_at from setup_grant
@@ -504,15 +596,23 @@ export class SetupGrantStore {
       update setup_grant as g
          set state = case when l.expires_at is not null and l.expires_at <= clock_timestamp() then 'EXPIRED' else 'SUPERSEDED' end
         from locked l where g.id = l.id
-      returning g.id, g.state`);
-    const rows = result.rows as { id: string; state: 'EXPIRED' | 'SUPERSEDED' }[];
+      returning g.id, g.state, g.purpose`);
+    const rows = result.rows as {
+      id: string;
+      state: 'EXPIRED' | 'SUPERSEDED';
+      purpose: SetupGrantPurpose;
+    }[];
+    const superseded = rows.filter((row) => row.state === 'SUPERSEDED');
     return {
-      superseded: rows
-        .filter((row) => row.state === 'SUPERSEDED')
-        .map((row) => row.id)
-        .toSorted(),
+      superseded: superseded.map((row) => row.id).toSorted(),
       expired: rows
         .filter((row) => row.state === 'EXPIRED')
+        .map((row) => row.id)
+        .toSorted(),
+      // A grant that travels no message has no job to cancel: the two rider grants are shown as a QR, and their issuing key does not queue
+      // anything (the delivery statements are not run for it, and the policies of the delivery job name no such key).
+      messaged: superseded
+        .filter((row) => isMessagePurpose(row.purpose))
         .map((row) => row.id)
         .toSorted(),
     };

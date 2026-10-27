@@ -23,12 +23,12 @@ import type { TransactionHandle } from '../ports/unit-of-work.port.js';
 import { SessionSnapshotUnreadableError } from './session-errors.js';
 import { ACTIVITY_COALESCE_MS } from './session-parameters.js';
 
-/** The columns a `StoredSession` is made from. The token hash is not among them: nothing that reads a session needs it again. */
-const COLUMNS = sql.raw(
-  `id, principal_type, principal_id, bundle_snapshot, bundle_id, bundle_revision, policy_revision, authorized_hub_ids,
-   registered_device_id, client_root_signal, csrf_token_hash, issued_at, expires_at, last_activity_at, terminated_at,
-   termination_reason`,
-);
+/**
+ * What a `StoredSession` is made from. The login holds no `SELECT` on the columns that are credentials or authority (the token hash,
+ * the synchronizer token's hash, the snapshot, the root signal; migration 0031), so they are read only through
+ * `melarc.session_by_token_hash`, which answers the authentication capability alone. The token hash is not among them: nothing that
+ * reads a session needs it again.
+ */
 
 interface SessionColumns {
   readonly id: string;
@@ -136,6 +136,11 @@ function selection(selector: SessionSelector): SQL {
         );
       }
       return sql`principal_type = ${given.principalType} and principal_id = ${given.principalId}`;
+    case 'device':
+      if (!isUuid(given.registeredDeviceId)) {
+        throw new TypeError('A registered device is selected by its id (a UUID)');
+      }
+      return sql`registered_device_id = ${given.registeredDeviceId}`;
     case 'bundle': {
       if (!isUuid(given.bundleId)) throw new TypeError('A bundle is selected by its id (a UUID)');
       const below = given.belowRevision;
@@ -148,7 +153,9 @@ function selection(selector: SessionSelector): SQL {
       return sql`bundle_id = ${given.bundleId} and bundle_revision < ${below}`;
     }
     default:
-      throw new TypeError('A selection of sessions is by session, by principal or by bundle');
+      throw new TypeError(
+        'A selection of sessions is by session, by principal, by device or by bundle',
+      );
   }
 }
 
@@ -184,6 +191,8 @@ export class PostgresSessionStore implements SessionStore {
     if (!authority.authorizedHubIds.every((hub) => isUuid(hub))) {
       throw new TypeError('The hubs of a session are ids (UUIDs)');
     }
+    // The statement returns the moments the database recorded and nothing that is a credential: the login cannot read those columns
+    // back, and the session returned is the one that was written (the rest of it is what this call was given).
     const result = await transactionOf(transaction).execute(sql`
       insert into session (id, principal_type, principal_id, bundle_snapshot, bundle_id, bundle_revision, policy_revision,
                            authorized_hub_ids, registered_device_id, client_root_signal, token_hash, csrf_token_hash,
@@ -195,16 +204,39 @@ export class PostgresSessionStore implements SessionStore {
               ${Buffer.from(session.tokenHash)},
               ${session.csrfTokenHash === undefined ? null : Buffer.from(session.csrfTokenHash)},
               ${session.issuedAt}, ${session.expiresAt}, ${session.issuedAt})
-      returning ${COLUMNS}`);
-    return sessionOf(result.rows[0] as unknown as SessionColumns);
+      returning id, issued_at, expires_at, last_activity_at, terminated_at, termination_reason`);
+    const stored = result.rows[0] as unknown as Pick<
+      SessionColumns,
+      | 'id'
+      | 'issued_at'
+      | 'expires_at'
+      | 'last_activity_at'
+      | 'terminated_at'
+      | 'termination_reason'
+    >;
+    return sessionOf({
+      ...stored,
+      principal_type: session.principalType,
+      principal_id: session.principalId,
+      bundle_snapshot: authority.snapshot,
+      bundle_id: authority.bundleId,
+      bundle_revision: authority.bundleRevision,
+      policy_revision: authority.policyRevision,
+      authorized_hub_ids: authority.authorizedHubIds,
+      registered_device_id: session.registeredDeviceId ?? null,
+      client_root_signal: session.clientRootSignal ?? null,
+      csrf_token_hash:
+        session.csrfTokenHash === undefined ? null : Buffer.from(session.csrfTokenHash),
+    });
   }
 
   async findByTokenHash(
     transaction: TransactionHandle,
     tokenHash: Uint8Array,
   ): Promise<StoredSession | null> {
-    const result = await transactionOf(transaction).execute(sql`
-      select ${COLUMNS} from session where token_hash = ${Buffer.from(tokenHash)}`);
+    const result = await transactionOf(transaction).execute(
+      sql`select * from melarc.session_by_token_hash(${Buffer.from(tokenHash)}::bytea)`,
+    );
     const row = result.rows[0] as unknown as SessionColumns | undefined;
     return row === undefined ? null : sessionOf(row);
   }

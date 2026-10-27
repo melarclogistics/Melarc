@@ -16,7 +16,7 @@ import {
  * The database side of the bootstrap seed and the resume command (S0.30): the four functions of migration 0019, each called by its
  * name and by no other, in **one transaction** under the `bootstrap` capability, as the provisioning login. The command's own logic
  * (`bootstrap-command.ts`) is written against this port, so that the order of its steps is shown without a database; the adapter below
- * is shown against a real one (`test/database/bootstrap-command.db.test.ts`).
+ * is shown against a real one (`test/database/alone/bootstrap-command.db.test.ts`).
  *
  * What the adapter does with a refusal: a rule the database states (SQLSTATE 55000 with a `reason=` detail) becomes the
  * `BootstrapRefusedError` of that rule; the missing Platform Admin bundle (the foreign key of the identity) becomes

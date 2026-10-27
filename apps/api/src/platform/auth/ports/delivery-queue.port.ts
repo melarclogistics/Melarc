@@ -18,6 +18,11 @@ export interface DeliveryRequest {
   readonly channel: DeliveryChannel;
   readonly destination: string;
   readonly link: string;
+  /**
+   * A vendor message's account identifier, which the vendor signs in with and which the message carries beside the link
+   * (SECURITY_DESIGN.md §13.9a; S0.47). Not a secret. Every vendor message has one and no other message does.
+   */
+  readonly accountIdentifier?: string;
   /** The end of the redemption record: a job is never retried past it. */
   readonly expiresAt: Date;
 }

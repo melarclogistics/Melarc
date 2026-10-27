@@ -884,12 +884,47 @@ describe('loadConfig: origins and the other settings that relate keys', () => {
       ]);
     });
 
-    it('lets a service on a loopback host go without a caller secret', () => {
+    it('lets a service on a loopback host go without a caller secret in a local run', () => {
       expect(
         loadConfig(
           validEnv({
             ATTESTATION_VERIFIER: 'service',
             ATTESTATION_VERIFIER_URL: 'http://127.0.0.1:9100',
+            ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+          }),
+        ).ok,
+      ).toBe(true);
+    });
+
+    // Break caught (S0.56, AC-SLICE-000-55): production reaching a verifier on this very host with no secret. The verifier itself refuses to
+    // start in production without one, so the API that sent none could never be answered, and any process on the host could ask it.
+    it.each(['https://127.0.0.1:9100', 'https://localhost:9100'])(
+      'requires a caller secret in production, even for a service on a loopback host (%s)',
+      (url) => {
+        const env = deployedEnv('production', {
+          ATTESTATION_VERIFIER: 'service',
+          ATTESTATION_VERIFIER_URL: url,
+          ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+        });
+        expect(problemsFor(env)).toEqual([
+          expect.objectContaining({
+            key: 'ATTESTATION_VERIFIER_CALLER_SECRET',
+            problem: 'missing',
+          }),
+        ]);
+        // With the secret given, the verifier's settings are no problem; what production still refuses is the rest of the test's environment.
+        expect(
+          keysOf(problemsFor({ ...env, ATTESTATION_VERIFIER_CALLER_SECRET: randomKey() })),
+        ).not.toContain('ATTESTATION_VERIFIER_CALLER_SECRET');
+      },
+    );
+
+    it('still lets a service on a loopback host go without a caller secret in staging', () => {
+      expect(
+        loadConfig(
+          deployedEnv('staging', {
+            ATTESTATION_VERIFIER: 'service',
+            ATTESTATION_VERIFIER_URL: 'https://127.0.0.1:9100',
             ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
           }),
         ).ok,

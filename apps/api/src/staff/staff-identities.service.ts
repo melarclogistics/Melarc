@@ -10,22 +10,15 @@ import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_SEARCH_LENGTH } from './staff-identity-schemas.js';
 import { staffIdentityEtagOf } from './staff-identity-etag.js';
+import {
+  IDENTITY_COLUMNS as COLUMNS,
+  viewOf,
+  type IdentityRow,
+  type StaffIdentityView,
+} from './staff-identity-view.js';
 import { decodePageToken, encodePageToken } from './staff-identity-page-token.js';
 
-/** One staff identity as the reads answer it (`StaffIdentity`): what the record says, and what the recorded factors say. */
-export interface StaffIdentityView {
-  readonly id: string;
-  readonly work_email: string;
-  readonly full_name: string;
-  readonly phone: string | null;
-  readonly status: string;
-  readonly role_bundle_id: string;
-  readonly primary_hub_id: string | null;
-  readonly mfa_enrolled: boolean;
-  readonly mfa_reset_state: string;
-  readonly created_by: string;
-  readonly approved_by: string | null;
-}
+export type { StaffIdentityView };
 
 export interface StaffListFilter {
   readonly status?: string;
@@ -42,24 +35,6 @@ export interface StaffIdentitiesServiceOptions {
 
 /** The isolation of both reads: the rows, the second-factor facts and the audit are one picture of the data (F02 of 22 October 2026). */
 const ONE_SNAPSHOT = { isolation: 'REPEATABLE READ' } as const;
-
-interface IdentityRow {
-  readonly id: string;
-  readonly work_email: string;
-  readonly full_name: string;
-  readonly phone: string | null;
-  readonly status: string;
-  readonly role_bundle_id: string;
-  readonly primary_hub_id: string | null;
-  readonly created_by: string;
-  readonly approved_by: string | null;
-  readonly version: number;
-  readonly created_at_text: string;
-}
-
-const COLUMNS = sql.raw(
-  `id, work_email, full_name, phone, status, role_bundle_id, primary_hub_id, created_by, approved_by, version, created_at::text as created_at_text`,
-);
 
 function invalid(name: string, rule: string): ApiException {
   return new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
@@ -240,23 +215,4 @@ export class StaffIdentitiesService {
     );
     return (own.rows[0] as { primary_hub_id: string | null } | undefined)?.primary_hub_id ?? null;
   }
-}
-
-function viewOf(
-  row: IdentityRow,
-  posture: { readonly mfaEnrolled: boolean; readonly resetState: string },
-): StaffIdentityView {
-  return {
-    id: row.id,
-    work_email: row.work_email,
-    full_name: row.full_name,
-    phone: row.phone,
-    status: row.status,
-    role_bundle_id: row.role_bundle_id,
-    primary_hub_id: row.primary_hub_id,
-    mfa_enrolled: posture.mfaEnrolled,
-    mfa_reset_state: posture.resetState,
-    created_by: row.created_by,
-    approved_by: row.approved_by,
-  };
 }

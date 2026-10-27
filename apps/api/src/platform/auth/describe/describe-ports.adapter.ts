@@ -199,6 +199,22 @@ export class DescribeIdentityDirectory extends DescribeAdapter implements Identi
   displayName(): Promise<string | null> {
     return refuse('IdentityDirectory', 'displayName');
   }
+
+  vendorOrganizationOf(): Promise<string | null> {
+    return refuse('IdentityDirectory', 'vendorOrganizationOf');
+  }
+
+  registeredChannel(): Promise<never> {
+    return refuse('IdentityDirectory', 'registeredChannel');
+  }
+
+  recoveryEligible(): Promise<boolean> {
+    return refuse('IdentityDirectory', 'recoveryEligible');
+  }
+
+  replaceCredential(): Promise<{ readonly generation: number } | null> {
+    return refuse('IdentityDirectory', 'replaceCredential');
+  }
 }
 
 export class DescribeUnitOfWork extends DescribeAdapter implements UnitOfWork {

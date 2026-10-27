@@ -13,9 +13,10 @@ import type { CompiledFixedPolicy } from './session-authority.js';
  *
  * - It compares only the audiences this build declares a revision for. A build that declares none (the state until the Vendor and
  *   Rider sign-ins are built) is not asked, and is ready as far as policy goes.
- * - **Unable to find out is not superseded.** The read goes through the database; a database that does not answer, or a policy
- *   that was not seeded, makes the check fail as any dependency does (`dependency_unavailable`), and only a revision actually read,
- *   and found above this build's, is `policy_superseded`.
+ * - **Unable to find out is not superseded.** The read goes through the database; a database that does not answer makes the check
+ *   fail as any dependency does (`dependency_unavailable`); a policy that was not seeded is the reference data the seed writes, not
+ *   there yet (`reference_data_missing`, the Product Owner's decision of 25 October 2026, which this check met once the build declared
+ *   the Vendor revision in S0.48); and only a revision actually read, and found above this build's, is `policy_superseded`.
  * - It ends no session and writes nothing: it is a read, under the `authentication` capability (a Vendor or Rider context may not
  *   read the policy tables), in a short transaction of its own.
  */
@@ -58,8 +59,8 @@ export class PolicyReadiness implements ReadinessCheck {
     );
 
     if (floors.some((each) => each.minimum === null)) {
-      // The seed has not written the policy: nothing can be compared, and nothing may be served on a guess.
-      throw new Error('The fixed policy is not seeded');
+      // The seed has not written the policy, which is reference data: nothing can be compared, and nothing may be served on a guess.
+      throw new NotReadyError('reference_data_missing');
     }
     if (floors.some((each) => each.minimum !== null && each.revision < each.minimum)) {
       throw new NotReadyError('policy_superseded');

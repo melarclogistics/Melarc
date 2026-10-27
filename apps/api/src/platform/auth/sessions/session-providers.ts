@@ -15,6 +15,7 @@ import { UNIT_OF_WORK, type UnitOfWork } from '../ports/unit-of-work.port.js';
 import { ReadinessRegistry } from '../../health/readiness.registry.js';
 import { ActivityRecorder } from './activity-recorder.js';
 import { PolicyReadiness } from './policy-readiness.js';
+import { ReferenceDataReadiness } from './reference-data-readiness.js';
 import type { CompiledFixedPolicy } from './session-authority.js';
 import { SESSION_AUTHENTICATOR, SessionAuthenticator } from './session-authenticator.js';
 import { SessionIssuer } from './session-issuer.js';
@@ -28,6 +29,8 @@ export const COMPILED_FIXED_POLICY = Symbol('COMPILED_FIXED_POLICY');
 export const ACTIVITY_RECORDER = Symbol('ACTIVITY_RECORDER');
 /** The readiness check of the fixed policy (`policy-readiness.ts`), registered with the readiness registry when it is built. */
 export const POLICY_READINESS = Symbol('POLICY_READINESS');
+/** The readiness check of the reference data (`reference-data-readiness.ts`), registered with the readiness registry when it is built. */
+export const REFERENCE_DATA_READINESS = Symbol('REFERENCE_DATA_READINESS');
 
 const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
@@ -77,18 +80,49 @@ export const sessionProviders: readonly FactoryProvider[] = [
   {
     // Registered with the probe where there is something to compare: a database to read the floor from, and a revision this build
     // declares for some audience. Created when the application is, so the probe reports `policy_superseded` from its first answer.
+    // A real database, as for the reference data below: the inert composition of a local run or a tool has a unit of work that reads
+    // nothing, and a check over it could only fail (since S0.48 the build declares a Vendor revision).
     provide: POLICY_READINESS,
     useFactory: (
       registry: ReadinessRegistry,
+      database: DatabaseService | undefined,
       unitOfWork: UnitOfWork | undefined,
       compiled: CompiledFixedPolicy,
     ): PolicyReadiness | undefined => {
-      if (unitOfWork === undefined || Object.keys(compiled).length === 0) return undefined;
+      if (
+        database === undefined ||
+        unitOfWork === undefined ||
+        Object.keys(compiled).length === 0
+      ) {
+        return undefined;
+      }
       const check = new PolicyReadiness({ unitOfWork, compiled });
       registry.register(check);
       return check;
     },
-    inject: [ReadinessRegistry, optional(UNIT_OF_WORK), COMPILED_FIXED_POLICY],
+    inject: [
+      ReadinessRegistry,
+      optional(DatabaseService),
+      optional(UNIT_OF_WORK),
+      COMPILED_FIXED_POLICY,
+    ],
+  },
+  {
+    // Registered wherever there is a database to read: an instance over a database the seed has not filled is not ready
+    // (`reference_data_missing`), instead of ready and unable to sign anyone in (the Product Owner's decision of 25 October 2026).
+    provide: REFERENCE_DATA_READINESS,
+    useFactory: (
+      registry: ReadinessRegistry,
+      database: DatabaseService | undefined,
+      unitOfWork: UnitOfWork | undefined,
+    ): ReferenceDataReadiness | undefined => {
+      // A real database to read, and not the inert composition of a local run or a tool, whose unit of work reads nothing.
+      if (database === undefined || unitOfWork === undefined) return undefined;
+      const check = new ReferenceDataReadiness({ unitOfWork });
+      registry.register(check);
+      return check;
+    },
+    inject: [ReadinessRegistry, optional(DatabaseService), optional(UNIT_OF_WORK)],
   },
   {
     provide: SESSION_AUTHENTICATOR,

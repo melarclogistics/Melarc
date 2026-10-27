@@ -5,8 +5,16 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  // The generated API client is machine output, checked for freshness rather than for style.
-  globalIgnores(['**/dist/', '**/coverage/', '**/.turbo/', 'packages/api-client/src/generated/']),
+  // The generated API client is machine output, checked for freshness rather than for style. So is what Gradle writes below the attestation
+  // verifier (its build folders hold an HTML test report with JavaScript of its own, and `.gradle` its caches).
+  globalIgnores([
+    '**/dist/',
+    '**/coverage/',
+    '**/.turbo/',
+    'packages/api-client/src/generated/',
+    'apps/attestation-verifier/**/build/',
+    'apps/attestation-verifier/.gradle/',
+  ]),
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
@@ -133,11 +141,19 @@ export default defineConfig(
             'got',
             'undici',
             'isomorphic-fetch',
-          ].map((name) => ({
-            name,
-            message:
-              'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
-          })),
+          ]
+            .map((name) => ({
+              name,
+              message:
+                'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
+            }))
+            .concat([
+              {
+                name: 'lucide-react',
+                message:
+                  'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
+              },
+            ]),
         },
       ],
       'no-restricted-syntax': [
@@ -160,6 +176,11 @@ export default defineConfig(
       'no-new-func': 'error',
       'no-script-url': 'error',
     },
+  },
+  {
+    // The one file that may import the icon library: the registry that names every icon of the application by its meaning.
+    files: ['apps/ops-web/src/components/ui/icon/icons.ts'],
+    rules: { 'no-restricted-imports': 'off' },
   },
   {
     // Production React code. Test fixtures, such as a component that fails on purpose, break the purity

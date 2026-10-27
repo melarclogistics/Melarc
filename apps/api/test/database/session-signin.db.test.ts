@@ -76,6 +76,10 @@ function fixedDirectory(summary: PrincipalSummary): IdentityDirectory {
     findStaffByCanonicalEmail: () => Promise.resolve(null),
     findVendorAccountByIdentifier: () => Promise.resolve(null),
     findRiderByCanonicalPhone: () => Promise.resolve(null),
+    vendorOrganizationOf: () => Promise.resolve(null),
+    registeredChannel: () => Promise.resolve(null),
+    recoveryEligible: () => Promise.resolve(false),
+    replaceCredential: () => Promise.resolve(null),
     readIdentity: answer,
     // A fixed principal of an audience with no table has no credential to write and no account to name (S0.31).
     establishCredential: () => Promise.resolve(null),

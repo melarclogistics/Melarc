@@ -1,3 +1,7 @@
+import {
+  ATTESTATION_INTEGRITY_CAUSES,
+  ATTESTATION_UNAVAILABLE_CAUSES,
+} from '../auth/ports/attestation-verifier.port.js';
 import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
 
@@ -120,6 +124,43 @@ export const METRIC_DEFINITIONS = Object.freeze({
     kind: 'counter',
     labels: {},
     description: 'Delivery leases taken over after their holder left no outcome.',
+  }),
+  /**
+   * Each answer of the private attestation verifier to the API (S0.56; SECURITY_DESIGN.md §15.2.3), by the outcome class of the port
+   * (`INTERFACE_BROKEN` is an answer that is not in the interface and is thrown as a defect). The verdicts count what was decided, not who:
+   * no key, chain, package or digest is a label.
+   */
+  attestation_verifier_calls_total: define({
+    kind: 'counter',
+    labels: {
+      outcome: [
+        'VERIFIED',
+        'DEVICE_INTEGRITY_FAILED',
+        'DEVICE_SECURITY_UNSUPPORTED',
+        'TRUST_DATA_UNAVAILABLE',
+        'INTERFACE_BROKEN',
+      ],
+    },
+    description: 'Answers of the attestation verifier service, by outcome class.',
+  }),
+  /**
+   * `TRUST_DATA_UNAVAILABLE` by its closed cause (SECURITY_DESIGN.md §15.2.3; OBSERVABILITY_AND_RECOVERY.md §4.3a): stale or missing data and
+   * unloadable roots as the verifier says them, and an unreachable, late or overloaded verifier as the API sees them. The cause is in the
+   * log and here, and never in a response.
+   */
+  attestation_verifier_unavailable_total: define({
+    kind: 'counter',
+    labels: { cause: ATTESTATION_UNAVAILABLE_CAUSES },
+    description: 'Enrolments the attestation verifier could not evaluate, by closed cause.',
+  }),
+  /**
+   * `DEVICE_INTEGRITY_FAILED` by the step of the policy that refused (SECURITY_DESIGN.md §15.2.1): a chain ending at an unknown root is visible
+   * as a rate, and so is a rotation the configuration missed. The cause is also on the audit event, and never in a response.
+   */
+  attestation_integrity_failures_total: define({
+    kind: 'counter',
+    labels: { cause: ATTESTATION_INTEGRITY_CAUSES },
+    description: 'Attestations the verifier refused, by the closed cause of the step that did.',
   }),
   /**
    * The registry's own account of the samples it dropped in production (OB-35), by the reason. The reason is a closed set; the

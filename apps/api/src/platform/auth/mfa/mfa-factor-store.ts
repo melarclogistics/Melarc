@@ -18,8 +18,9 @@ import {
 } from './mfa-vocabulary.js';
 
 /**
- * The columns a `StoredFactor` is made from. **The sealed secret is not among them**: only `openSeed` selects it, and only to open it
- * in memory, so a factor that is returned, logged or cached holds no part of a seed.
+ * The columns a `StoredFactor` is made from. **The sealed secret is not among them**: only `openSeed` reads it (through
+ * `melarc.mfa_factor_sealed_seed`, since the login has no `SELECT` on those columns), and only to open it in memory, so a factor that is
+ * returned, logged or cached holds no part of a seed.
  */
 const COLUMNS = sql.raw(
   `id, staff_identity_id, ordinal, factor_type, status, enrolled_at, revoked_at, last_verified_counter, created_by_purpose, revoked_by,
@@ -125,6 +126,20 @@ function assertAuthentication(handle: TransactionHandle): void {
   }
 }
 
+/**
+ * The reads of an identity's factors and the administrative revocation of one are the authentication capability's and, for
+ * `resetStaffMfa`, the Platform Admin's own staff context under the key `staff.mfa.reset` (S0.37; migration 0030 admits exactly these to
+ * that key). Every other method stays the authentication capability's.
+ */
+const RESET_KEY = 'staff.mfa.reset';
+function assertAuthenticationOrReset(handle: TransactionHandle): void {
+  const context = securityContextOf(handle);
+  const authentication =
+    context.principalType === 'SYSTEM' && context.taskCapability === 'authentication';
+  const reset = context.principalType === 'STAFF' && context.authorizationKey === RESET_KEY;
+  if (!authentication && !reset) throw new MfaFactorContextError();
+}
+
 const assertUuid = (value: unknown, field: string): string => {
   if (!isUuid(value)) throw new MfaFactorRequestError(field);
   return value;
@@ -194,9 +209,10 @@ export class MfaFactorStore {
   async openSeed(handle: TransactionHandle, factorId: string): Promise<Uint8Array | null> {
     assertAuthentication(handle);
     assertUuid(factorId, 'factorId');
-    const result = await transactionOf(handle).execute(sql`
-      select staff_identity_id, secret_ciphertext, secret_nonce, secret_key_version, secret_envelope_version
-        from mfa_factor where id = ${factorId}::uuid and status in ('PENDING', 'ACTIVE')`);
+    // The login holds no `SELECT` on the sealed columns (migration 0031): this reader answers the authentication capability alone.
+    const result = await transactionOf(handle).execute(
+      sql`select * from melarc.mfa_factor_sealed_seed(${factorId}::uuid)`,
+    );
     const row = result.rows[0] as
       | {
           staff_identity_id: string;
@@ -307,7 +323,7 @@ export class MfaFactorStore {
     handle: TransactionHandle,
     request: AdministrativeRevocation,
   ): Promise<StoredFactor | null> {
-    assertAuthentication(handle);
+    assertAuthenticationOrReset(handle);
     const factorId = assertUuid(request.factorId, 'factorId');
     const administratorId = assertUuid(request.administratorId, 'administratorId');
     const episodeId = assertUuid(request.episodeId, 'episodeId');
@@ -344,7 +360,7 @@ export class MfaFactorStore {
     handle: TransactionHandle,
     staffIdentityId: string,
   ): Promise<StoredFactor | null> {
-    assertAuthentication(handle);
+    assertAuthenticationOrReset(handle);
     if (!isUuid(staffIdentityId))
       throw new TypeError('An identity is identified by its id (a UUID)');
     const result = await transactionOf(handle).execute(sql`
@@ -358,7 +374,7 @@ export class MfaFactorStore {
     handle: TransactionHandle,
     staffIdentityId: string,
   ): Promise<StoredFactor | null> {
-    assertAuthentication(handle);
+    assertAuthenticationOrReset(handle);
     if (!isUuid(staffIdentityId))
       throw new TypeError('An identity is identified by its id (a UUID)');
     const result = await transactionOf(handle).execute(sql`
@@ -375,7 +391,7 @@ export class MfaFactorStore {
     handle: TransactionHandle,
     staffIdentityId: string,
   ): Promise<readonly StoredFactor[]> {
-    assertAuthentication(handle);
+    assertAuthenticationOrReset(handle);
     if (!isUuid(staffIdentityId))
       throw new TypeError('An identity is identified by its id (a UUID)');
     const result = await transactionOf(handle).execute(sql`

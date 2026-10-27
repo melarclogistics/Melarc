@@ -11,6 +11,9 @@ import {
   type HashSlot,
 } from '../../src/platform/auth/ports/hash-admission.port.js';
 import { HASHER, type Hasher } from '../../src/platform/auth/ports/hasher.port.js';
+import { UNIT_OF_WORK, type UnitOfWork } from '../../src/platform/auth/ports/unit-of-work.port.js';
+import { TRUSTED_BROWSER_STORE } from '../../src/platform/auth/trusted-browsers/trusted-browser-providers.js';
+import type { TrustedBrowserStore } from '../../src/platform/auth/trusted-browsers/trusted-browser-store.js';
 import { RESERVED_SYSTEM_ACTOR_ID } from '../../src/staff/reserved-system-actor.js';
 import type { RequestOptions, TestResponse } from '../../src/test-support/test-client.js';
 import { decodeBase32 } from '../../src/test-support/base32.js';
@@ -19,8 +22,11 @@ import { grantRow, insertGrant, setGrantState, type GrantRow } from './support/c
 import { delayConsumption, refuseConsumption } from './support/guard-race.js';
 import { insertStaff, staffRow, type StaffRow } from './support/identities.js';
 import { startIntegrationKit, type IntegrationKit } from './support/integration.js';
+import { backendPidOf, waitUntilBlockedBy, waitUntilTrue } from './support/lock-wait.js';
+import { systemContext } from './support/rls-fixture.js';
 import { seedReferenceData } from './support/seeded.js';
 import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
+import { insertVendor, vendorRow } from './support/vendors.js';
 
 /**
  * S0.31, the three credential setup operations against the real application and a real PostgreSQL (`completeStaffCredentialSetup`,
@@ -47,7 +53,17 @@ let admin: pg.Client;
 beforeAll(async () => {
   database = await createTestDatabase();
   await seedReferenceData(database);
-  kit = await startIntegrationKit(database, { poolMax: 4 });
+  // The races of this file hold a row lock until the test has seen the request wait for it (and, for a grant that lapses, until the database's
+  // clock says so): the test ends the wait and not a bound, so the database's lock bound is lengthened for this application alone. Nothing
+  // here tests a timeout, and the bounds of production are untouched (the audit of 26 October 2026, decision 9).
+  kit = await startIntegrationKit(database, {
+    poolMax: 4,
+    env: {
+      DATABASE_LOCK_TIMEOUT_MS: '10000',
+      DATABASE_STATEMENT_TIMEOUT_MS: '12000',
+      DATABASE_TRANSACTION_TIMEOUT_MS: '15000',
+    },
+  });
   admin = clientFor(database.urlFor('postgres'));
   await admin.connect();
 });
@@ -246,9 +262,13 @@ async function raceAgainstChange(
   identityId: string,
   change: string,
   request: () => Promise<TestResponse>,
+  /** What the test needs to be true, on the database's clock, before the lock is let go: a grant's end having passed, for instance. */
+  whileWaiting?: (observer: pg.Client) => Promise<void>,
 ): Promise<TestResponse> {
   const holder = clientFor(database.urlFor('postgres'));
+  const observer = clientFor(database.urlFor('postgres'));
   await holder.connect();
+  await observer.connect();
   try {
     await holder.query('begin');
     await holder.query('select id from staff_identity where id = $1 for no key update', [
@@ -256,13 +276,40 @@ async function raceAgainstChange(
     ]);
     await holder.query(change, [identityId]);
     const pending = request();
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // Committed when the request is seen waiting for the lock, and not after a time it may or may not have taken (audit of 26 October 2026,
+    // decision 9).
+    await waitUntilBlockedBy(observer, await backendPidOf(holder), 'the request', pending);
+    await whileWaiting?.(observer);
     await holder.query('commit');
     return await pending;
   } finally {
     await holder.end();
+    await observer.end();
   }
 }
+
+/**
+ * For `raceAgainstChange`: the grant was still live when the request was seen waiting (so that the request really did look at a live
+ * grant, and a slow machine cannot turn the test into a look at an expired one), and its end has passed on the database's clock before the
+ * lock is let go. The test waits for that moment and does not sleep for it.
+ */
+const lapsesWhileWaiting =
+  (grantId: string) =>
+  async (observer: pg.Client): Promise<void> => {
+    const live = await observer.query<{ ready: boolean }>(
+      'select clock_timestamp() < expires_at as ready from setup_grant where id = $1',
+      [grantId],
+    );
+    expect(live.rows[0]?.ready, 'the grant was still live when the request began to wait').toBe(
+      true,
+    );
+    await waitUntilTrue(
+      observer,
+      'select clock_timestamp() > expires_at as ready from setup_grant where id = $1',
+      [grantId],
+      'the end of the grant',
+    );
+  };
 
 const SUSPEND = "update staff_identity set status = 'SUSPENDED' where id = $1";
 
@@ -419,9 +466,9 @@ describe('completeStaffCredentialSetup: the grant is refused alike for every rea
     const orphan = await grant(randomUUID());
     answers.push({ name: 'orphan', answer: await refusal(orphan.token) });
 
-    const vendor = await grant(randomUUID(), 'VENDOR_CREDENTIAL_SETUP', {
-      principalType: 'VENDOR',
-    });
+    // A real vendor account, which the vendor guard (0035) requires of a vendor grant.
+    const account = (await insertVendor(admin, vendorRow())).accountId;
+    const vendor = await grant(account, 'VENDOR_CREDENTIAL_SETUP', { principalType: 'VENDOR' });
     answers.push({ name: 'another kind of principal', answer: await refusal(vendor.token) });
 
     const credentialed = await identity({
@@ -867,7 +914,9 @@ describe('completeStaffCredentialSetup: a privileged identity', () => {
     const row = await identity();
     const { token, id } = await grant(row.id);
     const holder = clientFor(database.urlFor('postgres'));
+    const observer = clientFor(database.urlFor('postgres'));
     await holder.connect();
+    await observer.connect();
     try {
       await holder.query('begin');
       await holder.query('select id from staff_identity where id = $1 for no key update', [row.id]);
@@ -878,7 +927,8 @@ describe('completeStaffCredentialSetup: a privileged identity', () => {
           return response;
         },
       );
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      // Seen waiting for the lock, which is what "waits for the identity lock" says; nothing is slept.
+      await waitUntilBlockedBy(observer, await backendPidOf(holder), 'the request', request);
 
       expect(finished).toBe(false);
       expect(await grantState(id)).toBe('PENDING');
@@ -887,6 +937,7 @@ describe('completeStaffCredentialSetup: a privileged identity', () => {
       expect((await request).status).toBe(200);
     } finally {
       await holder.end();
+      await observer.end();
     }
     expect((await identityFacts(row.id)).generation).toBe('1');
   });
@@ -1078,6 +1129,62 @@ describe('completeMfaEnrolment', () => {
     );
     expect(replaced).toMatchObject({ enhanced: true, outcome: 'SUCCEEDED' });
     expect(replaced?.detail).toMatchObject({ cause: 'REPLACED' });
+  });
+
+  // Break caught (staff-authentication.md section 5.8, AC-SLICE-000-135): a trusted browser that survives the authenticator it vouched for
+  // being replaced, or a replacement that ends it without a trace.
+  it('ends the trusted browsers bound to the authenticator a proven re-enrolment replaces, with an event for each', async () => {
+    const proof = await awaitingProof();
+    expect(
+      (await post(MFA, { setup_token: proof.mfaToken, totp_code: codeFor(proof.seed) })).status,
+    ).toBe(200);
+    const [first] = await factorsOf(proof.row.id);
+    const store = kit.app.app.get<TrustedBrowserStore>(TRUSTED_BROWSER_STORE, { strict: false });
+    const unitOfWork = kit.app.app.get<UnitOfWork>(UNIT_OF_WORK, { strict: false });
+    const credential = tokens.issue();
+    // The password was set by the operation just before, so the generation is the one it made.
+    const generation = Number(
+      (
+        await kit.observe.one<{ generation: string }>(
+          'select credential_generation::text as generation from staff_identity where id = $1',
+          [proof.row.id],
+        )
+      )?.generation,
+    );
+    const remembered = await unitOfWork.run(systemContext('authentication'), (handle) =>
+      store.issue(handle, {
+        staffIdentityId: proof.row.id,
+        tokenHash: credential.hash,
+        factorId: first?.id ?? '',
+        credentialGeneration: generation,
+        label: 'Chrome on Windows',
+      }),
+    );
+    const reset = await grant(proof.row.id, 'MFA_REENROLMENT', { episodeId: randomUUID() });
+    const second = provisioningOf(await post(BEGIN, { setup_token: reset.token }));
+
+    expect(
+      (await post(MFA, { setup_token: second.mfaToken, totp_code: codeFor(second.seed) })).status,
+    ).toBe(200);
+
+    const browser = await kit.observe.one<{
+      revocation_cause: string | null;
+      revoked_by: string | null;
+    }>('select revocation_cause, revoked_by from trusted_browser where id = $1', [
+      remembered.browser.id,
+    ]);
+    expect(browser).toEqual({ revocation_cause: 'FACTOR_REPLACED', revoked_by: null });
+    const ended = (await auditAbout(proof.row.id)).filter(
+      (event) => event.event_code === 'auth.trusted_browser.revoked',
+    );
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({
+      enhanced: false,
+      outcome: 'SUCCEEDED',
+      actor_type: 'STAFF',
+      actor_id: proof.row.id,
+      detail: { cause: 'FACTOR_REPLACED' },
+    });
   });
 
   // Break caught (the lock order of SECURITY_DESIGN.md §13.10a): a status judged on a read that took no lock, so an identity
@@ -1480,10 +1587,13 @@ describe('a grant that has expired and is still PENDING', () => {
   it('is refused when it expires while the request waits for the identity lock, before the code is verified', async () => {
     const proof = await awaitingProof();
     const continuation = await continuationOf(proof.row.id);
-    await setExpiry(continuation, "clock_timestamp() + interval '1200 milliseconds'");
+    await setExpiry(continuation, "clock_timestamp() + interval '2 seconds'");
 
-    const response = await raceAgainstChange(proof.row.id, 'select $1::uuid as unchanged', () =>
-      post(MFA, { setup_token: proof.mfaToken, totp_code: wrongCode(proof.seed) }),
+    const response = await raceAgainstChange(
+      proof.row.id,
+      'select $1::uuid as unchanged',
+      () => post(MFA, { setup_token: proof.mfaToken, totp_code: wrongCode(proof.seed) }),
+      lapsesWhileWaiting(continuation),
     );
 
     expect(response.status).toBe(422);
@@ -1495,10 +1605,13 @@ describe('a grant that has expired and is still PENDING', () => {
   it('is refused when it expires while the request waits for the identity lock, and no password was set', async () => {
     const row = await identity();
     const { token, id } = await grant(row.id);
-    await setExpiry(id, "clock_timestamp() + interval '1200 milliseconds'");
+    await setExpiry(id, "clock_timestamp() + interval '2 seconds'");
 
-    const response = await raceAgainstChange(row.id, 'select $1::uuid as unchanged', () =>
-      post(CREDENTIAL, { setup_token: token, password: PASSWORD }),
+    const response = await raceAgainstChange(
+      row.id,
+      'select $1::uuid as unchanged',
+      () => post(CREDENTIAL, { setup_token: token, password: PASSWORD }),
+      lapsesWhileWaiting(id),
     );
 
     expect(response.status).toBe(422);

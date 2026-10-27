@@ -57,7 +57,9 @@ const quoted = (values: readonly string[]): string =>
  *   `UPDATE` on the credential columns (which is also what lets the identity lock be taken) and on nothing else. This is a boundary
  *   between application roles, not a claim about the owner role or the migration login.
  * - **`created_by` and `approved_by`** are the maker and the checker of §30.8: the checker is null exactly while the profile is
- *   `PENDING_APPROVAL`, and is never the maker, but for the two seeded bootstrap identities, where both are the reserved system actor.
+ *   `PENDING_APPROVAL`, and is not the maker unless the maker is a Platform Admin (their bundle grants `staff.identity.approve` at tier
+ *   P; migration 0032, the Product Owner's decision of 25 October 2026), and for the two seeded bootstrap identities, where both are the
+ *   reserved system actor.
  *
  * This file is the *shape*. The migration (`0016_staff_identity_and_session.sql`) adds by hand, in the same change: the owner
  * (`melarc_owner`), `ENABLE` and `FORCE ROW LEVEL SECURITY`, the policies (a staff member reads their own row; a `SYSTEM` context
@@ -142,11 +144,9 @@ export const staffIdentity = pgTable(
       'staff_identity_checker_by_status',
       sql`(${table.status} = 'PENDING_APPROVAL') = (${table.approvedBy} IS NULL)`,
     ),
-    // The creator cannot approve their own profile: the two seeded bootstrap records are the exception that holds both actors.
-    check(
-      'staff_identity_checker_is_not_maker',
-      sql`${table.origin} = 'BOOTSTRAP' OR ${table.approvedBy} IS NULL OR ${table.approvedBy} <> ${table.createdBy}`,
-    ),
+    // The rule that the checker is not the maker is the trigger `staff_identity_transition_checker` since migration 0032, because it
+    // looks the maker's grant up and a CHECK cannot: the maker may decide their own profile when their bundle grants the approval at the
+    // Platform Admin tier. The two seeded bootstrap records, which hold both actors, are exempt as before.
     check(
       'staff_identity_credential_whole',
       sql`(${table.credentialHash} IS NULL) = (${table.credentialEstablishedAt} IS NULL)

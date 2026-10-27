@@ -776,7 +776,7 @@ each with an owner and the milestone it must meet. A waiver is not a proof: the 
    workstation, in order; write down what you see, and what you cannot do.
 
    1. **Start the application.** From the repository root: `pnpm install` once, then `pnpm --filter @melarc/ops-web run dev`. Note
-      the address it prints (Vite's default is `http://localhost:5173`). The shell is `/`; the component showcase, which exists only
+      the address it prints (`http://127.0.0.1:5172`). The shell is `/`; the component showcase, which exists only
       in the development server, is `/__showcase`. Nothing here calls the API.
    2. **Write down the environment before you begin**: the date and your name; Windows (`winver`); each browser and its exact version
       (`chrome://version`, `edge://version`, Firefox's About dialog); the screen reader and its version (NVDA: menu, Help, About);
@@ -898,6 +898,8 @@ Result:
 Tests:
 Problem/blocker, if any:
 ```
+
+Tests says what `pnpm run test:affected` chose, what passed and what it left owed, as it printed them, and a gate only when the owner asked for one ([the development loop](../../DEVELOPMENT.md#the-development-loop-and-the-gate)).
 
 Raw logs are kept only when useful for debugging or CI artifacts.
 

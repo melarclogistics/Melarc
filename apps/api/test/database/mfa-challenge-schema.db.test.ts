@@ -469,7 +469,7 @@ describe('the credential’s failed-attempt count and lock time', () => {
 
   // Break caught: the API able to write more of the identity than the two credential records it needs, or unable to take the identity
   // lock; and a read of the columns by another login.
-  it('lets the API runtime read and write these two columns and still not the identity’s origin, status or name', async () => {
+  it('lets the API runtime read and write these two columns and still not the identity’s origin, bundle or name', async () => {
     const held = async (kind: string, column: string): Promise<boolean> =>
       (
         await admin.query<{ held: boolean }>(
@@ -483,8 +483,13 @@ describe('the credential’s failed-attempt count and lock time', () => {
       expect(await held('UPDATE', column), column).toBe(true);
       expect(await held('INSERT', column), column).toBe(false);
     }
-    for (const column of ['status', 'origin', 'full_name', 'role_bundle_id', 'work_email']) {
+    for (const column of ['origin', 'full_name', 'role_bundle_id', 'work_email']) {
       expect(await held('UPDATE', column), column).toBe(false);
+    }
+    // S0.36 (migration 0029): the approver's decision is the status and the checker, written once by the machine of the table and by no
+    // other column; the bundle, the hub and the maker are written at creation and never again.
+    for (const column of ['status', 'approved_by']) {
+      expect(await held('UPDATE', column), column).toBe(true);
     }
   });
 

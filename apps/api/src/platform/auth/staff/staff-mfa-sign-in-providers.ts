@@ -6,10 +6,13 @@ import type { MfaFactorStore } from '../mfa/mfa-factor-store.js';
 import { MFA_CHALLENGE_STORE, MFA_FACTOR_STORE } from '../mfa/mfa-providers.js';
 import { AUDIT_WRITER, type AuditWriter } from '../ports/audit-writer.port.js';
 import { IDENTITY_DIRECTORY, type IdentityDirectory } from '../ports/identity-directory.port.js';
+import { TOKEN_SERVICE, type TokenService } from '../ports/token-service.port.js';
 import { TOTP_VERIFIER, type TotpVerifier } from '../ports/totp-verifier.port.js';
 import { UNIT_OF_WORK, type UnitOfWork } from '../ports/unit-of-work.port.js';
 import type { SessionIssuer } from '../sessions/session-issuer.js';
 import { SESSION_ISSUER } from '../sessions/session-providers.js';
+import { TRUSTED_BROWSER_STORE } from '../trusted-browsers/trusted-browser-providers.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { StaffMfaSignInService } from './staff-mfa-sign-in.service.js';
 
 /** The injection token of the service of `completeStaffMfaSignIn` (S0.33), which its controller asks for. */
@@ -33,6 +36,8 @@ export const staffMfaSignInProviders: readonly FactoryProvider[] = [
       totp: TotpVerifier | undefined,
       issuer: SessionIssuer | undefined,
       audit: AuditWriter | undefined,
+      trustedBrowsers: TrustedBrowserStore | undefined,
+      tokens: TokenService | undefined,
     ): StaffMfaSignInService | undefined =>
       unitOfWork === undefined ||
       directory === undefined ||
@@ -40,7 +45,9 @@ export const staffMfaSignInProviders: readonly FactoryProvider[] = [
       factors === undefined ||
       totp === undefined ||
       issuer === undefined ||
-      audit === undefined
+      audit === undefined ||
+      trustedBrowsers === undefined ||
+      tokens === undefined
         ? undefined
         : new StaffMfaSignInService({
             unitOfWork,
@@ -51,6 +58,8 @@ export const staffMfaSignInProviders: readonly FactoryProvider[] = [
             issuer,
             audit,
             settings: new SettingsReader(),
+            trustedBrowsers,
+            tokens,
           }),
     inject: [
       optional(UNIT_OF_WORK),
@@ -60,6 +69,8 @@ export const staffMfaSignInProviders: readonly FactoryProvider[] = [
       optional(TOTP_VERIFIER),
       optional(SESSION_ISSUER),
       optional(AUDIT_WRITER),
+      optional(TRUSTED_BROWSER_STORE),
+      optional(TOKEN_SERVICE),
     ],
   },
 ];

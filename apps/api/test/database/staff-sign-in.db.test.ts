@@ -19,6 +19,7 @@ import { sameShape } from '../../src/test-support/work-shape.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { insertStaff, staffRow, type StaffRow } from './support/identities.js';
 import { startIntegrationKit, type IntegrationKit } from './support/integration.js';
+import { backendPidOf, waitUntilBlockedBy } from './support/lock-wait.js';
 import { seedReferenceData } from './support/seeded.js';
 import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
 
@@ -323,8 +324,18 @@ describe('a privileged identity is given a challenge and no session (AC-SLICE-00
     expect(response.status).toBe(202);
     expect(response.header('set-cookie')).toBeNull();
     expect(response.setCookies).toEqual([]);
-    const body = response.json() as { challenge_id: string; expires_at: string };
-    expect(Object.keys(body).toSorted()).toEqual(['challenge_id', 'expires_at']);
+    const body = response.json() as {
+      challenge_id: string;
+      expires_at: string;
+      trusted_browser_days: number;
+    };
+    // The challenge says how many days a browser remembered at the next step stays trusted: the server's number, never the screen's.
+    expect(Object.keys(body).toSorted()).toEqual([
+      'challenge_id',
+      'expires_at',
+      'trusted_browser_days',
+    ]);
+    expect(body.trusted_browser_days).toBe(7);
     expect(await sessionsOf(row)).toBe(0);
     const [challenge] = await challengesOf(row);
     expect(challenge).toMatchObject({
@@ -1018,17 +1029,22 @@ async function raceAgainstChange(
   request: () => Promise<TestResponse>,
 ): Promise<TestResponse> {
   const holder = clientFor(database.urlFor('postgres'));
+  const observer = clientFor(database.urlFor('postgres'));
   await holder.connect();
+  await observer.connect();
   try {
     await holder.query('begin');
     await holder.query('select id from staff_identity where id = $1 for no key update', [row.id]);
     await holder.query(change, [row.id, ...values]);
     const pending = request();
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // The change is committed when the request is seen waiting for the lock, and not after some time that it may or may not have taken:
+    // the wait ends when this test says so (the audit of 26 October 2026, decision 9).
+    await waitUntilBlockedBy(observer, await backendPidOf(holder), 'the sign-in', pending);
     await holder.query('commit');
     return await pending;
   } finally {
     await holder.end();
+    await observer.end();
   }
 }
 

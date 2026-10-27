@@ -19,6 +19,7 @@ import { bundleIsPrivileged } from '../sessions/bundle-reader.js';
 import { SetupGrantExpiredError } from '../setup-grants/setup-grant-errors.js';
 import { SetupGrantStore, type StoredGrant } from '../setup-grants/setup-grant-store.js';
 import type { SetupGrantPurpose } from '../setup-grants/setup-grant-vocabulary.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { authenticationContext } from './authentication-context.js';
 import { otpauthUri } from './otpauth.js';
 
@@ -67,6 +68,8 @@ export interface StaffSetupOptions {
   readonly hashAdmission: HashAdmission;
   readonly totp: TotpVerifier;
   readonly audit: AuditWriter;
+  /** Ends the trusted browsers bound to an authenticator that a newly proven one replaces (staff-authentication.md §5.8). */
+  readonly trustedBrowsers: Pick<TrustedBrowserStore, 'revokeAll'>;
 }
 
 export type CredentialSetupOutcome =
@@ -204,7 +207,7 @@ export class StaffSetupService {
     await this.#precheck(context, hash, ENROLMENT_PURPOSES, () => true);
 
     await this.#act(context, async (transaction) => {
-      const { directory, grants, factors, totp, audit } = this.#options;
+      const { directory, grants, factors, totp, audit, trustedBrowsers } = this.#options;
       const grant = await grants.findLiveByTokenHash(transaction, hash);
       if (!usable(grant, ENROLMENT_PURPOSES)) throw invalidGrant();
       const ref: PrincipalRef = { type: 'STAFF', id: grant.principalId };
@@ -252,6 +255,23 @@ export class StaffSetupService {
       });
       for (const replaced of activated.replacedFactorIds) {
         await audit.write(transaction, revoked(ref, replaced, 'ACTIVE', 'REPLACED'));
+      }
+      // Whatever was trusted with the authenticator that was in place stands in for a code that this one does not produce: it ends here,
+      // in the transaction that activates the new one (the trust is bound to the factor, so it would be refused anyway; this says so).
+      for (const id of await trustedBrowsers.revokeAll(transaction, {
+        staffIdentityId: ref.id,
+        cause: 'FACTOR_REPLACED',
+        revokedBy: null,
+      })) {
+        await audit.write(transaction, {
+          code: 'auth.trusted_browser.revoked',
+          enhanced: false,
+          outcome: 'SUCCEEDED',
+          actor: { type: 'STAFF', id: ref.id },
+          object: { type: 'StaffIdentity', id: ref.id },
+          relatedIds: { trusted_browser_id: id },
+          detail: { cause: 'FACTOR_REPLACED' },
+        });
       }
       // The pair of bootstrap administrators complete the bootstrap at their first proof, and only at the first: a factor that was
       // proven and later reset leaves an identity that has been proven before (audit.md §5.4: written once per bootstrap identity).

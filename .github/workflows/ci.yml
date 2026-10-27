@@ -2,9 +2,10 @@
 #
 #   static      formatting, lint, strict types, the migration history, the generated client is current
 #   unit        unit, component and process tests of every workspace, and the repository's own tooling tests
-#   database    the PostgreSQL tests, against a real server
+#   database    the PostgreSQL tests, against a real server (and, for the attested rider enrolment, the real verifier service it builds)
 #   integrated  build, the API against the contract, browser smoke test, the browser-API-database journey;
 #               then the build is described and kept
+#   verifier    the private attestation verifier (a JVM service, S0.55): its vendored library against its checksums, the build and every test
 #   audit       dependency vulnerabilities of high or critical severity
 #   ci          "CI result": waits for all of the above and fails unless every one succeeded
 #
@@ -96,7 +97,7 @@ jobs:
   database:
     name: Database tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     # The PostgreSQL server lives for this job only, and the credentials below protect nothing else: they are
     # generated nowhere and are not used outside this job. The image tag matches infrastructure/postgres/
@@ -131,6 +132,14 @@ jobs:
 
       - name: Set up the toolchain
         uses: ./.github/actions/setup
+
+      # The attested enrolment (S0.57) is tested against the real verifier service, which these tests build from source and start: the JDK comes
+      # from .java-version (Temurin), as in the verifier job, and Gradle from the wrapper, whose distribution is held to a checksum.
+      - name: Set up the JDK
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version-file: .java-version
 
       - name: Database tests
         run: pnpm run test:db
@@ -244,6 +253,31 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
+  verifier:
+    name: Attestation verifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      # The JDK comes from .java-version (Temurin); do not pin a version here. Gradle comes from the wrapper, whose distribution is
+      # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml.
+      - name: Set up the JDK
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+
+      - name: Test the attestation verifier
+        run: pnpm run verifier:test
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
@@ -266,7 +300,7 @@ jobs:
   ci:
     name: CI result
     if: always()
-    needs: [static, unit, database, integrated, audit]
+    needs: [static, unit, database, integrated, audit, verifier]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -286,4 +320,4 @@ jobs:
       - name: Require every mandatory job to have succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/ci-aggregate.ts static unit database integrated audit
+        run: node scripts/ci-aggregate.ts static unit database integrated audit verifier

@@ -1,0 +1,55 @@
+/*
+ * EmptyState (design/COMPONENT_PATTERNS.md section 16). `none` is a success message and takes the success tone; `filtered` is neutral. The meaning is
+ * in the icon, the heading and the words; the colours only support them (DESIGN_SYSTEM section 4.6).
+ */
+.ui-empty-state {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-empty-state--none {
+  border-color: var(--color-status-success-border);
+  background: var(--color-status-success-background);
+  color: var(--color-status-success-foreground);
+}
+
+.ui-empty-state--filtered {
+  border-color: var(--color-status-neutral-border);
+  background: var(--color-status-neutral-background);
+  color: var(--color-status-neutral-foreground);
+}
+
+.ui-empty-state__icon {
+  margin-top: 0.125rem;
+}
+
+.ui-empty-state__body {
+  min-width: 0;
+}
+
+.ui-empty-state__heading {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.ui-empty-state__text {
+  margin: var(--space-1) 0 0;
+}
+
+.ui-empty-state__action {
+  margin-top: var(--space-3);
+}
+
+/* An action link takes the state's text colour, underlined, as in an Alert, so it keeps the contrast the tone was verified for. */
+.ui-empty-state a,
+.ui-empty-state a:hover {
+  color: inherit;
+  text-decoration: underline;
+}

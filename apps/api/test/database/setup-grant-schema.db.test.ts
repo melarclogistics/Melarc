@@ -23,8 +23,11 @@ import { grantRow, insertGrant, setGrantState, type GrantRow } from './support/c
 import { hashOf } from './support/identities.js';
 import { withHandle } from './support/handle.js';
 import { systemContext } from './support/rls-fixture.js';
+import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
 import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
+import { insertRider, insertRiderDevice, riderRow } from './support/riders.js';
+import { insertVendor, SOME_SECRET_HASH, vendorRow } from './support/vendors.js';
 
 /**
  * S0.29, the setup grant (migration 0018, `setup_grant`), against a real PostgreSQL. What the schema itself refuses (the
@@ -37,9 +40,9 @@ let database: TestDatabase;
 let admin: pg.Client;
 let api: BuiltService;
 let work: BuiltService;
-
 beforeAll(async () => {
   database = await createTestDatabase();
+  await seedReferenceData(database);
   admin = clientFor(database.urlFor('postgres'));
   await admin.connect();
   api = buildService(database, { poolMax: 2 });
@@ -94,6 +97,24 @@ const refusalOfInsert = async (row: GrantRow): Promise<Refusal | undefined> => {
 
 const grant = (overrides: Partial<GrantRow> = {}): Promise<GrantRow> =>
   insertGrant(admin, grantRow(overrides));
+/**
+ * A new principal for a vendor grant: an active account of an active organisation, as the vendor guard (0035) requires, holding a secret
+ * for a browser grant and none for a setup.
+ */
+const vendorAccount = async (holdsSecret: boolean): Promise<string> =>
+  (await insertVendor(admin, vendorRow(holdsSecret ? { secretHash: SOME_SECRET_HASH } : {})))
+    .accountId;
+/**
+ * A new principal for a rider grant: a rider in a status a device is bound in, as the rider guard (0040) requires, with no device for a
+ * first registration and a device it holds for a re-registration.
+ */
+const riderPrincipal = async (
+  purpose: 'RIDER_DEVICE_ENROLMENT' | 'RIDER_DEVICE_REREGISTRATION',
+): Promise<string> => {
+  const rider = await insertRider(admin, riderRow());
+  if (purpose === 'RIDER_DEVICE_REREGISTRATION') await insertRiderDevice(admin, rider.id);
+  return rider.id;
+};
 const ago = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 
 const PURPOSES_OF = {
@@ -179,9 +200,23 @@ describe('a setup grant is held to the rules of the domain model', () => {
   it('pairs each purpose with the principal it is for, and with no other', async () => {
     for (const [type, purposes] of Object.entries(PURPOSES_OF)) {
       for (const purpose of purposes) {
-        const rider = type === 'RIDER' ? { attestationChallengeHash: RIDER_CHALLENGE } : {};
+        const rider =
+          type === 'RIDER'
+            ? {
+                attestationChallengeHash: RIDER_CHALLENGE,
+                principalId: await riderPrincipal(
+                  purpose as 'RIDER_DEVICE_ENROLMENT' | 'RIDER_DEVICE_REREGISTRATION',
+                ),
+              }
+            : {};
+        const vendor =
+          type === 'VENDOR'
+            ? { principalId: await vendorAccount(purpose === 'VENDOR_DEVICE_ENROLMENT') }
+            : {};
         expect(
-          await refusalOfInsert(grantRow({ principalType: type as 'STAFF', purpose, ...rider })),
+          await refusalOfInsert(
+            grantRow({ principalType: type as 'STAFF', purpose, ...rider, ...vendor }),
+          ),
         ).toBeUndefined();
       }
     }
@@ -193,12 +228,21 @@ describe('a setup grant is held to the rules of the domain model', () => {
       ['RIDER', 'VENDOR_DEVICE_ENROLMENT'],
       ['RIDER', 'BOOTSTRAP_SETUP'],
     ] as const) {
-      // The challenge belongs to the rider purposes alone, so each row below breaks the pairing and nothing else.
+      // The challenge belongs to the rider purposes alone, so each row below breaks the pairing and nothing else. A vendor row names a
+      // real account and a rider row a real rider, so the guards (0035 and 0040, triggers that run before the table's checks) admit
+      // them and the pairing is what refuses.
+      const principal =
+        type === 'VENDOR'
+          ? { principalId: await vendorAccount(false) }
+          : type === 'RIDER'
+            ? { principalId: await riderPrincipal('RIDER_DEVICE_ENROLMENT') }
+            : {};
       const refusal = await refusalOfInsert(
         grantRow({
           principalType: type,
           purpose,
           attestationChallengeHash: purpose.startsWith('RIDER_') ? RIDER_CHALLENGE : null,
+          ...principal,
         }),
       );
       expect(refusal?.constraint, `${type} ${purpose}`).toBe('setup_grant_purpose_by_principal');
@@ -278,7 +322,11 @@ describe('a setup grant is held to the rules of the domain model', () => {
   // rider's device grant with none, which `completeRiderDeviceEnrolment` could not compare the attested challenge with.
   it('holds an attestation challenge hash of 32 bytes for the two rider device purposes, and for no other', async () => {
     for (const purpose of PURPOSES_OF.RIDER) {
-      const rider = { principalType: 'RIDER', purpose } as const;
+      const rider = {
+        principalType: 'RIDER',
+        purpose,
+        principalId: await riderPrincipal(purpose),
+      } as const;
       expect(
         (await refusalOfInsert(grantRow({ ...rider, attestationChallengeHash: null })))?.constraint,
       ).toBe('setup_grant_attestation_by_purpose');
@@ -327,7 +375,8 @@ describe('a principal has at most one PENDING grant of a purpose', () => {
   });
 
   it('keys the rule on the principal and on the purpose', async () => {
-    const principalId = randomUUID();
+    // A vendor account's id, so the vendor grant below names a real account; the staff grants carry the same id as another principal.
+    const principalId = await vendorAccount(false);
     await grant({ principalId });
     await grant({ principalId: randomUUID() });
     await grant({ principalId, purpose: 'MFA_ENROLMENT' });

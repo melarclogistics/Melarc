@@ -135,7 +135,7 @@ describe('diffRoutes', () => {
 describe('the generated description of the real application', () => {
   // Break caught: a business route documented that does not exist, or the technical probes leaking into
   // a description that is compared with the product contract.
-  it('documents the three credential setup operations, the two staff sign-in steps, the two operations on the caller’s own session and the four reads of S0.35, and nothing else', async () => {
+  it('documents the three credential setup operations, the two staff sign-in steps, the two operations on the caller’s own session, the four reads of S0.35, the three operations of S0.36, the three of S0.37, the four of the trusted browser (staff-authentication.md §5.8), the four of S0.47 (the vendor reads, the re-issue and the vendor’s setup), the vendor sign-in of S0.48, the four of S0.49 (the vendor’s own browsers), the recovery request of S0.50, its completion (S0.51a), the two administrator recoveries (S0.51b), the two reads of the rider roster (S0.53a), the three acts on a rider’s device (S0.53b, S0.53c, S0.58), the completion of its enrolment (S0.57) and the rider’s challenge and sign-in (S0.59), and nothing else', async () => {
     const { app } = await start();
     const document = buildOpenApiDocument(app);
 
@@ -143,20 +143,64 @@ describe('the generated description of the real application', () => {
       Object.entries(document.paths).map(([path, item]) => [
         path,
         Object.keys(item),
-        item.post?.operationId ?? [item.get?.operationId, item.delete?.operationId],
+        (Object.values(item) as { operationId?: string }[]).map(
+          (operation) => operation.operationId,
+        ),
       ]),
     ).toEqual([
-      ['/auth/staff/setup/credential', ['post'], 'completeStaffCredentialSetup'],
-      ['/auth/staff/setup/mfa', ['post'], 'completeMfaEnrolment'],
-      ['/auth/staff/setup/mfa/begin', ['post'], 'beginMfaReenrolment'],
-      ['/auth/staff/sign-in', ['post'], 'staffSignIn'],
-      ['/auth/staff/sign-in/mfa', ['post'], 'completeStaffMfaSignIn'],
+      ['/auth/staff/setup/credential', ['post'], ['completeStaffCredentialSetup']],
+      ['/auth/staff/setup/mfa', ['post'], ['completeMfaEnrolment']],
+      ['/auth/staff/setup/mfa/begin', ['post'], ['beginMfaReenrolment']],
+      // S0.47: the vendor's own setup, beside the staff's.
+      ['/auth/vendor/setup/credential', ['post'], ['completeVendorCredentialSetup']],
+      // S0.48: the vendor sign-in; S0.49: the vendor's own browsers, registered in the same platform module.
+      ['/auth/vendor/sign-in', ['post'], ['vendorSignIn']],
+      ['/auth/vendor/device/grant', ['post'], ['requestAdditionalDeviceGrant']],
+      ['/auth/vendor/device/enrol', ['post'], ['completeAdditionalDeviceEnrolment']],
+      ['/auth/vendor/devices', ['get'], ['listVendorDevices']],
+      ['/auth/vendor/devices/{id}/revoke', ['post'], ['revokeVendorDevice']],
+      // S0.57: the handset completes a rider's device binding; S0.59: the rider's challenge and sign-in, native operations of the Rider app.
+      ['/auth/rider/device/enrol', ['post'], ['completeRiderDeviceEnrolment']],
+      ['/auth/rider/sign-in/challenge', ['post'], ['requestRiderSignInChallenge']],
+      ['/auth/rider/sign-in', ['post'], ['riderSignIn']],
+      ['/auth/staff/sign-in', ['post'], ['staffSignIn']],
+      ['/auth/staff/sign-in/mfa', ['post'], ['completeStaffMfaSignIn']],
       ['/auth/session', ['get', 'delete'], ['getCurrentSession', 'signOut']],
+      // The trusted browser (staff-authentication.md §5.8): a person's own, listed and removed.
+      ['/auth/staff/trusted-browsers', ['get'], ['listTrustedBrowsers']],
+      ['/auth/staff/trusted-browsers/{id}', ['delete'], ['revokeTrustedBrowser']],
+      // S0.50: the self-service recovery request.
+      ['/auth/recovery/request', ['post'], ['requestCredentialRecovery']],
+      ['/auth/recovery/complete', ['post'], ['completeCredentialRecovery']],
+      // S0.53a: the rider roster, the first routes of the `dispatch` module.
+      ['/ops/riders', ['get'], ['listRiders']],
+      ['/ops/riders/{riderId}', ['get'], ['getRider']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
-      ['/staff-role-bundles/assignable', ['get'], ['listAssignableStaffRoleBundles', undefined]],
-      ['/reason-definitions', ['get'], ['listReasonDefinitions', undefined]],
-      ['/staff-identities', ['get'], ['listStaffIdentities', undefined]],
-      ['/staff-identities/{id}', ['get'], ['getStaffIdentity', undefined]],
+      ['/staff-role-bundles/assignable', ['get'], ['listAssignableStaffRoleBundles']],
+      ['/reason-definitions', ['get'], ['listReasonDefinitions']],
+      // S0.36: the maker creates the profile, the checker approves it, and a credential setup is re-issued.
+      ['/staff-identities', ['get', 'post'], ['listStaffIdentities', 'createStaffIdentity']],
+      ['/staff-identities/{id}', ['get'], ['getStaffIdentity']],
+      ['/staff-identities/{id}/approve', ['post'], ['approveStaffIdentity']],
+      ['/ops/staff/{id}/credential/setup/reissue', ['post'], ['reissueStaffCredentialSetup']],
+      // S0.51b: the administrator's recovery of a staff member's password, beside the re-issue.
+      ['/ops/staff/{id}/credential/recover', ['post'], ['recoverStaffCredential']],
+      // S0.37: the sessions of a principal, ending one, and the reset of a staff member's second factor.
+      ['/auth/sessions', ['get'], ['listSessions']],
+      ['/auth/sessions/{id}/revoke', ['post'], ['revokeSession']],
+      ['/ops/staff/{id}/mfa/reset', ['post'], ['resetStaffMfa']],
+      // The trusted browser, for a Platform Admin: another person's, listed and all removed.
+      ['/ops/staff/{id}/trusted-browsers', ['get'], ['listStaffTrustedBrowsers']],
+      ['/ops/staff/{id}/trusted-browsers/revoke', ['post'], ['revokeStaffTrustedBrowsers']],
+      // S0.53b, S0.53c, S0.58: the in-person start of a rider's device binding and the report of its loss, `staff.device.*` and so the staff domain's.
+      ['/ops/riders/{riderId}/device/register', ['post'], ['registerRiderDevice']],
+      ['/ops/riders/{riderId}/device/reregister', ['post'], ['reregisterRiderDevice']],
+      ['/ops/riders/{riderId}/device/revoke', ['post'], ['revokeRiderDevice']],
+      // S0.47: the vendor domain's reads and re-issue.
+      ['/ops/vendors', ['get'], ['listVendorAccounts']],
+      ['/ops/vendors/{id}', ['get'], ['getVendorAccount']],
+      ['/ops/vendors/{id}/credential/setup/reissue', ['post'], ['reissueVendorCredentialSetup']],
+      ['/ops/vendors/{id}/credential/recover', ['post'], ['recoverVendorCredential']],
     ]);
     expect(document.servers).toEqual([{ url: '/api/v1' }]);
     expect(document.info.title).toContain('derived from the implementation');

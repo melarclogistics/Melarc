@@ -101,6 +101,8 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
           'Hub',
           'Setting',
           'ReasonCode',
+          // The status of a vendor account's organisation, which a vendor's recovery is judged on (S0.50, credential-recovery.md 5.7).
+          'VendorOrganization',
         ],
         ['SELECT'],
       ),
@@ -111,8 +113,8 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
       ),
       ...on(
         ['IdempotencyRecord'],
-        ['UPDATE'],
-        'UPDATE that erases the sealed columns only, for the grant just consumed, superseded or invalidated',
+        ['SELECT', 'INSERT', 'UPDATE'],
+        'UPDATE that erases the sealed columns only, for the grant just consumed, superseded or invalidated; and a vendor’s own unsealed record of requestAdditionalDeviceGrant, kept on its behalf (migration 0036, S0.49)',
       ),
       ...on(['AuditEvent'], ['INSERT']),
     ],

@@ -13,11 +13,15 @@ import type {
   LockoutPolicy,
   PrincipalRef,
 } from '../ports/identity-directory.port.js';
+import type { TokenService } from '../ports/token-service.port.js';
 import type { TotpVerifier } from '../ports/totp-verifier.port.js';
 import type { TransactionHandle, UnitOfWork } from '../ports/unit-of-work.port.js';
+import { bundleIsPrivileged } from '../sessions/bundle-reader.js';
 import { currentSessionOf, type CurrentSessionView } from '../sessions/current-session.js';
 import { SessionIssueRefusedError } from '../sessions/session-errors.js';
 import type { IssuedSession, SessionIssuer } from '../sessions/session-issuer.js';
+import { UNRECOGNISED_BROWSER_LABEL } from '../trusted-browsers/trusted-browser-label.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { authenticationContext } from './authentication-context.js';
 import type { StaffSignInOutcome } from './staff-sign-in.service.js';
 
@@ -66,6 +70,15 @@ export interface StaffMfaSignInOptions {
   readonly issuer: Pick<SessionIssuer, 'issue'>;
   readonly audit: AuditWriter;
   readonly settings: Pick<SettingsReader, 'integer'>;
+  /** Records the trusted browser of a person who asked to be remembered (staff-authentication.md §5.8). */
+  readonly trustedBrowsers: Pick<TrustedBrowserStore, 'issue'>;
+  /** Makes the credential of a trusted browser: 32 random bytes, of which only the hash is kept. */
+  readonly tokens: Pick<TokenService, 'issue'>;
+  /**
+   * Whether a role bundle is privileged, read in the issuing transaction (`bundleIsPrivileged`). Only such an identity is ever given a trusted
+   * browser; a role that stopped being privileged between the two steps is signed in as it is and given none.
+   */
+  readonly isPrivileged?: (handle: TransactionHandle, bundleId: string) => Promise<boolean | null>;
 }
 
 /** What the decision found: an answer to raise once the bookkeeping has committed, or a proof to turn into a session. */
@@ -132,6 +145,9 @@ class LockedMeanwhileError extends Error {
  *   so of two requests that present one code, one is accepted), the identity's count is cleared and `auth.mfa.completed` is written.
  *   A request that loses a race for the challenge is `CHALLENGE_UNUSABLE`; one that loses a race for the step is a replay, and is
  *   counted as a wrong code.
+ * - **A person who asked to be remembered (`trust_browser`) is also given a trusted browser** (§5.8), in that same transaction and only
+ *   there: after the code, the challenge and the step are spent and the count is cleared, so a refused code, an expired challenge, a lock
+ *   and a race lost issue none. The credential is made here, shown once in the outcome and kept only as a hash; a sixth removes the oldest.
  */
 export class StaffMfaSignInService {
   readonly #options: StaffMfaSignInOptions;
@@ -143,6 +159,10 @@ export class StaffMfaSignInService {
   async completeSignIn(request: {
     readonly challengeId: string;
     readonly code: string;
+    /** The person asked to be remembered (`trust_browser`); false when the field is absent. */
+    readonly trustBrowser?: boolean;
+    /** The label of the browser, made from its `User-Agent` by a closed list (`trustedBrowserLabel`), never the header. */
+    readonly browserLabel?: string;
   }): Promise<StaffSignInOutcome> {
     const context = authenticationContext();
     const { unitOfWork } = this.#options;
@@ -291,24 +311,42 @@ export class StaffMfaSignInService {
   /** The proved code, turned into the session; the proofs it spends commit with it, and what a race lost is answered as what it is. */
   async #issue(
     context: SecurityContext,
-    request: { readonly challengeId: string; readonly code: string },
+    request: {
+      readonly challengeId: string;
+      readonly code: string;
+      readonly trustBrowser?: boolean;
+      readonly browserLabel?: string;
+    },
     proved: Extract<Decision, { proved: unknown }>['proved'],
   ): Promise<StaffSignInOutcome> {
-    const { directory, challenges, factors, audit, issuer } = this.#options;
+    const {
+      directory,
+      challenges,
+      factors,
+      audit,
+      issuer,
+      trustedBrowsers,
+      tokens,
+      isPrivileged = bundleIsPrivileged,
+    } = this.#options;
     const ref: PrincipalRef = { type: 'STAFF', id: proved.challenge.staffIdentityId };
+    // What the step made, read after the issue committed: set inside the step on every run, so a run that was rolled back leaves nothing.
+    const remembered: { value?: { readonly token: string; readonly expiresAt: Date } } = {};
     let issued: IssuedSession<CurrentSessionView>;
     try {
       issued = await issuer.issue({
         principal: ref,
         correlationId: context.correlationId,
         verifiedCredentialGeneration: proved.challenge.credentialGeneration,
+        secondFactor: 'TOTP',
         // The view is built in the issuing transaction: one that cannot be built takes the session, the challenge and the step it spent,
         // the count it cleared and the success event back with it (the audit of 21 October 2026, A04).
         project: (handle, session) => currentSessionOf(handle, session, directory),
         steps: [
           {
             name: 'the challenge is consumed and the step the code proved is recorded',
-            run: async (handle) => {
+            run: async (handle, locked) => {
+              delete remembered.value;
               // The lock is judged again under the identity's lock: it was read at the decision, and the clear below would wipe one set
               // since.
               if (await directory.isCredentialLocked(handle, ref)) throw new LockedMeanwhileError();
@@ -330,6 +368,45 @@ export class StaffMfaSignInService {
                 relatedIds: { factor_id: proved.factor.id, challenge_id: proved.challenge.id },
                 detail: { factor_type: 'TOTP' },
               });
+              if (
+                request.trustBrowser === true &&
+                (await isPrivileged(handle, locked.bundleId)) === true
+              ) {
+                // After the code, the challenge, the step and the count: the only place a trusted browser is made, in the transaction
+                // that issues the session, so that no refusal and no race lost leaves one behind.
+                const credential = tokens.issue();
+                const made = await trustedBrowsers.issue(handle, {
+                  staffIdentityId: ref.id,
+                  tokenHash: credential.hash,
+                  factorId: proved.factor.id,
+                  credentialGeneration: proved.challenge.credentialGeneration,
+                  label: request.browserLabel ?? UNRECOGNISED_BROWSER_LABEL,
+                });
+                for (const replacedId of made.replacedIds) {
+                  await audit.write(handle, {
+                    code: 'auth.trusted_browser.revoked',
+                    enhanced: false,
+                    outcome: 'SUCCEEDED',
+                    actor: { type: 'STAFF', id: ref.id },
+                    object: { type: 'StaffIdentity', id: ref.id },
+                    relatedIds: { trusted_browser_id: replacedId },
+                    detail: { cause: 'REPLACED' },
+                  });
+                }
+                await audit.write(handle, {
+                  code: 'auth.trusted_browser.issued',
+                  enhanced: false,
+                  outcome: 'SUCCEEDED',
+                  actor: { type: 'STAFF', id: ref.id },
+                  object: { type: 'StaffIdentity', id: ref.id },
+                  relatedIds: { trusted_browser_id: made.browser.id, factor_id: proved.factor.id },
+                  detail: {
+                    label: made.browser.label,
+                    expires_at: made.browser.expiresAt.toISOString(),
+                  },
+                });
+                remembered.value = { token: credential.token, expiresAt: made.browser.expiresAt };
+              }
             },
           },
         ],
@@ -354,7 +431,12 @@ export class StaffMfaSignInService {
       }
       throw error;
     }
-    return { kind: 'SESSION', session: issued, view: issued.view };
+    return {
+      kind: 'SESSION',
+      session: issued,
+      view: issued.view,
+      ...(remembered.value === undefined ? {} : { trustedBrowser: remembered.value }),
+    };
   }
 
   /** What a race lost is answered as what it is, with its bookkeeping committed first. */

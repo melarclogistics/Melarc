@@ -401,6 +401,14 @@ class ReassigningDirectory implements IdentityDirectory {
   isCredentialLocked: IdentityDirectory['isCredentialLocked'] = (...args) =>
     this.inner.isCredentialLocked(...args);
   displayName: IdentityDirectory['displayName'] = (...args) => this.inner.displayName(...args);
+  vendorOrganizationOf: IdentityDirectory['vendorOrganizationOf'] = (...args) =>
+    this.inner.vendorOrganizationOf(...args);
+  registeredChannel: IdentityDirectory['registeredChannel'] = (...args) =>
+    this.inner.registeredChannel(...args);
+  recoveryEligible: IdentityDirectory['recoveryEligible'] = (...args) =>
+    this.inner.recoveryEligible(...args);
+  replaceCredential: IdentityDirectory['replaceCredential'] = (...args) =>
+    this.inner.replaceCredential(...args);
 }
 
 /** A directory that runs something once the identity lock is held, to show what the lock keeps out. */
@@ -440,6 +448,14 @@ class AfterLockDirectory implements IdentityDirectory {
   isCredentialLocked: IdentityDirectory['isCredentialLocked'] = (...args) =>
     this.inner.isCredentialLocked(...args);
   displayName: IdentityDirectory['displayName'] = (...args) => this.inner.displayName(...args);
+  vendorOrganizationOf: IdentityDirectory['vendorOrganizationOf'] = (...args) =>
+    this.inner.vendorOrganizationOf(...args);
+  registeredChannel: IdentityDirectory['registeredChannel'] = (...args) =>
+    this.inner.registeredChannel(...args);
+  recoveryEligible: IdentityDirectory['recoveryEligible'] = (...args) =>
+    this.inner.recoveryEligible(...args);
+  replaceCredential: IdentityDirectory['replaceCredential'] = (...args) =>
+    this.inner.replaceCredential(...args);
 }
 
 describe('an identity reassigned between discovery and lock (§13.10a obligation 11, OB-11)', () => {
@@ -716,6 +732,10 @@ function fixedDirectory(summary: PrincipalSummary): IdentityDirectory {
     findStaffByCanonicalEmail: () => Promise.resolve(null),
     findVendorAccountByIdentifier: () => Promise.resolve(null),
     findRiderByCanonicalPhone: () => Promise.resolve(null),
+    vendorOrganizationOf: () => Promise.resolve(null),
+    registeredChannel: () => Promise.resolve(null),
+    recoveryEligible: () => Promise.resolve(false),
+    replaceCredential: () => Promise.resolve(null),
     readIdentity: answer,
     // A fixed principal of an audience with no table has no credential to write and no account to name (S0.31).
     establishCredential: () => Promise.resolve(null),

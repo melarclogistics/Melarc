@@ -142,14 +142,25 @@ describe('a staff identity is held to the rules of the domain model', () => {
   // address for ever (§6.8: a REJECTED profile releases its work email).
   it('has a canonical work email that is unique among identities that are not REJECTED', async () => {
     const taken = `unique-${randomUUID().slice(0, 8)}@example.test`;
-    await staff({ workEmail: taken, workEmailCanonical: taken });
+    // A pending profile and another identity to reject it: a rejection is the decision of a checker on a profile awaiting one (the machine
+    // of state-machines.md 13.3 allows no other way to REJECTED).
+    const checker = await staff({});
+    await staff({
+      workEmail: taken,
+      workEmailCanonical: taken,
+      status: 'PENDING_APPROVAL',
+      approvedBy: null,
+      credentialHash: null,
+      credentialEstablishedAt: null,
+      credentialGeneration: 0,
+    });
 
     expect(await refusal(() => staff({ workEmail: taken, workEmailCanonical: taken }))).toBe(
       '23505',
     );
     await admin.query(
-      `update staff_identity set status = 'REJECTED' where work_email_canonical = $1`,
-      [taken],
+      `update staff_identity set status = 'REJECTED', approved_by = $2 where work_email_canonical = $1`,
+      [taken, checker.id],
     );
     await staff({ workEmail: taken, workEmailCanonical: taken });
   });
@@ -699,9 +710,12 @@ describe('what the API login reaches, by context', () => {
       'termination_reason',
     ]);
     expect(updatable(await columns('staff_identity'))).toEqual([
+      // S0.36 (migration 0029): the decision of an approver, its status and its checker, held to the machine of state-machines.md 13.3.
+      'status',
       'credential_hash',
       'credential_established_at',
       'credential_generation',
+      'approved_by',
       // S0.32: the credential's failed-attempt count and lock time (migration 0020), and nothing else.
       'failed_attempt_count',
       'locked_until',
@@ -744,8 +758,14 @@ describe('what the API login reaches, by context', () => {
         sql`update session set token_hash = ${hashOf('x')} where id = ${ownerSession.id}`,
       ),
     ).toBe('42501');
+    // (The status and the checker have been updatable since S0.36, held by the table's machine; the bundle, the name and the origin are not.)
     expect(
-      await attempt(sql`update staff_identity set status = 'SUSPENDED' where id = ${owner}`),
+      await attempt(sql`update staff_identity set full_name = 'Renamed' where id = ${owner}`),
+    ).toBe('42501');
+    expect(
+      await attempt(
+        sql`update staff_identity set role_bundle_id = role_bundle_id where id = ${owner}`,
+      ),
     ).toBe('42501');
     expect(
       await attempt(sql`update staff_identity set origin = 'BOOTSTRAP' where id = ${owner}`),

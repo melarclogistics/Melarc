@@ -16,6 +16,7 @@ import {
   SetupGrantStore,
   type IssueGrantRequest,
 } from '../../src/platform/auth/setup-grants/setup-grant-store.js';
+import { INERT_DEADLINES } from '../../src/platform/config/inert-config.js';
 import { serverErrorIn } from '../../src/platform/database/database-failures.js';
 import { PostgresDeliveryQueue } from '../../src/platform/delivery/postgres.delivery-queue.adapter.js';
 import { SettingsReader } from '../../src/platform/settings/settings-reader.js';
@@ -24,6 +25,7 @@ import { openAdmin, type Admin } from './support/admin.js';
 import { withHandle } from './support/handle.js';
 import { delayConsumption, refuseConsumption } from './support/guard-race.js';
 import { hashOf } from './support/identities.js';
+import { backendPidOf, waitUntilBlockedBy, waitUntilTrue } from './support/lock-wait.js';
 import { observe, type Observer } from './support/observe.js';
 import { systemContext } from './support/rls-fixture.js';
 import { seedReferenceData } from './support/seeded.js';
@@ -51,7 +53,17 @@ const staff = (): PrincipalRef => ({ type: 'STAFF', id: randomUUID() });
 beforeAll(async () => {
   database = await createTestDatabase();
   await seedReferenceData(database);
-  api = buildService(database, { poolMax: 6 });
+  // The race of the lapsing grant ends when the test says so (it sees the decisions wait, and then waits for the database's clock): the lock
+  // bound is lengthened for this service alone, and the bounds of production are untouched (audit of 26 October 2026, decision 9).
+  api = buildService(database, {
+    poolMax: 6,
+    deadlines: {
+      ...INERT_DEADLINES,
+      lockTimeoutMs: 10_000,
+      statementTimeoutMs: 12_000,
+      transactionTimeoutMs: 15_000,
+    },
+  });
   admin = await openAdmin(database);
   observer = await observe(database);
   const clock = new SystemClock();
@@ -362,7 +374,14 @@ describe('issuing a grant', () => {
   });
 
   it('issues a rider’s device grant with the hash of its attestation challenge', async () => {
-    const principal: PrincipalRef = { type: 'RIDER', id: randomUUID() };
+    // A rider who exists, as the rider guard (0040) requires of every writer of a rider's grant, with no device yet.
+    const riderId = randomUUID();
+    await admin.query(
+      `insert into rider_identity (id, phone, full_name, status, primary_hub_id)
+       values ($1, $2, 'Store test rider', 'ACTIVE', (select id from hub limit 1))`,
+      [riderId, `+999${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`],
+    );
+    const principal: PrincipalRef = { type: 'RIDER', id: riderId };
 
     const issued = await issue({
       principal,
@@ -466,10 +485,18 @@ describe('issuing a grant', () => {
         'supersedePending',
         (handle) => store.supersedePending(handle, staff(), ['STAFF_CREDENTIAL_SETUP']),
       ],
+      [
+        'findPendingOf',
+        (handle) => store.findPendingOf(handle, staff(), ['MFA_ENROLMENT', 'MFA_REENROLMENT']),
+      ],
       ['findById', (handle) => store.findById(handle, randomUUID())],
       ['findByTokenHash', (handle) => store.findByTokenHash(handle, hashOf('x'))],
       ['findLiveByTokenHash', (handle) => store.findLiveByTokenHash(handle, hashOf('x'))],
       ['lockLive', (handle) => store.lockLive(handle, hashOf('x'))],
+      [
+        'attestationChallengeHashOf',
+        (handle) => store.attestationChallengeHashOf(handle, hashOf('x')),
+      ],
     ];
     const named = Object.getOwnPropertyNames(SetupGrantStore.prototype).filter(
       (name) => name !== 'constructor',
@@ -765,9 +792,11 @@ describe('a grant that can be used now', () => {
   it('judges the expiry on the time after a wait for a lock held on an unchanged row', async () => {
     const lapsing = await issue({ principal: staff(), purpose: 'STAFF_CREDENTIAL_SETUP' });
     const lasting = await issue({ principal: staff(), purpose: 'STAFF_CREDENTIAL_SETUP' });
-    await expireAt(lapsing.grant.id, "clock_timestamp() + interval '1200 milliseconds'");
+    await expireAt(lapsing.grant.id, "clock_timestamp() + interval '2 seconds'");
     const holder = clientFor(database.urlFor('postgres'));
+    const watcher = clientFor(database.urlFor('postgres'));
     await holder.connect();
+    await watcher.connect();
     try {
       await holder.query('begin');
       await holder.query(
@@ -775,7 +804,21 @@ describe('a grant that can be used now', () => {
         [[lapsing.grant.id, lasting.grant.id]],
       );
       const waiting = Promise.all([lockedBy(lapsing.token), lockedBy(lasting.token)]);
-      await new Promise((resolve) => setTimeout(resolve, 1_800));
+      await waitUntilBlockedBy(watcher, await backendPidOf(holder), 'the two decisions', waiting);
+      // They began to wait before the grant ended, which is what makes this a race and not a grant that had already lapsed.
+      const before = await watcher.query<{ ready: boolean }>(
+        'select clock_timestamp() < expires_at as ready from setup_grant where id = $1',
+        [lapsing.grant.id],
+      );
+      expect(before.rows[0]?.ready, 'the decisions began to wait before the grant ended').toBe(
+        true,
+      );
+      await waitUntilTrue(
+        watcher,
+        'select clock_timestamp() > expires_at as ready from setup_grant where id = $1',
+        [lapsing.grant.id],
+        'the end of the grant',
+      );
       await holder.query('commit');
 
       const [lapsed, kept] = await waiting;
@@ -783,7 +826,96 @@ describe('a grant that can be used now', () => {
       expect(kept?.id).toBe(lasting.grant.id);
     } finally {
       await holder.end();
+      await watcher.end();
     }
+  });
+});
+
+/**
+ * S0.57: the one thing `completeRiderDeviceEnrolment` needs of a rider's device grant that a `StoredGrant` never carries, the hash of the
+ * attestation challenge issued with it, which the verifier is asked to find in the evidence. It is read for a grant that can be used now
+ * and for no other, by the token a request presents, and nothing else of the grant comes with it.
+ */
+describe('the attestation challenge of a rider’s device grant', () => {
+  async function rider(): Promise<PrincipalRef> {
+    const id = randomUUID();
+    await admin.query(
+      `insert into rider_identity (id, phone, full_name, status, primary_hub_id)
+       values ($1, $2, 'Challenge test rider', 'ACTIVE', (select id from hub limit 1))`,
+      [id, `+999${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`],
+    );
+    return { type: 'RIDER', id };
+  }
+  const challengeBy = (token: string) =>
+    inTransaction((handle) =>
+      store.attestationChallengeHashOf(handle, tokens.hash(token) ?? new Uint8Array(32)),
+    );
+
+  // Break caught: a challenge read for a grant that cannot be used any more (the evidence of a spent grant is never evaluated), a hash of
+  // another grant, or a challenge invented for a grant that carries none.
+  it('gives the hash of the challenge of a live rider grant, and nothing for a grant that is spent, replaced, lapsed, unknown or not a rider’s', async () => {
+    const challenge = hashOf('the challenge of the live grant');
+    const live = await issue({
+      principal: await rider(),
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: challenge,
+    });
+    const consumedFor = await rider();
+    const consumed = await issue({
+      principal: consumedFor,
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: hashOf('consumed'),
+    });
+    await consume(consumedFor, 'RIDER_DEVICE_ENROLMENT', consumed.token);
+    const replacedFor = await rider();
+    const replaced = await issue({
+      principal: replacedFor,
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: hashOf('replaced'),
+    });
+    await issue({
+      principal: replacedFor,
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: hashOf('the replacement'),
+    });
+    const lapsed = await issue({
+      principal: await rider(),
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: hashOf('lapsed'),
+    });
+    await age(lapsed.grant.id, 60);
+    const staffGrant = await issue({ principal: staff(), purpose: 'STAFF_CREDENTIAL_SETUP' });
+
+    const found = await challengeBy(live.token);
+    expect(found).not.toBeNull();
+    expect(Buffer.from(found ?? new Uint8Array()).equals(Buffer.from(challenge))).toBe(true);
+    for (const token of [
+      consumed.token,
+      replaced.token,
+      lapsed.token,
+      staffGrant.token,
+      tokens.issue().token,
+    ]) {
+      expect(await challengeBy(token)).toBeNull();
+    }
+  });
+
+  // Break caught: a hash read in a context other than the authentication capability's, where row-level security would hide the grant and the
+  // store must say so rather than answer as if there were none (the refusal of every method is also pinned for all of them, above).
+  it('is the authentication capability’s alone', async () => {
+    const live = await issue({
+      principal: await rider(),
+      purpose: 'RIDER_DEVICE_ENROLMENT',
+      attestationChallengeHash: hashOf('x'),
+    });
+
+    await expect(
+      inTransaction(
+        (handle) =>
+          store.attestationChallengeHashOf(handle, tokens.hash(live.token) ?? new Uint8Array(32)),
+        systemContext('rate_limit'),
+      ),
+    ).rejects.toBeInstanceOf(SetupGrantContextError);
   });
 });
 
@@ -844,10 +976,14 @@ describe('what the store offers', () => {
     );
 
     expect(methods.toSorted()).toEqual([
+      // S0.57: the challenge hash of one live rider grant, by the token a request presents.
+      'attestationChallengeHashOf',
       'consume',
       'findById',
       'findByTokenHash',
       'findLiveByTokenHash',
+      // S0.37: the pending grants of one principal, which the reset ends (by purpose, never a list of principals).
+      'findPendingOf',
       'issue',
       'lockLive',
       'supersedePending',

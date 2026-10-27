@@ -45,7 +45,12 @@ function requestedEngines(value: string | undefined): Engine[] {
  *   shell       the application shell, against the production build served the way a static host would serve it.
  *               It needs no API and no database: the shell calls neither.
  *   components  the real components in the development-only showcase, which the production build does not contain
- *               (test/build.test.ts proves that), so they run against the Vite development server.
+ *               (test/build.test.ts proves that), so they run against the Vite development server. The secrets and dialogs specs
+ *               are the same showcase in files of their own.
+ *   pre-sign-in the five screens a person reaches with no session, against the production build and, in a project of its own,
+ *               the development server (strict mode), with a stand-in for the API.
+ *   staff       the six signed-in identity screens (S0.44), the same two ways, with a stateful stand-in for the API.
+ *   riders      the four rider screens (S0.60), the same two ways, with a stateful stand-in for the API.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -59,6 +64,9 @@ export default defineConfig({
   workers: 2,
   reporter: 'list',
   use: {
+    // A trace keeps the requests and responses of a failed test. That is accepted here because every page these tests open is the
+    // synthetic showcase or a stubbed shell: no real credential, token or seed is typed or received in them. It is not an authorization
+    // for a test that does (S0.43's sign-in, a real seed): such a test turns tracing, screenshots and video off for its own context.
     trace: 'retain-on-failure',
   },
   projects: requestedEngines(process.env.MELARC_BROWSERS).flatMap((engine) => [
@@ -70,6 +78,68 @@ export default defineConfig({
     {
       name: `components-${engine}`,
       testMatch: 'components.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The form components, the one-time secret and the QR code of the showcase (S0.39): the same server, their own spec.
+      name: `secrets-${engine}`,
+      testMatch: 'secrets.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The dialogs and the reason and confirmation workflow of the showcase (S0.41): what only a real browser can show of a modal.
+      name: `dialogs-${engine}`,
+      testMatch: 'dialogs.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The five pre-sign-in screens (S0.43) against the production build, with a stand-in for the API.
+      name: `pre-sign-in-${engine}`,
+      testMatch: 'pre-sign-in.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server, where React runs every effect twice: a page that reads a grant from a fragment is exactly
+      // where that shows.
+      name: `pre-sign-in-dev-${engine}`,
+      testMatch: 'pre-sign-in.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The six signed-in identity screens (S0.44) against the production build, with a stateful stand-in for the API.
+      name: `staff-${engine}`,
+      testMatch: 'staff.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice).
+      name: `staff-dev-${engine}`,
+      testMatch: 'staff.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The two recovery screens and the two vendor screens (S0.52) against the production build, with stand-ins for the API.
+      name: `recovery-${engine}`,
+      testMatch: 'recovery.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server: the recovery link is read from a fragment, where strict mode shows.
+      name: `recovery-dev-${engine}`,
+      testMatch: 'recovery.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The four rider screens (S0.60) against the production build, with a stateful stand-in for the API: the enrolment code as the browser
+      // painted it, and everywhere it could be left.
+      name: `riders-${engine}`,
+      testMatch: 'riders.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, which a page that holds a credential must survive).
+      name: `riders-dev-${engine}`,
+      testMatch: 'riders.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),

@@ -1,0 +1,38 @@
+# Every version is pinned and exact, and gradle/verification-metadata.xml pins the checksum of every artifact these resolve to.
+#
+# The vendored library (third_party/keyattestation, release v0.4) was built with Kotlin 2.2.0 and BouncyCastle 1.78.1. Both are newer here,
+# on purpose: BouncyCastle before 1.85 resets the nesting-depth guard of its ASN.1 parser when a lazy sequence is forced (GHSA-qp49-qgx5-5m26,
+# high), and this service parses the ASN.1 of certificates a caller sent, before it has proved the chain; Kotlin before 2.4.20 deserializes
+# build-cache metadata unsafely (GHSA-r937-wjx7-w2jp; the build cache is off in gradle.properties). The rest keep the release's versions.
+# An advisory check of every pinned artifact is part of qualifying a change here (third_party/keyattestation/PROVENANCE.md).
+[versions]
+kotlin = "2.4.21"
+androidx-annotation = "1.9.1"
+cbor = "0.9"
+errorprone = "2.41.0"
+protobuf = "4.28.3"
+bouncycastle = "1.86"
+coroutines = "1.10.2"
+guava = "33.5.0-jre"
+gson = "2.11.0"
+junit = "5.14.4"
+
+[libraries]
+androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "androidx-annotation" }
+cbor = { module = "co.nstant.in:cbor", version.ref = "cbor" }
+errorprone-annotations = { module = "com.google.errorprone:error_prone_annotations", version.ref = "errorprone" }
+protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
+protobuf-kotlin-lite = { module = "com.google.protobuf:protobuf-kotlin-lite", version.ref = "protobuf" }
+bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutines" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+kotlin-test-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlin" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

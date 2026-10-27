@@ -43,12 +43,17 @@ export const UNREACHABLE_DATABASE_URL =
  * timed out, and it does not stop what the test started. Every deadline here is shorter than that, and
  * so is the sum of the ones the longest test waits for in turn, so a helper fails first, says what it was
  * waiting for, and has already killed its process. api-process.test.ts holds the sum to the real timeout.
+ *
+ * They guard against a hang; they do not measure speed. A start or a finish may take 20 seconds (the
+ * owner's decision of 27 October 2026, SLICE-000 plan 7.48): on an idle Windows workstation a refusal
+ * exits in about 2 seconds and a tool, or the API's first answer, takes 4 to 5, and a busy one missed
+ * the 8 seconds these were before. Changing them is the owner's decision, never a way to get a test green.
  */
 export const DEADLINES = {
   /** A script that is expected to finish by itself, such as a startup refusal. */
-  finish: 8_000,
+  finish: 20_000,
   /** The API answering /readyz after it starts. */
-  ready: 8_000,
+  ready: 20_000,
   /** One /readyz request. */
   request: 1_000,
   /** A process ending after a stop signal it is expected to handle. */

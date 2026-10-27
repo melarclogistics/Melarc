@@ -159,6 +159,29 @@ export class TestClient {
     return new TestClient({ ...this.options, bearer: token });
   }
 
+  /**
+   * Puts a cookie in the jar as if the server had set it (`Secure; HttpOnly`, `Path=/` unless given, no lifetime): a browser that already
+   * holds a credential an earlier step of the product gave it (a vendor's registered browser), arranged by a test that made the record
+   * directly. It is stored by the same rules as a `Set-Cookie`, and replaced by one of the same name and path.
+   */
+  seed(name: string, value: string, path = '/'): void {
+    this.store(
+      [
+        {
+          name,
+          value,
+          path,
+          secure: true,
+          httpOnly: true,
+          sameSite: 'Lax',
+          maxAge: undefined,
+          expires: undefined,
+        },
+      ],
+      new URL(this.options.baseUrl),
+    );
+  }
+
   /** The value of a cookie in the jar (whether or not a page could read it), for assertions about what the server set. */
   cookie(name: string): string | undefined {
     this.expire();

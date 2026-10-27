@@ -112,6 +112,8 @@ export const GRANT_CEILINGS: ReadonlyMap<string, readonly Privilege[]> = new Map
   // An MFA challenge ends in a terminal state and stays as the history of a sign-in; no registry row gives any identity DELETE on it,
   // although the write cell reads `api`, which the check reads as DELETE too (migration 0020).
   ['MfaChallenge', ['SELECT', 'INSERT', 'UPDATE']],
+  // A rider's sign-in challenge is the same: it ends in a terminal state and stays as the history of a sign-in (migration 0041).
+  ['RiderSignInChallenge', ['SELECT', 'INSERT', 'UPDATE']],
 ]);
 
 /** The privileges `login` may hold on `row`'s table. */

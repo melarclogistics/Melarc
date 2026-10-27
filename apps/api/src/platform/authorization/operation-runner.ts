@@ -11,7 +11,7 @@ import { PolicyCoordinator } from '../database/policy-lock/coordinate.js';
 import { bundleLock, fixedLock, type PolicyLockRequest } from '../database/policy-lock/plan.js';
 import { timestampOf } from '../database/timestamps.js';
 import { transactionOf } from '../database/transaction-handle.js';
-import { isUuid } from '../database/transaction-context.js';
+import { isUuid, type SecurityContext } from '../database/transaction-context.js';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import type { AuthorizedRequest } from './authorized-request.js';
@@ -152,6 +152,40 @@ export class OperationRunner {
     work: OperationWork<T>,
   ): Promise<T> {
     const context = await this.#options.contexts.of(authorized, correlationId);
+    return this.#locked(authorized, context, work);
+  }
+
+  /**
+   * A vendor's own credential act (S0.49: `requestAdditionalDeviceGrant`, `revokeVendorDevice`): the locked path of `mutate`, the session's
+   * shared policy locks and its standing judged under them, **with the work under the `authentication` capability** the caller gives. The
+   * registry gives a Vendor no write on the grant, the message or the browser it changes (data-scope-registry.md: Vendor `DENY`), which only
+   * that capability writes, by key; the session and its locks are what make it the vendor's act, and the caller records the vendor's
+   * account as the actor. The context is built where the capability may be opened (`platform/auth`) and handed in; anything else, and a
+   * session that is not a vendor's, is refused before a lock is taken.
+   */
+  async actAsAuthentication<T>(
+    authorized: AuthorizedRequest,
+    context: SecurityContext,
+    work: OperationWork<T>,
+  ): Promise<T> {
+    if (context.principalType !== 'SYSTEM' || context.taskCapability !== 'authentication') {
+      throw new TypeError(
+        'A vendor’s own credential act runs under the authentication capability and no other context',
+      );
+    }
+    if (authorized.session.principalType !== 'VENDOR') {
+      throw new TypeError(
+        'Only a vendor’s own credential act runs under the authentication capability',
+      );
+    }
+    return this.#locked(authorized, context, work);
+  }
+
+  async #locked<T>(
+    authorized: AuthorizedRequest,
+    context: SecurityContext,
+    work: OperationWork<T>,
+  ): Promise<T> {
     const { session } = authorized;
     return this.#options.coordinator.run<Standing | null, T>(context, {
       discover: (_transaction, handle) => readStanding(handle, session.id),

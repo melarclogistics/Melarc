@@ -174,6 +174,25 @@
    */
   --button-pressed-background: var(--gray-100);
 
-  /* Layout: the width the frame has always given the main landmark. Not a design-system token (section 13.2). */
+  /*
+   * The side menu of the authenticated shell, on Ink (section 4.6, the shell recipe; approved by the Product Owner on 25 October 2026).
+   * Aliases of the palette: every text pairing on Ink or on its hovered and pressed fills is at least 5.7:1 (scripts/design-tokens.test.ts).
+   * The current item is the Primary action colour with its text (6.52:1), so no new red is introduced.
+   */
+  --shell-surface-hover: var(--gray-900);
+  --shell-surface-pressed: var(--gray-800);
+  --shell-border: var(--gray-800);
+  --shell-text: var(--color-text-inverse);
+  --shell-text-muted: var(--gray-300);
+  --shell-text-subtle: var(--gray-400);
+
+  /* The three sizes of an icon (section 24), in rem so that enlarged text enlarges the icon with it. */
+  --icon-size-sm: 1rem;
+  --icon-size-md: 1.25rem;
+  --icon-size-lg: 1.5rem;
+
+  /* Layout: the width the frame has always given the main landmark, and the two widths of the side menu. Not design-system tokens (section 13.2). */
   --layout-content-width: 72rem;
+  --sidebar-width: 16rem;
+  --sidebar-width-collapsed: 4.5rem;
 }

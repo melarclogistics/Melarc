@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.77.0-slice-000-reconciliation
- *   SHA-256 fb1b6a0c59642e3fb14f447fb2599d5b16f389ed590b4b54d8fe29cf8fae3755 (of the contract, line endings normalized to LF)
+ *   SHA-256 9eba6cd897facf4e55dd8b0f97397b94474f4e3f54ad87799cb72f1d88a09b9d (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -364,7 +364,7 @@ export interface paths {
          *     widened it.
          *
          *     The approver may not be the requester, or `SELF_APPROVAL_FORBIDDEN` (§37.4,
-         *     MSC-DEC-135).
+         *     MSC-DEC-135), unless the approver is a Platform Admin (permissions.md section 6).
          *
          *     **The approved GH20 single-package fee becomes due on acceptance**, and
          *     settlement follows the Vendor's eligibility: posted to statement for an
@@ -1305,6 +1305,18 @@ export interface paths {
          *     the same `202` challenge as an enrolled one, so this answer reveals nothing about the factor. The
          *     refusal is `completeStaffMfaSignIn`'s: `MFA_ENROLMENT_REQUIRED`.
          *
+         *     **A trusted browser** (Product decision, 25 October 2026; staff-authentication.md section 5.8). The
+         *     one exception to the `202`: a Senior Ops or Platform Admin whose password is correct and whose
+         *     browser presents a valid `melarc_trusted_browser` credential issued to them is answered `200` and
+         *     the session, with no challenge. The credential stands in for the code and nothing else: it is read
+         *     only after the password is proved, a wrong password with it is `INVALID_CREDENTIALS` and counts as
+         *     any other, and a locked credential is refused. It is valid while it is not removed, seven days have
+         *     not passed (absolute, on the database's clock), the identity is `ACTIVE`, and the identity's `ACTIVE`
+         *     factor and credential generation are the ones it was issued for. **A credential that is unknown,
+         *     expired, removed, another identity's or no longer valid is ignored, with no word and no cookie: the
+         *     answer is the ordinary `202`, indistinguishable from the answer to a browser that holds none.** An
+         *     Ops Staff sign-in never reads it.
+         *
          *     **`INVALID_CREDENTIALS` is returned identically** for an unknown email, a wrong password
          *     and a suspended account, with matching timing. Distinguishing them confirms which
          *     addresses are real staff, and Melarc staff emails follow a predictable pattern (§37.7).
@@ -1345,6 +1357,12 @@ export interface paths {
          *     for privileged roles. The idle control is the operative one - the exposure is an
          *     unattended browser, which an absolute lifetime cannot tell apart from a working user.
          *
+         *     **Remember this browser** (Product decision, 25 October 2026; staff-authentication.md section 5.8).
+         *     With `trust_browser: true` and an accepted code, the same transaction that issues the session
+         *     records a trusted browser for this identity and the answer also sets `melarc_trusted_browser`
+         *     (`HttpOnly; Secure; SameSite=Lax; Path=/api/v1/auth/staff; Max-Age=604800`). A code that is not
+         *     accepted, a challenge that has expired and a lock issue none. It is the only operation that makes one.
+         *
          *     **A wrong code counts twice**: against the challenge (`mfa_max_attempts` 3, then `CHALLENGE_UNUSABLE`) and against the identity's failed-attempt count shared with the password, so a thief who knows the password cannot guess codes across fresh challenges. The caller holds a live challenge - the password was proved - so a locked identity is told `CREDENTIAL_LOCKED` here. A complete sign-in resets the count.
          *
          *     **An identity with no `ACTIVE` MFA factor** (privileged, password correct, no factor proven yet) is answered `MFA_ENROLMENT_REQUIRED` with `403` here, never at `staffSignIn`, which gave it the same `202` challenge as an enrolled identity. **That attempt does not count towards the lockout**: no factor was presented. The refusal has its own audit cause on `auth.session.failed`, and no lock counter moves. No session is issued.
@@ -1352,6 +1370,135 @@ export interface paths {
          *     **Limits and origin** (Product decision, 8 October 2026). The privileged MFA limit is keyed on the bounded challenge reference, bound to its principal, so an invalid or forged reference still meets admission limits; a request refused by the rate limit or because no hash slot is free (`RATE_LIMITED`) is neither verified nor counted. This is a browser pre-session mutation: the `Origin` must exactly match a configured allowlisted origin of the Ops Portal, and a missing, `null` or unlisted one is `403` `CSRF_VALIDATION_FAILED` before the code is examined.
          */
         post: operations["completeStaffMfaSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/staff/trusted-browsers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed-in person's own trusted browsers
+         * @description Product decision, 25 October 2026 (staff-authentication.md section 5.8). The caller's own
+         *     trusted browsers that are not removed and not past their expiry, newest first. A reset of the
+         *     authenticator and a new authenticator remove them in the act that does it, so none is listed
+         *     for an authenticator that is gone; a new password makes a credential refused at the sign-in
+         *     (the credential generation moved), and its recorded removal is owed to the recovery that
+         *     replaces a password. A person whose role does not sign in with an authenticator has none, and
+         *     the list is empty. **No credential, no hash and nobody
+         *     else's.** `current` is true for the one browser that presented its credential with this request
+         *     (the cookie is sent to this path), so the screen can say which one is in use.
+         */
+        get: operations["listTrustedBrowsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/staff/trusted-browsers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove one of the signed-in person's trusted browsers
+         * @description Product decision, 25 October 2026 (staff-authentication.md section 5.8). Removes one of the
+         *     caller's **own** trusted browsers (`SELF`): that browser's next sign-in asks for a code. One that
+         *     is another person's, one already removed or past its expiry, and one that does not exist are
+         *     all `NOT_FOUND`, so the answer says nothing of other people's browsers. **When it is the browser
+         *     asking** (it presented the credential with this request) the answer clears the cookie with
+         *     `Max-Age=0`, host-only, `Path=/api/v1/auth/staff` and the attributes it was issued with.
+         *     Signing out does not remove a trusted browser; this does.
+         */
+        delete: operations["revokeTrustedBrowser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/staff/{id}/trusted-browsers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The valid trusted browsers of one staff identity, so an administrator can remove them
+         * @description Product decision, 25 October 2026 (staff-authentication.md section 5.8). `staff.session.revoke`
+         *     at tier `P` (a Platform Admin): a trusted browser is standing access of a staff identity, of the
+         *     same kind as a staff session, and ends at the same authority. A Senior Ops caller holds the key
+         *     and not the tier, so the answer is `INSUFFICIENT_AUTHORITY`. The identity must be in the caller's
+         *     scope (`HUB_SCOPE_VIOLATION`, `NOT_FOUND`). Labels and dates only; `current` is always false.
+         *
+         *     **An authorised read outside the caller's own hub is audited** (audit.md sections 5.4 and 6; audit
+         *     of 26 October 2026): when the answer shows browsers of an identity whose primary hub is not the
+         *     caller's, one enhanced `auth.hub_boundary.crossed` names that hub, taken from the identity and
+         *     never from the request, and this operation, and carries no browser, label or identifier. An
+         *     identity with no hub, a hub that is the caller's own and an empty answer write none. The event
+         *     is written in the read's own transaction, so a ledger that cannot take it fails the read.
+         */
+        get: operations["listStaffTrustedBrowsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/staff/{id}/trusted-browsers/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove every trusted browser of one staff identity
+         * @description Product decision, 25 October 2026 (staff-authentication.md section 5.8). `staff.session.revoke` at
+         *     tier `P`, with a **mandatory reason**: one of the reasons the session-revocation domain offers for
+         *     `revokeSession` (a trusted browser is revoked for the same causes a session is, and the catalogue
+         *     holds no second set). The identity is locked first, in the caller's scope, so that the removal and
+         *     a sign-in that is issuing a trusted browser at the same moment are ordered: a browser issued first
+         *     is removed with the rest, and a person who proves a code afterwards is given a new one, because a
+         *     removal ends what exists and is not a ban. Removes **all** the identity's valid trusted browsers,
+         *     in one transaction, and writes the enhanced `auth.trusted_browser.admin_revoked` with the reason
+         *     and the count. Removing none is not an error: the answer says `0`.
+         *
+         *     **It takes an `Idempotency-Key` (audit of 26 October 2026).** "All the valid browsers" is not a
+         *     fixed set, so repeating the request would remove a browser the person enrolled after the first
+         *     one. The receipt is kept in the transaction that removes: the same key with the same identity,
+         *     reason and note replays the original count, removes nothing and writes no second event; the same
+         *     key with another identity, reason or note is `409 IDEMPOTENCY_KEY_CONFLICT`. A request that fails
+         *     keeps no receipt, so its key may be used again.
+         */
+        post: operations["revokeStaffTrustedBrowsers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2098,7 +2245,7 @@ export interface paths {
          *     **Choosing a bundle grants nothing.** The flag reports the existing approval policy
          *     and does not replace it: the profile is created `PENDING_APPROVAL`,
          *     a Platform Admin approves a privileged target, and the creator cannot approve their own
-         *     profile. `createStaffIdentity` validates `role_bundle_id` itself and does not trust that the
+         *     profile unless the creator is a Platform Admin (permissions.md section 6). `createStaffIdentity` validates `role_bundle_id` itself and does not trust that the
          *     id came from this list.
          *
          *     Not paged: the assignable set is small and fixed by configuration. The list carries no ETag.
@@ -2136,7 +2283,7 @@ export interface paths {
         get: operations["listStaffIdentities"];
         put?: never;
         /**
-         * Create a staff profile, awaiting independent approval
+         * Create a staff profile, awaiting approval
          * @description `staff.identity.create` - Ops Staff, Senior Ops, Platform Admin at own hub (30.8, MSC-DEC-247).
          *
          *     A `primary_hub_id` outside the actor's hubs is `HUB_SCOPE_VIOLATION`; the maker cannot place a profile in a hub they do not act in.
@@ -2149,10 +2296,10 @@ export interface paths {
          *     target.
          *
          *     **The record is created in `PENDING_APPROVAL` and grants nothing.** No session may be issued
-         *     against it (state-machines.md 13), and its `role_bundle_id` confers no permission until a
-         *     different actor approves. 30.8: an independent approver acts "before it becomes active."
+         *     against it (state-machines.md 13), and its `role_bundle_id` confers no permission until the
+         *     profile is approved, by a different actor or by the maker when the maker is a Platform Admin. 30.8: an approver acts "before it becomes active."
          *
-         *     **The caller is recorded as `created_by` and cannot approve this record.** 11.6's same-actor
+         *     **The caller is recorded as `created_by` and cannot approve this record, unless the caller is a Platform Admin** (permissions.md section 6). 11.6's same-actor
          *     exclusion is enforced at `approveStaffIdentity` and checkable afterwards from the two actor
          *     fields the record carries.
          *
@@ -2221,14 +2368,16 @@ export interface paths {
          *     **This is the act that creates a usable identity**, and until 24 August the product had no
          *     way to perform it - CONFLICT-035, "the product cannot have its first user."
          *
-         *     **The approver may not be the creator** (11.6, MSC-DEC-135). Returns
+         *     **The approver may not be the creator, unless the approver is a Platform Admin** (11.6, MSC-DEC-135;
+         *     permissions.md section 6): a Platform Admin, whose grant is at tier P, approves or rejects a profile they made, whatever its
+         *     role, and needs no second person (Product decision, 25 October 2026). Any other creator is refused with
          *     `SELF_APPROVAL_FORBIDDEN`, the same code `approveOnePackageException` returns: one uniform
          *     rule keeps one code.
          *
          *     **A Platform Admin is required where the named bundle is privileged** - Senior Ops or
          *     Platform Admin - returning `INSUFFICIENT_AUTHORITY` (MSC-DEC-248, confirmed 26 August under
          *     MSC-DEC-253). **The same holds for rejection**: rejecting a profile that carries a privileged
-         *     bundle needs a Platform Admin other than the maker, and a lower tier is
+         *     bundle needs a Platform Admin, the maker included, and a lower tier is
          *     `INSUFFICIENT_AUTHORITY` (`403`).
          *
          *     **Approval does NOT make sign-in possible**. It issues a SetupGrant to the
@@ -2305,7 +2454,7 @@ export interface paths {
          *     emitted `permission.bundle.assigned` event **enhanced** with `before_after` carrying both
          *     bundles by name.
          *
-         *     **The approver may not be the proposer** - `SELF_APPROVAL_FORBIDDEN`. A bundle grant is the
+         *     **The approver may not be the proposer, unless the approver is a Platform Admin** (permissions.md section 6) - otherwise `SELF_APPROVAL_FORBIDDEN`. A bundle grant is the
          *     one act that can manufacture every other authority in the system.
          *
          *     **A Platform Admin is required where the target bundle is privileged**, by analogy to 30.9,
@@ -3311,7 +3460,7 @@ export interface paths {
          *     **What it reaches** (Product decision, 8 October 2026, corrected by the R2 review). A privileged
          *     identity with an established password, in exactly one of three **recorded** states. (1) It holds an
          *     `ACTIVE` factor to revoke (the original case). (2) It holds a `PENDING` factor of recorded
-         *     provenance with no usable enrolment or re-enrolment grant and no pending delivery attempt (a stranded
+         *     provenance with no usable enrolment or re-enrolment grant and no qualifying pending delivery attempt (a stranded
          *     enrolment). (3) Its most recent factor was revoked by an administrator, carries a revocation episode,
          *     and no replacement factor was created (an unfinished reset). The reason says which
          *     (`MFA_AUTHENTICATOR_UNAVAILABLE` for the first, `MFA_ENROLMENT_EXPIRED` for the other two). Atomically
@@ -4939,7 +5088,7 @@ export interface paths {
          * Approve or reject a proposed resolution
          * @description **Finance approves or rejects the proposal.** MSC-DEC-395.
          *
-         *     **The decider is never the proposer** - refused with SELF_APPROVAL_FORBIDDEN. The
+         *     **The decider is never the proposer, unless the decider is a Platform Admin** (permissions.md section 6) - otherwise refused with SELF_APPROVAL_FORBIDDEN. The
          *     maker-checker shape is payment.road_expense.approve's, for the reason audit.md gives that
          *     key: approval moves money out. The approver is Finance rather than Senior Ops because
          *     payment.cash.disposition and payment.cash.reconcile_hub already place outbound and
@@ -5348,7 +5497,7 @@ export interface paths {
          *     **No administrator supplies the secret**, here or anywhere. It is set by
          *     the vendor from the setup grant that APPROVAL issues, not creation.
          *
-         *     **The caller is recorded as `created_by` and cannot decide this record.** 35.12.2's
+         *     **The caller is recorded as `created_by` and cannot decide this record, unless the caller is a Platform Admin** (permissions.md section 6). 35.12.2's
          *     exclusion is enforced at `decideVendorOrganization` and is checkable afterwards from
          *     the two actor fields the record carries.
          *
@@ -5381,7 +5530,8 @@ export interface paths {
          *     rejects" - the same shape `approveStaffIdentity` uses, and the reason no
          *     `vendor.organization.reject` key exists.
          *
-         *     **The decider may not be the creator** (29.2.3, 35.12.2). Returns
+         *     **The decider may not be the creator, unless the decider is a Platform Admin** (29.2.3, 35.12.2;
+         *     permissions.md section 6). Any other creator is refused with
          *     `SELF_APPROVAL_FORBIDDEN`, the same code every other same-actor exclusion returns:
          *     one uniform rule keeps one code (37.4, MSC-DEC-135).
          *
@@ -7832,6 +7982,12 @@ export interface components {
             challenge_id: string;
             /** Format: date-time */
             expires_at: string;
+            /**
+             * @description How many days a browser remembered at the next step stays trusted (7: a constant of the
+             *     contract). It is here so that a screen offering the choice states the number the server
+             *     will apply and never one of its own.
+             */
+            trusted_browser_days: number;
         };
         MfaSignInComplete: {
             /** Format: uuid */
@@ -7843,6 +7999,42 @@ export interface components {
              *     the factor is `MFA_PROOF_INVALID`.
              */
             code: string;
+            /**
+             * @description Remember this browser (staff-authentication.md section 5.8): when true and the code is
+             *     accepted, a trusted browser is recorded and `melarc_trusted_browser` is set. Absent is false.
+             * @default false
+             */
+            trust_browser?: boolean;
+        };
+        /**
+         * @description A trusted browser as its owner or an administrator sees it. **No credential, no hash, no factor
+         *     and no generation**: nothing here can be used to sign in.
+         */
+        TrustedBrowser: {
+            /** Format: uuid */
+            id: string;
+            /** @description A short description the person can recognise ("Chrome on Windows"). Never the `User-Agent` itself. */
+            label: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Seven days after it was created. Nothing moves it.
+             */
+            expires_at: string;
+            /**
+             * Format: date-time
+             * @description When it last stood in for a code. Null until it has.
+             */
+            last_used_at: string | null;
+            /** @description True for the one browser that presented its credential with this request. Always false for an administrator's list. */
+            current: boolean;
+        };
+        TrustedBrowserList: {
+            items: components["schemas"]["TrustedBrowser"][];
+        };
+        TrustedBrowsersRevoked: {
+            revoked: number;
         };
         SessionRevoke: {
             /**
@@ -7851,6 +8043,13 @@ export interface components {
              *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
+            /**
+             * @description Free text that explains the act, kept on its audit event. **One line of at most 1000 characters** (counted in UTF-16 code units, as the audit counts them, so a note of characters outside the basic plane, emoji for one, can be refused as `maxLength` below 1000 of them) with no control character
+             *     (a line break or a tab included), no email address and no international telephone number: the audit screening of free text,
+             *     applied before the act so that a note it would refuse is `VALIDATION_FAILED` (`400`, naming `/note`) and never an
+             *     error after the act has begun. A note that is blank is kept as none. Mandatory where the reason's metadata says so
+             *     (`REASON_REQUIRED`).
+             */
             note?: string;
         };
         /**
@@ -7948,7 +8147,10 @@ export interface components {
             principal_display_name: string | null;
             /**
              * @description The hubs of the session's `authorized_hub_ids`, each entry only the hub id and its display name,
-             *     for the interface to show where the principal acts. A principal with no hub scope (a vendor)
+             *     for the interface to show where the principal acts. **A principal whose session snapshot holds a
+             *     grant of the all-hub scope (a Platform Admin) acts in every hub, so every hub is listed** (Product
+             *     decision, 25 October 2026), while `authorized_hub_ids` keeps what the session was issued with and the
+             *     list grants nothing. A principal with no hub scope (a vendor)
              *     carries an empty list. **The list is finite and is never silently truncated**: a principal whose
              *     authority covers more hubs than the supported maximum is refused where that authority is assigned
              *     or at session issue, and is never given a shortened list. The supported maximum is a capacity
@@ -8236,6 +8438,13 @@ export interface components {
              *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
+            /**
+             * @description Free text that explains the act, kept on its audit event. **One line of at most 1000 characters** (counted in UTF-16 code units, as the audit counts them, so a note of characters outside the basic plane, emoji for one, can be refused as `maxLength` below 1000 of them) with no control character
+             *     (a line break or a tab included), no email address and no international telephone number: the audit screening of free text,
+             *     applied before the act so that a note it would refuse is `VALIDATION_FAILED` (`400`, naming `/note`) and never an
+             *     error after the act has begun. A note that is blank is kept as none. Mandatory where the reason's metadata says so
+             *     (`REASON_REQUIRED`).
+             */
             note?: string;
         };
         /**
@@ -9497,6 +9706,13 @@ export interface components {
              *     `REASON_NOT_ACTIVE`.
              */
             reason_code?: string;
+            /**
+             * @description Free text that explains the act, kept on its audit event. **One line of at most 1000 characters** (counted in UTF-16 code units, as the audit counts them, so a note of characters outside the basic plane, emoji for one, can be refused as `maxLength` below 1000 of them) with no control character
+             *     (a line break or a tab included), no email address and no international telephone number: the audit screening of free text,
+             *     applied before the act so that a note it would refuse is `VALIDATION_FAILED` (`400`, naming `/note`) and never an
+             *     error after the act has begun. A note that is blank is kept as none. Mandatory where the reason's metadata says so
+             *     (`REASON_REQUIRED`).
+             */
             note?: string;
         };
         /**
@@ -10096,6 +10312,13 @@ export interface components {
              *     retired, in another domain or not permitted for this operation is `REASON_NOT_ACTIVE`.
              */
             reason_code: string;
+            /**
+             * @description Free text that explains the act, kept on its audit event. **One line of at most 1000 characters** (counted in UTF-16 code units, as the audit counts them, so a note of characters outside the basic plane, emoji for one, can be refused as `maxLength` below 1000 of them) with no control character
+             *     (a line break or a tab included), no email address and no international telephone number: the audit screening of free text,
+             *     applied before the act so that a note it would refuse is `VALIDATION_FAILED` (`400`, naming `/note`) and never an
+             *     error after the act has begun. A note that is blank is kept as none. Mandatory where the reason's metadata says so
+             *     (`REASON_REQUIRED`).
+             */
             note?: string;
         };
         /**
@@ -10109,7 +10332,7 @@ export interface components {
             /** @description True when this call queued a new grant; false when the request was coalesced. */
             reenrolment_grant_issued?: boolean;
             /**
-             * @description True when a usable re-enrolment grant or a pending delivery attempt already existed, so nothing
+             * @description True when a usable re-enrolment grant or a qualifying pending delivery attempt (a message of a grant that is still pending, within its own deadline) already existed, so nothing
              *     new was issued or queued (Product decision, 8 October 2026). Absent is the same as false.
              */
             coalesced?: boolean;
@@ -10883,6 +11106,13 @@ export interface components {
         CsrfToken: string;
         /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
         Id: string;
+        /**
+         * @description The trusted-browser credential, when this browser holds one (staff-authentication.md section 5.8).
+         *     It is sent by the browser to the staff sign-in routes (`Path=/api/v1/auth/staff`) and to nothing
+         *     else. Any text is accepted here and judged where it is used: a value that is not a valid
+         *     credential is simply not one, and is never reported.
+         */
+        TrustedBrowserCookie: string;
         /**
          * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
          *     than state-based, so a concurrent change that does not alter state is still caught.
@@ -12863,7 +13093,15 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                /**
+                 * @description The trusted-browser credential, when this browser holds one (staff-authentication.md section 5.8).
+                 *     It is sent by the browser to the staff sign-in routes (`Path=/api/v1/auth/staff`) and to nothing
+                 *     else. Any text is accepted here and judged where it is used: a value that is not a valid
+                 *     credential is simply not one, and is never reported.
+                 */
+                melarc_trusted_browser?: components["parameters"]["TrustedBrowserCookie"];
+            };
         };
         requestBody: {
             content: {
@@ -12872,8 +13110,10 @@ export interface operations {
         };
         responses: {
             /**
-             * @description **Ops Staff only.** Session established and the session cookies set. An unprivileged
-             *     role needs no second factor.
+             * @description **Ops Staff, or a Senior Ops or Platform Admin whose browser presents a valid trusted-browser
+             *     credential.** Session established and the session cookies set. An unprivileged role needs no
+             *     second factor, and a valid trusted browser stands in for the code of a privileged one. The
+             *     session is exactly what a proven code would have issued.
              */
             200: {
                 headers: {
@@ -12919,8 +13159,9 @@ export interface operations {
         };
         responses: {
             /**
-             * @description Factor proven. **This is the only response that can establish a privileged Session**,
-             *     which is what makes "no privileged Session before MFA" mechanically testable.
+             * @description Factor proven. **This is the only response that can establish a privileged Session
+             *     after a code** (the other is `staffSignIn`'s, for a valid trusted browser), which is what
+             *     makes "no privileged Session before MFA" mechanically testable.
              */
             200: {
                 headers: {
@@ -12949,6 +13190,163 @@ export interface operations {
             };
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listTrustedBrowsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                /**
+                 * @description The trusted-browser credential, when this browser holds one (staff-authentication.md section 5.8).
+                 *     It is sent by the browser to the staff sign-in routes (`Path=/api/v1/auth/staff`) and to nothing
+                 *     else. Any text is accepted here and judged where it is used: a value that is not a valid
+                 *     credential is simply not one, and is never reported.
+                 */
+                melarc_trusted_browser?: components["parameters"]["TrustedBrowserCookie"];
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustedBrowserList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    revokeTrustedBrowser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: {
+                /**
+                 * @description The trusted-browser credential, when this browser holds one (staff-authentication.md section 5.8).
+                 *     It is sent by the browser to the staff sign-in routes (`Path=/api/v1/auth/staff`) and to nothing
+                 *     else. Any text is accepted here and judged where it is used: a value that is not a valid
+                 *     credential is simply not one, and is never reported.
+                 */
+                melarc_trusted_browser?: components["parameters"]["TrustedBrowserCookie"];
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description Removed. When the removed browser is the one asking, the `Set-Cookie` line expires
+             *     `melarc_trusted_browser`; otherwise there is none.
+             */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listStaffTrustedBrowsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustedBrowserList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    revokeStaffTrustedBrowsers: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionRevoke"];
+            };
+        };
+        responses: {
+            /** @description Removed. `revoked` is how many were valid and are now gone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustedBrowsersRevoked"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     riderSignIn: {
@@ -13144,7 +13542,6 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
-            422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -15097,7 +15494,7 @@ export interface operations {
         responses: {
             /**
              * @description Factor revoked (or a pending one superseded), sessions terminated, re-enrolment grant queued -
-             *     or, while a usable grant or a pending delivery attempt exists, that grant's non-secret metadata
+             *     or, while a usable grant or a qualifying pending delivery attempt exists, that grant's non-secret metadata
              *     returned and nothing new issued.
              */
             200: {
@@ -15276,7 +15673,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            422: components["responses"]["RuleViolation"];
         };
     };
     completeRiderDeviceEnrolment: {
@@ -15508,7 +15904,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            422: components["responses"]["RuleViolation"];
         };
     };
     beginMfaReenrolment: {

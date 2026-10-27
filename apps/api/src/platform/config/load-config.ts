@@ -296,9 +296,12 @@ function adapterProblems(
     if (url === undefined) missing('ATTESTATION_VERIFIER_URL');
     else if (endpointNeedsHttps(url, env.APP_ENV)) invalid('ATTESTATION_VERIFIER_URL');
     if (timeout === undefined) missing('ATTESTATION_VERIFIER_TIMEOUT_MS');
-    // SECURITY_DESIGN.md §15.2.3: the service authenticates its caller if it crosses hosts.
+    // SECURITY_DESIGN.md §15.2.3: the service authenticates its caller if it crosses hosts, and in production always: the verifier refuses
+    // to start in production without the secret (apps/attestation-verifier), so an API that sent none there could never be answered, and
+    // every other process on the host could ask the verifier what it likes.
     const parsed = url === undefined ? undefined : parseEndpoint(url);
-    if (parsed !== undefined && !isLoopbackHost(parsed) && secret === undefined) {
+    const crossesHosts = parsed !== undefined && !isLoopbackHost(parsed);
+    if (secret === undefined && (env.APP_ENV === 'production' || crossesHosts)) {
       missing('ATTESTATION_VERIFIER_CALLER_SECRET');
     }
   } else {

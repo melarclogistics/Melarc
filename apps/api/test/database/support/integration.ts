@@ -1,4 +1,6 @@
 import { AppModule } from '../../../src/app.module.js';
+import type { AttestationVerifier } from '../../../src/platform/auth/ports/attestation-verifier.port.js';
+import type { Metrics } from '../../../src/platform/auth/ports/metrics.port.js';
 import type { CompiledFixedPolicy } from '../../../src/platform/auth/sessions/session-authority.js';
 import type { VendorOrganizationResolver } from '../../../src/platform/authorization/operation-contexts.js';
 import { API_RUNTIME_ROLE, loadConfig } from '../../../src/platform/config/load-config.js';
@@ -71,12 +73,23 @@ export interface IntegrationOptions {
   /** Settings beyond the defaults of `validEnv`; a key mapped to `undefined` is removed. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   /**
-   * The fixed-policy revisions this build declares, as the tasks that build the Vendor and Rider sign-ins will (S0.48, S0.59). None by
-   * default, so an application of this slice serves no Vendor or Rider session; a test of a session of either composes its own.
+   * The fixed-policy revisions the application is composed with. By default the build's own (`BUILD_FIXED_POLICY`: the Vendor's revision
+   * since S0.48 and the Rider's since S0.59); a test of another revision, or of none, gives its own.
    */
   readonly compiledFixedPolicy?: CompiledFixedPolicy;
-  /** Where a Vendor session's organisation comes from (the vendor domain's, S0.47); none by default. */
+  /** Where a Vendor session's organisation comes from; by default the vendor domain's own resolver, as the runtime composes it. */
   readonly vendorOrganization?: VendorOrganizationResolver;
+  /**
+   * A metrics registry bound to the port. The runtime composition of the API binds none until the private metrics endpoint does (S0.68), so
+   * an operation that counts (the excluded recovery requests, S0.50) counts nothing there; a test that reads a count gives one.
+   */
+  readonly metrics?: Metrics;
+  /**
+   * The attestation verifier the application is given in place of the one its configuration selects (S0.57): a test that counts the calls it
+   * makes, or controls the verdicts, supplies one through the same `ports` option a test double always was. The runtime composition binds the
+   * substitute for a local configuration and the HTTP adapter for a service one, whatever is said here is this file's composition only.
+   */
+  readonly attestationVerifier?: AttestationVerifier;
 }
 
 export async function startIntegrationKit(
@@ -109,7 +122,13 @@ export async function startIntegrationKit(
         rootModule: (moduleOptions) =>
           AppModule.register({
             ...moduleOptions,
-            ports: { clock: { useValue: clock } },
+            ports: {
+              clock: { useValue: clock },
+              ...(options.metrics === undefined ? {} : { metrics: { useValue: options.metrics } }),
+              ...(options.attestationVerifier === undefined
+                ? {}
+                : { attestationVerifier: { useValue: options.attestationVerifier } }),
+            },
             ...(options.compiledFixedPolicy === undefined
               ? {}
               : { compiledFixedPolicy: options.compiledFixedPolicy }),

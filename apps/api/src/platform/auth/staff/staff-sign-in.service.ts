@@ -18,11 +18,13 @@ import type {
   PrincipalRef,
   SignInCandidate,
 } from '../ports/identity-directory.port.js';
+import type { TokenService } from '../ports/token-service.port.js';
 import type { TransactionHandle, UnitOfWork } from '../ports/unit-of-work.port.js';
 import { bundleIsPrivileged } from '../sessions/bundle-reader.js';
 import { currentSessionOf, type CurrentSessionView } from '../sessions/current-session.js';
 import { SessionIssueRefusedError } from '../sessions/session-errors.js';
 import type { IssuedSession, SessionIssuer } from '../sessions/session-issuer.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { authenticationContext } from './authentication-context.js';
 import { MAX_ADDRESS_BYTES } from './staff-sign-in-limit.js';
 
@@ -86,6 +88,10 @@ export interface StaffSignInOptions {
   readonly issuer: Pick<SessionIssuer, 'issue'>;
   readonly audit: AuditWriter;
   readonly settings: Pick<SettingsReader, 'integer'>;
+  /** Finds a trusted browser by its credential (staff-authentication.md §5.8) and records that it stood in for a code. */
+  readonly trustedBrowsers: Pick<TrustedBrowserStore, 'use'>;
+  /** Hashes a presented trusted-browser credential, or says it is not a well-formed one. */
+  readonly tokens: Pick<TokenService, 'hash'>;
 }
 
 export type StaffSignInOutcome =
@@ -93,6 +99,11 @@ export type StaffSignInOutcome =
       readonly kind: 'SESSION';
       readonly session: IssuedSession<CurrentSessionView>;
       readonly view: CurrentSessionView;
+      /**
+       * The trusted browser the second step recorded when the person asked to be remembered: its credential, shown once, and the moment it
+       * ends. Only `completeStaffMfaSignIn` sets it; no other outcome carries one.
+       */
+      readonly trustedBrowser?: { readonly token: string; readonly expiresAt: Date };
     }
   | { readonly kind: 'CHALLENGE'; readonly challengeId: string; readonly expiresAt: Date };
 
@@ -144,6 +155,18 @@ class LockedMeanwhileError extends Error {
 }
 
 /**
+ * The credential a browser presented does not stand in for the code: under the identity's lock it is unknown, another identity's, removed,
+ * past its end, or bound to an authenticator or a credential the identity no longer holds. The issue rolls back with the use it recorded,
+ * and the sign-in goes on as it would for a browser with none, **without a word about the credential** (staff-authentication.md §5.8).
+ */
+class TrustedBrowserNotValidError extends Error {
+  constructor() {
+    super('The presented trusted-browser credential is not valid');
+    this.name = 'TrustedBrowserNotValidError';
+  }
+}
+
+/**
  * `staffSignIn` (S0.32; staff-authentication.md §5; SECURITY_DESIGN.md §13.4b, §13.4c): the email and password of a staff member.
  * Ops Staff are given a session; Senior Ops and Platform Admin are given an MFA challenge, which grants nothing, **whether or not
  * the identity holds a factor** (the refusal is the second step's).
@@ -173,6 +196,9 @@ class LockedMeanwhileError extends Error {
  * - **A correct password for an Ops Staff member** issues the session through the protocol of S0.24, with the failed-attempt count
  *   cleared in the same transaction as the session. **For a privileged identity** it issues a challenge on the credential that was
  *   proved, ends any other live challenge of the identity, and clears nothing: a complete sign-in is the second step's.
+ * - **A privileged identity whose browser presents a valid trusted-browser credential** (§5.8) is given the session a proven code would have
+ *   issued, in the one transaction that also records the use and clears the count: the password was proved, a lock was honoured and a
+ *   wrong password was counted above, exactly as for a browser with none. A credential that is not valid is ignored, in silence.
  * - A hash the hasher says may be replaced (forward only) is replaced in the transaction of the success, on the same generation.
  */
 export class StaffSignInService {
@@ -185,6 +211,8 @@ export class StaffSignInService {
   async signIn(request: {
     readonly email: string;
     readonly password: string;
+    /** The value of the `melarc_trusted_browser` cookie as presented, when the request carried exactly one; read only after the password. */
+    readonly trustedBrowser?: string;
   }): Promise<StaffSignInOutcome> {
     const context = authenticationContext();
     // A text longer than the limiter takes a key from is refused before anything else: it met no limit, and trimming could make a
@@ -207,7 +235,12 @@ export class StaffSignInService {
       credential === null
         ? await this.#examine(context, canonical, null)
         : await this.#examinedInASlot(context, canonical, credential);
-    return this.#conclude(context, canonical, examined);
+    // Only the hash of the presented credential goes further, and a text that is not a well-formed token is none.
+    const trusted =
+      request.trustedBrowser === undefined
+        ? null
+        : this.#options.tokens.hash(request.trustedBrowser);
+    return this.#conclude(context, canonical, examined, trusted);
   }
 
   async #examinedInASlot(
@@ -291,6 +324,7 @@ export class StaffSignInService {
     context: SecurityContext,
     canonical: string,
     examined: Examined,
+    trusted: Uint8Array | null,
   ): Promise<StaffSignInOutcome> {
     const { branch, candidate } = examined;
     const identity = candidate?.summary.ref ?? null;
@@ -317,7 +351,7 @@ export class StaffSignInService {
           this.#countFailure(transaction, examined, canonical),
         );
       case 'CORRECT':
-        return this.#succeed(context, canonical, examined);
+        return this.#succeed(context, canonical, examined, trusted);
     }
   }
 
@@ -390,6 +424,7 @@ export class StaffSignInService {
     context: SecurityContext,
     canonical: string,
     examined: Examined,
+    trusted: Uint8Array | null,
   ): Promise<StaffSignInOutcome> {
     const { unitOfWork } = this.#options;
     const candidate = candidateOf(examined);
@@ -398,7 +433,14 @@ export class StaffSignInService {
       if (found === null) throw new Error('A staff identity names a role bundle that is not there');
       return found;
     });
-    if (privileged) return this.#challenge(context, canonical, examined);
+    if (privileged) {
+      // Only a password that was proved reaches here, so the credential is read after it and by nothing before it.
+      if (trusted !== null) {
+        const standsIn = await this.#trustedSession(context, canonical, examined, trusted);
+        if (standsIn !== null) return standsIn;
+      }
+      return this.#challenge(context, canonical, examined);
+    }
     try {
       return await this.#session(context, canonical, examined);
     } catch (error) {
@@ -447,6 +489,69 @@ export class StaffSignInService {
     return { kind: 'CHALLENGE', challengeId: issued.id, expiresAt: issued.expiresAt };
   }
 
+  /**
+   * A privileged identity whose browser presents a trusted-browser credential: the session of the S0.24 protocol if the credential is valid
+   * under the identity's lock, with the use recorded and the count cleared in the same transaction, and `null` when it is not (the issue
+   * has rolled back, and the caller issues the ordinary challenge). The lock is honoured as in any success, and the bundle is judged again.
+   */
+  async #trustedSession(
+    context: SecurityContext,
+    canonical: string,
+    examined: Examined,
+    trusted: Uint8Array,
+  ): Promise<StaffSignInOutcome | null> {
+    const { directory, issuer, trustedBrowsers } = this.#options;
+    const candidate = candidateOf(examined);
+    const ref = candidate.summary.ref;
+    const generation = candidate.summary.credentialGeneration;
+
+    let issued: IssuedSession<CurrentSessionView>;
+    try {
+      issued = await issuer.issue({
+        principal: ref,
+        correlationId: context.correlationId,
+        verifiedCredentialGeneration: generation,
+        secondFactor: 'TRUSTED_BROWSER',
+        project: (handle, session) => currentSessionOf(handle, session, directory),
+        steps: [
+          {
+            name: 'a trusted browser stands in for the code, and a complete sign-in clears the failed-attempt count',
+            run: async (handle, locked) => {
+              // The identity was judged privileged on an earlier read; under its lock it is judged again. A credential means nothing for
+              // a role that signs in without a second factor.
+              if ((await bundleIsPrivileged(handle, locked.bundleId)) !== true) {
+                throw new TrustedBrowserNotValidError();
+              }
+              if (await directory.isCredentialLocked(handle, ref)) throw new LockedMeanwhileError();
+              // Valid, judged on the database's clock under the identity's lock, or it stands in for nothing.
+              if ((await trustedBrowsers.use(handle, trusted, ref.id)) === null) {
+                throw new TrustedBrowserNotValidError();
+              }
+              if (examined.rehashed !== null && examined.verifiedHash !== null) {
+                await directory.rehashCredential(
+                  handle,
+                  ref,
+                  generation,
+                  examined.verifiedHash,
+                  examined.rehashed,
+                );
+              }
+              await directory.clearFailedAttempts(handle, ref);
+            },
+          },
+        ],
+      });
+    } catch (error) {
+      if (error instanceof TrustedBrowserNotValidError) return null;
+      if (error instanceof SessionIssueRefusedError)
+        return this.#staleRefusal(context, canonical, ref);
+      if (error instanceof LockedMeanwhileError)
+        return this.#lockedRefusal(context, canonical, ref);
+      throw error;
+    }
+    return { kind: 'SESSION', session: issued, view: issued.view };
+  }
+
   /** An Ops Staff member: the session of the S0.24 protocol, with the count cleared in the same transaction. */
   async #session(
     context: SecurityContext,
@@ -464,6 +569,8 @@ export class StaffSignInService {
         principal: ref,
         correlationId: context.correlationId,
         verifiedCredentialGeneration: generation,
+        // A role that signs in without a second factor says so in the record of the session (audit.md §5.4).
+        secondFactor: 'NONE',
         // The view is built in the issuing transaction: one that cannot be built takes the session, the count it cleared and the success
         // event back with it, and nothing is committed for a caller who is answered with a failure (the audit of 21 October 2026, A04).
         project: (handle, session) => currentSessionOf(handle, session, directory),

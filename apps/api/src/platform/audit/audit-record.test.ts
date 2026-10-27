@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuditEventInput } from '../auth/ports/audit-writer.port.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import { AUDIT_OBJECT_TYPES, AUDIT_SERIALISATION_VERSION } from './audit-vocabulary.js';
-import { AuditRefusedError, buildAuditRecord } from './audit-record.js';
+import { AuditRefusedError, buildAuditRecord, noteRefusal } from './audit-record.js';
 
 const ID = '019a0000-0000-7000-8000-000000000001';
 const NOW = new Date('2026-10-10T09:00:00.000Z');
@@ -432,5 +432,37 @@ describe('the audit record: what may be written into the facts', () => {
 
     expect(refusal(() => build({ relatedIds: polluted })).code).toBe('AUDIT_DETAIL_REFUSED');
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe('the audit record: the note, asked before the act (F04 of 23 October 2026)', () => {
+  // Break caught: the question and the writer disagreeing. A note the question accepts must be a note the writer keeps, or the caller
+  // is met with the writer's refusal as an unexplained error after the act has begun; a note it refuses must be one the writer refuses,
+  // or a caller is turned away for text the ledger would take.
+  it.each([
+    ['plain text', 'The surname is spelt wrongly', undefined],
+    ['accents and punctuation', 'Réseau « partagé » (n° 7) — vérifié, ok.', undefined],
+    ['exactly 1000 characters', 'y'.repeat(1000), undefined],
+    ['1001 characters', 'y'.repeat(1001), 'maxLength'],
+    ['a line break', 'one\ntwo', 'format'],
+    ['a carriage return', 'one\rtwo', 'format'],
+    ['a tab', 'one\ttwo', 'format'],
+    ['a NUL byte', 'one\u0000two', 'format'],
+    ['an email address', 'ask kwame@example.test', 'format'],
+    ['an international number', 'call +233201234567', 'format'],
+    ['a local-looking number that is not E.164', 'ref 0201234567', undefined],
+  ] as const)('agrees with the writer for %s', (_label, note, expected) => {
+    expect(noteRefusal(note)).toBe(expected);
+    if (expected === undefined) {
+      expect(build({ note }).note).toBe(note);
+    } else {
+      expect(refusal(() => build({ note })).code).toBe('AUDIT_DETAIL_REFUSED');
+    }
+  });
+
+  it('keeps a secret that travels inside the text out of the stored note, as the writer always did', () => {
+    const stored = build({ note: 'see https://user:hunter2@host.example/path' }).note;
+
+    expect(stored).not.toContain('hunter2');
   });
 });

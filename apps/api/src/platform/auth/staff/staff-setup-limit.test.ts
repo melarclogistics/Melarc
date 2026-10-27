@@ -37,6 +37,26 @@ describe('the limit of a credential setup operation (S0.31; AC-SLICE-000-125)', 
     expect(new Set(keys).size).toBe(3);
   });
 
+  // Break caught (S0.57; AC-125 names `completeRiderDeviceEnrolment` among the operations of the bucket): the rider's enrolment taking another
+  // operation's key space, or none of its own, so that a token tried there spends an allowance somewhere else.
+  it('gives each of the six operations that take a setup token a key space of its own, the rider’s enrolment among them', () => {
+    const purposes = [
+      'STAFF_CREDENTIAL_SETUP',
+      'MFA_ENROLMENT',
+      'MFA_REENROLMENT',
+      'VENDOR_CREDENTIAL_SETUP',
+      'VENDOR_DEVICE_ENROLMENT',
+      'RIDER_DEVICE_ENROLMENT',
+    ] as const;
+    const limits = purposes.map((purpose) => setupTokenLimit(purpose));
+
+    expect(new Set(limits.map((limit) => limit.canonical(TOKEN))).size).toBe(purposes.length);
+    for (const limit of limits) {
+      expect(limit.bucket).toBe('rate_limit_recovery');
+      expect(limit.identifier).toEqual({ field: 'setup_token', maxBytes: 128 });
+    }
+  });
+
   it('gives one key to one value at one operation, and another to another value', () => {
     const limit = setupTokenLimit('MFA_REENROLMENT');
 

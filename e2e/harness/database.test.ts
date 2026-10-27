@@ -2,12 +2,16 @@ import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  arrange,
+  bootstrapAdministrators,
   clientSettings,
   createDatabase,
   dropDatabase,
   listDatabases,
+  observe,
   parseCreated,
   redactUrl,
+  resumeAdministrator,
   withClient,
 } from './database.ts';
 import { repositoryPaths } from './paths.ts';
@@ -32,9 +36,10 @@ vi.mock('node:child_process', () => ({ execFile: execFileMock }));
 const MIGRATION =
   'postgres://melarc_migration_elevated:m-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
 const RUNTIME = 'postgres://melarc_api_runtime:r-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
+const WORKER = 'postgres://melarc_worker_runtime:w-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
 
 const created = (overrides: Record<string, unknown> = {}) =>
-  `${JSON.stringify({ database: 'melarc_test_0a1b2c3d', migrationUrl: MIGRATION, runtimeUrl: RUNTIME, ...overrides })}\n`;
+  `${JSON.stringify({ database: 'melarc_test_0a1b2c3d', migrationUrl: MIGRATION, runtimeUrl: RUNTIME, workerUrl: WORKER, ...overrides })}\n`;
 
 describe('parseCreated', () => {
   it('reads the one line the database command prints', () => {
@@ -42,6 +47,7 @@ describe('parseCreated', () => {
       name: 'melarc_test_0a1b2c3d',
       migrationUrl: MIGRATION,
       runtimeUrl: RUNTIME,
+      workerUrl: WORKER,
     });
   });
 
@@ -62,6 +68,7 @@ describe('parseCreated', () => {
     ['a warning before the line', `(node) warning\n${created()}`],
     ['two lines', `${created()}${created()}`],
     ['a missing runtime URL', created({ runtimeUrl: undefined })],
+    ['a missing worker URL', created({ workerUrl: undefined })],
     ['a URL that is not a PostgreSQL one', created({ runtimeUrl: 'http://127.0.0.1/x' })],
   ])('refuses %s', (_label, output) => {
     expect(() => parseCreated(output)).toThrow();
@@ -77,9 +84,14 @@ describe('parseCreated', () => {
     ['a TLS option', `${RUNTIME}?sslmode=require`],
     ['an empty query string', `${RUNTIME}?`],
     ['a fragment', `${MIGRATION}#section`],
+    ['a worker URL with a user override', `${WORKER}?user=postgres`],
   ])('refuses a connection string with %s', (_label, url) => {
     const output = created(
-      url.startsWith('postgres://melarc_migration') ? { migrationUrl: url } : { runtimeUrl: url },
+      url.startsWith('postgres://melarc_migration')
+        ? { migrationUrl: url }
+        : url.startsWith('postgres://melarc_worker')
+          ? { workerUrl: url }
+          : { runtimeUrl: url },
     );
 
     expect(() => parseCreated(output)).toThrow(/query string or fragment/);
@@ -292,13 +304,14 @@ describe('the database command', () => {
   });
 
   // Break caught: the wrong verb, so that `create` or `list` runs something else, or the output of the command
-  // being read from the wrong place.
-  it('creates a database with `create` and reads the one line it prints', async () => {
+  // being read from the wrong place; or a database made without the reference data, which the API the run
+  // starts is not ready over (`reference_data_missing`, the owner's decision of 25 October 2026).
+  it('creates a database with `create --seed` and reads the one line it prints', async () => {
     commandPrints(created());
 
     await expect(createDatabase()).resolves.toMatchObject({ name: 'melarc_test_0a1b2c3d' });
 
-    expect(theCall().args).toEqual([repositoryPaths().databaseTool, 'create']);
+    expect(theCall().args).toEqual([repositoryPaths().databaseTool, 'create', '--seed']);
   });
 
   it('lists the disposable databases with `list`', async () => {
@@ -371,5 +384,114 @@ describe('the database command', () => {
     const passed = theCall().options?.env ?? {};
     const systemRoot = Object.entries(passed).find(([name]) => name.toUpperCase() === 'SYSTEMROOT');
     expect(systemRoot?.[1]).toBe('C:\\StubbedWindows');
+  });
+});
+
+describe('what a journey asks of the database command (S0.45)', () => {
+  const NAME = 'melarc_test_0a1b2c3d';
+
+  afterEach(() => {
+    execFileMock.mockReset();
+  });
+
+  // Break caught: the bootstrap run against a database other than the run's own, or the custodians passed as one argument, which the
+  // command would read as one custodian.
+  it('bootstraps the run database with the folder and each custodian as an argument of its own', async () => {
+    commandPrints(`${JSON.stringify({ bootstrapped: NAME })}
+`);
+
+    await bootstrapAdministrators(NAME, '/tmp/custody', [
+      'Ada Admin <ada@x.example>',
+      'Bola <b@x.example>',
+    ]);
+
+    expect(theCall().args).toEqual([
+      repositoryPaths().databaseTool,
+      'bootstrap',
+      NAME,
+      '/tmp/custody',
+      'Ada Admin <ada@x.example>',
+      'Bola <b@x.example>',
+    ]);
+  });
+
+  // Break caught: a bootstrap that takes seconds on Windows (a bundle costs runs of whoami and icacls) being cut off by the limit of
+  // an ordinary command, and a run failing for want of time rather than for a reason.
+  it('allows the bootstrap and the resume the time a custody bundle costs', async () => {
+    commandPrints(`${JSON.stringify({ bootstrapped: NAME })}
+`);
+    await bootstrapAdministrators(NAME, '/tmp/custody', ['a <a@x.example>', 'b <b@x.example>']);
+    expect(theCall().options?.timeout).toBeGreaterThan(60_000);
+
+    execFileMock.mockReset();
+    commandPrints(`${JSON.stringify({ resumed: NAME })}
+`);
+    await resumeAdministrator(NAME, '/tmp/custody', 'ada@x.example');
+    expect(theCall().options?.timeout).toBeGreaterThan(60_000);
+  });
+
+  // Break caught: the command acting on a database of another shape, the development database among them.
+  it.each([
+    [
+      'bootstrap',
+      () => bootstrapAdministrators('melarc_dev', '/tmp/c', ['a <a@x.example>', 'b <b@x.example>']),
+    ],
+    ['resume', () => resumeAdministrator('melarc_dev', '/tmp/c', 'a@x.example')],
+    ['arrange', () => arrange('melarc_dev', 'lapse-lock', 'a@x.example')],
+    ['observe', () => observe('melarc_dev', 'lock', 'a@x.example')],
+  ])(
+    'refuses to %s a database that is not a harness database, and runs no command',
+    async (verb, call) => {
+      commandPrints('{}');
+
+      await expect(call()).rejects.toThrow(`Refusing to ${verb}`);
+
+      expect(execFileMock).not.toHaveBeenCalled();
+    },
+  );
+
+  // Break caught: output that is not the command's answer being taken for it.
+  it('refuses an answer that does not say what was done', async () => {
+    commandPrints(`${JSON.stringify({ bootstrapped: 'melarc_test_ffffffff' })}
+`);
+    await expect(
+      bootstrapAdministrators(NAME, '/tmp/custody', ['a <a@x.example>', 'b <b@x.example>']),
+    ).rejects.toThrow(/did not say it bootstrapped/);
+
+    commandPrints(`${JSON.stringify({ arranged: 'something-else', rows: 1 })}
+`);
+    await expect(arrange(NAME, 'lapse-lock', 'a@x.example')).rejects.toThrow(/did not say/);
+
+    commandPrints(`${JSON.stringify({ observed: 'lock', rows: 'many' })}
+`);
+    await expect(observe(NAME, 'lock', 'a@x.example')).rejects.toThrow(/did not answer/);
+  });
+
+  it('passes an arrangement and an observation by name with their arguments, and returns the rows', async () => {
+    commandPrints(`${JSON.stringify({ arranged: 'expire-setup-grant', rows: 2 })}
+`);
+    await expect(
+      arrange(NAME, 'expire-setup-grant', 'a@x.example', 'STAFF_CREDENTIAL_SETUP'),
+    ).resolves.toBe(2);
+    expect(theCall().args).toEqual([
+      repositoryPaths().databaseTool,
+      'arrange',
+      NAME,
+      'expire-setup-grant',
+      'a@x.example',
+      'STAFF_CREDENTIAL_SETUP',
+    ]);
+
+    execFileMock.mockReset();
+    commandPrints(`${JSON.stringify({ observed: 'factors', rows: [{ status: 'ACTIVE' }] })}
+`);
+    await expect(observe(NAME, 'factors', 'a@x.example')).resolves.toEqual([{ status: 'ACTIVE' }]);
+    expect(theCall().args).toEqual([
+      repositoryPaths().databaseTool,
+      'observe',
+      NAME,
+      'factors',
+      'a@x.example',
+    ]);
   });
 });

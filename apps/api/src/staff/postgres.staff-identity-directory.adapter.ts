@@ -6,6 +6,7 @@ import type {
   LockoutPolicy,
   PrincipalRef,
   PrincipalSummary,
+  RegisteredChannel,
   SignInCandidate,
 } from '../platform/auth/ports/identity-directory.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
@@ -13,9 +14,9 @@ import { timestampOf } from '../platform/database/timestamps.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 
 /**
- * A lookup this adapter cannot answer because the identities it would search are not built yet: a vendor account (the vendor domain)
- * and a rider (the rider tasks). It fails and says so, and never answers "no such account": a success stub would sign nobody in and
- * also hide that nothing could have been found.
+ * A lookup this adapter cannot answer because the identities it would search are another directory's: a vendor account (the vendor
+ * domain) and a rider (the rider directory). It fails and says so, and never answers "no such account": a success stub would sign nobody
+ * in and also hide that the question was put to the wrong directory.
  */
 export class IdentityDirectoryNotBuiltError extends Error {
   constructor(readonly what: 'vendor account' | 'rider') {
@@ -85,7 +86,9 @@ function staffRef(ref: PrincipalRef): string {
  *   the sign-in's lookup says only whether a lock is in force now, on the database's clock. Setting a credential clears both.
  * - **The summary carries what a decision needs and nothing it could use to read the record**: the status, whether a credential
  *   is established (never the hash), the bundle a session snapshots and the hubs the principal is limited to.
- * - Vendor accounts and riders are not built: their lookups throw `IdentityDirectoryNotBuiltError`.
+ * - A rider is the rider directory's (`postgres.rider-identity-directory.adapter.ts`, S0.53) and a vendor account the vendor directory's
+ *   (S0.47): the router of `platform/auth` sends them there, and asked of this adapter anyway, a rider or a vendor throws
+ *   `IdentityDirectoryNotBuiltError`, never "no such principal".
  */
 export class PostgresStaffIdentityDirectory implements IdentityDirectory {
   async findStaffByCanonicalEmail(
@@ -309,6 +312,64 @@ export class PostgresStaffIdentityDirectory implements IdentityDirectory {
     );
     const row = result.rows[0] as unknown as { full_name: string } | undefined;
     return row === undefined ? null : row.full_name;
+  }
+
+  /** A staff member's messages go to the verified work email, as entered and without the padding the canonical form removes. */
+  async registeredChannel(
+    transaction: TransactionHandle,
+    ref: PrincipalRef,
+  ): Promise<RegisteredChannel | null> {
+    const result = await transactionOf(transaction).execute(
+      sql`select work_email from staff_identity where id = ${staffRef(ref)}::uuid`,
+    );
+    const row = result.rows[0] as unknown as { work_email: string } | undefined;
+    return row === undefined ? null : { channel: 'EMAIL', destination: row.work_email.trim() };
+  }
+
+  /**
+   * A staff identity may recover while it is `ACTIVE` or `SUSPENDED` with an established password and a work email
+   * (credential-recovery.md section 5.7): never `PENDING_APPROVAL`, never the terminal `REJECTED` (its address is released) or
+   * `OFFBOARDED`, and never one that has set no password yet (the setup grant reaches it). Read in the caller's transaction, under the lock.
+   */
+  async recoveryEligible(transaction: TransactionHandle, ref: PrincipalRef): Promise<boolean> {
+    const result = await transactionOf(transaction).execute(sql`
+      select 1 from staff_identity
+       where id = ${staffRef(ref)}::uuid and status in ('ACTIVE', 'SUSPENDED')
+         and credential_generation > 0 and credential_established_at is not null and btrim(work_email) <> ''`);
+    return result.rows.length === 1;
+  }
+
+  /**
+   * One conditional update of the credential columns: the hash, the moment (the database's clock), the generation raised by one (the
+   * table's guard holds it to one step) and the lockout cleared. `credential_generation > 0` is what makes it a replacement and not a setup.
+   * The identity lock is the caller's.
+   */
+  async replaceCredential(
+    transaction: TransactionHandle,
+    ref: PrincipalRef,
+    encodedHash: string,
+  ): Promise<{ readonly generation: number } | null> {
+    const id = staffRef(ref);
+    if (typeof encodedHash !== 'string' || encodedHash.length === 0 || encodedHash.length > 1024) {
+      throw new TypeError(
+        'A credential is replaced by the encoded hash of a password: 1 to 1024 characters',
+      );
+    }
+    const result = await transactionOf(transaction).execute(sql`
+      update staff_identity
+         set credential_hash = ${encodedHash}, credential_established_at = clock_timestamp(),
+             credential_generation = credential_generation + 1,
+             failed_attempt_count = 0, locked_until = null
+       where id = ${id}::uuid and credential_generation > 0
+      returning credential_generation`);
+    const row = result.rows[0] as unknown as { credential_generation: number | string } | undefined;
+    return row === undefined ? null : { generation: generationOf(row.credential_generation) };
+  }
+
+  /** A staff member belongs to no vendor organisation: only the vendor directory answers this. */
+  vendorOrganizationOf(_transaction: TransactionHandle, ref: PrincipalRef): Promise<string | null> {
+    staffRef(ref);
+    return Promise.reject(new TypeError('A staff identity belongs to no vendor organisation'));
   }
 
   async #one(transaction: TransactionHandle, statement: SQL): Promise<PrincipalSummary | null> {

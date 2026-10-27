@@ -11,6 +11,8 @@ import { MFA_FACTOR_STORE } from '../mfa/mfa-providers.js';
 import type { MfaFactorStore } from '../mfa/mfa-factor-store.js';
 import { SETUP_GRANT_STORE } from '../setup-grants/setup-grant-providers.js';
 import type { SetupGrantStore } from '../setup-grants/setup-grant-store.js';
+import { TRUSTED_BROWSER_STORE } from '../trusted-browsers/trusted-browser-providers.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { StaffSetupService } from './staff-setup.service.js';
 
 /** The injection token of the service of the three credential setup operations (S0.31), which their controller asks for. */
@@ -37,6 +39,7 @@ export const staffSetupProviders: readonly FactoryProvider[] = [
       hashAdmission: HashAdmission | undefined,
       totp: TotpVerifier | undefined,
       audit: AuditWriter | undefined,
+      trustedBrowsers: TrustedBrowserStore | undefined,
     ): StaffSetupService | undefined =>
       unitOfWork === undefined ||
       directory === undefined ||
@@ -46,7 +49,8 @@ export const staffSetupProviders: readonly FactoryProvider[] = [
       hasher === undefined ||
       hashAdmission === undefined ||
       totp === undefined ||
-      audit === undefined
+      audit === undefined ||
+      trustedBrowsers === undefined
         ? undefined
         : new StaffSetupService({
             unitOfWork,
@@ -58,6 +62,7 @@ export const staffSetupProviders: readonly FactoryProvider[] = [
             hashAdmission,
             totp,
             audit,
+            trustedBrowsers,
           }),
     inject: [
       optional(UNIT_OF_WORK),
@@ -69,6 +74,7 @@ export const staffSetupProviders: readonly FactoryProvider[] = [
       optional(HASH_ADMISSION),
       optional(TOTP_VERIFIER),
       optional(AUDIT_WRITER),
+      optional(TRUSTED_BROWSER_STORE),
     ],
   },
 ];

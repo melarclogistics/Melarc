@@ -9,10 +9,10 @@
  * that the race happened (`hits() === 1`) and does not pass because an expiry came early and was refused somewhere else.
  *
  * It is test support for a disposable database, and the administrator's: the function is `SECURITY DEFINER` so that the API's login,
- * which owns no sequence, can fire it. Table names are checked against the two this serves; every other word is a fixed one.
+ * which owns no sequence, can fire it. Table names are checked against the three this serves (the recovery request since S0.51a); every other word is a fixed one.
  */
 
-export type RaceTable = 'setup_grant' | 'mfa_challenge';
+export type RaceTable = 'setup_grant' | 'mfa_challenge' | 'recovery_request';
 
 /** What a test hands in: the administrator's statements, whatever the client that runs them. */
 export type AdminQuery = (statement: string) => Promise<readonly unknown[]>;
@@ -24,7 +24,7 @@ export interface InstalledRace {
   remove(): Promise<void>;
 }
 
-const TABLES: readonly RaceTable[] = ['setup_grant', 'mfa_challenge'];
+const TABLES: readonly RaceTable[] = ['setup_grant', 'mfa_challenge', 'recovery_request'];
 const DETAIL = /^reason=[A-Z_]+$/;
 
 function checked(table: RaceTable): RaceTable {

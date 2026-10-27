@@ -129,7 +129,8 @@ const CATALOGUE_FACTS: Readonly<Record<string, Partial<AuditEventInput>>> = {
     enhancedBasis: 'SELF_SERVICE',
     object: { type: 'RecoveryRequest', id: OBJECT },
     resultingState: 'ISSUED',
-    relatedIds: { initiated_by: OBJECT },
+    // A self-service request names its principal, and no initiator (S0.50: `initiated_by` is an administrator's request's).
+    relatedIds: { principal_type: 'STAFF', principal_id: OBJECT },
   },
   'auth.session.terminated': {
     enhancedBasis: 'ROUTINE_TERMINATION',

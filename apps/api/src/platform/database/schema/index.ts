@@ -14,3 +14,5 @@ export * from './credential-delivery.js';
 export * from './session.js';
 // S0.29 adds the setup grant. The MFA factor that a grant leads to is `src/staff/mfa-factor.schema.ts`, beside the identity it belongs to.
 export * from './setup-grant.js';
+// S0.50 adds the recovery request, the record that repairs an existing credential.
+export * from './recovery-request.js';

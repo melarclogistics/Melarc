@@ -394,8 +394,9 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     });
 
     // Break caught: a limit described as applied that nothing reads, or an applied one still described as validation only.
-    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), and the HTTP limits and the request budget (S0.20), and no other', () => {
+    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), the HTTP limits and the request budget (S0.20) and the verifier call (S0.56), and no other', () => {
       const applied = (setting: string): boolean =>
+        setting.includes('ATTESTATION_VERIFIER_TIMEOUT_MS') ||
         setting.includes('SHUTDOWN_TIMEOUT_MS') ||
         setting.includes('DATABASE_') ||
         setting.includes('HTTP_') ||

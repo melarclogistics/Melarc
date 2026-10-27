@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -14,10 +14,21 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function build(paths: ReturnType<typeof repositoryPaths>, which: 'api' | 'ops' | 'database'): void {
-  const file = { api: paths.apiMain, ops: paths.opsIndex, database: paths.databaseTool }[which];
-  mkdirSync(join(file, '..'), { recursive: true });
-  writeFileSync(file, '');
+type Which = 'api' | 'ops' | 'database';
+
+/** The files of each build: the API's entry point, the worker's and the two bootstrap commands are built together. */
+const filesOf = (paths: ReturnType<typeof repositoryPaths>, which: Which): string[] =>
+  ({
+    api: [paths.apiMain, paths.workerMain, paths.bootstrapSeed, paths.bootstrapResume],
+    ops: [paths.opsIndex],
+    database: [paths.databaseTool],
+  })[which];
+
+function build(paths: ReturnType<typeof repositoryPaths>, which: Which): void {
+  for (const file of filesOf(paths, which)) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '');
+  }
 }
 
 describe('requireBuilds', () => {
@@ -52,9 +63,24 @@ describe('requireBuilds', () => {
     }).toThrow(/e2e-database\.js/);
   });
 
+  // Break caught (S0.45): a stack that starts the delivery worker or the bootstrap commands from a build that does not hold them, and
+  // fails in the middle of a run. Each of them is a file of the API's build, and each is named when it is missing.
+  it.each(['workerMain', 'bootstrapSeed', 'bootstrapResume'] as const)(
+    'names %s when it alone is missing',
+    (key) => {
+      const paths = repositoryPaths(root);
+      for (const which of ['api', 'ops', 'database'] as const) build(paths, which);
+      rmSync(paths[key]);
+
+      expect(() => {
+        requireBuilds(paths);
+      }).toThrow(paths[key]);
+    },
+  );
+
   // Break caught: a missing build whose message names another file, or all of them, so that the person who
-  // reads it does not know which build to make. Each of the three is left out in turn: the message names that
-  // file, with its whole path, and names neither of the two that exist.
+  // reads it does not know which build to make. Each of the three is left out in turn: the message names the
+  // files of that build, with their whole paths, and names none of the two that exist.
   it.each([
     ['api', 'apiMain'],
     ['ops', 'opsIndex'],
@@ -63,9 +89,9 @@ describe('requireBuilds', () => {
     const paths = repositoryPaths(root);
     for (const other of ['api', 'ops', 'database'] as const)
       if (other !== which) build(paths, other);
-    const present = [paths.apiMain, paths.opsIndex, paths.databaseTool].filter(
-      (file) => file !== paths[key],
-    );
+    const present = (['api', 'ops', 'database'] as const)
+      .filter((other) => other !== which)
+      .flatMap((other) => filesOf(paths, other));
 
     let message = '';
     try {

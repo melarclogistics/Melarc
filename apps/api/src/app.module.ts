@@ -1,6 +1,8 @@
-import { Module, type DynamicModule } from '@nestjs/common';
+import { Logger, Module, type DynamicModule } from '@nestjs/common';
 
 import { PostgresAuditWriter } from './platform/audit/postgres.audit-writer.adapter.js';
+import { ServiceAttestationVerifier } from './platform/auth/attestation/service.attestation-verifier.adapter.js';
+import { SubstituteAttestationVerifier } from './platform/auth/attestation/substitute.attestation-verifier.adapter.js';
 import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import { DESCRIBE_PORT_BINDINGS } from './platform/auth/describe/describe-ports.adapter.js';
 import {
@@ -12,7 +14,9 @@ import { Sha256TokenService } from './platform/auth/crypto/sha256.token-service.
 import { AesGcmSecretCipher } from './platform/auth/crypto/aes-gcm.secret-cipher.adapter.js';
 import { Argon2Hasher } from './platform/auth/crypto/argon2.hasher.adapter.js';
 import { Rfc6238TotpVerifier } from './platform/auth/crypto/rfc6238.totp-verifier.adapter.js';
+import { RoutedIdentityDirectory } from './platform/auth/directory/routed.identity-directory.adapter.js';
 import { CLOCK, type Clock } from './platform/auth/ports/clock.port.js';
+import { METRICS, type Metrics } from './platform/auth/ports/metrics.port.js';
 import { portProviders, type PortBindings } from './platform/auth/ports/port-bindings.js';
 import { SECRET_CIPHER, type SecretCipher } from './platform/auth/ports/secret-cipher.port.js';
 import { PostgresSessionStore } from './platform/auth/sessions/postgres.session-store.adapter.js';
@@ -21,6 +25,7 @@ import type { AppConfig } from './platform/config/load-config.js';
 import { DatabaseService } from './platform/database/database.service.js';
 import { PostgresUnitOfWork } from './platform/database/postgres.unit-of-work.adapter.js';
 import { PostgresDeliveryQueue } from './platform/delivery/postgres.delivery-queue.adapter.js';
+import { PostgresIdempotencyStore } from './platform/idempotency/postgres.idempotency-store.adapter.js';
 import { SettingsBucketLimits } from './platform/limiter/bucket-limits.js';
 import {
   BoundedHashAdmission,
@@ -28,12 +33,22 @@ import {
   planHashAdmission,
 } from './platform/limiter/bounded.hash-admission.adapter.js';
 import { PostgresRateLimiter } from './platform/limiter/postgres.rate-limiter.adapter.js';
+import { BoundedMetrics } from './platform/metrics/bounded.metrics.adapter.js';
+import { labelPolicyFor } from './platform/metrics/metric-catalogue.js';
+import type { CompiledFixedPolicy } from './platform/auth/sessions/session-authority.js';
 import { PlatformModule, type PlatformModuleOptions } from './platform/platform.module.js';
 import { SettingsReader } from './platform/settings/settings-reader.js';
+import { DispatchModule } from './dispatch/dispatch.module.js';
 import { PermissionModule } from './permission/permission.module.js';
+import { PostgresRiderIdentityDirectory } from './staff/postgres.rider-identity-directory.adapter.js';
 import { PostgresStaffIdentityDirectory } from './staff/postgres.staff-identity-directory.adapter.js';
+import { PostgresVendorAccountDirectory } from './vendor/postgres.vendor-account-directory.adapter.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { StaffModule } from './staff/staff.module.js';
+import { VendorModule } from './vendor/vendor.module.js';
+
+/** Where the metrics registry says that it dropped a sample (a defect in code that counts, never a value). */
+const metricsLogger = new Logger('Metrics');
 
 export interface AppModuleOptions extends PlatformModuleOptions {
   /**
@@ -70,9 +85,42 @@ export interface AppModuleOptions extends PlatformModuleOptions {
  *   (`authentication.guard.ts`). A key purpose that is missing stops the application at start.
  */
 function runtimePortBindings(config: AppConfig): PortBindings {
+  const verifier = config.adapters.attestationVerifier;
   const bindings: PortBindings = {
     clock: { useClass: SystemClock },
     tokenService: { useClass: Sha256TokenService },
+    // The metrics registry (S0.56; the first consumer is the attestation verifier adapter, OB-38): bounded labels, a sample outside the
+    // catalogue throws in development and test and is dropped, counted and diagnosed in production. Nothing serves it yet (S0.68).
+    // It reads the system clock itself and injects no port: its only use of time is the spacing of its own diagnostics, and a test that
+    // controls the Clock must not make this a request-scoped provider by propagation.
+    metrics: {
+      useFactory: () =>
+        new BoundedMetrics({
+          policy: labelPolicyFor(config.nodeEnv),
+          clock: new SystemClock(),
+          onDiagnostic: (diagnostic) => {
+            metricsLogger.warn(JSON.stringify(diagnostic));
+          },
+        }),
+    },
+    // The substitute attestation verifier (S0.54) is the one the configuration may select for a local run and for staging (production refuses
+    // it, `adapter-refusals.ts`); it holds no state and needs no database. The production adapter asks the private verifier service over
+    // HTTP (S0.56) and is the only one a production configuration can select.
+    attestationVerifier:
+      verifier.kind === 'substitute'
+        ? { useFactory: () => new SubstituteAttestationVerifier() }
+        : {
+            useFactory: (metrics: Metrics) =>
+              new ServiceAttestationVerifier({
+                url: verifier.url,
+                timeoutMs: verifier.timeoutMs,
+                ...(verifier.callerSecret === undefined
+                  ? {}
+                  : { callerSecret: verifier.callerSecret }),
+                metrics,
+              }),
+            inject: [METRICS],
+          },
     ...(config.database === undefined
       ? {}
       : {
@@ -84,7 +132,15 @@ function runtimePortBindings(config: AppConfig): PortBindings {
             useFactory: (clock: Clock) => new PostgresSessionStore(clock),
             inject: [CLOCK],
           },
-          identityDirectory: { useClass: PostgresStaffIdentityDirectory },
+          // Each audience's directory is its domain's; the platform is given one port over them (S0.47).
+          identityDirectory: {
+            useFactory: () =>
+              new RoutedIdentityDirectory({
+                STAFF: new PostgresStaffIdentityDirectory(),
+                VENDOR: new PostgresVendorAccountDirectory(),
+                RIDER: new PostgresRiderIdentityDirectory(),
+              }),
+          },
           auditWriter: {
             useFactory: (clock: Clock) => new PostgresAuditWriter(clock),
             inject: [CLOCK],
@@ -95,16 +151,26 @@ function runtimePortBindings(config: AppConfig): PortBindings {
   const { keys } = config;
   // The first consumers of the secret cipher and of the issuing side of the delivery queue (S0.29; OB-38, OB-107): the MFA factor store
   // seals a TOTP seed and the setup grant store queues the message that carries a grant. The API's cipher serves those two purposes
-  // and no other: the sealed replay of an idempotent answer is opened by the operation that keeps one (S0.53), and the worker holds the
-  // delivery key under a cipher of its own (`delivery-worker-runtime.ts`).
+  // and the sealed replay of an idempotent answer, which `registerRiderDevice` alone keeps (S0.53b: the store refuses a seal for any
+  // other operation); the worker holds the delivery key under a cipher of its own (`delivery-worker-runtime.ts`).
   const withCredentials: PortBindings = {
     ...bindings,
     secretCipher: {
-      useFactory: () => new AesGcmSecretCipher(keys, { serves: ['TOTP_SEED', 'DELIVERY_PAYLOAD'] }),
+      useFactory: () =>
+        new AesGcmSecretCipher(keys, {
+          serves: ['TOTP_SEED', 'DELIVERY_PAYLOAD', 'REPLAY_SECRET'],
+        }),
     },
     deliveryQueue: {
       useFactory: (cipher: SecretCipher, clock: Clock) =>
         new PostgresDeliveryQueue({ cipher, clock }),
+      inject: [SECRET_CIPHER, CLOCK],
+    },
+    // The first consumer of the idempotency store (S0.36, `createStaffIdentity`; OB-38). It is built on the API's cipher, which serves the
+    // TOTP seed and the delivery payload and, since S0.53b, the sealed replay of the one operation that replays a secret.
+    idempotencyStore: {
+      useFactory: (cipher: SecretCipher, clock: Clock) =>
+        new PostgresIdempotencyStore(cipher, clock),
       inject: [SECRET_CIPHER, CLOCK],
     },
     // The first consumers of the hasher, the hash admission and the TOTP verifier (S0.31; OB-38): the credential setup operations.
@@ -147,6 +213,14 @@ function runtimePortBindings(config: AppConfig): PortBindings {
     },
   };
 }
+
+/**
+ * The fixed-policy revision this build is compiled for, for each audience that has one (SECURITY_DESIGN.md section 13.10; the session-issue
+ * protocol refuses an instance below the stored floor). S0.48 declares the Vendor's: revision 1, the fixed Vendor bundle the seed writes
+ * (`tools/seed/bundles.ts`); S0.59 declares the Rider's, revision 1 of the fixed Rider bundle, with the sign-in that issues its sessions (what two
+ * builds of different revisions do is proved by S0.63). A composition that gives its own (a test) replaces this.
+ */
+export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: 1, RIDER: 1 });
 
 /** `base` with every defined binding of `over` laid on it. An explicit `undefined` means no binding and replaces nothing. */
 function overlay(base: PortBindings, over: PortBindings = {}): PortBindings {
@@ -211,8 +285,13 @@ export class AppModule {
       // The domain modules (S0.35: `settings` first), whose routes are the product's and are left out with the platform's by
       // `productRoutes: false`: a test that brings its own routes and contract composes the application without them.
       imports: [
-        PlatformModule.register(options),
-        ...(options.productRoutes === false ? [] : [PermissionModule, SettingsModule, StaffModule]),
+        PlatformModule.register({
+          ...options,
+          compiledFixedPolicy: options.compiledFixedPolicy ?? BUILD_FIXED_POLICY,
+        }),
+        ...(options.productRoutes === false
+          ? []
+          : [DispatchModule, PermissionModule, SettingsModule, StaffModule, VendorModule]),
       ],
       providers: check === undefined ? bound : [...bound, check],
       exports: bound.map((provider) => provider.provide),

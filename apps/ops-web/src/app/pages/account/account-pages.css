@@ -1,0 +1,19 @@
+/*
+ * The trusted browsers (staff-authentication.md section 5.8). Layout only: every colour, size and space comes from tokens.css.
+ */
+.trusted-browser__current {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.trusted-browsers__note {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.trusted-browsers__notice {
+  margin-bottom: var(--space-4);
+}

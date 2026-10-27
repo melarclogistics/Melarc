@@ -74,6 +74,17 @@ export type FailedAttempt =
       readonly lockedUntil: Date;
     };
 
+/**
+ * Where a principal's credential messages go (SECURITY_DESIGN.md §13.9a; state-machines.md §19.1): resolved from the principal's record,
+ * **never from a request**. A staff member's verified work email as entered; a vendor account's registered address of the delivery channel
+ * its approver chose, with the account identifier every vendor message carries beside the link (S0.47).
+ */
+export interface RegisteredChannel {
+  readonly channel: 'EMAIL' | 'SMS';
+  readonly destination: string;
+  readonly accountIdentifier?: string;
+}
+
 /** The two settings a failure is counted by (`signin_max_attempts`, `signin_lockout_minutes`), read by the caller. */
 export interface LockoutPolicy {
   readonly maxAttempts: number;
@@ -179,8 +190,43 @@ export interface IdentityDirectory {
   ): Promise<boolean>;
   /** Sets the count to zero and ends any lock: a complete sign-in, and a credential set or recovered (S0.32). Nothing to clear is no error. */
   clearFailedAttempts(transaction: TransactionHandle, ref: PrincipalRef): Promise<void>;
-  /** What a session shows as whose it is: a staff member's full name. `null` when the principal does not exist. */
+  /**
+   * What a session shows as whose it is: a staff member's full name, a vendor account's organisation (its trading name, or its legal
+   * name where it has none; never a person). `null` when the principal does not exist.
+   */
   displayName(transaction: TransactionHandle, ref: PrincipalRef): Promise<string | null>;
+  /**
+   * The organisation a vendor account belongs to (S0.47), read from the account: what the security context of a vendor session's
+   * operation names (`VendorOrganizationResolver`). `null` when the account does not exist. Only a `VENDOR` principal has one.
+   */
+  vendorOrganizationOf(transaction: TransactionHandle, ref: PrincipalRef): Promise<string | null>;
+  /**
+   * Where the principal's credential messages go (S0.49, S0.50): `null` when the principal does not exist or has no deliverable channel
+   * (a vendor whose approver chose none, or whose chosen address is not registered). Read under the authentication capability.
+   */
+  registeredChannel(
+    transaction: TransactionHandle,
+    ref: PrincipalRef,
+  ): Promise<RegisteredChannel | null>;
+  /**
+   * Whether the principal may be sent a recovery link and may complete one (S0.50, S0.51; credential-recovery.md section 5.7), read under
+   * the identity lock the caller holds: a status of its own state machine that keeps a credential (a suspended principal included), an
+   * established credential and a registered recovery channel, and for a vendor account an organisation that is `ACTIVE` or `SUSPENDED`.
+   * Which statuses those are is the owning domain's: `platform/auth` never names another domain's states. False for a principal that
+   * does not exist.
+   */
+  recoveryEligible(transaction: TransactionHandle, ref: PrincipalRef): Promise<boolean>;
+  /**
+   * Replaces the credential of a principal whose identity lock the caller holds (S0.51, a completed recovery): the encoded hash, the moment
+   * on the database's clock, the generation raised by one, and the failed-attempt count and lock cleared, in one conditional statement.
+   * It writes nothing and answers `null` for a principal that does not exist or holds no credential yet: establishing a first one is a
+   * setup's act and never a recovery's. The hash is the caller's to make and is never read back through this port.
+   */
+  replaceCredential(
+    transaction: TransactionHandle,
+    ref: PrincipalRef,
+    encodedHash: string,
+  ): Promise<{ readonly generation: number } | null>;
 }
 
 export const IDENTITY_DIRECTORY = Symbol('IDENTITY_DIRECTORY');
@@ -294,6 +340,39 @@ export const IDENTITY_DIRECTORY_DESCRIPTOR: PortDescriptor<IdentityDirectory> = 
       inputs: 'the transaction and the principal',
       outputs: "the principal's full name, or null when there is none",
       outcomes: ['NOT_FOUND'],
+      raises: 'none',
+      transaction: 'inside-callers-transaction',
+    },
+    vendorOrganizationOf: {
+      inputs: 'the transaction and a vendor account',
+      outputs:
+        'the id of the organisation the account belongs to, or null when there is no such account',
+      outcomes: ['NOT_FOUND'],
+      raises: 'none',
+      transaction: 'inside-callers-transaction',
+    },
+    registeredChannel: {
+      inputs: 'the transaction and the principal',
+      outputs:
+        "where the principal's credential messages go (the channel, the address and, for a vendor, the account identifier), or null when it has no deliverable channel",
+      outcomes: ['NOT_FOUND', 'NO_DELIVERABLE_CHANNEL'],
+      raises: 'none',
+      transaction: 'inside-callers-transaction',
+    },
+    recoveryEligible: {
+      inputs: 'the transaction and the principal, whose identity lock the caller holds',
+      outputs:
+        'whether the principal may be sent and may complete a recovery link: an eligible status, an established credential, a registered channel and, for a vendor, an organisation that is ACTIVE or SUSPENDED',
+      outcomes: ['NOT_FOUND', 'NOT_ELIGIBLE'],
+      raises: 'none',
+      transaction: 'inside-callers-transaction',
+    },
+    replaceCredential: {
+      inputs:
+        'the transaction, the principal (whose identity lock the caller holds) and the encoded hash of the new credential',
+      outputs:
+        'the credential generation now held, raised by one, with the failed-attempt count and the lock cleared; or null when the principal does not exist or holds no credential, in which case nothing is written',
+      outcomes: ['NOT_FOUND', 'NO_CREDENTIAL'],
       raises: 'none',
       transaction: 'inside-callers-transaction',
     },

@@ -157,69 +157,90 @@ export const LOGIN_ROLES = [
 export async function provisionRoles(admin: LocalAdmin, settings: LocalPostgres): Promise<void> {
   assertLocalHost(admin.host);
   const { client } = admin;
-  await withProvisioningLock(client, async () => {
-    const roles = [
-      { name: OWNER_ROLE, login: 'NOLOGIN', password: undefined },
-      { name: MIGRATION_ROLE, login: 'LOGIN', password: settings.migrationPassword },
-      { name: API_RUNTIME_ROLE, login: 'LOGIN', password: settings.runtimePassword },
-      {
-        name: WORKER_RUNTIME_ROLE,
-        login: 'LOGIN',
-        password: localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE),
-      },
-      { name: WORKER_CREDENTIAL_DELIVERY_ROLE, login: 'NOLOGIN', password: undefined },
-      {
-        name: PROVISIONING_ROLE,
-        login: 'LOGIN',
-        password: localLoginPassword(settings.adminPassword, PROVISIONING_ROLE),
-      },
-    ];
-    for (const role of roles) {
-      const verb = (await roleExists(client, role.name)) ? 'ALTER' : 'CREATE';
-      await runFormatted(client, `${verb} ROLE %I WITH ${role.login} ${NO_PRIVILEGES}`, role.name);
-      if (role.password !== undefined) {
-        await runFormatted(client, 'ALTER ROLE %I WITH PASSWORD %L', role.name, role.password);
-      }
+  await withProvisioningLock(client, () =>
+    inOneTransaction(client, () => provisionRoleStatements(client, settings)),
+  );
+}
+
+/**
+ * Runs `work` as one transaction. Role statements are transactional in PostgreSQL, so a session that uses these roles while
+ * another process provisions them (the database test files run several at a time, each provisioning first) sees the roles as
+ * they were or as they end, never half-way: provisioning revokes a login's memberships and grants back the one it keeps, and
+ * a worker statement that ran between the two would be refused for want of its capability's grants.
+ */
+async function inOneTransaction(client: SqlClient, work: () => Promise<void>): Promise<void> {
+  await client.query('begin');
+  try {
+    await work();
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined);
+    throw error;
+  }
+}
+
+async function provisionRoleStatements(client: SqlClient, settings: LocalPostgres): Promise<void> {
+  const roles = [
+    { name: OWNER_ROLE, login: 'NOLOGIN', password: undefined },
+    { name: MIGRATION_ROLE, login: 'LOGIN', password: settings.migrationPassword },
+    { name: API_RUNTIME_ROLE, login: 'LOGIN', password: settings.runtimePassword },
+    {
+      name: WORKER_RUNTIME_ROLE,
+      login: 'LOGIN',
+      password: localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE),
+    },
+    { name: WORKER_CREDENTIAL_DELIVERY_ROLE, login: 'NOLOGIN', password: undefined },
+    {
+      name: PROVISIONING_ROLE,
+      login: 'LOGIN',
+      password: localLoginPassword(settings.adminPassword, PROVISIONING_ROLE),
+    },
+  ];
+  for (const role of roles) {
+    const verb = (await roleExists(client, role.name)) ? 'ALTER' : 'CREATE';
+    await runFormatted(client, `${verb} ROLE %I WITH ${role.login} ${NO_PRIVILEGES}`, role.name);
+    if (role.password !== undefined) {
+      await runFormatted(client, 'ALTER ROLE %I WITH PASSWORD %L', role.name, role.password);
     }
+  }
 
-    await runFormatted(
-      client,
-      'GRANT %I TO %I WITH INHERIT TRUE, SET TRUE',
-      OWNER_ROLE,
-      MIGRATION_ROLE,
-    );
+  await runFormatted(
+    client,
+    'GRANT %I TO %I WITH INHERIT TRUE, SET TRUE',
+    OWNER_ROLE,
+    MIGRATION_ROLE,
+  );
 
-    // Only the migration identity is a member of anything (of the owner, above). A membership any other role of ours
-    // has acquired, of the owner, of the migration identity, of a predefined role or of one another, is taken away.
-    const { rows: memberships } = await client.query(
-      `select granted.rolname as granted, member.rolname as member
-         from pg_auth_members m
-         join pg_roles member on member.oid = m.member
-         join pg_roles granted on granted.oid = m.roleid
-        where member.rolname = any($1)`,
+  // Only the migration identity is a member of anything (of the owner, above). A membership any other role of ours
+  // has acquired, of the owner, of the migration identity, of a predefined role or of one another, is taken away.
+  const { rows: memberships } = await client.query(
+    `select granted.rolname as granted, member.rolname as member
+       from pg_auth_members m
+       join pg_roles member on member.oid = m.member
+       join pg_roles granted on granted.oid = m.roleid
+      where member.rolname = any($1)`,
+    [
       [
-        [
-          API_RUNTIME_ROLE,
-          WORKER_RUNTIME_ROLE,
-          WORKER_CREDENTIAL_DELIVERY_ROLE,
-          PROVISIONING_ROLE,
-          OWNER_ROLE,
-        ],
+        API_RUNTIME_ROLE,
+        WORKER_RUNTIME_ROLE,
+        WORKER_CREDENTIAL_DELIVERY_ROLE,
+        PROVISIONING_ROLE,
+        OWNER_ROLE,
       ],
-    );
-    for (const row of memberships) {
-      await runFormatted(client, 'REVOKE %I FROM %I', String(row.granted), String(row.member));
-    }
+    ],
+  );
+  for (const row of memberships) {
+    await runFormatted(client, 'REVOKE %I FROM %I', String(row.granted), String(row.member));
+  }
 
-    // The one membership a login is given: the delivery worker's capability. It inherits the grants (so that its transactions
-    // can use them) and cannot become the role (so that nothing it runs can SET ROLE to it or hand it on).
-    await runFormatted(
-      client,
-      'GRANT %I TO %I WITH INHERIT TRUE, SET FALSE',
-      WORKER_CREDENTIAL_DELIVERY_ROLE,
-      WORKER_RUNTIME_ROLE,
-    );
-  });
+  // The one membership a login is given: the delivery worker's capability. It inherits the grants (so that its transactions
+  // can use them) and cannot become the role (so that nothing it runs can SET ROLE to it or hand it on).
+  await runFormatted(
+    client,
+    'GRANT %I TO %I WITH INHERIT TRUE, SET FALSE',
+    WORKER_CREDENTIAL_DELIVERY_ROLE,
+    WORKER_RUNTIME_ROLE,
+  );
 }
 
 async function disposableMarker(

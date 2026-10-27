@@ -15,10 +15,13 @@ import { appWith, startTestApp, type TestApp } from '../../../test-support/test-
 import {
   COOKIES,
   expireBrowserSessionCookies,
+  expireTrustedBrowserCookie,
   issueBrowserSessionCookies,
+  issueTrustedBrowserCookie,
   issueVendorDeviceCookie,
   setCookieLine,
 } from './cookie-writer.js';
+import { TRUSTED_BROWSER_DAYS } from '../trusted-browsers/trusted-browser-policy.js';
 
 const contract = parse(readFileSync(locateContract(import.meta.dirname), 'utf8')) as JsonObject;
 const definitions = contract['x-cookies'] as JsonObject;
@@ -53,8 +56,71 @@ const broken = (line: string): string[] => {
 
 describe('the cookie names', () => {
   // Break caught: a name that is not the contract's, which no browser or validator would recognise.
-  it('are the three cookies the contract’s x-cookies defines, and no other', () => {
+  it('are the cookies the contract’s x-cookies defines, and no other', () => {
     expect(Object.values(COOKIES).toSorted()).toEqual(Object.keys(definitions).toSorted());
+  });
+});
+
+const TRUSTED = '0123456789abcdefABCDEF-_0123456789abcdefABCDEF-_xy';
+
+describe('the trusted-browser cookie (SECURITY_DESIGN.md §13.5a)', () => {
+  // Break caught: the credential issued with a wider path (it would then be sent to every business operation), without HttpOnly (script
+  // could read a bearer of the second factor), without a lifetime of its own, or with another one than the seven days of the contract.
+  it('is issued HttpOnly, Secure, SameSite=Lax, on the staff sign-in path only, for seven days', () => {
+    const { response, lines } = fake();
+
+    issueTrustedBrowserCookie(response, TRUSTED);
+
+    expect(lines()).toEqual([
+      `melarc_trusted_browser=${TRUSTED}; Path=/api/v1/auth/staff; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`,
+    ]);
+    expect(TRUSTED_BROWSER_DAYS).toBe(7);
+    expect(broken(lines()[0] ?? '')).toEqual([]);
+  });
+
+  // Break caught: a removal that does not match the scope the cookie was set in, which a browser would not honour, so that the credential
+  // of a browser that was removed stayed in it.
+  it('is removed with an empty value, the literal Max-Age=0 and the path and attributes it was issued with', () => {
+    const { response, lines } = fake();
+
+    expireTrustedBrowserCookie(response);
+
+    expect(lines()).toEqual([
+      'melarc_trusted_browser=; Max-Age=0; Path=/api/v1/auth/staff; HttpOnly; Secure; SameSite=Lax',
+    ]);
+    expect(broken(lines()[0] ?? '')).toEqual([]);
+  });
+
+  // Break caught: the sign-out expiring the trusted browser too, which would make signing out forget the browser (the point of it is that
+  // it survives a sign-out), or a session issue setting it.
+  it('is no part of the session cookies: a sign-out and a session issue write nothing of it', () => {
+    const issued = fake();
+    const expired = fake();
+
+    issueBrowserSessionCookies(issued.response, { session: SESSION, csrf: CSRF });
+    expireBrowserSessionCookies(expired.response);
+
+    for (const line of [...issued.lines(), ...expired.lines()]) {
+      expect(line).not.toContain('melarc_trusted_browser');
+    }
+  });
+
+  it.each([
+    ['empty', ''],
+    ['short', 'abc'],
+    ['with a semicolon', `${'a'.repeat(30)};Domain=evil.example`],
+    [
+      'with a line break',
+      `${'a'.repeat(30)}
+Set-Cookie: x=y`,
+    ],
+  ])('refuses a value that is %s, and writes nothing', (_label, value) => {
+    const { response, lines } = fake();
+
+    expect(() => {
+      issueTrustedBrowserCookie(response, value);
+    }).toThrow(TypeError);
+    expect(lines()).toEqual([]);
   });
 });
 

@@ -1,6 +1,9 @@
+import { DispatchModule } from './dispatch/dispatch.module.js';
 import { PermissionModule } from './permission/permission.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { StaffModule } from './staff/staff.module.js';
+import { VendorModule } from './vendor/vendor.module.js';
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 
 import { Global, Inject, Injectable, Module, Scope, type ModuleMetadata } from '@nestjs/common';
@@ -11,6 +14,9 @@ import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import { DescribeAdapterBoundError } from './platform/auth/describe/describe-adapter.js';
 import { PortBindingError } from './platform/auth/describe/port-binding-check.js';
 import { DescribeAdapterInvokedError } from './platform/auth/describe/describe-adapter-error.js';
+import { RoutedIdentityDirectory } from './platform/auth/directory/routed.identity-directory.adapter.js';
+import type { IdentityDirectory } from './platform/auth/ports/identity-directory.port.js';
+import type { TransactionHandle } from './platform/auth/ports/unit-of-work.port.js';
 import {
   DESCRIBE_PORT_BINDINGS,
   DescribeClock,
@@ -23,6 +29,7 @@ import {
   DELIVERY_QUEUE,
   HASH_ADMISSION,
   HASHER,
+  IDEMPOTENCY_STORE,
   IDENTITY_DIRECTORY,
   METRICS,
   PORTS,
@@ -70,7 +77,16 @@ import { PostgresAuditWriter } from './platform/audit/postgres.audit-writer.adap
 import { PolicyCoordinator } from './platform/database/policy-lock/coordinate.js';
 import { PostgresUnitOfWork } from './platform/database/postgres.unit-of-work.adapter.js';
 import { PostgresRateLimiter } from './platform/limiter/postgres.rate-limiter.adapter.js';
-import { PostgresStaffIdentityDirectory } from './staff/postgres.staff-identity-directory.adapter.js';
+import { NotARiderQuestionError } from './staff/postgres.rider-identity-directory.adapter.js';
+import { ServiceAttestationVerifier } from './platform/auth/attestation/service.attestation-verifier.adapter.js';
+import { SubstituteAttestationVerifier } from './platform/auth/attestation/substitute.attestation-verifier.adapter.js';
+import { BoundedMetrics } from './platform/metrics/bounded.metrics.adapter.js';
+import {
+  ATTESTATION_VERIFIER,
+  type AttestationVerifier,
+} from './platform/auth/ports/attestation-verifier.port.js';
+import { IdentityDirectoryNotBuiltError } from './staff/postgres.staff-identity-directory.adapter.js';
+import { NotAVendorQuestionError } from './vendor/postgres.vendor-account-directory.adapter.js';
 import { createLogger } from './platform/logging/create-logger.js';
 import { APP_CONFIG } from './platform/platform.tokens.js';
 import { randomKey } from './test-support/config-env.js';
@@ -208,15 +224,25 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
   // Break caught: a port that resolves to something nobody bound, so the first caller finds a half-wired application. Without a
   // database the runtime composition binds the production Clock (S0.6, which needs it for its deadlines) and the SHA-256 token
   // service (S0.24, which needs no key and no database), and nothing else: each other port is bound by the first task that
-  // consumes it (OB-38). This pin changed deliberately at S0.6 and again at S0.24.
-  it('binds only the production Clock and the token service in the runtime composition without a database', async () => {
+  // consumes it (OB-38). This pin changed deliberately at S0.6 and again at S0.24, and at S0.54 for the substitute attestation verifier,
+  // which the configuration selects by default (production refuses it) and which needs neither a database nor a key.
+  it('binds only the production Clock, the token service, the metrics registry and the substitute attestation verifier in the runtime composition without a database', async () => {
     running = await startTestApp({ config: RUNTIME_CONFIG });
 
     for (const entry of PORTS.filter(
-      (port) => port.name !== 'Clock' && port.name !== 'TokenService',
+      (port) =>
+        port.name !== 'Clock' &&
+        port.name !== 'TokenService' &&
+        port.name !== 'AttestationVerifier' &&
+        port.name !== 'Metrics',
     )) {
       expect(() => resolve(entry.token), entry.name).toThrow();
     }
+    // The registry (S0.56; the first consumer is the attestation verifier adapter) is one application singleton and the real one.
+    expect(resolve(METRICS)).toBeInstanceOf(BoundedMetrics);
+    expect(resolve(METRICS)).toBe(resolve(METRICS));
+    expect(resolve(ATTESTATION_VERIFIER)).toBeInstanceOf(SubstituteAttestationVerifier);
+    expect(resolve(ATTESTATION_VERIFIER)).toBe(resolve(ATTESTATION_VERIFIER));
     const clock = resolve<Clock>(CLOCK);
     expect(clock).toBeInstanceOf(SystemClock);
     expect(Number.isFinite(clock.monotonicMilliseconds())).toBe(true);
@@ -224,6 +250,46 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
     expect(resolve(TOKEN_SERVICE)).toBeInstanceOf(Sha256TokenService);
     expect(portProviders()).toEqual([]);
     expect(portProviders({})).toEqual([]);
+  });
+
+  // Break caught (S0.56): the configuration selecting the private verifier service and the substitute being bound all the same, or the
+  // adapter built without the registry that counts its answers. Nothing is listening on the port, so the call is an unreachable verifier,
+  // which is a verdict and is counted.
+  it('binds the production adapter over the verifier service where the configuration selects it, on the one metrics registry', async () => {
+    running = await startTestApp({
+      config: {
+        ...RUNTIME_CONFIG,
+        adapters: {
+          ...RUNTIME_CONFIG.adapters,
+          attestationVerifier: Object.freeze({
+            kind: 'service',
+            url: 'http://127.0.0.1:1',
+            timeoutMs: 2_000,
+            callerSecret: new Secret('S'.repeat(43)),
+          }),
+        },
+      },
+    });
+
+    const verifier = resolve<AttestationVerifier>(ATTESTATION_VERIFIER);
+    expect(verifier).toBeInstanceOf(ServiceAttestationVerifier);
+    expect(verifier).toBe(resolve(ATTESTATION_VERIFIER));
+    expect(
+      await verifier.verify({
+        expectedChallengeSha256: new Uint8Array(32),
+        certificateChain: ['AAAA'],
+        devicePublicKey: 'x',
+      }),
+    ).toEqual({ verdict: 'TRUST_DATA_UNAVAILABLE', cause: 'VERIFIER_UNREACHABLE' });
+    expect(resolve<BoundedMetrics>(METRICS).snapshot().counters).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'attestation_verifier_unavailable_total',
+          labels: { cause: 'VERIFIER_UNREACHABLE' },
+          value: 1,
+        },
+      ]),
+    );
   });
 
   // Break caught (S0.24): a credential judged by a store that is not there, or the session machinery built over the inert adapters.
@@ -269,16 +335,19 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
       });
 
       // S0.29 adds the secret cipher and the issuing side of the delivery queue, and S0.31 the hasher, the hash admission and the TOTP
-      // verifier, bound over a database and local key custody.
+      // verifier, bound over a database and local key custody, and S0.36 the idempotency store (`createStaffIdentity`).
       expect(module.exports).toEqual([
         CLOCK,
         TOKEN_SERVICE,
+        METRICS,
+        ATTESTATION_VERIFIER,
         UNIT_OF_WORK,
         SESSION_STORE,
         IDENTITY_DIRECTORY,
         AUDIT_WRITER,
         SECRET_CIPHER,
         DELIVERY_QUEUE,
+        IDEMPOTENCY_STORE,
         HASHER,
         HASH_ADMISSION,
         TOTP_VERIFIER,
@@ -486,7 +555,27 @@ describe('the session machinery (S0.24)', () => {
 
     expect(resolve(UNIT_OF_WORK)).toBeInstanceOf(PostgresUnitOfWork);
     expect(resolve(SESSION_STORE)).toBeInstanceOf(PostgresSessionStore);
-    expect(resolve(IDENTITY_DIRECTORY)).toBeInstanceOf(PostgresStaffIdentityDirectory);
+    // One port over the domains' directories (S0.47, S0.53): a vendor's question reaches the vendor domain's, a rider's the rider directory
+    // and a staff member's the staff one. The answers that need no transaction say whose directory answered.
+    const directory = resolve<IdentityDirectory>(IDENTITY_DIRECTORY);
+    expect(directory).toBeInstanceOf(RoutedIdentityDirectory);
+    const handle = {} as TransactionHandle;
+    await expect(
+      directory.accountLabel(handle, { type: 'VENDOR', id: randomUUID() }),
+    ).rejects.toBeInstanceOf(NotAVendorQuestionError);
+    await expect(
+      directory.accountLabel(handle, { type: 'RIDER', id: randomUUID() }),
+    ).rejects.toBeInstanceOf(NotARiderQuestionError);
+    await expect(
+      directory.accountLabel(handle, { type: 'STAFF', id: randomUUID() }),
+    ).rejects.not.toBeInstanceOf(NotARiderQuestionError);
+    // The finder of a rider goes to the rider directory: asked of the staff one it would be refused as not built.
+    await expect(
+      directory.findRiderByCanonicalPhone(handle, '+233200000000'),
+    ).rejects.not.toBeInstanceOf(IdentityDirectoryNotBuiltError);
+    await expect(
+      directory.vendorOrganizationOf(handle, { type: 'STAFF', id: randomUUID() }),
+    ).rejects.toThrow(/belongs to no vendor organisation/);
     expect(resolve(AUDIT_WRITER)).toBeInstanceOf(PostgresAuditWriter);
     expect(resolve(UNIT_OF_WORK)).toBe(resolve(UNIT_OF_WORK));
     expect(resolve(TOKEN_SERVICE)).toBeInstanceOf(Sha256TokenService);
@@ -542,20 +631,25 @@ describe('the credential stores (S0.29)', () => {
     expect(resolve<DeliveryQueue>(DELIVERY_QUEUE)).toBe(resolve<DeliveryQueue>(DELIVERY_QUEUE));
   });
 
-  // Break caught (least privilege, SECURITY_DESIGN.md §14.9): the API's cipher serving a purpose no API code needs yet. It seals the
-  // seeds and the delivery payloads and opens no sealed replay, which the idempotency store brings with the first operation that keeps one.
-  it('serves the TOTP seed and the delivery payload and no other purpose', async () => {
+  // Break caught (least privilege, SECURITY_DESIGN.md §14.9): the API's cipher serving a purpose no API code needs. It seals the seeds, the
+  // delivery payloads and, since S0.53b, the sealed replay of the one operation that keeps one; it serves nothing else, and the list of
+  // purposes it knows is closed (a purpose that is not one is refused whatever the key material).
+  it('serves the TOTP seed, the delivery payload and the sealed replay, and no other purpose', async () => {
     running = await startTestApp({ config: WITH_KEYS });
     const cipher = resolve<SecretCipher>(SECRET_CIPHER);
 
+    for (const purpose of ['TOTP_SEED', 'DELIVERY_PAYLOAD', 'REPLAY_SECRET'] as const) {
+      await expect(
+        cipher.seal(purpose, new Uint8Array([1, 2, 3]), new Uint8Array([9])),
+        purpose,
+      ).resolves.toBeDefined();
+    }
     await expect(
-      cipher.seal('TOTP_SEED', new Uint8Array([1, 2, 3]), new Uint8Array([9])),
-    ).resolves.toBeDefined();
-    await expect(
-      cipher.seal('DELIVERY_PAYLOAD', new Uint8Array([1]), new Uint8Array([9])),
-    ).resolves.toBeDefined();
-    await expect(
-      cipher.seal('REPLAY_SECRET', new Uint8Array([1]), new Uint8Array([9])),
+      cipher.seal(
+        'NOT_A_PURPOSE' as unknown as 'TOTP_SEED',
+        new Uint8Array([1]),
+        new Uint8Array([9]),
+      ),
     ).rejects.toThrow();
   });
 
@@ -723,7 +817,13 @@ describe('the credential setup operations (S0.31)', () => {
   });
 });
 
-const DOMAIN_MODULES = [PermissionModule, SettingsModule, StaffModule];
+const DOMAIN_MODULES = [
+  DispatchModule,
+  PermissionModule,
+  SettingsModule,
+  StaffModule,
+  VendorModule,
+];
 
 describe('the root module exposes the port tokens and nothing else (S0.1)', () => {
   const options = { config: TEST_CONFIG, logger: createLogger({ config: TEST_CONFIG }) };
@@ -738,23 +838,24 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     });
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS]);
-    // The three bindings and the check that no inert describe adapter was bound; the check is not exported.
-    expect(module.providers).toHaveLength(4);
+    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS, ATTESTATION_VERIFIER]);
+    // The four bindings and the check that no inert describe adapter was bound; the check is not exported.
+    expect(module.providers).toHaveLength(5);
     // The platform and the domain modules of the product (S0.35: permission, settings, staff), which depend on it and which it never
     // imports: a domain module is added here as its slice builds it, and `productRoutes: false` leaves them out.
     expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
     expect(module.imports?.slice(1)).toEqual(DOMAIN_MODULES);
   });
 
-  // Changed deliberately at S0.6 and at S0.24: the runtime composition binds the production Clock and the token service itself, and
-  // exports those two tokens (and, with a database, the ports of the session machinery).
-  it('exports the Clock and the token service and nothing else in the runtime composition without a database', () => {
+  // Changed deliberately at S0.6, at S0.24 and at S0.54: the runtime composition binds the production Clock, the token service and the
+  // substitute attestation verifier (the default selection) itself, and exports those tokens (and, with a database, the ports of the session
+  // machinery).
+  it('exports the Clock, the token service, the metrics registry and the attestation verifier and nothing else in the runtime composition without a database', () => {
     const module = AppModule.register(runtime);
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE]);
-    expect(module.providers).toHaveLength(3);
+    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS, ATTESTATION_VERIFIER]);
+    expect(module.providers).toHaveLength(5);
   });
 
   // Break caught: the describe composition exporting more than the sixteen tokens, or fewer.
@@ -941,7 +1042,7 @@ describe('the runtime composition refuses an inert describe adapter, however it 
         hasher: { useValue: new DescribeHasher() },
         metrics: { useClass: DescribeMetrics },
       }),
-    ).toEqual(['Hasher', 'Metrics']);
+    ).toEqual(['Metrics', 'Hasher']);
   });
 
   it('says nothing about a value: the message names ports and the way out', () => {
@@ -997,7 +1098,7 @@ describe('the runtime composition refuses an inert describe adapter, however it 
           hasher: { useFactory: () => new DescribeHasher() },
           metrics: { useFactory: () => new DescribeMetrics() },
         }),
-      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Hasher,Metrics');
+      ).rejects.toSatisfy((error) => resolvedToDescribe(error).join() === 'Metrics,Hasher');
     });
   });
 

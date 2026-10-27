@@ -81,6 +81,7 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     ['axios', "import axios from 'axios';"],
     ['ky', "import ky from 'ky';"],
     ['node-fetch', "import fetch from 'node-fetch';"],
+    ['the icon library', "import { Eye } from 'lucide-react';"],
     [
       'dangerouslySetInnerHTML',
       'export const A = () => <div dangerouslySetInnerHTML={{ __html: html }} />;',
@@ -96,6 +97,24 @@ describe('the Ops Portal reaches the API through the generated client only', () 
       assert.notDeepEqual(messagesFor(OPS, code), [], `${code} was not refused`);
     });
   }
+
+  // Break caught: a second door to the icon library, so that a screen names a picture of the library instead of a meaning of the design
+  // system and the one family drifts (DESIGN_SYSTEM section 24). The registry is the one file that may import it.
+  it('lets only the icon registry import the icon library', () => {
+    const code = "import { Eye } from 'lucide-react';";
+    assert.deepEqual(messagesFor('apps/ops-web/src/components/ui/icon/icons.ts', code), []);
+    for (const path of [
+      'apps/ops-web/src/components/ui/icon/Icon.tsx',
+      'apps/ops-web/src/components/Probe.tsx',
+      'apps/ops-web/src/app/Probe.tsx',
+    ]) {
+      assert.match(
+        messagesFor(path, code).join('\n'),
+        /icon registry|icons\.ts/,
+        `${path} was not refused`,
+      );
+    }
+  });
 
   it('allows the ordinary code a page is made of', () => {
     const code = [

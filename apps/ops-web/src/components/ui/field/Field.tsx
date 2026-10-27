@@ -1,5 +1,6 @@
 import { createContext, useContext, useId, type ReactNode } from 'react';
 
+import { Icon } from '../icon/Icon';
 import './field.css';
 
 /** What a control inside a Field needs in order to be tied to its label, help and error. */
@@ -31,24 +32,6 @@ export interface FieldProps {
 }
 
 const present = (text: string | undefined): text is string => text !== undefined && text !== '';
-
-function ErrorIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <circle cx="10" cy="10" r="8.25" />
-      <path d="M10 5.75v5" />
-      <path d="M10 13.75h.01" />
-    </svg>
-  );
-}
 
 /**
  * The composition that ties a label, a control, optional help and an optional error together
@@ -94,7 +77,7 @@ export function Field({ label, help, error, required = false, children }: FieldP
       ) : null}
       {hasError ? (
         <p id={errorId} className="ui-field__error">
-          <ErrorIcon />
+          <Icon name="warning" size="sm" className="ui-field__error-icon" />
           <span>{error}</span>
         </p>
       ) : null}

@@ -71,6 +71,13 @@ export const RIDER_DEVICE_PURPOSES = [
   'RIDER_DEVICE_ENROLMENT',
   'RIDER_DEVICE_REREGISTRATION',
 ] as const;
+export type RiderDeviceGrantPurpose = (typeof RIDER_DEVICE_PURPOSES)[number];
+
+/**
+ * The one purpose whose grant may name an idempotency record: the first-registration grant of `registerRiderDevice`, the one operation
+ * whose replay returns a secret (SECURITY_DESIGN.md §14.16). The table holds the same as a CHECK (`setup_grant_replay_by_purpose`, 0040).
+ */
+export const REPLAYED_GRANT_PURPOSE = 'RIDER_DEVICE_ENROLMENT';
 
 /**
  * The purposes whose grant reaches its principal as a message, through the durable delivery job (SECURITY_DESIGN.md §13.9a). Four do

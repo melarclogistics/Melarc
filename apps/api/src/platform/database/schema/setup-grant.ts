@@ -83,6 +83,14 @@ export const setupGrant = pgTable(
     continuedFromGrantId: uuid('continued_from_grant_id'),
     /** The hash of the single-use attestation challenge issued beside a rider's device grant: 32 bytes, for those two purposes alone. */
     attestationChallengeHash: bytea('attestation_challenge_hash'),
+    /**
+     * The idempotency record of the `registerRiderDevice` call that issued this grant, whose response held the grant's token and challenge
+     * sealed for a bounded replay (S0.53, migration 0040; SECURITY_DESIGN.md section 14.16): for a `RIDER_DEVICE_ENROLMENT` grant alone, and
+     * written once. **The window of that replay ends when the grant leaves `PENDING`** (consumed, superseded or expired): a trigger erases
+     * the sealed fields in the same statement, so no writer can end a grant and leave a secret behind. A reference and not a foreign key:
+     * a record is reclaimable after `idempotency_record_ttl_hours` and a grant is kept for good.
+     */
+    idempotencyRecordId: uuid('idempotency_record_id'),
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
   },
   (table) => [
@@ -151,6 +159,12 @@ export const setupGrant = pgTable(
       sql.raw(
         `(${oneOf('purpose', RIDER_DEVICE_PURPOSES)}) = ("setup_grant"."attestation_challenge_hash" IS NOT NULL)
         AND ("setup_grant"."attestation_challenge_hash" IS NULL OR octet_length("setup_grant"."attestation_challenge_hash") = ${String(GRANT_TOKEN_HASH_BYTES)})`,
+      ),
+    ),
+    check(
+      'setup_grant_replay_by_purpose',
+      sql.raw(
+        `"setup_grant"."idempotency_record_id" IS NULL OR "setup_grant"."purpose" = 'RIDER_DEVICE_ENROLMENT'`,
       ),
     ),
     check(

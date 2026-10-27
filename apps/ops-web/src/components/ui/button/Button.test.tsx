@@ -63,6 +63,42 @@ describe('Button', () => {
   });
 });
 
+describe('Button: danger', () => {
+  // Break caught: danger being an alias of primary. It is a semantic variant of its own (DESIGN_SYSTEM section 16.3), for the act that
+  // does harm, and the confirmation dialog uses it for the button that confirms.
+  it('is a variant of its own, with the same native semantics', async () => {
+    const onClick = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Button type="button" variant="danger" onClick={onClick}>
+        End the demo session
+      </Button>,
+    );
+
+    const button = screen.getByRole('button', { name: 'End the demo session' });
+    expect(button).toHaveClass('ui-button--danger');
+    expect(button).not.toHaveClass('ui-button--primary');
+    await user.click(button);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('is busy and inert while loading, like any button, and keeps its label', async () => {
+    const onClick = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Button type="button" variant="danger" loading onClick={onClick}>
+        End the demo session
+      </Button>,
+    );
+
+    const button = screen.getByRole('button', { name: 'End the demo session' });
+    await user.click(button);
+
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
 describe('Button: the attributes a caller sets', () => {
   // Break caught: the button overwriting an ARIA state the caller set, when it is not the one loading owns.
   it('keeps aria-busy and aria-disabled that the caller set while it is not loading', () => {
@@ -223,6 +259,9 @@ describe('Button: accessibility', () => {
         <Button type="button">Primary</Button>
         <Button type="button" variant="secondary">
           Secondary
+        </Button>
+        <Button type="button" variant="danger">
+          Danger
         </Button>
         <Button type="button" disabled>
           Disabled

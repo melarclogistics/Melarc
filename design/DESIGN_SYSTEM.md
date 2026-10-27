@@ -448,6 +448,15 @@ A text field is identified by its boundary, so the boundary must reach 3:1 again
   `#EDA3AC` (8.08) or `crimson.500` `#C93D4A` (3.29); the active item is also marked by `aria-current` and a
   weight or text change, never by the colour alone. An inverse link is `text.inverse`, underlined (16.27), and its hover
   uses `crimson.200` `#F7CDD2` (11.32). These inverse choices are proposed.
+- **The side menu on Ink (25 October 2026; the Product Owner's reference screenshot).** The menu is a vertical list, so the
+  current item is a **filled item** and not a bar: `color.action.primary` with `color.action.primaryText` (6.52), written in
+  weight 700 with `aria-current`, so the state is carried by the white text on the fill, the weight and the attribute, and the
+  fill supports them (its edge against Ink is 2.49, below 3:1, which is why it is never the only cue). Idle items are
+  `shell.text.muted` `gray.300` (11.03 on Ink); hovered, `shell.text` on `shell.surface.hover` `gray.900` `#1F2937`
+  (14.68); pressed, on `shell.surface.pressed` `gray.800` (10.46); secondary text (the application's name, the account's
+  hub) is `shell.text.subtle` `gray.400` (6.32 on Ink, 5.70 on hover); dividers are `shell.border` `gray.800`. Focus is the
+  inverse recipe and holds 3:1 on each of those fills. These are aliases of the palette: no new colour is introduced, and
+  every pairing is in `scripts/design-tokens.test.ts`.
 - Status text pairs (foreground on its own soft background, on white, on page): success 7.08, 7.88, 7.42; warning 5.88,
   6.39, 6.01; danger 7.69, 8.85, 8.33; info 7.38, 8.33, 7.84; neutral 6.98, 7.69, 7.23. The base hues are not text
   colours: warning `#B76E00` is 4.00:1 against white and white on it is 4.00:1. Status borders are 1.3–1.9:1
@@ -463,7 +472,7 @@ Tokens only (written without the `color.` prefix of §4.3); the ratio is the tex
 | Primary: disabled | `action.disabled` | `text.disabled` (exempt, 2.18) | native `disabled`; loading keeps the label and the colours |
 | Secondary: default, hover, pressed | `surface.default`, `surface.subtle`, `#EAECF0` | `action.secondaryText` (16.27, 14.76, 13.75) | `border.default` (decorative) |
 | Tertiary: default, hover, pressed | none, `surface.subtle`, `#EAECF0` | `text.link`, `text.linkHover`, `text.linkHover` (8.40 on white, 9.46 and 8.81 on the hover and pressed fills) | no border |
-| Danger (outline; proposed) | `surface.default`, `status.danger.background`, `#EAECF0` | `status.danger.foreground` (8.85, 7.69, 7.48) | wording names the consequence; never a filled button, because a fill of `#8F1D27` would be almost the same colour as Primary hover `#971B26` |
+| Danger (outline; approved 24 October 2026) | `surface.default`, `status.danger.background`, `#EAECF0` | `status.danger.foreground` (8.85, 7.69, 7.48) | wording names the consequence; never a filled button, because a fill of `#8F1D27` would be almost the same colour as Primary hover `#971B26` |
 | Link: default, hover | none | `text.link`, `text.linkHover` | underlined in running text; no separate visited colour until a screen needs one |
 | Input: default, hover | `surface.default` | `text.primary`; placeholder `text.muted` (4.97) | `border.control` (`border.strong` on `surface.selected`); hover `border.strong` |
 | Input: invalid | `surface.default` | `text.primary`; message `status.danger.foreground` (8.85) | 2px `status.danger.foreground` border and an icon and the message and `aria-invalid`; never the red border alone |
@@ -747,9 +756,9 @@ parts, because a pre-authentication page must never be able to show a signed-in 
 
 | Layout | Route family | Contains | Never contains | In code |
 |---|---|---|---|---|
-| **Neutral frame** | the seven pre-authentication routes (`/sign-in`, `/sign-in/mfa`, `/recovery`, `/recovery/complete`, `/setup/credential`, `/setup/mfa`, `/setup/mfa/complete`), and any address that matches no route | a skip link, a banner that names the product, the main landmark, the move of focus to the new page's heading after a navigation | navigation, a user menu, sign-out, session data, anything loaded for a signed-in user | `apps/ops-web/src/app/AppFrame.tsx` |
-| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the neutral frame's skip link and landmarks, Ink primary navigation, a top context area for session identity and hub context | content for a caller who has no session | not built: the identity slice adds it around the signed-in routes |
-| **Setup layout** | `/setup/*`, which are reached by a grant and carry no session | the neutral frame (decided below) | the authenticated shell, navigation | the neutral frame, unchanged |
+| **Neutral frame** | any address that matches no route, and the development showcase | a skip link, a banner that names the product, the main landmark, the move of focus to the new page's heading after a navigation | navigation, a user menu, sign-out, session data, anything loaded for a signed-in user | `apps/ops-web/src/app/AppFrame.tsx` |
+| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the skip link and the landmarks, an **Ink side menu** docked at the left (the primary navigation, and an account card with the sign-out control), collapsible to a rail of icons and sliding in over the page on a narrow screen; **no banner**, because the menu carries the product's name | content for a caller who has no session | the frame in its sidebar layout, the menu drawn into the place beside the main content (`apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `components/side-menu/`; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.6). It was a band across the top until 25 October 2026, when the Product Owner decided that the Ops Portal is an application and not a website |
+| **Split-screen layout** | the five pre-sign-in routes (`/sign-in`, `/sign-in/mfa`, `/setup/credential`, `/setup/mfa`, `/setup/mfa/complete`), and the two recovery routes when they are built; the setup routes are reached by a grant and carry no session | the skip link and the landmarks, the banner (the logo) above the main landmark that holds the form, and beside them a decorative panel of photography over a band of Ink with the mark and the name (§13.1a); under 64rem the panel is not drawn and the form is alone | the authenticated shell, navigation, anything loaded for a signed-in user | the frame in its split layout (`AuthSplitLayout`), its banner and main landmark unchanged; the five pre-sign-in screens (the sign-in pair and the three setup pages) are in `apps/ops-web/src/app/pages/pre-sign-in/` (S0.43; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.7) |
 
 - The route tree chooses the layout; a page never decides which frame it sits in.
 - Every layout keeps the skip link, the landmarks and the focus move after a navigation.
@@ -766,6 +775,26 @@ shell: it has a banner with the product name and no navigation. The product name
 exists, §26) is identification only and never navigation. Build nothing that makes the setup routes differ from the
 neutral frame; if "no application shell" is later read as forbidding even that banner, the route tree changes, not the
 components.
+
+**Changed (Product Owner, 25 October 2026): the pre-sign-in screens, the setup pages included, are drawn in a split-screen
+layout** (§13.1a). It is still the frame: the same skip link, landmarks, banner and move of focus, and still no navigation,
+user menu or signed-in affordance in any state; what changes is that a decorative panel of photography stands beside the form
+on a wide screen. The neutral frame stays for an address that matches no route.
+
+### 13.1a The split screen
+
+- Two halves from 64rem: the **photography** on the left (full height, sticky while the form scrolls), and the form on the
+  right: the banner with the logo, and the main landmark holding the page's heading and form, centred in its half (a column of
+  at most 30rem, about 430 px of form once the padding is taken). Below 64rem the photograph is not drawn and the form is alone,
+  in the same column, centred; the photograph is not downloaded either (it loads lazily, and a panel that is not laid out is not
+  loaded).
+- The photograph fills what a solid band of Ink leaves, cropped to it and never stretched, and is **decorative**: empty alternative
+  text, hidden as a whole from assistive technology, never the only carrier of meaning. The band carries the symbol on a white
+  tile and the product's name as plain text (§25), in `text.inverse` on Ink (16.27), whatever the photograph is.
+- The photographs are the Product Owner's (`design/images`), served as web-sized copies with no metadata
+  (`apps/ops-web/src/assets/auth/README.md`). Which photograph goes with which screen is one table
+  (`apps/ops-web/src/app/pages/pre-sign-in/auth-art.ts`); a screen with none shows the band of Ink alone, never a stand-in.
+  Their licence and attribution are the Product Owner's to confirm.
 
 ### 13.2 Content width
 
@@ -786,7 +815,10 @@ Normal single-column forms should generally remain within approximately:
 560–720px
 ```
 
-unless workflow requirements justify wider composition.
+unless workflow requirements justify wider composition. Built as `FormPage` (`apps/ops-web/src/components/FormPage.tsx`): 40rem, which is
+640 px at the default size and grows with enlarged text; the form of a signed-in screen uses it. The five pre-sign-in screens use it too,
+but inside the column of the split screen, which is at most 30rem (§13.1a): a narrower measure than this one, because the form has the
+half of a window and not a page (Product Owner, 25 October 2026).
 
 ---
 
@@ -1037,7 +1069,15 @@ Exact mappings belong with implemented domain patterns.
 
 ## 22. Navigation
 
-Navigation belongs to the authenticated Ops shell (§13.1). The neutral frame carries none.
+Navigation belongs to the authenticated Ops shell (§13.1). The neutral frame and the split screen carry none.
+
+**It is a side menu, not a band across the top** (Product Owner, 25 October 2026: the Ops Portal is an application and not a
+website). Docked at the left on a wide screen, full height, on Ink; a button at its head collapses it to a rail of icons and
+expands it again, and every entry keeps its name when collapsed (visually hidden, with the name as a tooltip). On a narrow screen
+(under 48rem) it is hidden, a slim bar with a menu button stands in its place, and the menu slides in over the page: the page
+behind it is inert, Escape, the scrim, the close button and following a link close it, and focus goes in on opening and back on
+closing. Its foot is the account card: the person's initials, name and where they act, and an icon button that signs out. The
+choice of collapsed or expanded is kept while the page lives and not longer (nothing is written to web storage).
 
 Navigation should communicate:
 
@@ -1054,8 +1094,9 @@ Backend authorization remains authoritative.
 Which entries a session may use comes from the `permissions` list of the `Session` resource: the permission keys the
 session holds, from the snapshot taken when it was created (decided 6 October 2026; [contracts/openapi.yaml](../contracts/openapi.yaml)).
 An entry is shown when the session holds the key its screen needs. Never infer entries from a role name, and never fill
-the menu with placeholders. The navigation component takes a plain list and shows none until the identity slice supplies
-it from the session. The server stays authoritative: a hidden entry is a convenience, and a shown one is not a grant.
+the menu with placeholders. The navigation component takes a plain list; the authenticated Ops shell (S0.42) gives it the entries of
+the route registry whose key the session holds, and an entry exists only for a route that is built. The server stays authoritative:
+a hidden entry is a convenience, and a shown one is not a grant.
 
 ### Active navigation
 
@@ -1064,6 +1105,9 @@ Recommended treatment:
 - Ink shell;
 - selected item gains clear contrast;
 - Crimson is used as controlled accent rather than filling the whole shell.
+
+As built: the current entry is a filled item (§4.6) with an icon and its name; the icon is the one the landing gives the same
+place, so one meaning has one picture.
 
 ---
 
@@ -1099,9 +1143,26 @@ Rules:
 - avoid mixing stroke weights/styles;
 - status icons supplement, not replace, state text.
 
-Icon-library selection is not decided by this document. The family is chosen with the first screen that needs an icon;
-until then none is installed and no icon catalogue is built. An icon that repeats adjacent text is decorative
-(`aria-hidden`); an icon-only control has an accessible name.
+**Decided (Product Owner, 25 October 2026): the family is Lucide** ([github.com/lucide-icons/lucide](https://github.com/lucide-icons/lucide),
+ISC licence, the `lucide-react` package, bundled with the application and never loaded from a CDN; its licence text ships in
+`licenses/Lucide-ISC.txt`). It was chosen with the first screens that needed icons: the side menu, the show-password control and
+the status pictures.
+
+- **One door.** `apps/ops-web/src/components/ui/icon/icons.ts` is the only file that imports the library (a test and a lint rule
+  say so). It names every icon by its **meaning** (`warning`, `success`, `sign-out`, `show-password`), never by the library's
+  name for the picture, so the application can change a picture or the family in one place. An icon is added when a screen needs
+  it, with its meaning; there is no catalogue of icons nobody uses (a test fails on one).
+- **One look.** `<Icon name="…" />` draws every icon with the same **2px stroke**, in the colour of the text around it
+  (`currentColor`), at one of three sizes from tokens: `icon.size.sm` 1rem, `md` 1.25rem (the default), `lg` 1.5rem, in rem so
+  that enlarged text enlarges them. The same meaning has the same picture everywhere: one `warning` for a thing that went wrong
+  (alerts and field errors), one `success` for a thing that worked.
+- **Words stay primary.** An icon that repeats adjacent text is decorative (`aria-hidden`, so nothing is read twice). A control
+  that is only an icon is an **IconButton** (COMPONENT_PATTERNS §22): a native button whose accessible name is its required
+  `label` (it names the act: "Show password", not "Eye"), at least 2rem square, with the label repeated as a `title` for a
+  pointer user. An icon is never the only carrier of an important operational meaning (BRAND_FOUNDATION §9).
+- **What has icons today:** the menu's entries and its controls, the account's sign-out, the status pictures of an alert, an
+  empty state and a field's error, the sort arrows of a table, the pager's chevrons and the eye of a password field. The icons
+  are the Product Owner's choice of family; the individual pictures are provisional like the rest of this document.
 
 ---
 
@@ -1368,7 +1429,7 @@ This document does **not** approve:
 - another component workshop;
 - CSS Modules;
 - CSS-in-JS;
-- a specific icon library.
+- ~~a specific icon library~~ (decided on 25 October 2026: Lucide, §24).
 
 Those should be selected based on the actual web implementation and project constraints.
 
@@ -1452,6 +1513,9 @@ Each pattern should eventually document:
 | First implementation scope (COMPONENT_PATTERNS §42.2) | **CONFIRMED** 6 October 2026, built in three increments |
 | Browser coverage of the component acceptance (§14) | **DECIDED** 6 October 2026: Chromium, Firefox and WebKit in CI; Chromium locally unless the others are installed |
 | Source of the signed-in navigation entries (§22) | **DECIDED** 6 October 2026: the `permissions` list of the `Session` resource |
+| The authenticated shell's navigation: a top band or a side menu (§13.1, §22) | **DECIDED** 25 October 2026 (Product Owner, with a reference screenshot): a collapsible **side menu** on Ink with an account card; the Ops Portal is an application, not a website |
+| Layout of the pre-sign-in screens (§13.1, §13.1a) | **DECIDED** 25 October 2026 (Product Owner): a **split screen**, photography beside the form; the photographs are theirs (`design/images`), their licence is theirs to confirm |
+| Icon family (§24) | **DECIDED** 25 October 2026 (Product Owner): **Lucide**, through one registry; IconButton is built |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |
 

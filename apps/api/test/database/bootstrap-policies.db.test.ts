@@ -21,6 +21,7 @@ import {
 } from './support/credentials.js';
 import { insertSessionRow, insertStaff, sessionRow, staffRow } from './support/identities.js';
 import { seedReferenceData } from './support/seeded.js';
+import { insertVendor, vendorRow } from './support/vendors.js';
 import {
   clientFor,
   createTestDatabase,
@@ -46,12 +47,15 @@ type Label = Readonly<Record<string, string>>;
 
 let database: TestDatabase;
 let admin: pg.Client;
+/** An active vendor account with no secret: the principal a vendor row names, so the vendor guard (0035) admits the row. */
+let vendorAccountId: string;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await seedReferenceData(database);
   admin = clientFor(database.urlFor('postgres'));
   await admin.connect();
+  vendorAccountId = (await insertVendor(admin, vendorRow())).accountId;
 });
 
 afterAll(async () => {
@@ -60,7 +64,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.query('truncate mfa_challenge, mfa_factor, setup_grant, session, staff_identity');
+  await admin.query(
+    'truncate trusted_browser, mfa_challenge, mfa_factor, setup_grant, session, staff_identity',
+  );
 });
 
 /**
@@ -244,9 +250,10 @@ describe('StaffIdentity: the bootstrap branch admits the bootstrap shape and not
   });
 
   // Break caught: the label being what stops the provisioning login and the worker, when the privilege is: neither holds an INSERT on
-  // the table, so asserting the label reaches nothing. (The API runtime holds no INSERT on it either today; the day createStaffIdentity
-  // gives it one, the bootstrap shape is still the only one this branch admits, and the label is the accepted residual of §14.1.)
-  it.each([API_RUNTIME_ROLE, PROVISIONING_ROLE, WORKER_RUNTIME_ROLE] as const)(
+  // the table, so asserting the label reaches nothing. (The API runtime holds one since S0.36 gave it to `createStaffIdentity`, and it is
+  // refused by the next test: the bootstrap shape is still the only one this branch admits, and only to the role the bootstrap functions
+  // run as, D07.)
+  it.each([PROVISIONING_ROLE, WORKER_RUNTIME_ROLE] as const)(
     'refuses %s the insert under the bootstrap label for want of a privilege, not a policy',
     async (login) => {
       const failure = await within(login, BOOTSTRAP, async (client) => {
@@ -267,6 +274,25 @@ describe('StaffIdentity: the bootstrap branch admits the bootstrap shape and not
       expect(await within(login, BOOTSTRAP, (client) => insertIdentity(client))).toBe('42501');
     },
   );
+
+  // Break caught: the bootstrap branch admitting a login that is not the role the bootstrap functions run as, now that the API login holds
+  // an INSERT on the table (S0.36): asserting the label, it is refused by the policy of the table and not by a missing privilege, whatever
+  // it sends.
+  it('refuses melarc_api_runtime the insert under the bootstrap label by the policy, since createStaffIdentity gave it the privilege', async () => {
+    const failure = await within(API_RUNTIME_ROLE, BOOTSTRAP, async (client) => {
+      try {
+        await client.query('insert into staff_identity (id) values ($1)', [randomUUID()]);
+      } catch (error) {
+        return serverErrorIn(error);
+      }
+      return undefined;
+    });
+    expect(failure?.code).toBe('42501');
+    expect(failure?.message).toMatch(/row-level security/);
+    expect(await within(API_RUNTIME_ROLE, BOOTSTRAP, (client) => insertIdentity(client))).toBe(
+      '42501',
+    );
+  });
 
   it('reads every identity under the capability, so that the emptiness count sees an ordinary profile too, and none without it', async () => {
     await arrangeIdentities();
@@ -355,7 +381,9 @@ describe('SetupGrant: the bootstrap branch issues two purposes and ends a pendin
     ],
     ['a grant with an issuer', { purpose: 'MFA_REENROLMENT', issuedBy: randomUUID() }],
   ] as const)('refuses %s', async (_name, overrides) => {
-    expect(await insertGrantAs(BOOTSTRAP, overrides)).toBe('42501');
+    // A vendor row names a real account, so the guard admits it and what refuses it is the policy.
+    const principal = 'principalType' in overrides ? { principalId: vendorAccountId } : {};
+    expect(await insertGrantAs(BOOTSTRAP, { ...overrides, ...principal })).toBe('42501');
   });
 
   it.each([

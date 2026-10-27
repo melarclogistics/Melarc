@@ -1,0 +1,64 @@
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import { render } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
+
+import { ApiClientProvider } from '../platform/api/api-client';
+import { createQueryClient, endSession } from '../platform/query/query-client';
+import { SessionBoundary } from '../platform/session/session-boundary';
+import { SessionProvider } from '../platform/session/SessionProvider';
+import { SessionStore, type SessionView } from '../platform/session/session-store';
+import { sessionFixture } from './session-fixture';
+
+export interface ProvidersOptions {
+  /** Start with this person signed in (the default is nobody known yet, as at the first load). */
+  readonly signedIn?: boolean | SessionView;
+  /** The route the component sits at. */
+  readonly path?: string;
+}
+
+/**
+ * A component inside the real providers (query client, session store and boundary, scoped API client) and a router, without the
+ * application's frame or routes, and with the store and the query client in hand so a test can end a session or read the cache. Only the
+ * network is replaced (`installFakeApi`). What `AppProviders` does when a session ends is done the same way here, apart from the
+ * navigation.
+ */
+export function renderWithProviders(ui: ReactElement, options: ProvidersOptions = {}) {
+  const store = new SessionStore();
+  if (options.signedIn !== undefined && options.signedIn !== false) {
+    store.signedIn(options.signedIn === true ? sessionFixture() : options.signedIn);
+  }
+  const queryClient: QueryClient = createQueryClient();
+  const ended: string[] = [];
+  const boundary = new SessionBoundary({
+    store,
+    onEnded: (code) => {
+      ended.push(code);
+      endSession(queryClient);
+      store.end();
+    },
+  });
+  const user = userEvent.setup();
+  const wrap = (element: ReactElement) => (
+    <QueryClientProvider client={queryClient}>
+      <ApiClientProvider boundary={boundary}>
+        <SessionProvider store={store}>
+          <MemoryRouter initialEntries={[options.path ?? '/']}>{element}</MemoryRouter>
+        </SessionProvider>
+      </ApiClientProvider>
+    </QueryClientProvider>
+  );
+  const view = render(wrap(ui));
+  return {
+    ...view,
+    user,
+    store,
+    queryClient,
+    ended,
+    /** Renders another element inside the same providers, as a screen re-renders with other props. */
+    rerenderUi: (next: ReactElement) => {
+      view.rerender(wrap(next));
+    },
+  };
+}

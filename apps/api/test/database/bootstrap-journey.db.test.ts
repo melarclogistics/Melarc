@@ -8,7 +8,7 @@ import { hotp } from '../../src/platform/auth/crypto/hotp.js';
 import { Sha256TokenService } from '../../src/platform/auth/crypto/sha256.token-service.adapter.js';
 import { PROVISIONING_ROLE } from '../../src/platform/database/technical-roles.js';
 import { decodeBase32 } from '../../src/test-support/base32.js';
-import type { RequestOptions, TestResponse } from '../../src/test-support/test-client.js';
+import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { PostgresBootstrapDatabase } from '../../src/tools/bootstrap/bootstrap-database.js';
 import { planSeed } from '../../src/tools/bootstrap/bootstrap-plan.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
@@ -25,8 +25,9 @@ import { clientFor, createTestDatabase, type TestDatabase } from './support/test
  * "P: all hubs" is the whole of what such an administrator can reach, and a Platform Admin whose reach for the staff identity's keys
  * were its own hub would read, create and approve nobody. Nothing here is arranged: the seed is the real seed (`planSeed` through the
  * provisioning login), the password and the second factor are set by the real setup routes with the secret the plan holds, the session
- * is issued by the real sign-in and the code of a second step, and the reads are the real reads. The creation and the approval of an
- * identity are S0.36 and are not asserted here.
+ * is issued by the real sign-in and the code of a second step, and the reads are the real reads. S0.36 adds the last clause of
+ * `AC-SLICE-000-118`: in this clean environment the first profile is made by one administrator, who is refused its approval, and approved
+ * by the other, each holding the all-hub grant of the seed.
  */
 const OPS = 'http://127.0.0.1:5173';
 const CREDENTIAL = '/api/v1/auth/staff/setup/credential';
@@ -46,11 +47,15 @@ let database: TestDatabase;
 let kit: IntegrationKit;
 let admin: pg.Client;
 let provisioning: BuiltService;
-let kofi: { readonly id: string; readonly email: string; readonly secret: string };
-let sequence = 0;
+interface Administrator {
+  readonly id: string;
+  readonly email: string;
+  readonly secret: string;
+}
 
-const post = (path: string, body: unknown, options: RequestOptions = {}): Promise<TestResponse> =>
-  kit.client.post(path, body, { origin: OPS, ...options });
+let kofi: Administrator;
+let efua: Administrator;
+let sequence = 0;
 
 beforeAll(async () => {
   database = await createTestDatabase();
@@ -72,9 +77,12 @@ beforeAll(async () => {
   await new PostgresBootstrapDatabase(provisioning.service).run(correlationId, (calls) =>
     calls.seed(plan.document),
   );
-  const first = plan.administrators[0];
-  if (first === undefined) throw new Error('the seed planned no administrator');
+  const [first, second] = plan.administrators;
+  if (first === undefined || second === undefined) {
+    throw new Error('the seed planned fewer than two administrators');
+  }
   kofi = { id: first.id, email: first.workEmailCanonical, secret: first.secret };
+  efua = { id: second.id, email: second.workEmailCanonical, secret: second.secret };
 });
 
 afterAll(async () => {
@@ -88,6 +96,76 @@ afterAll(async () => {
 async function target(tag: string, overrides: Partial<StaffRow>): Promise<StaffRow> {
   sequence += 1;
   return insertStaff(admin, staffRow({ fullName: `${tag} ${String(sequence)}`, ...overrides }));
+}
+
+/**
+ * An administrator's password and second factor by the real setup routes with the secret the plan holds, then the sign-in with a code of
+ * a later step than the one that proved the factor (a code is never used twice). The client keeps the session the sign-in issued.
+ */
+async function establish(
+  person: Administrator,
+  client: TestClient,
+): Promise<{ client: TestClient; codeAt: (offsetSteps?: number) => string }> {
+  const setup = await client.post(
+    CREDENTIAL,
+    { setup_token: person.secret, password: PASSWORD },
+    { origin: OPS },
+  );
+  expect(setup.status).toBe(200);
+  const body = setup.json() as {
+    mfa_provisioning: { otpauth_uri: string };
+    mfa_setup_token: string;
+  };
+  const seed = decodeBase32(
+    new URL(body.mfa_provisioning.otpauth_uri).searchParams.get('secret') ?? '',
+  );
+  const codeAt = (offsetSteps = 0): string =>
+    hotp(seed, Math.floor(kit.clock.now().getTime() / 30_000) + offsetSteps, 6);
+  const enrolled = await client.post(
+    MFA_SETUP,
+    { setup_token: body.mfa_setup_token, totp_code: codeAt() },
+    { origin: OPS },
+  );
+  expect(enrolled.status).toBe(200);
+  expect(enrolled.json()).toEqual({ authentication_ready: true });
+
+  kit.clock.advance(31_000);
+  const first = await client.post(
+    SIGN_IN,
+    { email: person.email, password: PASSWORD },
+    { origin: OPS },
+  );
+  expect(first.status).toBe(202);
+  const challenge = (first.json() as { challenge_id: string }).challenge_id;
+  const signedIn = await client.post(
+    SIGN_IN_MFA,
+    { challenge_id: challenge, code: codeAt() },
+    { origin: OPS },
+  );
+  expect(signedIn.status).toBe(200);
+  expect(signedIn.setCookies.map((cookie) => cookie.name).toSorted()).toEqual([
+    'melarc_csrf',
+    'melarc_session',
+  ]);
+  return { client, codeAt };
+}
+
+/** Each administrator is set up and signed in once, whichever test asks first; the first one's client is the kit's own. */
+interface Established {
+  readonly client: TestClient;
+  readonly codeAt: (offsetSteps?: number) => string;
+}
+const sessions = new Map<string, Promise<Established>>();
+function established(person: Administrator): Promise<Established> {
+  let session = sessions.get(person.id);
+  if (session === undefined) {
+    session = establish(person, person === kofi ? kit.client : kit.client.fork());
+    sessions.set(person.id, session);
+  }
+  return session;
+}
+async function signedIn(person: Administrator): Promise<TestClient> {
+  return (await established(person)).client;
 }
 
 describe('what the seed gives, and to whom', () => {
@@ -131,36 +209,8 @@ describe('a seeded Platform Admin, from the bootstrap secret to the first reads 
       status: 'ACTIVE',
     });
 
-    // The password, then the second factor, by the real routes and the secret the plan holds.
-    const setup = await post(CREDENTIAL, { setup_token: kofi.secret, password: PASSWORD });
-    expect(setup.status).toBe(200);
-    const body = setup.json() as {
-      mfa_provisioning: { otpauth_uri: string };
-      mfa_setup_token: string;
-    };
-    const seed = decodeBase32(
-      new URL(body.mfa_provisioning.otpauth_uri).searchParams.get('secret') ?? '',
-    );
-    const codeAt = (offsetSteps = 0): string =>
-      hotp(seed, Math.floor(kit.clock.now().getTime() / 30_000) + offsetSteps, 6);
-    const enrolled = await post(MFA_SETUP, {
-      setup_token: body.mfa_setup_token,
-      totp_code: codeAt(),
-    });
-    expect(enrolled.status).toBe(200);
-    expect(enrolled.json()).toEqual({ authentication_ready: true });
-
-    // The sign-in: the password, then a code of a later step than the one that proved the factor (a code is never used twice).
-    kit.clock.advance(31_000);
-    const first = await post(SIGN_IN, { email: kofi.email, password: PASSWORD });
-    expect(first.status).toBe(202);
-    const challenge = (first.json() as { challenge_id: string }).challenge_id;
-    const signedIn = await post(SIGN_IN_MFA, { challenge_id: challenge, code: codeAt() });
-    expect(signedIn.status).toBe(200);
-    expect(signedIn.setCookies.map((cookie) => cookie.name).toSorted()).toEqual([
-      'melarc_csrf',
-      'melarc_session',
-    ]);
+    // The password, the second factor and the sign-in, by the real routes and the secret the plan holds.
+    await signedIn(kofi);
 
     // The session the real sign-in issued: the seeded bundle's grants, with the all-hub scope, and no hub of its own.
     const session = await admin.query<{
@@ -228,4 +278,148 @@ describe('a seeded Platform Admin, from the bootstrap secret to the first reads 
     expect(flat.status).toBe(200);
     expect((await crossings()).length).toBe(before);
   });
+});
+
+describe('the first profile of a clean environment (AC-SLICE-000-118)', () => {
+  const staffCount = async (): Promise<number> =>
+    Number(
+      (await admin.query<{ n: string }>('select count(*) as n from staff_identity')).rows[0]?.n,
+    );
+
+  async function createProfile(maker: TestClient): Promise<{ id: string; name: string }> {
+    const name = `Ama Owusu ${randomUUID().slice(0, 8)}`;
+    const created = await maker.post(
+      LIST,
+      {
+        work_email: `first.profile.${randomUUID()}@example.com`,
+        full_name: name,
+        role_bundle_id: BUNDLE_IDS.opsStaff,
+        primary_hub_id: HUB_A,
+      },
+      { origin: OPS, headers: { 'idempotency-key': randomUUID() } },
+    );
+    expect(created.status).toBe(200);
+    const profile = created.json() as { id: string; status: string; created_by: string };
+    expect(profile).toMatchObject({ status: 'PENDING_APPROVAL', created_by: kofi.id });
+    return { id: profile.id, name };
+  }
+
+  /** What a reader sees of the profile's version, then the decision sent with it. */
+  async function approveAs(client: TestClient, id: string): Promise<TestResponse> {
+    const seen = await client.get(ONE(id));
+    expect(seen.status).toBe(200);
+    const version = seen.header('etag');
+    expect(version).not.toBeNull();
+    return client.post(
+      `${ONE(id)}/approve`,
+      { approved: true },
+      { origin: OPS, headers: { 'if-match': version ?? '' } },
+    );
+  }
+
+  const decisionOf = async (id: string) =>
+    (
+      await admin.query<{ created_by: string; approved_by: string; origin: string }>(
+        'select created_by, approved_by, origin from staff_identity where id = $1',
+        [id],
+      )
+    ).rows[0];
+
+  // Break caught: a seeded administrator that cannot create or approve for want of a hub (the stop condition of S0.36), or an
+  // administrator who must wait for the other one to approve what they made (the owner's decision of 25 October 2026: the highest
+  // authority needs no second person).
+  it('is made by one bootstrap administrator, who approves it without waiting for the other', async () => {
+    const maker = await signedIn(kofi);
+    const before = await staffCount();
+
+    const profile = await createProfile(maker);
+    expect(await staffCount()).toBe(before + 1);
+    const approved = await approveAs(maker, profile.id);
+
+    expect(approved.status).toBe(200);
+    expect(approved.json()).toMatchObject({ id: profile.id, status: 'ACTIVE' });
+    expect(await decisionOf(profile.id)).toEqual({
+      created_by: kofi.id,
+      approved_by: kofi.id,
+      origin: 'MAKER_CHECKER',
+    });
+    const grants = await admin.query<{ purpose: string; state: string }>(
+      'select purpose, state from setup_grant where principal_id = $1',
+      [profile.id],
+    );
+    expect(grants.rows).toEqual([{ purpose: 'STAFF_CREDENTIAL_SETUP', state: 'PENDING' }]);
+  }, 120_000);
+
+  // Break caught: an approval that is only the maker's, so that the other administrator could not find the profile in the list or decide it.
+  it('can equally be approved by the other bootstrap administrator, who finds it in the list', async () => {
+    const maker = await signedIn(kofi);
+    const checker = await signedIn(efua);
+
+    const profile = await createProfile(maker);
+
+    const listed = await checker.get(
+      `${LIST}?status=PENDING_APPROVAL&q=${encodeURIComponent(profile.name)}`,
+    );
+    expect(listed.status).toBe(200);
+    expect((listed.json() as { items: { id: string }[] }).items.map((item) => item.id)).toEqual([
+      profile.id,
+    ]);
+    const approved = await approveAs(checker, profile.id);
+    expect(approved.status).toBe(200);
+    expect(approved.json()).toMatchObject({ id: profile.id, status: 'ACTIVE' });
+    expect(await decisionOf(profile.id)).toEqual({
+      created_by: kofi.id,
+      approved_by: efua.id,
+      origin: 'MAKER_CHECKER',
+    });
+    const grants = await admin.query<{ purpose: string; state: string }>(
+      'select purpose, state from setup_grant where principal_id = $1',
+      [profile.id],
+    );
+    expect(grants.rows).toEqual([{ purpose: 'STAFF_CREDENTIAL_SETUP', state: 'PENDING' }]);
+  }, 120_000);
+});
+
+describe('a reset that lands while a sign-in is past its password step', () => {
+  // Break caught (GBT-B14, the attack it names): a challenge opened before the reset still becoming a session after it, for an identity
+  // whose factor has been revoked. The reset and the issue take the one identity lock in turn, and the second step reads the factor under it.
+  it('leaves the challenge unable to become a session once the other administrator has reset the factor', async () => {
+    const target = await established(kofi);
+    const resetter = await signedIn(efua);
+    const browser = kit.client.fork();
+    kit.clock.advance(31_000);
+    const first = await browser.post(
+      SIGN_IN,
+      { email: kofi.email, password: PASSWORD },
+      { origin: OPS },
+    );
+    expect(first.status).toBe(202);
+    const challenge = (first.json() as { challenge_id: string }).challenge_id;
+
+    const read = await resetter.get(ONE(kofi.id));
+    expect(read.status).toBe(200);
+    const reset = await resetter.post(
+      `/api/v1/ops/staff/${kofi.id}/mfa/reset`,
+      { reason_code: 'MFA_AUTHENTICATOR_UNAVAILABLE' },
+      { origin: OPS, headers: { 'if-match': read.header('etag') ?? '' } },
+    );
+    expect(reset.status).toBe(200);
+
+    // The code is the right one for the factor that has been revoked, and of a later step than any used.
+    kit.clock.advance(31_000);
+    const second = await browser.post(
+      SIGN_IN_MFA,
+      { challenge_id: challenge, code: target.codeAt() },
+      { origin: OPS },
+    );
+
+    expect(second.status).toBe(403);
+    expect((second.json() as { code: string }).code).toBe('MFA_ENROLMENT_REQUIRED');
+    expect(second.setCookies).toEqual([]);
+    const live = await admin.query<{ n: string }>(
+      'select count(*) as n from session where principal_id = $1 and terminated_at is null',
+      [kofi.id],
+    );
+    expect(live.rows[0]?.n).toBe('0');
+  }, 120_000);
 });

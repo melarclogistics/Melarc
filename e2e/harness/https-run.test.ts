@@ -18,9 +18,9 @@ import type { MintResult } from './test-ca.ts';
 /**
  * The command that runs the proofs over the trusted HTTPS origin (S0.23), tested with a fake of everything it touches: no key is
  * made, no `openssl` runs, no browser starts, no `sudo` is used and no store is changed. What these prove is what the command decides
- * itself: where it will run, in what order it does things (the engines that have a store of their own and WebKit's refusal first, then
- * the CA into the system store, then WebKit's proofs, then the CA out again), that the directory and the CA are removed whatever
- * happens, and what it exits with.
+ * itself: where it will run, in what order it does things (Chromium with WebKit's refusal first, Firefox next, then the CA into the system
+ * store, then WebKit's proofs, then the CA out again), that each engine's journeys are a run, and so a stack, of their own, that the
+ * directory and the CA are removed whatever happens, and what it exits with.
  */
 const TLS = join('/tmp/run', 'tls');
 const CA = '/tmp/run/tls/ca.pem';
@@ -34,24 +34,21 @@ const MATERIAL: MintResult = {
   notes: [],
 };
 
-/** The projects of the first run: every engine that has a store of its own, and WebKit's refusal, while the system store lacks the CA. */
-const BEFORE_CA = [
-  'https-chromium',
-  'https-chromium-secret',
-  'https-firefox',
-  'https-firefox-secret',
-  'https-webkit-control',
-] as const;
-/** The projects of the second run: WebKit's proofs that need its trust, with the CA in the system store. */
-const WITH_CA = ['https-webkit', 'https-webkit-secret'] as const;
+/** The projects of the first run: Chromium, and WebKit's refusal while the system store lacks the CA. */
+const CHROMIUM_RUN = ['https-chromium', 'https-chromium-secret', 'https-webkit-control'] as const;
+/** The projects of the second run: Firefox, on a stack of its own (audit G01). */
+const FIREFOX_RUN = ['https-firefox', 'https-firefox-secret'] as const;
+/** The projects of the third run: WebKit's proofs that need its trust, with the CA in the system store. */
+const WEBKIT_RUN = ['https-webkit', 'https-webkit-secret'] as const;
 
 /**
  * Where each run writes its artifacts. Playwright removes the output directory of every project it is about to run when a run starts,
  * so two runs that share one directory erase the first run's evidence (traces, attachments) when the second begins: the first hosted
  * run of the two-run command kept 10 KB of diagnostics for that reason, whatever the first run had found.
  */
-const BEFORE_OUT = 'test-results/https-1-own-stores';
-const WITH_OUT = 'test-results/https-2-system-store';
+const CHROMIUM_OUT = 'test-results/https-1-chromium';
+const FIREFOX_OUT = 'test-results/https-2-firefox';
+const WEBKIT_OUT = 'test-results/https-3-webkit-system-store';
 
 const args = (projects: readonly string[], output: string) => [
   'test',
@@ -172,15 +169,17 @@ describe('what it does, in order', () => {
     expect(run.events).toEqual([
       'make-directory',
       `mint ${TLS}`,
-      `playwright ${BEFORE_CA.join(',')}`,
+      `playwright ${CHROMIUM_RUN.join(',')}`,
+      `playwright ${FIREFOX_RUN.join(',')}`,
       `system-trust install ${CA}`,
-      `playwright ${WITH_CA.join(',')}`,
+      `playwright ${WEBKIT_RUN.join(',')}`,
       'system-trust remove',
       'remove /tmp/run',
     ]);
     expect(run.runs.map((call) => call.args)).toEqual([
-      args(BEFORE_CA, BEFORE_OUT),
-      args(WITH_CA, WITH_OUT),
+      args(CHROMIUM_RUN, CHROMIUM_OUT),
+      args(FIREFOX_RUN, FIREFOX_OUT),
+      args(WEBKIT_RUN, WEBKIT_OUT),
     ]);
     for (const call of run.runs) {
       expect(call.environment.MELARC_E2E_TLS_DIR).toBe(TLS);
@@ -188,23 +187,71 @@ describe('what it does, in order', () => {
     }
   });
 
-  it('is two runs, the second with the CA in the system store, and every HTTPS project in exactly one', () => {
+  it('is three runs, the last with the CA in the system store, and every HTTPS project in exactly one', () => {
     expect(HTTPS_PHASES).toEqual([
       {
         name: expect.any(String) as string,
-        projects: BEFORE_CA,
+        projects: CHROMIUM_RUN,
         systemTrust: false,
-        output: BEFORE_OUT,
+        output: CHROMIUM_OUT,
       },
       {
         name: expect.any(String) as string,
-        projects: WITH_CA,
+        projects: FIREFOX_RUN,
+        systemTrust: false,
+        output: FIREFOX_OUT,
+      },
+      {
+        name: expect.any(String) as string,
+        projects: WEBKIT_RUN,
         systemTrust: true,
-        output: WITH_OUT,
+        output: WEBKIT_OUT,
       },
     ]);
-    expect(HTTPS_PROJECTS).toEqual([...BEFORE_CA, ...WITH_CA]);
+    expect(HTTPS_PROJECTS).toEqual([...CHROMIUM_RUN, ...FIREFOX_RUN, ...WEBKIT_RUN]);
     expect(new Set(HTTPS_PROJECTS).size).toBe(HTTPS_PROJECTS.length);
+  });
+
+  // Break caught (the audit of 26 October 2026, G01): two engines sent through one stack. A run is one Playwright invocation and so one
+  // global setup, one database and one set of one-time bootstrap bundles; the journeys of S0.46 begin by reading and consuming those
+  // bundles, so the engine that comes second finds a story already told and fails for a reason that says nothing of its own behaviour.
+  // The projects that run the journeys are the secret ones; no run holds two of them.
+  it('gives the journeys of each engine a run, and so a stack, of its own', () => {
+    const journeyProjects = (config.projects ?? [])
+      .filter(
+        (project) =>
+          (project.name ?? '').startsWith('https-') &&
+          String(project.testMatch).endsWith('.secret.test.ts'),
+      )
+      .map((project) => project.name ?? '');
+    expect(journeyProjects).toEqual(
+      expect.arrayContaining([
+        'https-chromium-secret',
+        'https-firefox-secret',
+        'https-webkit-secret',
+      ]),
+    );
+    for (const phase of HTTPS_PHASES) {
+      const running = phase.projects.filter((name) => journeyProjects.includes(name));
+      expect(running.length, `${phase.name} runs ${running.join(', ')}`).toBeLessThanOrEqual(1);
+    }
+    // And each engine's journeys are run: no secret project was left out of every run.
+    for (const name of journeyProjects) expect(HTTPS_PROJECTS).toContain(name);
+  });
+
+  // Break caught (the same): every run is a separate invocation of Playwright, which is what makes the stack separate. A single
+  // invocation handed all the projects would put the engines back on one stack whatever the list says.
+  it('starts a Playwright invocation for each run, not one for all of them', () => {
+    const run = harness();
+
+    runHttpsSuite(run.deps);
+
+    expect(run.runs).toHaveLength(HTTPS_PHASES.length);
+    for (const call of run.runs) {
+      expect(call.args.filter((argument) => argument.startsWith('--project=')).length).toBeLessThan(
+        HTTPS_PROJECTS.length,
+      );
+    }
   });
 
   // Break caught: a run that says the CA was made and prints it, or anything of a key: only the public fingerprint.
@@ -242,8 +289,9 @@ describe('where the system store may not be changed', () => {
     expect(run.events).toEqual([
       'make-directory',
       `mint ${TLS}`,
-      `playwright ${BEFORE_CA.join(',')}`,
-      `playwright ${WITH_CA.join(',')}`,
+      `playwright ${CHROMIUM_RUN.join(',')}`,
+      `playwright ${FIREFOX_RUN.join(',')}`,
+      `playwright ${WEBKIT_RUN.join(',')}`,
       'remove /tmp/run',
     ]);
     expect(run.out.join('\n')).toContain(reason);
@@ -264,14 +312,14 @@ describe('how it ends', () => {
     },
   );
 
-  // Break caught: a failure of the first run hiding the second, so that WebKit's result is never known, or the second run's status
+  // Break caught: a failure of an earlier run hiding the later ones, so that WebKit's result is never known, or a later run's status
   // replacing the first's, so that what failed first is not what is reported.
   it('runs WebKit’s proofs even when the first run failed, and exits with the first failure', () => {
     const run = harness({ playwright: (projects) => (projects.includes('https-webkit') ? 2 : 1) });
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(run.events).toContain(`playwright ${WITH_CA.join(',')}`);
+    expect(run.events).toContain(`playwright ${WEBKIT_RUN.join(',')}`);
     expect(run.events.slice(-2)).toEqual(['system-trust remove', 'remove /tmp/run']);
   });
 
@@ -301,7 +349,7 @@ describe('how it ends', () => {
     expect(run.events).toEqual([
       'make-directory',
       `mint ${TLS}`,
-      `playwright ${BEFORE_CA.join(',')}`,
+      `playwright ${CHROMIUM_RUN.join(',')}`,
       'remove /tmp/run',
     ]);
   });
@@ -336,7 +384,8 @@ describe('how it ends', () => {
     expect(run.events).toEqual([
       'make-directory',
       `mint ${TLS}`,
-      `playwright ${BEFORE_CA.join(',')}`,
+      `playwright ${CHROMIUM_RUN.join(',')}`,
+      `playwright ${FIREFOX_RUN.join(',')}`,
       `system-trust install ${CA}`,
       'system-trust remove',
       'remove /tmp/run',
@@ -383,7 +432,7 @@ describe('what a failure leaves behind', () => {
   // and the artifact said nothing of what had failed. Playwright removes the output directory of every project it runs at the start of a
   // run; each run therefore writes to a directory of its own, and none is inside another or inside the plain run's.
   it('gives each run an output directory of its own, none inside another and none the plain run’s', () => {
-    expect(outputs).toEqual([BEFORE_OUT, WITH_OUT]);
+    expect(outputs).toEqual([CHROMIUM_OUT, FIREFOX_OUT, WEBKIT_OUT]);
     expect(new Set(outputs).size).toBe(outputs.length);
     const plain = posix.normalize(String(config.outputDir));
     for (const output of outputs) {
@@ -403,7 +452,11 @@ describe('what a failure leaves behind', () => {
 
     expect(
       run.runs.map((call) => call.args.filter((argument) => argument.startsWith('--output='))),
-    ).toEqual([[`--output=${BEFORE_OUT}`], [`--output=${WITH_OUT}`]]);
+    ).toEqual([
+      [`--output=${CHROMIUM_OUT}`],
+      [`--output=${FIREFOX_OUT}`],
+      [`--output=${WEBKIT_OUT}`],
+    ]);
   });
 
   // Break caught: a directory of a run written somewhere the failure artifact does not keep, so that a failing job loses the evidence
@@ -430,40 +483,57 @@ describe('what it says of each run, and of all of them', () => {
 
     runHttpsSuite(run.deps);
 
-    expect(said(run)).toContain('HTTPS run 1 of 2 ended with exit status 0.');
-    expect(said(run)).toContain('HTTPS run 2 of 2 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 1 of 3 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 2 of 3 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 3 of 3 ended with exit status 0.');
     expect(said(run)).toContain('HTTPS run summary:');
-    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
-    expect(said(run)).toContain(`run 2 of 2: exit status 0; output ${WITH_OUT}`);
+    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
     expect(said(run)).toContain('overall exit status 0');
     expect(run.out.at(-1)).toBe('  overall exit status 0');
   });
 
-  // Break caught: a failure of the first run reported as the second run's, or the second run's status hiding the first: the summary
-  // says what each run answered and which one the overall status comes from, the first that did not pass.
-  it('names the first run that failed as the source of the overall status, and says what the other did', () => {
+  // Break caught: a failure of an earlier run reported as a later run's, or a later run's status hiding the first: the summary says what
+  // each run answered and which one the overall status comes from, the first that did not pass.
+  it('names the first run that failed as the source of the overall status, and says what the others did', () => {
     const run = harness({ playwright: (projects) => (projects.includes('https-webkit') ? 2 : 1) });
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain('HTTPS run 1 of 2 ended with exit status 1.');
-    expect(said(run)).toContain('HTTPS run 2 of 2 ended with exit status 2.');
-    expect(said(run)).toContain(`run 1 of 2: exit status 1; output ${BEFORE_OUT}`);
-    expect(said(run)).toContain(`run 2 of 2: exit status 2; output ${WITH_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 2');
+    expect(said(run)).toContain('HTTPS run 1 of 3 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 2 of 3 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 3 of 3 ended with exit status 2.');
+    expect(said(run)).toContain(`run 1 of 3: exit status 1; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 3: exit status 1; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: exit status 2; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 3');
   });
 
-  it('names the second run when only the second failed', () => {
+  it('names Firefox’s run when only it failed, and runs WebKit’s after it', () => {
+    const run = harness({
+      playwright: (projects) => (projects.includes('https-firefox') ? 1 : 0),
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 3: exit status 1; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 3');
+  });
+
+  it('names the last run when only it failed', () => {
     const run = harness({ playwright: (projects) => (projects.includes('https-webkit') ? 1 : 0) });
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
-    expect(said(run)).toContain(`run 2 of 2: exit status 1; output ${WITH_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 2');
+    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: exit status 1; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 3 of 3');
   });
 
-  it('says that a run that threw did not complete, and that the next one was not run', () => {
+  it('says that a run that threw did not complete, and that the next ones were not run', () => {
     const run = harness({
       playwright: () => {
         throw new Error('spawn failed');
@@ -473,13 +543,14 @@ describe('what it says of each run, and of all of them', () => {
     expect(runHttpsSuite(run.deps)).toBe(1);
 
     expect(said(run)).toContain(
-      `run 1 of 2: did not complete (an error stopped it; see above); output ${BEFORE_OUT}`,
+      `run 1 of 3: did not complete (an error stopped it; see above); output ${CHROMIUM_OUT}`,
     );
-    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 2');
+    expect(said(run)).toContain(`run 2 of 3: not run; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 3');
   });
 
-  it('says that the second run was not run when the CA could not be put in the system store', () => {
+  it('says that WebKit’s run was not run when the CA could not be put in the system store', () => {
     const run = harness({
       install: () => {
         throw new Error('update-ca-certificates failed (exit 1)');
@@ -488,9 +559,10 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 2: exit status 0; output ${BEFORE_OUT}`);
-    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 2');
+    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 3 of 3');
   });
 
   it('says that no run was made when the CA could not be made', () => {
@@ -502,13 +574,14 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 2: not run; output ${BEFORE_OUT}`);
-    expect(said(run)).toContain(`run 2 of 2: not run; output ${WITH_OUT}`);
+    expect(said(run)).toContain(`run 1 of 3: not run; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 3: not run; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
     expect(run.out.at(-1)).toBe('  overall exit status 1, no run was made (see above)');
   });
 
   // Break caught: a CA left in the system store reported as a pass that merely had nothing to say: the status comes from taking it out.
-  it('says the status came from taking the CA out when both runs passed', () => {
+  it('says the status came from taking the CA out when every run passed', () => {
     const run = harness({
       remove: () => {
         throw new Error('rm failed');
@@ -517,7 +590,7 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 2 of 2: exit status 0; output ${WITH_OUT}`);
+    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
     expect(run.out.at(-1)).toBe(
       '  overall exit status 1, from taking the CA out of the system trust store (see above)',
     );

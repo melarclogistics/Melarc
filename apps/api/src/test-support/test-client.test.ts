@@ -59,6 +59,20 @@ describe('the cookie jar', () => {
     expect(seen[1]?.headers.get('cookie')).toBe('melarc_session=abc; melarc_csrf=tok');
   });
 
+  // Break caught: a seeded credential not sent, or not replaced by the server's renewal of the same cookie (S0.48: a vendor's browser).
+  it('sends a seeded cookie as one the server set, and replaces it with the server’s cookie of the same name', async () => {
+    const { fetchLike, seen } = server(
+      { setCookie: ['melarc_vendor_device=renewed; Path=/; Max-Age=60; HttpOnly; Secure'] },
+      {},
+    );
+    const client = clientFor(fetchLike);
+    client.seed('melarc_vendor_device', 'registered');
+    await client.post('/api/v1/auth/vendor/sign-in', {});
+    await client.get('/api/v1/auth/session');
+    expect(seen[0]?.headers.get('cookie')).toBe('melarc_vendor_device=registered');
+    expect(seen[1]?.headers.get('cookie')).toBe('melarc_vendor_device=renewed');
+  });
+
   // Break caught: a cookie the server deleted staying in the jar (a signed-out session still presented).
   it.each([
     ['Max-Age=0', 'melarc_session=; Path=/; Max-Age=0'],

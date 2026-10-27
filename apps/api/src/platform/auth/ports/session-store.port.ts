@@ -123,6 +123,8 @@ export type SessionSelector =
       readonly principalType: SessionPrincipalType;
       readonly principalId: string;
     }
+  /** The sessions issued to one registered device (a vendor's browser that is revoked, S0.49). */
+  | { readonly by: 'device'; readonly registeredDeviceId: string }
   | {
       readonly by: 'bundle';
       readonly bundleId: string;

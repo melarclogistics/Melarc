@@ -62,12 +62,18 @@ const PORT_NAMES = [
  * and the in-memory one that unit tests use and a deployed environment refuses), S0.15 the bounded metrics registry and S0.16 the bounded hash admission.
  * S0.17 adds the durable delivery queue over PostgreSQL. S0.18 adds the two delivery providers of the worker: the capture adapter and
  * the allow-list that stands in front of a real provider (no real provider is built). S0.24 adds the session store and the unit of
- * work over PostgreSQL, and `staff/postgres.staff-identity-directory.adapter.ts`, the first adapter a domain provides. The next adapter, a real one, is added here by
- * the task that builds it, and a review sees the line.
+ * work over PostgreSQL, and `staff/postgres.staff-identity-directory.adapter.ts`, the first adapter a domain provides. S0.47 adds the
+ * vendor domain's directory and the platform's router that sends each question to the directory of its audience. S0.53 adds the
+ * rider directory, which the staff domain provides beside its staff one. S0.54 adds the substitute attestation verifier, the one a local
+ * run and staging may select and production refuses. The next adapter, a real one, is added here by the task that builds it, and a review
+ * sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/audit/postgres.audit-writer.adapter.ts',
+  'platform/auth/attestation/service.attestation-verifier.adapter.ts',
+  'platform/auth/attestation/substitute.attestation-verifier.adapter.ts',
   'platform/auth/clock/system.clock.adapter.ts',
+  'platform/auth/directory/routed.identity-directory.adapter.ts',
   'platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts',
   'platform/auth/crypto/argon2.hasher.adapter.ts',
   'platform/auth/crypto/rfc6238.totp-verifier.adapter.ts',
@@ -83,13 +89,18 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/limiter/in-memory.rate-limiter.adapter.ts',
   'platform/limiter/postgres.rate-limiter.adapter.ts',
   'platform/metrics/bounded.metrics.adapter.ts',
+  'staff/postgres.rider-identity-directory.adapter.ts',
   'staff/postgres.staff-identity-directory.adapter.ts',
+  'vendor/postgres.vendor-account-directory.adapter.ts',
 ];
 
 /** The port each real adapter above implements, so that a test can say what the checker must see in each file. */
 const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/audit/postgres.audit-writer.adapter.ts', 'AuditWriter'],
+  ['platform/auth/attestation/service.attestation-verifier.adapter.ts', 'AttestationVerifier'],
+  ['platform/auth/attestation/substitute.attestation-verifier.adapter.ts', 'AttestationVerifier'],
   ['platform/auth/clock/system.clock.adapter.ts', 'Clock'],
+  ['platform/auth/directory/routed.identity-directory.adapter.ts', 'IdentityDirectory'],
   ['platform/auth/crypto/aes-gcm.secret-cipher.adapter.ts', 'SecretCipher'],
   ['platform/auth/crypto/argon2.hasher.adapter.ts', 'Hasher'],
   ['platform/auth/crypto/rfc6238.totp-verifier.adapter.ts', 'TotpVerifier'],
@@ -111,7 +122,11 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
  * the checker that lists every port implementation inside `platform/` does not see them; they are named `*.adapter.ts`, listed in
  * `ALLOWED_PORT_IMPLEMENTATIONS` like the others, and only the composition root imports them.
  */
-const DOMAIN_ADAPTERS: readonly string[] = ['staff/postgres.staff-identity-directory.adapter.ts'];
+const DOMAIN_ADAPTERS: readonly string[] = [
+  'staff/postgres.rider-identity-directory.adapter.ts',
+  'staff/postgres.staff-identity-directory.adapter.ts',
+  'vendor/postgres.vendor-account-directory.adapter.ts',
+];
 const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
 
 /**
@@ -1195,13 +1210,15 @@ describe('the database door (S0.4)', () => {
     });
 
     // Break caught: the harness entry point (test/support/e2e-main.mjs, outside src/ and never built into dist) going
-    // back through the service's pool. It wrote with `db.$client`, which is the door S0.4c closed: it now builds a pool
-    // of its own, as the runtime identity, and the service neither offers its own nor is asked for it.
-    it('keeps the harness entry point off the service’s pool and driver handle', () => {
+    // back through the service's pool. It wrote with `db.$client`, which is the door S0.4c closed; it then built a pool of its
+    // own for a table of its own. S0.45 retired that table (the journeys are the real operations, and the harness reads the
+    // database through the database command's observations), so the entry point holds no database access of any kind: no
+    // handle of the service, no pool and no driver.
+    it('keeps the harness entry point off the service’s pool and driver handle, and holds no database access of its own', () => {
       const entry = readFileSync(join(sourceRoot, '..', 'test', 'support', 'e2e-main.mjs'), 'utf8');
 
       expect(entry).not.toMatch(/\.\$client|\.db\b|DatabaseService/);
-      expect(entry).toMatch(/createPool\(/);
+      expect(entry).not.toMatch(/createPool\(|new Pool\(|from 'pg'|node-postgres/);
     });
   });
 

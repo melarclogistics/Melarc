@@ -8,9 +8,9 @@ import { wcagViolations } from '../test-support/wcag';
 import { PrimaryNavigation, type NavigationItem } from './PrimaryNavigation';
 
 const ITEMS: NavigationItem[] = [
-  { to: '/', label: 'Home' },
-  { to: '/admin', label: 'Administration' },
-  { to: '/reports', label: 'Reports' },
+  { to: '/', label: 'Home', icon: 'overview' },
+  { to: '/admin', label: 'Administration', icon: 'staff' },
+  { to: '/reports', label: 'Reports', icon: 'sessions' },
 ];
 
 /** The navigation inside a real router, next to a main landmark showing which page is current. */
@@ -60,6 +60,34 @@ describe('PrimaryNavigation', () => {
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/admin', '/reports']);
   });
 
+  // Break caught: an entry with no picture, or one whose picture is read out beside its name ("Staff, Staff"): the icon is decorative and
+  // the name is the label (DESIGN_SYSTEM section 24). The same entry has the same picture whatever the address.
+  it('draws each entry as an icon that is hidden from assistive technology, and its name', () => {
+    renderNavigation(ITEMS);
+
+    for (const item of ITEMS) {
+      const link = screen.getByRole('link', { name: item.label });
+      const svg = link.querySelector('svg');
+      expect(svg, item.label).not.toBeNull();
+      expect(svg, item.label).toHaveAttribute('aria-hidden', 'true');
+      expect(link, item.label).not.toHaveAttribute('title');
+    }
+  });
+
+  // Break caught: a collapsed menu whose entries lose their names (an icon alone, with nothing to read), or that repeats them to a screen
+  // reader. The label stays in the document; the `title` is for a pointer user.
+  it('keeps every name when the menu around it is collapsed, and says it as a tooltip', () => {
+    const router = createMemoryRouter(
+      [{ path: '*', element: <PrimaryNavigation items={ITEMS} collapsed /> }],
+      { initialEntries: ['/'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    for (const item of ITEMS) {
+      expect(screen.getByRole('link', { name: item.label })).toHaveAttribute('title', item.label);
+    }
+  });
+
   // Break caught: the current page shown by colour alone (surfaces/ops-portal.md §11), or the home
   // entry looking current on every page because "/" is a prefix of every path.
   it('marks only the current page, in a way assistive technology can read', () => {
@@ -71,6 +99,48 @@ describe('PrimaryNavigation', () => {
     );
     expect(screen.getByRole('link', { name: 'Home' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('link', { name: 'Reports' })).not.toHaveAttribute('aria-current');
+  });
+
+  // Break caught (S0.44): two entries marked current at once. "Add a staff profile" lies under "Staff", and the profile of a person lies under
+  // "Staff" and under nothing else: the entry that is current is the most specific one the address is at or under.
+  describe('when one entry lies under another', () => {
+    const NESTED: NavigationItem[] = [
+      { to: '/', label: 'Home', icon: 'overview' },
+      { to: '/admin/staff', label: 'Staff', icon: 'staff' },
+      { to: '/admin/staff/new', label: 'Add a staff profile', icon: 'add-staff' },
+    ];
+
+    it.each([
+      ['/admin/staff', 'Staff'],
+      ['/admin/staff/new', 'Add a staff profile'],
+      ['/admin/staff/11111111-2222-4333-8444-555555555555', 'Staff'],
+      ['/admin/staff/11111111-2222-4333-8444-555555555555/mfa/reset', 'Staff'],
+    ])('marks only the most specific entry at %s', (path, current) => {
+      renderNavigation(NESTED, path);
+
+      const marked = screen
+        .getAllByRole('link')
+        .filter((link) => link.getAttribute('aria-current') === 'page')
+        .map((link) => link.textContent);
+      expect(marked).toEqual([current]);
+    });
+
+    // Break caught: a path that only begins with the same letters taken for a page under the entry.
+    it('does not take a longer word for a page under an entry', () => {
+      renderNavigation(NESTED, '/admin/staffing');
+
+      expect(
+        screen.getAllByRole('link').filter((link) => link.hasAttribute('aria-current')),
+      ).toHaveLength(0);
+    });
+
+    it('marks nothing at a page that is under no entry', () => {
+      renderNavigation(NESTED, '/admin/sessions');
+
+      expect(
+        screen.getAllByRole('link').filter((link) => link.hasAttribute('aria-current')),
+      ).toHaveLength(0);
+    });
   });
 
   it('marks the home entry when the home page is shown', () => {

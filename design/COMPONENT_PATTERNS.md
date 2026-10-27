@@ -12,8 +12,10 @@
 
 **Approval (Product Owner, 6 October 2026).** This document is approved. A pattern that is built and tested (§42.3) is
 ACTIVE: Button, Link, Field, Input, Alert, LoadingIndicator, PageHeader, the neutral frame, the error state and the
-not-found state. A pattern that is not built keeps its status: PasswordInput and the authenticated Ops shell stay PROPOSED
-for the identity slice, and the deferred patterns stay deferred. The variants and sizes that are not built (§42.2) are
+not-found state. A pattern that is not built keeps its status (PasswordInput became ACTIVE when S0.39a built it, §42.4; the
+forbidden, empty, skeleton, status, table, select, dialog and alert-dialog patterns and the authenticated Ops shell when S0.40 to
+S0.42 built them, §42.5, and the form page and the five pre-sign-in screens when S0.43 built them, §12.7 and §42.6), and the
+deferred patterns stay deferred. The variants and sizes that are not built (§42.2) are
 vocabulary, not a build list.
 
 ---
@@ -203,6 +205,11 @@ Danger actions must:
 - not rely on red alone;
 - use confirmation when the action is sufficiently destructive or irreversible.
 
+**Built (S0.41), because the AlertDialog's confirming button is one:** the outline recipe of
+[DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) §4.6, never a filled button: `status.danger.foreground` text and border on
+`surface.default`, `status.danger.background` under the pointer, the pressed grey when pressed; busy and inert while loading like any
+button. The recipe was marked proposed there; the owner confirmed it on 24 October 2026.
+
 ### 4.8 States
 
 Required states:
@@ -242,6 +249,13 @@ Do not:
 - use icon-only buttons without accessible names;
 - place multiple Primary buttons side by side without hierarchy;
 - use Danger styling for ordinary brand emphasis.
+
+### 4.12 ButtonLink (S0.44)
+
+A link drawn as a button, for going somewhere that is the main thing a surface offers ("Add a staff profile", "Reset authenticator"). It is
+an anchor with an address, so it can be followed in a new tab and is announced as a link; an act that changes something is a Button, and
+navigation that is not the point of a surface is a Link. It has the Primary and Secondary recipes and the same size and focus ring, and no
+Danger, because a link never does harm.
 
 ---
 
@@ -466,9 +480,52 @@ For money, counts, dimensions, or other domain values:
 
 ---
 
+### 7.9 Select
+
+> **Status:** ACTIVE (S0.41)
+> **Code:** `apps/ops-web/src/components/ui/select/`
+
+A native single-choice `<select>` at medium size, wired to a Field exactly as an Input is: it takes the Field's id, description,
+`aria-invalid` and `aria-required`. The options are the caller's `<option>` children, so the platform's picker, keys and
+type-ahead are kept, and nothing is drawn as an image (a strict content-security policy refuses a `data:` background, which is why
+the arrow is the browser's). A first option that is not a choice ("Choose a reason") carries the empty value; the form, not the
+control, says that a choice is required. It offers one choice: `multiple` is not part of the control, and a list that takes several is
+another control and is not built. Invalid is a 2px danger border with the Field's icon and message; disabled differs in look and in
+behaviour, as for an Input (§7.7).
+
+### 7.10 Checkbox
+
+> **Status:** ACTIVE (25 October 2026, for the trusted browser of [staff-authentication.md](../features/identity/staff-authentication.md) §5.8; **owner to confirm as a pattern**)
+> **Code:** `apps/ops-web/src/components/ui/checkbox/`
+
+One native `<input type="checkbox">` with a real `<label>` beside it, so that the whole phrase is the target, and optional help beneath
+the phrase, linked with `aria-describedby`. It is a **choice the person makes and never a state the page decides**: it is off unless
+the caller says the choice was already the person's (`defaultChecked`), and a form reads it at submit time (`fieldChecked`), not from a
+copy kept in the page. The label states what ticking it means in a short sentence-case phrase (*Remember this browser for 7 days*), and
+the help says what the choice does and does not do; neither is a placeholder for the other. It is drawn by the browser (so forced
+colours, zoom and assistive technology behave as everywhere), 1.25rem square, tinted with the primary action colour, with the frame's
+own focus ring. It takes no part in a Field, which is for a text control; a checkbox that needs an error says it in an Alert of the
+form. It has no indeterminate state, no switch look and no group: a list of several choices is another pattern and is not built.
+
+### 7.11 Textarea
+
+> **Status:** ACTIVE (S0.60, for the verification note of `reregisterRiderDevice`; **owner to confirm as a pattern**)
+> **Code:** `apps/ops-web/src/components/ui/textarea/`
+
+The multi-line sibling of the Input (§7), for text a person writes in their own words that does not fit a line: how a rider's identity was
+verified in person. A native `<textarea>` with the Input's recipe (the 3:1 control border, the same padding, type and states), wired to a
+Field exactly as an Input is: it takes the Field's id, description, `aria-invalid` and `aria-required`, and on its own needs a name from
+`aria-label`. It starts at three rows (`rows` changes that), grows only downwards (vertical resize, never wider than its container), and its
+height is a minimum in rem so enlarged text is not clipped. Invalid is the 2px danger border with the Field's icon and message; disabled
+and read-only differ in look and in behaviour, as for an Input (§7.7). It holds no value of its own, counts nothing and decides nothing
+about what may be written: the screen says how long and what a note may hold, and the server refuses the rest. (The note of an
+administrative act is one line with no control character, so a screen that uses a Textarea for one says so and refuses a line break.)
+
+---
+
 ## 8. Password Input
 
-> **Status:** PROPOSED  
+> **Status:** ACTIVE (built in S0.39a, 23 October 2026; §42.4)  
 > **Initial implementation priority:** Only when identity UI is implemented
 
 PasswordInput extends Input.
@@ -483,6 +540,8 @@ The visibility control must:
 - communicate current state;
 - not alter the underlying password value;
 - remain keyboard accessible.
+
+As built it is an icon button (§22) with an eye, not a button with words: "Show password" (the open eye) and "Hide password" (the crossed eye).
 
 ### 8.2 Security
 
@@ -638,8 +697,9 @@ Operational content below it may be compact.
 
 ## 12. Application Frame
 
-> **Status:** the neutral frame is ACTIVE (`apps/ops-web/src/app/AppFrame.tsx`); the authenticated Ops shell is PROPOSED and DEFERRED to the identity slice  
-> **Initial implementation priority:** the neutral frame is Required (it exists); the authenticated Ops shell is not part of the UI foundation gate
+> **Status:** the neutral frame is ACTIVE (`apps/ops-web/src/app/AppFrame.tsx`); the authenticated Ops shell is ACTIVE (S0.42, §12.6; its navigation is a side menu since 25 October 2026); the split screen of the
+> pre-sign-in pages is ACTIVE (§12.7)  
+> **Initial implementation priority:** the neutral frame is Required (it exists); the authenticated Ops shell was not part of the UI foundation gate
 
 ### 12.1 Purpose
 
@@ -652,29 +712,37 @@ of each.
 ### 12.2 Anatomy
 
 ```text
-NeutralFrame (exists as AppFrame)
+NeutralFrame (AppFrame, layout `neutral`: an address that matches no route)
 ├── SkipLink
-├── Banner (the product name)
+├── Banner (the logo and the product name)
 └── MainContent (the route's page; focus moves to its heading after a navigation)
 
-AuthenticatedOpsShell (identity slice)
-├── SkipLink
-├── PrimaryNavigation (a plain list; none shown until the entries have a source)
-├── TopContextArea (session identity, hub context)
-└── MainContent
+SplitScreen (AppFrame, layout `split`: the five pre-sign-in screens, §12.7)
+├── SkipLink                      (the frame's)
+├── AuthArt                       decorative photography over a band of Ink with the mark and the name; from 64rem, beside the form
+├── Banner                        (the frame's: the logo, above the form)
+└── MainContent                   (the frame's; focus moves to the new page's heading)
+
+AuthenticatedOpsShell (AppFrame, layout `sidebar`: S0.42, a side menu since 25 October 2026)
+├── SkipLink                      (the frame's)
+├── SideMenu                      the mark and the name, PrimaryNavigation (an icon and a label for each entry from the registry),
+│                                 the account card with the sign-out control; collapses to a rail, slides in on a narrow screen
+└── MainContent                   (the frame's; focus moves to the new page's heading)
 ```
 
-The setup layout is the neutral frame until the open decision in DESIGN_SYSTEM §13.1 is made. Exact navigation behavior
+The pre-sign-in screens, the setup pages included, use the split screen (DESIGN_SYSTEM §13.1a). Exact navigation behavior
 depends on the product surface.
 
 ### 12.3 Visual direction
 
-Neutral frame: quiet, on `surface.page`, the product name in text, no Ink navigation. Pre-authentication pages carry no
-Ink, no navigation and no signed-in affordance.
+Neutral frame: quiet, on `surface.page`, the logo and the product name, no Ink navigation. The split screen of the
+pre-sign-in pages (§12.7) is the same frame with photography beside the form: the only Ink on it is the band under the
+photograph, which is decoration, and it carries no navigation and no signed-in affordance.
 
-Authenticated Ops shell:
+Authenticated Ops shell: an application's frame and not a website's, so its navigation is a menu at the side and not a band
+at the top (Product Owner, 25 October 2026):
 
-- Ink-oriented navigation structure;
+- an Ink side menu, full height, that collapses to a rail of icons and slides in on a narrow screen;
 - neutral working surface;
 - restrained Crimson active accent, on a value that is visible against Ink (DESIGN_SYSTEM §4.6);
 - spacious shell;
@@ -688,9 +756,10 @@ Every layout must:
 - be chosen by the route tree and never by the page it contains;
 - remain responsive.
 
-The neutral frame must never show, in any state (loading, challenge, error or success), navigation, a user menu,
+The neutral frame and the split screen must never show, in any state (loading, challenge, error or success), navigation, a user menu,
 sign-out, session data or anything loaded for a signed-in user. A `202` MFA challenge renders here, because it is not a
-session. Tests assert this for each pre-authentication route as it is built.
+session. Tests assert this for each pre-authentication route as it is built (`pre-sign-in-neutral-frame.test.tsx` does, for the five
+routes of §12.7, in each state they can be in).
 
 The authenticated Ops shell must also:
 
@@ -711,6 +780,166 @@ The initial shell must not:
 - present demo data as production state.
 
 Development-only showcase data must be obviously non-production.
+
+### 12.6 The authenticated Ops shell as built (S0.42; a side menu since 25 October 2026)
+
+> **Code:** `apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx`, `components/side-menu/`, `components/PrimaryNavigation.tsx`, `components/brand/BrandLockup.tsx`, `app/frame-chrome.ts`
+
+The Ops Portal is an application and not a website, so its navigation is a menu at the side and not a band at the top (Product
+Owner, 25 October 2026, with a reference screenshot of a dark menu with icons, a red current item and an account card).
+
+- **A layout route between the session guard and the signed-in routes**, and around nothing else: it is drawn only for a session the
+  API has said is there and only for the routes of the registry. The neutral frame is not changed: an address that matches no route
+  uses the frame with no menu, even for a person who is signed in.
+- **The menu is drawn into the frame**, in the place AppFrame keeps beside the main content, and the route tree asks the frame for its
+  sidebar layout (`useFrameLayout`): the frame then draws no banner above the page, because the menu carries the product's name. The
+  order of the page is skip link, menu, main content. The menu is a landmark of its own (an `aside` named "Main menu", holding the
+  `nav` named "Primary"), never inside the main content, and the skip link passes it. The frame's landmarks, skip link and move of
+  focus are the frame's and are not copied.
+- **One route registry** (`SIGNED_IN_ROUTES`) is where the signed-in routes and their menu entries are written, and the route tree and
+  the menu are both derived from it: a route cannot exist without a decision about its menu entry (an entry, with its icon, or `null`
+  for a screen reached from another) and about the key it needs (a permission, or any signed-in session); an entry cannot link a screen
+  that does not exist, because nothing but a route makes one. A later task adds its screens there and nowhere else.
+- **The menu is the entries of the routes whose key the session holds** (`CurrentSession.permissions`, keys only), by area and place;
+  an unbuilt route has no entry even when its key is held. A hint never authorises: every route is behind `RequirePermission`, and the
+  server checks every request. No role name or bundle is read anywhere in the navigation or the guards; the navigation tests carry
+  the keys of each seeded bundle written out beside its name, held to the seed by a root test.
+- **The Ink side menu** (§4.6, the shell recipe) is 16rem wide and as tall as the window, and stays where it is while the page
+  scrolls. Its head is the symbol on a white tile and the product's name as plain text (the wordmark is never redrawn), with the
+  collapse button. Each entry is an icon and a label (§22; DESIGN_SYSTEM §24): text `shell.text.muted`, and the current entry a
+  filled item in the Primary action colour with white text (6.52:1), bold, and `aria-current`, never marked by colour alone. Focus
+  uses the **inverse** recipe (`focus.ringInverse` outside a band of `focus.offsetInverse`), because the default ring is only 2.64:1
+  on Ink. Its foot is the account card: the person's initials (decoration), their name, where they act (the hub's name, or how many
+  hubs) and the sign-out icon button. The menu presents what it is given and knows nothing of sessions, permissions or routes.
+- **On a wide screen (from 48rem) it collapses.** The button at its head ("Collapse menu", then "Expand menu", with `aria-expanded`)
+  makes it a rail of icons 4.5rem wide: every entry keeps its name (the label is drawn out of sight and not removed) and a `title`, and
+  the page takes the room. The choice lasts as long as the page and no longer: nothing is written to web storage, so a reload starts
+  expanded. Enlarged text widens the menu with it, never past half the window.
+- **On a narrow screen it slides in.** A slim bar with a menu button, the mark and the name stands in its place; the button slides the
+  menu in over the page, behind a scrim. While it is open the main content is inert; Escape, the scrim, the close button and following a
+  link close it. Focus goes to the close button on opening and back to the menu button on closing (a navigation leaves focus to the new
+  page's heading, which the frame moves it to). Closed, it is out of sight and out of the tab order. A person who asked for reduced
+  motion sees it appear and disappear without the slide.
+- **It reflows.** The whole panel scrolls when the window is too short for it (enlarged text, a low window, zoom), instead of one part
+  being squeezed until the account card spills out; the product's name goes under the mark, and the close button under the name, when
+  they do not fit in a row. At 320px and at 200% text nothing clips and the page never scrolls sideways. Under forced colours the menu
+  keeps an edge and the current entry a system highlight.
+- **Sign-out** is an icon button ("Sign out") in the account card, on every signed-in screen. It calls `signOut` and ends the session by
+  the one action that ends it (the same event that an answer of `SESSION_INVALID` raises), so the cache, the person and the screen go
+  the way they always do. `204` and `SESSION_INVALID` are **done**; anything else (no connection, a fault, `CSRF_VALIDATION_FAILED`)
+  leaves the person signed in with "Sign-out did not finish, so you are still signed in." and **Try again**, which is safe because the act
+  is idempotent; "signed out" is never said while the session may be live. An answer for a session that was replaced meanwhile is dropped.
+- **Who is signed in** is told by the account card and by the landing, each in its own words; a session with no display name is "Signed
+  in" in the card and "You are signed in." on the landing.
+
+### 12.7 The pre-sign-in screens as built (S0.43)
+
+> **Code:** `apps/ops-web/src/app/pages/pre-sign-in/`, `platform/auth/`, `components/FormPage.tsx`, `components/auth-art/`
+
+- **Five screens in the frame's split-screen layout** (changed 25 October 2026; they were in the neutral frame). `/sign-in`,
+  `/sign-in/mfa`, `/setup/credential`, `/setup/mfa` and `/setup/mfa/complete` are siblings of the session guard (`PRE_SIGN_IN_ROUTES`) under
+  one layout route (`AuthSplitLayout`), so none of them is wrapped in the authenticated shell, and the setup screens use the same layout
+  (DESIGN_SYSTEM §13.1, §13.1a). None draws navigation, a user menu, sign-out or session data in any state, and none asks the API for a
+  session: the only requests on the wire are the operation the person is performing.
+- **The split screen** draws the photography beside the form from 64rem: `AuthArt` in the place the frame keeps beside the main content,
+  the banner (the logo) and the main landmark in the other half. The photograph is decoration, hidden from assistive technology as a whole,
+  with no alternative text, and holds nothing that can be reached or operated; under the band of Ink at its foot are the mark and the name
+  as text. Which photograph goes with which screen is one table (`auth-art.ts`, a test holds it to the five screens and to the copies in
+  `assets/auth/`, which have no metadata and are recorded in their README). It is loaded lazily, so a screen too narrow to draw it never
+  fetches it.
+- **A form page** sits in the column of the split screen (at most 30rem; the 560 to 720 px of DESIGN_SYSTEM §13.3 yields to the half of a
+  split screen, §13.1a). When a state replaces the form (an ending, a used grant) the button the person pressed has gone with it, so focus
+  moves to the new state (`FocusedRegion`) and its alert is announced.
+- **"Show password" is an eye.** The password field's visibility control is an icon button (§22): the open eye when the password is
+  hidden ("Show password"), the crossed eye when it is shown ("Hide password"). It has no text of its own, keeps focus when pressed and is
+  announced when it changes what is on the screen.
+- **The password step has one refusal** (`/sign-in`). A wrong password, an unknown address, an ineligible identity and a lock are one
+  sentence, "The email or password is not correct.": the page has no locked state, and any refusal it was not told how to word reads
+  as a wrong password. A wait, an Origin that could not be verified, a request that got no answer and a refusal of a field are worded as they
+  are. The password is emptied after every answer that is not a sign-in and focus returns to it; the email stays.
+- **The second step is not the application.** A privileged sign-in is answered with a challenge, which the page holds in memory and uses
+  to complete the sign-in. Four refusals are four states and are not merged (a wrong code keeps the attempt open and shows no count; a
+  finished attempt, a slow one, a lock and a missing authenticator each end it, forget the challenge and offer signing in again); the lock
+  is told here and nowhere earlier. A visit with no challenge goes back to the first step.
+- **A link page reads its grant once** (`useGrantToken`, `platform/auth/`). The grant is in the fragment (`#token=…`): it is read in the
+  first effect, the fragment is removed by *replacing* the history entry whatever it held, the token is kept as a transient secret and is
+  sent only in the body of the one request that redeems it, with the real `Origin` and no referrer (`NoReferrer`). Opening the page
+  redeems nothing: the person presses the button. One page, `GrantProblem`, answers a link with no grant and a grant that cannot be used,
+  whichever way, and does not re-open the form.
+- **The authenticator screen** shows the QR code and the key to type by hand together (the key is the accessible alternative), once, from
+  memory, with the field for the code that proves them. It is never a link, never has a copy button and holds no field a form would
+  send. A wrong code says the authenticator is not set up yet and keeps the picture; only a proven code ends the setup, and the
+  confirmation says the next step is an ordinary sign-in and that nobody is signed in.
+- **What two screens hand each other lives in memory** (`PreSignInFlowLayout`): the sign-in challenge, and the authenticator's
+  material with its continuation grant. It is let go of when the person leaves the family of addresses it belongs to, when the page is
+  hidden, when the session changes and after the longest a page may hold a secret; never in the address, the history state or a storage.
+- **Copy** is keyed by operation, context and code in `problem-copy.ts`. The context `unknown-outcome` words a command that got no answer,
+  where a single-use grant or code may or may not have been spent, and says what to try next. The wording is proposed for the Product
+  Owner to review with the composed screens.
+
+### 12.8 The six signed-in identity screens as built (S0.44)
+
+> **Code:** `apps/ops-web/src/app/pages/staff/`, `app/pages/LandingPage.tsx`, `platform/staff/`
+
+- **Six screens behind the registry** (`SIGNED_IN_ROUTES`): `/` (the landing), `/admin/staff` (the list and the approver's queue),
+  `/admin/staff/new`, `/admin/staff/{id}`, `/admin/staff/{id}/mfa/reset` and `/admin/sessions`. Each names the permission key its guard needs
+  and, for the first three and the sessions page, a menu entry with a line of what it is for (the landing lists them). The detail and the
+  reset are reached from a profile, so they have none. A profile also leads to the sessions page with the person chosen; opened from the menu
+  it asks for one.
+- **The list opens on what the person came for**: the queue for a session that can approve, everyone for one that cannot. The view and the
+  search are in the address, so a link (the landing's "Review the queue") and Back mean what they say; the page of results is not, because a
+  token is good only for the list it was given for. *None waiting* and *the filter hides everything* are told differently; a count is exact only
+  when the whole queue is on the page, and is never shown while the list is loading.
+- **A profile is read once and the page acts on the version it read** (`WithProfile`, `If-Match` exactly as the server sent it); a second
+  read of the same profile on mount would change the version under the person's hand. A profile in a hub the session does not act in and one
+  that is not there are two pages of their own. The status is a badge and a sentence; the role comes from the assignable list when the session
+  may read it (otherwise the row is left out, not shown as "Another role"); no id is ever shown.
+- **Only what can be done is offered, and a hint is not the authority.** The actions follow the status and the held keys: approve and reject a
+  profile that waits (not the maker's own, which says so), a new setup link for an active one, the reset of an authenticator when
+  `mfa_reset_state` allows it, the person's sessions. The server refuses what it should whatever the page showed. **Recovery of a credential is
+  not here**: its operation is not built.
+- **Approving is a confirmation, rejecting is a reason.** Approving gives access, so it is `ConfirmationDialog` with a primary confirm;
+  rejecting, sending a link, resetting an authenticator and ending a session ask for a reason from the catalogue of that act (`operation`, and
+  the `branch` the record names) over `ReasonConfirmationDialog`. After an act the dialog closes, the news says what happened, focus moves to
+  it, and the record is read again.
+- **No page that acts on another principal's credential has a field that could show one.** The answers of a re-issue and of a reset are judged
+  to a handful of facts (how many sessions ended, whether a link was sent, when it lapses) and the link is never read; a structural test fails
+  on any import or name that draws, holds or reads a credential in these screens, and each screen's tests plant one in the answer.
+- **The create form has no password, no status and no creator** (the schema has none). The role is chosen from the server's list by name; a
+  form that cannot name a role is not drawn. Creating takes an `Idempotency-Key`, so a lost answer is tried again under the same key; the
+  success says the profile is waiting for approval and that a different approver is needed unless the maker is a Platform Admin.
+- **Sessions** are asked for one principal, named by the address; opened with none the page asks for a person first. A refusal of the tier is
+  told plainly; ending a session that had already ended reads as done; the list is read again after every close of the dialog.
+- **Time** is shown as the design system says (§40): 24-hour in Accra with no label (`formatInstant`), whatever the machine's zone.
+
+### 12.9 The four rider screens as built (S0.60)
+
+> **Code:** `apps/ops-web/src/app/pages/riders/`, `platform/rider/`
+
+- **Four screens behind the registry**: `/admin/riders` (the roster; `dispatch.read`; one menu entry), `/admin/riders/{id}` (one rider and the
+  version the device acts take), `/admin/riders/{id}/device/register` (`staff.device.register`) and `/admin/riders/{id}/device`
+  (`staff.device.revoke`; replacing a handset is offered inside it to a session that holds `staff.device.reregister`, and the page names the
+  permission each act needs, never a role). The last three are reached from a rider and have no menu entry.
+- **Identity and readiness only.** A rider is a name, a phone, a status, a hub, whether a PIN is set and whether a device is `ACTIVE`; a device
+  is its state and when it was registered. No page has a field for a PIN, a hash, a key or an attestation, and the shapes read those fields and
+  no other (`rider-shape.ts`). A structural test fails on any import or name that draws, holds or reads one in these screens.
+- **The QR is the credential and is held like one.** The enrolment URI of a registration is drawn as modules by the S0.39c primitive and is in no
+  text, attribute, link or copy button of the page. It lives in memory only (`useTransientSecret`: never a query, a mutation, a storage, the
+  address, the history or a log), for the lesser of the grant's lifetime and fifteen minutes, and is gone on navigation, on completion, when
+  the page is hidden, when the session ends and when its time is up. A code that has lapsed is never left on screen: the page says so and offers
+  a new one. The officer never receives the rider's PIN or key; the code is useless without the handset's hardware attestation.
+- **The first binding is told apart from a replacement.** A rider with no device held is registered; one with an `ACTIVE` device, or a revoked
+  one, is replaced (`STATE_CONFLICT` on a first registration is explained and points at the replacement). Registration takes an
+  `Idempotency-Key` and no version, so a lost answer is tried again under the same key; a replacement takes the version of the read, a reason
+  of the catalogue and a note, in a Textarea (§7.11), on how the rider's identity was verified in person.
+- **Revoking is a report and is not made slower.** It asks for a reason and a confirmation, takes no version and no verification, and says that
+  it ends the rider's live session. A rider with no `ACTIVE` device has nothing to revoke, and the page says so.
+- **Where focus goes, and the way out of a doubt.** The button that asks for a code is gone once the code appears, so focus goes to the code's
+  region (a screen reader reads from its heading), and to the news when a code has lapsed. When it is not known whether a code was made, the
+  page offers to look at the rider and, only for the first binding (it takes a key), to try again under the same key; a replacement offers the
+  look alone, because a new code ends the old one. Each branch of the replacement form has a key of its own: without one, React gives the next
+  branch the button the click was on and changes its type to `submit` before the browser acts on the click, and reading the rider again would
+  ask for a code (found in Chromium, which jsdom cannot show).
 
 ---
 
@@ -787,126 +1016,204 @@ Do not turn Not Found into a decorative marketing illustration unless there is a
 
 ## 15. Forbidden State
 
-> **Status:** DEFERRED UNTIL AUTHORIZATION UI IS IMPLEMENTED
+> **Status:** ACTIVE (S0.40)  
+> **Code:** `apps/ops-web/src/components/ui/forbidden-state/`
 
-Add this pattern when a real workflow needs explicit forbidden presentation.
+### 15.1 Purpose
 
-It should eventually distinguish:
+Tell a person, in words, which refusal of authority they met and what it is about. The three refusals of authority are different
+bugs with different fixes ([errors-and-enums.md](../contracts/errors-and-enums.md) §4), so they are told differently.
 
-- not authorized;
-- approval required;
-- role/permission missing;
-- unavailable in current operational context.
+### 15.2 Kinds
 
-Do not implement it prematurely as a generic screen.
+| Kind | Meaning | Names |
+|---|---|---|
+| `permission-missing` | The session does not hold the permission the page or part needs (`PERMISSION_DENIED`) | the permission key (required) |
+| `insufficient-authority` | It holds the key, and this target or state needs a higher authority (`INSUFFICIENT_AUTHORITY`) | the key, if one can be told |
+| `outside-hubs` | The record exists in a hub the session does not act in (`HUB_SCOPE_VIOLATION`) | nothing |
+| `approval-required` | A different approver, one who holds the permission, decides this (`SELF_APPROVAL_FORBIDDEN`) | the key, if one can be told |
+| `unavailable-here` | The act is not available for this record as it stands | nothing |
+
+### 15.3 Rules
+
+- It names the **permission key** and never a role ([surfaces/ops-portal.md](../surfaces/ops-portal.md) §7). A refusal for a missing
+  permission cannot be drawn without the key: the type requires it.
+- Two forms, by composition: `ForbiddenState` is an Alert in the page, for a part of a page that cannot be had (the reason list
+  that a session may not read); `ForbiddenPage` is a whole page, with its own title and the page's one level-one heading, for a
+  route the session may not open. `RequirePermission` renders the second and does not render the page at all.
+- It is presentation. Hiding a control, or refusing a page here, is not enforcement: the server refuses again on every request
+  (§25).
+- The wording is approved presentation copy, never the API's diagnostic `message` (§33).
 
 ---
 
 ## 16. Empty State
 
-> **Status:** DEFERRED UNTIL FIRST REAL DATA SCREEN
+> **Status:** ACTIVE (S0.40)  
+> **Code:** `apps/ops-web/src/components/ui/empty-state/`
 
-Add only when a real list/table/dashboard needs it.
-
-Required future anatomy:
+### 16.1 Anatomy
 
 ```text
 EmptyState
-├── heading
+├── icon (decorative)
+├── heading (level 2 to 4, the page's outline decides)
 ├── explanation
-└── optional useful action
+└── action (optional; required when filtered)
 ```
 
-Do not populate empty states with fake production-looking examples.
+### 16.2 Rules
+
+- It tells **none** from **filtered to nothing**, because conflating them sends Ops hunting for a bug
+  ([surfaces/ops-portal.md](../surfaces/ops-portal.md) §7). `none` is a success message in the success tone: a queue worked to
+  empty is the goal. `filtered` is neutral, and the type requires an action, because the only useful thing to do with a filter
+  that hides everything is to take it off.
+- The words are the screen's. The component fixes none, and never shows example rows or a count of `0` for a list still
+  loading (§24.1).
+- `announce` is set only when the empty result appears because of something that just happened, such as a filter: it is then
+  a polite status. One that is part of a page that loads is read in order like any other text.
 
 ---
 
 ## 17. Skeleton
 
-> **Status:** DEFERRED UNTIL NEEDED
+> **Status:** ACTIVE (S0.40)  
+> **Code:** `apps/ops-web/src/components/ui/skeleton/`
 
-Use only when:
+A placeholder of the shape of content that is on its way, so that the layout does not jump. It is **decoration**: `aria-hidden`,
+no words, no role, always beside a `LoadingIndicator`, which is what says that the page is loading. It pulses, and stops under
+`prefers-reduced-motion: reduce`; under forced colours it keeps a border. `lines` is a whole number from 1 to 20 and anything
+else throws, because a placeholder of a million lines is a defect of the page.
 
-- layout is predictable;
-- skeleton reduces disruptive layout shift;
-- loading duration justifies the complexity.
-
-Do not use skeletons everywhere by default.
+Use it only where the layout is predictable and the wait is long enough to justify it. A table, a list and a detail page are;
+a button is not.
 
 ---
 
 ## 18. Status Badge
 
-> **Status:** DEFERRED UNTIL DOMAIN STATUS MAPPING IS IMPLEMENTED
-
-When introduced, StatusBadge must consume semantic status mappings rather than raw domain values.
-
-Pattern:
+> **Status:** ACTIVE (S0.40)  
+> **Code:** `apps/ops-web/src/components/ui/status-badge/`
 
 ```text
 domain enum
     ↓
-presentation mapping
+presentation mapping (the feature's, typed over the whole enum)
     ↓
-status semantic token
+status tone: success · warning · danger · info · neutral
     ↓
-StatusBadge
+StatusBadge (words in the tone)
 ```
 
-Do not hard-code:
+- The badge **knows no domain value**. A feature writes a `StatusMap<Value>`: a tone and the words for **every** value of the
+  enum, so a value the contract adds is a compile error where the mapping is written until someone decides how it looks.
+- The words carry the meaning and the tone supports them (§4.6 pairings: the foreground on its soft background, as an Alert
+  has it). Colour is never alone.
+- A value the mapping does not have (a newer server, a mapping not yet updated) is shown **neutral as "Unknown status"**, never as
+  the raw value and never in a colour that means something. The lookup finds own properties only, so `constructor` and
+  `__proto__` are unknown values like any other.
+
+---
+
+## 19. Table
+
+> **Status:** ACTIVE (S0.40)  
+> **Code:** `apps/ops-web/src/components/ui/table/`
+
+### 19.1 Anatomy
 
 ```text
-DELIVERED = green
-FAILED = red
+Table
+└── region (named, focusable, scrolls sideways)
+    └── <table> with <caption>
+        ├── <thead>  column headers; sortable ones hold a button and carry aria-sort
+        └── <tbody>  rows; the cell that names a row is a row header
 ```
 
-inside a generic Badge component.
+### 19.2 Rules
 
-The mapping belongs in the relevant domain/presentation layer.
-
----
-
-## 19. Table Shell
-
-> **Status:** DEFERRED UNTIL FIRST OPERATIONAL DATA SCREEN
-
-The initial table pattern should be introduced from a real Ops workflow.
-
-It must eventually define:
-
-- column header behavior;
-- row density;
-- sorting;
-- filtering;
-- empty/loading/error states;
-- actions;
-- horizontal overflow;
-- keyboard behavior;
-- responsive strategy.
-
-Do not implement a generic enterprise data-grid framework during the UI-foundation gate.
+- A **native table** with a caption. The caption names the table and the region; `hideCaption` takes it from the eye and not from
+  assistive technology, where the page's own heading already says it.
+- Rows are about 40px (`control.height.md`), in rem so that enlarged text grows them.
+- A column of numbers is aligned to the end and set in figures of one width.
+- **Sorting is the screen's**: the header button asks for an order (`ascending` first, then it toggles; another column starts
+  ascending) and `aria-sort` says the order that is shown, on the sorted column only. The table sorts nothing. A sortable column
+  with nothing to sort with, a duplicate column or row key, and two row-header columns are defects of the page, and drawing
+  them throws.
+- **Overflow is intentional**: a table narrower than 30rem scrolls inside its region instead of squeezing its columns, the region
+  has a name and takes focus, and the arrow keys scroll it. The page never scrolls sideways for a table (WCAG 1.4.10 allows a data
+  table to scroll).
+- It draws only its header for no rows. What to say about none is the screen's (§16), and the states around it are
+  `ReadState`'s (§33.3).
+- It is **not a data grid**: no selection, paging, filtering, resizing or virtualisation. A requirement that needs one is a new
+  pattern (§37).
 
 ---
 
-## 20. Dialog / AlertDialog
+## 20. Dialog and AlertDialog
 
-> **Status:** DEFERRED UNTIL FIRST REAL MODAL INTERACTION
+> **Status:** ACTIVE (S0.41)  
+> **Code:** `apps/ops-web/src/components/ui/dialog/`, `reason-confirmation/`, `apps/ops-web/test/setup-components.ts`
 
-Dialog should be introduced only when a real product flow needs modal interaction.
+### 20.1 The primitive, chosen deliberately
 
-AlertDialog is for high-risk confirmation and must not be used for ordinary information.
+The platform's own **`<dialog>` opened with `showModal()`**. It adds no dependency (a new one is a stop condition), and it gives, for
+nothing: the top layer, a page behind it that is inert (no focus by Tab or by script, no click), Escape as a `cancel` event, and a
+backdrop to draw. What it does not do, the component does:
 
-Future implementation must define:
+| Behaviour | Rule |
+|---|---|
+| Opening | The page's `open` prop. The element is always in the page and is opened and closed with it; a `close` the browser made on its own (a second Escape on an untouched page is not cancelable) is told to the page, and a dialog the page still wants is opened again. |
+| Initial focus | The control marked `data-initial-focus`; otherwise the browser's, the first focusable. An alert dialog marks its **safe action**. |
+| Return of focus | To the element that had it when the dialog opened, on every way of closing, unless that element is gone. |
+| Escape | The `cancel` event is prevented and the page is asked (`onRequestClose`). A dialog given none cannot be dismissed. |
+| Backdrop | **Never closes it.** What a person typed would be lost to a stray click, and a state they must see could be hidden. |
+| Content | Drawn only while open, so a dialog opened again starts clean. |
+| Scrim | `--color-surface-inverse` at 55% by `opacity` on `::backdrop`: no new colour, and no token to add. |
+| Size | `min(32rem, 100vw - 2 × space.4)`; it scrolls inside itself, so enlarged text and 320px never push it off the screen. |
 
-- focus trap;
-- initial focus;
-- return focus;
-- escape behavior;
-- backdrop interaction;
-- destructive-action wording;
-- responsive behavior.
+jsdom has no `showModal()`, `close()` or `returnValue`, so `test/setup-components.ts` supplies enough of them for a component test
+to drive a dialog (open state, the `cancel` on Escape, the queued `close`, initial focus). **What jsdom cannot show is proved in a
+real browser, in three engines** (`test/browser/dialogs.spec.ts`): that the page behind is inert, that Tab stays inside, the
+scrim, and the return of focus.
 
-Do not implement these during the initial foundation unless the current feature explicitly requires them.
+### 20.2 AlertDialog
+
+For a question that interrupts: a high-risk confirmation, and never for information. A title that is a question, the consequence in
+words (the dialog is described by it), **Cancel** (focused first) and a confirming button that **says what it does** ("Reset the
+second factor", never "OK"), in the Danger treatment (§4.7). Enter confirms from a field. While the act is under way the confirming
+button is busy, Cancel is not offered and Escape does nothing.
+
+### 20.3 Reason and confirmation workflow
+
+`ReasonConfirmationDialog` holds what the identity screens share, so that none gets a part of it wrong:
+
+- the reasons are `listReasonDefinitions` for the action, filtered by `operation` and `branch` (the branch from the record's
+  `mfa_reset_state`, never from `mfa_enrolled`); no reason code is invented and no second catalogue is kept; if they cannot be
+  had, the act cannot be confirmed;
+- a note is mandatory when the chosen reason says so; it is one line of at most 1000 UTF-16 code units with no control character,
+  sent **as typed** (blank is none); the page checks only what it can, and the server screens the rest (email addresses,
+  telephone numbers) and the page puts its refusal on the note;
+- the command is everything that makes the request what it is, **with the version the person saw** (`If-Match`), held as a copy;
+- **an unknown outcome** (no answer, an answer that is not the API's, a fault) keeps the dialog, locks the reason and the note,
+  ignores Escape and offers a way out: **Check the record** (abandon the attempt, read the record again) always, and **Try again**
+  (the same command under the same key) only for an act that can safely be sent again — one that takes an `Idempotency-Key`
+  (§33.2). The nine identity operations take none, so for them the way out is the record;
+- an act whose operation has **no note field** (the report of a lost device, which `DeviceRevocation` makes a reason and nothing
+  else) is drawn with `withNote={false}`: the dialog shows no note, never asks for one and sends none, so that a person is not
+  asked for what cannot be sent and never believes a sentence they wrote was kept. The reason is still asked for, and a reason
+  that wants a note is not a dead end: the server judges it;
+- a **refusal** ends the attempt: the dialog and the input stay, what is wrong is put on its field and in the Ops Portal's words, and
+  the next submit is a new command;
+- **`STATE_CONFLICT`** says the record changed, and the way on is to read it again.
+
+### 20.4 ConfirmationDialog (S0.44)
+
+The confirmation of an act that needs no reason, over the same machinery as §20.3 (`useConfirmedCommand` and the shared outcome parts in
+`command-outcome.tsx`), so that a lost answer, a moved record and a changed session mean the same in both. Its confirming button is
+**primary** by default, because an act that gives something (approving a profile gives access) is not harm; the reason dialog's default is
+the danger treatment, because most of what asks for a reason is harm, and either takes `confirmVariant`. A colour that warns of harm where
+there is none teaches people to ignore it.
 
 ---
 
@@ -927,14 +1234,22 @@ Important business outcomes must not exist only in disappearing toast messages.
 
 ## 22. Icon Button
 
-> **Status:** DEFERRED UNTIL NEEDED
+> **Status:** ACTIVE (25 October 2026: the eye of the password field, and the controls of the side menu and its account card)
 
-When introduced:
+A native `<button>` named by a required `label` and drawn with one icon of the family (DESIGN_SYSTEM §24; the registry is
+`components/ui/icon/icons.ts`). It is the only way to make an icon-only control (`components/ui/icon-button/`).
 
-- icon-only controls require accessible names;
-- tooltip may improve discoverability but does not replace the accessible label;
-- target size must remain usable;
-- icon meaning must be conventional or otherwise clear.
+- icon-only controls require accessible names: `label` is required and is the accessible name, and it names the act ("Show password",
+  "Collapse menu", "Sign out"), not the picture;
+- a tooltip may improve discoverability but does not replace the accessible label: the `title` repeats the name for a pointer user, and
+  no custom tooltip is built, because one that appears on hover or focus must be dismissible, hoverable and persistent (WCAG 1.4.13);
+- target size stays usable: at least 2rem square, above the 24px of WCAG 2.2, and it grows with enlarged text;
+- icon meaning must be conventional or otherwise clear: an eye to show, a menu, a cross to close, chevrons to collapse and expand, an
+  arrow out of a door to sign out; the same meaning has the same picture everywhere;
+- `bare` on a light surface and `inverse` on Ink, where the focus ring is the inverse recipe; `loading` keeps the name and the place,
+  ignores activation and shows a spinner (`aria-busy`, `aria-disabled`, and not the native `disabled`, which would drop it from the
+  keyboard order);
+- its state is kept in its name or in `aria-expanded` and `aria-pressed` passed to it, never in the picture alone.
 
 ---
 
@@ -1184,15 +1499,15 @@ This table only says where each is presented.
 
 | State | Presented by | Note |
 |---|---|---|
-| `loading` | LoadingIndicator (§10); Skeleton when it exists (§17) | a count is never `0` while loading |
-| `empty` | EmptyState (§16, deferred) | a success message, not an error; says whether nothing exists or the filter hides it |
+| `loading` | LoadingIndicator (§10), with a Skeleton (§17) where the layout is predictable | a count is never `0` while loading |
+| `empty` | EmptyState (§16) | a success message, not an error; says whether nothing exists or the filter hides it |
 | `validation error` | FieldError (§6.5), and an Alert (§9) for a form-level summary | field-level, with recovery guidance |
 | `error` | ErrorState (§13) or an Alert, with copy mapped from the machine code | never the diagnostic `message` |
 | `retry` | a Button beside the error, separate from it | see §33.2 |
 | `offline` | **not applicable** | the Ops Portal has no offline mode: lost connectivity is an `error`. Do not build an offline queue or a deferred-write interface |
 | `stale / conflict` | an Alert (§9), written by the feature | `STATE_CONFLICT` explains what changed; the feature adapter owns it, not Button or Alert |
 | `success` | an Alert, or the changed state of the page | confirms the state reached, not only that a request returned |
-| `permission-restricted` | ForbiddenState (§15, deferred) or an Alert | a clear refusal that names the permission; hiding a control is not enforcement |
+| `permission-restricted` | ForbiddenState (§15) | a clear refusal that names the permission; hiding a control is not enforcement |
 
 ### 33.2 Retry, rejection and unknown outcomes
 
@@ -1205,9 +1520,32 @@ acted.
   a retry only where the operation is idempotent under the contract: the retry reuses the same `Idempotency-Key` and the
   same payload, and a replay returns the original result. Where the operation takes no such key, offer to reload the
   record instead.
+- An act that has words of its own for an unknown outcome (the rider screens' code that may or may not have been made) gives them
+  to the shared outcome notice (`CommandOutcomeNotice`, `unknownText`) in place of the generic sentence; the way out the person is
+  offered is the same, and still follows whether the act takes an `Idempotency-Key`.
 - A failed read may be retried freely, because it changes nothing.
 - Idempotency keys, version checks and conflict handling live in the feature adapter. Button, Alert and the other
-  primitives know nothing of them (§24).
+  primitives know nothing of them (§24). The adapter is `useConfirmedCommand` (§20.3).
+
+### 33.3 Reading the API: ReadState and the problem copy
+
+> **Code:** `apps/ops-web/src/components/ui/read-state/`, `apps/ops-web/src/platform/problem/problem-copy.ts`,
+> `apps/ops-web/src/test-support/interface-states.ts`
+
+- **`ReadState`** is the composition of a read of the API in the states the screen owes: loading (a loading indicator, and the
+  screen's skeleton beside it), the error in approved words **with a retry that is a control beside the error and not part of it**,
+  the refusals of authority (§15, naming the permission), nothing at all (the screen's empty state), and the content. It shows
+  nothing for a session that has ended or an answer for a session that has gone, because the session boundary has already taken the
+  person away. It never shows the diagnostic `message`, never shows data of an earlier answer beside a failed refresh, and parks focus
+  on its region when a retry takes its button away. A retry is offered for what could work (no answer, a fault, a rate limit) and not
+  for a missing record or a refusal.
+- **The problem copy** reads a failure as a kind (`forbidden`, `not-found`, `conflict`, `invalid`, `rate-limited`, `refused`,
+  `unavailable`, `session-ended`, `stale`) and words it from a table keyed by **operation, context and code**; the most specific rule
+  wins, and a rule for a whole operation does not speak over a code that has a meaning of its own. The generic wording is proposed
+  for the Product Owner to review as part of the composed screens. A request id is shown as a reference, for a person to quote.
+- **The nine states are asked of every screen**: `describeInterfaceStates(screen, {...})` fails the screen's test unless each of the
+  nine is tested or marked not applicable with a reason of a sentence. Offline is excused for every screen, once, in the words of the
+  specification.
 
 ---
 
@@ -1282,11 +1620,49 @@ Before accepting the initial UI-foundation implementation:
   states of a pre-authentication route;
 - [ ] no fake operational content.
 
-### Authenticated Ops shell (identity slice)
-- [ ] landmarks correct;
-- [ ] navigation focus works;
-- [ ] current location clear;
-- [ ] no navigation entry inferred from a role name.
+### Authenticated Ops shell (S0.42)
+- [ ] landmarks correct: banner, navigation, main, in that order, the navigation outside the main content;
+- [ ] navigation focus works, with the inverse ring on the Ink side menu;
+- [ ] current location clear, by more than colour;
+- [ ] no navigation entry inferred from a role name;
+- [ ] no entry for a route that is not built, and none for a key the session does not hold;
+- [ ] sign-out reads as done for `204` and `SESSION_INVALID`, and otherwise leaves the person signed in with a retry.
+
+### ForbiddenState, EmptyState, Skeleton, StatusBadge (S0.40)
+- [ ] a refusal names the permission and no role, in every kind;
+- [ ] none and filtered-to-nothing look and read differently, and a filtered one has its way out;
+- [ ] a skeleton is hidden from assistive technology, stands beside a loading indicator and stops under reduced motion;
+- [ ] a status is words in a tone, the mapping covers the whole enum, and an unknown value is neutral and not echoed.
+
+### Table (S0.40)
+- [ ] a native table, named, with row headers where a cell names its row;
+- [ ] sort buttons say their order with `aria-sort`, from the keyboard too;
+- [ ] it scrolls in a named, focusable region, and the page never scrolls sideways at 320px or 200% text.
+
+### Select, Dialog, AlertDialog, reason and confirmation (S0.41)
+- [ ] a select is wired to its Field like an Input, and is reached and chosen from by keyboard;
+- [ ] a dialog is modal, the page behind it is inert and Tab stays inside, in three browsers;
+- [ ] initial focus, Escape and return of focus behave as §20.1 says, and the backdrop closes nothing;
+- [ ] an alert dialog puts focus on its safe action and names the act it confirms;
+- [ ] a retry keeps its key and its version; an unknown outcome keeps the dialog, locks the form and offers the record.
+
+### Pre-sign-in screens (S0.43)
+- [ ] no navigation, user menu, sign-out or session data in any state, and no request for a session;
+- [ ] the password step has one refusal, no locked state and no wording that is true of one address and not another;
+- [ ] a grant is read once from the fragment, removed from the address by replacing the entry, held in memory only and sent in the body alone;
+- [ ] opening a link redeems nothing, and one page answers a link that cannot be used;
+- [ ] the QR code and the key are shown together, once, as no link, no copy button and no submitted field, and are gone on leaving, finishing, hiding and timing out;
+- [ ] a secret that is handed from one screen to the next is never in the address, the history state or a storage;
+- [ ] the keyboard, 320px, 200% text and axe (WCAG 2.2) hold in each state in three engines.
+
+### Signed-in identity screens (S0.44)
+- [ ] a list opens on what the person came for, and tells *none* from *filtered to nothing*; a count is never shown while loading;
+- [ ] an act sends the version the page read, a profile is read once, and a moved record is explained and read again;
+- [ ] only the acts the status and the held keys allow are offered, and a hint is never taken for authority;
+- [ ] no field, import or name on a screen that acts on another principal's credential could show one, and each screen's tests plant one;
+- [ ] a profile outside the session's hubs and one that does not exist are pages of their own;
+- [ ] focus lands on the new page's heading, on the news of an act, and on the way out of an outcome nobody knows;
+- [ ] times are 24-hour in Accra with no label whatever the machine's zone, and no id is shown where a name was owed.
 
 ### Error / Not Found
 - [ ] calm precise copy;
@@ -1304,14 +1680,7 @@ It simply records patterns intentionally **not** built during the initial founda
 
 | Pattern | Introduce when |
 |---|---|
-| EmptyState | first real empty data workflow |
-| StatusBadge | first real domain status UI |
-| Table shell | first operational data table |
-| Dialog | first modal workflow |
-| AlertDialog | first destructive confirmation |
 | Toast | first justified transient feedback flow |
-| IconButton | first icon-only action |
-| Skeleton | first layout where it materially helps |
 | Tabs | first real tabbed workflow |
 | DropdownMenu | first real menu requirement |
 | Drawer | first real side-panel workflow |
@@ -1361,23 +1730,24 @@ Do not use this file to override a product contract.
 | Link | ACTIVE | Yes |
 | Field | ACTIVE | Yes |
 | Input | ACTIVE | Yes |
-| PasswordInput | PROPOSED | Identity implementation |
+| PasswordInput | ACTIVE | Identity implementation (S0.39a) |
+| CodeInput | ACTIVE | Identity implementation (S0.39a) |
+| OneTimeSecret, QrCode | ACTIVE | Identity implementation (S0.39b, S0.39c) |
 | Alert | ACTIVE | Yes |
 | LoadingIndicator | ACTIVE | Yes |
 | PageHeader | ACTIVE | Yes |
 | NeutralFrame (`AppFrame`) | ACTIVE | Yes |
-| AuthenticatedOpsShell | PROPOSED | Identity slice |
+| AuthenticatedOpsShell, SideMenu | ACTIVE | Identity implementation (S0.42; a side menu since 25 October 2026) |
+| Icon, IconButton | ACTIVE | 25 October 2026 |
+| Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |
-| ForbiddenState | Deferred | No |
-| EmptyState | Deferred | No |
-| Skeleton | Deferred | No |
-| StatusBadge | Deferred | No |
-| Table shell | Deferred | No |
-| Dialog | Deferred | No |
-| AlertDialog | Deferred | No |
+| ForbiddenState, EmptyState, Skeleton, StatusBadge, Table | ACTIVE | Identity implementation (S0.40) |
+| Select, Dialog, AlertDialog, reason and confirmation | ACTIVE | Identity implementation (S0.41) |
+| Button `danger` | ACTIVE | Identity implementation (S0.41) |
+| FormPage, the five pre-sign-in screens | ACTIVE | Identity implementation (S0.43) |
+| ButtonLink, ConfirmationDialog, the six signed-in identity screens | ACTIVE | Identity implementation (S0.44) |
 | Toast | Deferred | No |
-| IconButton | Deferred | No |
 
 ---
 
@@ -1461,6 +1831,94 @@ Paths are under `apps/ops-web/src/`. Tests sit beside each component; the browse
 The first screens add a variant or size when they first use it (§30). The authenticated Ops shell, its navigation and the
 inverse recipes stay with the identity slice; the frame and `PrimaryNavigation` still show no entries, because nothing
 provides the caller's capabilities yet (DESIGN_SYSTEM §22).
+
+### 42.4 What the identity slice's foundation added (S0.38 and S0.39, 23 October 2026)
+
+Paths are under `apps/ops-web/src/`. Each interactive component has keyboard tests in jsdom and a browser pass in the
+showcase (`test/browser/components.spec.ts`, `secrets.spec.ts`) in the engines `test:browser` runs.
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| NeutralFrame, logo | `app/AppFrame.tsx`, `assets/brand/` | The banner shows the primary logo (an `img` named "Melarc Logistics", the only thing that says "Melarc") and the text "Ops Portal". It is identification and never a link. Height is `--space-10`, width follows, and the padding is the clear space of BRAND_FOUNDATION §4.5. After a navigation, focus goes to the page's heading, and if the page is not there yet (a guard is asking who is signed in) it waits on the content and moves to the heading when it arrives, unless the person has moved on |
+| Form submission | `components/ui/form/use-submission.ts` (a hook, not a component) | The browser's submit and validation are off; one submit at a time (a flag, not the screen's state); `aria-busy` on the form and `loading` on the button; focus on the first `[aria-invalid="true"]` after the errors are committed, each failed submit; the work returns `accepted`, `invalid` or `failed`; an error the work throws is reported with `reportError`, never swallowed |
+| PasswordInput | `components/ui/password-input/` | `autoComplete` is required (`current-password` or `new-password`). The value is never trimmed, truncated or changed; paste is allowed. "Show password" is a secondary button whose name swaps ("Hide password"), announced in a polite status, and the password is hidden again when the form is submitted |
+| CodeInput | `components/ui/code-input/` | Numeric keyboard, `autocomplete="one-time-code"`; keeps digits only and at most `length` (6). The change handler hears the cleaned value. A text field on purpose: a code is used once and seeing it catches a slip |
+| OneTimeSecret | `components/ui/one-time-secret/` | A read-only field in a Field, grouped in fours. No `name` (a form around it never submits it), `autocomplete="off"`, no copy button (clipboard history keeps what is copied), no link. The owner holds the secret with `useTransientSecret` (`platform/secrets/`): gone at completion, expiry (at most 15 minutes), navigation and `pagehide` |
+| QrCode | `components/ui/qr-code/` | An inline SVG computed from the matrix of `uqr` (behind `qr-matrix.ts` alone): no remote service, canvas or image file, nothing a strict CSP refuses. Error correction `M`, a four-module quiet zone, four CSS pixels to a module (the picture shrinks proportionally, and only, when its container is narrower than it: at 320 px the largest code, version 12, is drawn a little under four; the browser test asserts four (its one-pixel border included) where there is room and at least three at 320 px for the demo payload, and no floor below three is claimed), up to version 12. Black on white even under forced colours. The payload is in no attribute, title or text; a payload that cannot be drawn throws a `QrCodeError` that does not contain it. Verified by decoding what is drawn with an independent library (`jsqr`, test-only) in jsdom and, from a screenshot, in each engine |
+| Session guards | `platform/session/` | `RequireSession` (loading, sign-in redirect that replaces the entry, or an error with an explicit retry) and `RequirePermission` (a refusal that names the permission key, never a role). The full ForbiddenState (§15) is S0.40's |
+
+### 42.5 What the identity slice's read states, dialogs and shell added (S0.40 to S0.42, 24 October 2026)
+
+Paths are under `apps/ops-web/src/`. Each component has jsdom tests (keyboard, accessible name, axe) and a browser pass in the
+showcase in three engines.
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| ForbiddenState, ForbiddenPage | `components/ui/forbidden-state/` | Five kinds (§15.2). `RequirePermission` renders `ForbiddenPage`, so the refusal of a guarded route is this pattern, with the title and heading it always had |
+| EmptyState | `components/ui/empty-state/` | `none` (success tone) or `filtered` (neutral, with an action the type requires) |
+| Skeleton | `components/ui/skeleton/` | Decoration beside a loading indicator, 1 to 20 lines, still under reduced motion |
+| StatusBadge | `components/ui/status-badge/` | A tone and words from a `StatusMap` typed over the whole enum; an unknown value is "Unknown status" |
+| Table | `components/ui/table/` | A native table in a named, focusable, scrolling region; the screen sorts and the table says the order |
+| ReadState, the problem copy | `components/ui/read-state/`, `platform/problem/` | §33.3 |
+| Select | `components/ui/select/` | §7.9 |
+| Button `danger` | `components/ui/button/` | The outline recipe, §4.7 |
+| Dialog, AlertDialog, DialogActions | `components/ui/dialog/` | The native `<dialog>`, §20.1; jsdom is given a small stand-in in `test/setup-components.ts` |
+| ReasonSelect, ReasonConfirmationDialog | `components/ui/reason-select/`, `reason-confirmation/` | §20.3, over `platform/reasons/` and `platform/api/use-confirmed-command.ts` |
+| AuthenticatedOpsShell, the route registry | `app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx` | §12.6. Built as a band across the top (`ShellBar`); replaced on 25 October 2026 by the side menu (§42.8) |
+
+### 42.6 What the identity slice's pre-sign-in screens added (S0.43, 24 October 2026)
+
+Paths are under `apps/ops-web/src/`. Each screen has jsdom tests for its states and for the nine interface states, a sentinel test of the
+secrets it handles, and a browser pass in three engines against the production build and the development server
+(`test/browser/pre-sign-in.spec.ts`).
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| The five screens | `app/pages/pre-sign-in/` (`SignInPage`, `SignInMfaPage`, `SetupCredentialPage`, `SetupMfaPage`, `SetupMfaCompletePage`), routes in `pre-sign-in-routes.tsx` | §12.7. Siblings of the session guard in the neutral frame. `/recovery` and `/recovery/complete` are the recovery slice's |
+| FormPage | `components/FormPage.tsx`, `form-page.css` | The form measure of DESIGN_SYSTEM §13.3 (40rem) and the wrapping row of a form's buttons |
+| The grant of a link | `platform/auth/grant-fragment.ts`, `use-grant-token.ts`, `app/pages/pre-sign-in/NoReferrer.tsx`, `GrantProblem.tsx` | `tokenFromHash` reads exactly one `token` made of the characters a link carries; `useGrantToken` reads it once, replaces the entry, and holds it as a transient secret scoped to the page's path |
+| What two screens hand each other | `app/pages/pre-sign-in/PreSignInFlowLayout.tsx`, `pre-sign-in-flow.ts` | Two transient secrets in a layout route, scoped to the family of addresses (`familyOf`): the sign-in challenge and the authenticator's material. `useTransientSecret` gained a `scope` option for this and for the page that rewrites its own address |
+| The judgement of the answers | `platform/auth/pre-sign-in-shape.ts` | Like the session's: a challenge, the result of the first password and the begin of a re-enrolment are believed only when they have the shape the contract gives them, and the QR address only when it is a TOTP address that can be drawn. A test reads the contract and holds each list to its schema |
+| The password rule | `platform/auth/password-rule.ts` | 12 to 128 code points, as typed and after NFKC; the sign-in has the one bound of 128. A courtesy: the server counts again |
+| Copy | `platform/problem/problem-copy.ts` | The five operations' rules, and the context `unknown-outcome` |
+| The frame's move of focus | `app/AppFrame.tsx` | Now a layout effect: the heading has focus when the new page is first painted, not a few milliseconds after, which made a field filled at that moment lose its text (found by a flaky WebKit test and pinned by a deterministic one) |
+| `emptyField` | `components/ui/form/use-submission.ts` | A password or a code is emptied from the form once the server has answered it |
+
+
+### 42.7 What the identity slice's signed-in screens added (S0.44, 24 October 2026)
+
+Paths are under `apps/ops-web/src/`. Each screen has jsdom tests for its states and for the nine interface states, a test that plants a
+credential in the answer, and a browser pass in three engines against the production build and the development server
+(`test/browser/staff.spec.ts`).
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| The six screens | `app/pages/LandingPage.tsx`, `app/pages/staff/` (`StaffListPage`, `StaffCreatePage`, `StaffDetailPage`, `StaffMfaResetPage`, `SessionsPage`), routes in `app/navigation/route-registry.tsx` | §12.8. The registry gained a `description` for the landing's list of places (`destinationsFor`) |
+| ButtonLink | `components/ui/button/ButtonLink.tsx` | §4.12. An anchor drawn with the Button recipes |
+| ConfirmationDialog | `components/ui/confirmation/ConfirmationDialog.tsx`, with `reason-confirmation/command-outcome.tsx` shared with the reason dialog | §20.4. `ReasonConfirmationDialog` gained `confirmVariant` |
+| The profile gate | `app/pages/staff/WithProfile.tsx` | Reads a profile once for the pages about one (the profile, the reset), and shows the two pages of their own for a profile that is not there or is outside the hubs |
+| The judgement of the answers | `platform/staff/staff-shape.ts` | Like the session's: a profile, a page of the list, the assignable roles, a session, the outcome of a reset and of a re-issue are believed only when they have the shape the contract gives them, and carry nothing a credential could ride in on. A test reads the contract and holds each list and each enumeration to its schema |
+| Reads and commands | `platform/staff/use-staff-queries.ts`, `staff-commands.ts` | Reads are not repeated on focus or on reconnect, are not kept once the screen lets go of them, and a failed one is retried by the person. A command sends `If-Match` as the read gave it, and an `Idempotency-Key` only where the operation declares one |
+| Copy | `platform/problem/staff-copy.ts` | Rules for the ten operations, in the one table. Proposed for the Product Owner to review with the composed screens |
+| `formatInstant` | `platform/time/format-time.ts` | §40: 24-hour in Accra, no label, a fixed table of months so that no runtime's spelling can change it |
+| The session's principal | `platform/session/session-shape.ts` | `principal_id` is carried so that a screen can say "you created this" (a hint; the server decides) |
+
+### 42.8 What the Product Owner's decisions of 25 October 2026 added (the side menu, the icons, the split screen)
+
+Paths are under `apps/ops-web/src/`. Each component has jsdom tests (keyboard, accessible name, axe) and a browser pass in three engines:
+the shell and the split screen against the production build, the side menu and its demo in the showcase.
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| Icon, the registry | `components/ui/icon/` (`Icon.tsx`, `icons.ts`) | §24 of the design system. Lucide, imported by `icons.ts` alone; every icon is named by its meaning and drawn at one stroke and three sizes; a test fails on an icon nobody uses and on a second door to the library |
+| IconButton | `components/ui/icon-button/` | §22. `label` is required; `bare` and `inverse`; `loading`; a `ref` for a caller that moves focus to it |
+| SideMenu | `components/side-menu/` | §12.6. Collapses to a rail, slides in on a narrow screen with the main content inert, scrolls as a whole when the window is too short; the collapse state is in memory only |
+| PrimaryNavigation | `components/PrimaryNavigation.tsx` | A vertical list of an icon and a label; the current entry is a filled item with `aria-current`; a `title` when the menu is collapsed |
+| BrandLockup | `components/brand/` | The symbol (`public/favicon.svg`, served as it is) on a white tile and the name as text, for a surface on Ink: the side menu and the split screen's band |
+| Frame layouts | `app/AppFrame.tsx`, `app/frame-chrome.ts` | `neutral`, `sidebar` and `split`, chosen by the route tree (`useFrameLayout`), never by a page; the sidebar layout has no banner, the split layout draws its panel in the place beside the main content |
+| AuthSplitLayout, AuthArt | `app/pages/pre-sign-in/AuthSplitLayout.tsx`, `components/auth-art/` | §12.7. Decorative photography, loaded lazily, one table for which photograph goes with which screen (`auth-art.ts`) |
+| Favicon | `public/favicon.svg`, `index.html` | The approved symbol, the browser-tab icon and nothing else |
+
 
 ---
 

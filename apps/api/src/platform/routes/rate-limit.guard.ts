@@ -14,6 +14,7 @@ import { boundedIdentifier } from '../http/admission/bounded-identifier.js';
 import { ErrorCode } from '../http/error-codes.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
 import { accessDetailOf } from './access-kind.js';
+import { LIMIT_PARTITIONS, type LimitPartitions } from './limit-partitions.js';
 
 /**
  * Step 1 of the refusal order (permission-enforcement.md §5.1; `AC-SLICE-000-130`): the rate limit, **before anything is verified or
@@ -31,6 +32,9 @@ import { accessDetailOf } from './access-kind.js';
  *   (plan §7.16, finding on step 1). The authentication guard (S0.24) applies it, right after the session is found and before
  *   CSRF, authorization and validation.
  *
+ * - **A limit with a partition** (S0.48, the vendor sign-in) is keyed on what the partition reads of the request beside the identifier
+ *   (`limit-partitions.ts`); a partition the application was not composed with fails closed like a missing limiter.
+ *
  * It runs after the declaration guard and before the authentication slot, and it calls the limiter with no transaction of the
  * request's open (a guard runs before any handler does), which the limiter requires.
  */
@@ -39,6 +43,7 @@ export class RateLimitGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @Optional() @Inject(RATE_LIMITER) private readonly limiter: RateLimiter | undefined,
+    @Optional() @Inject(LIMIT_PARTITIONS) private readonly partitions: LimitPartitions | undefined,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -48,10 +53,16 @@ export class RateLimitGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const raw = boundedIdentifier(request, limit.identifier);
-    const key = raw === undefined ? undefined : limit.canonical(raw);
-    if (key === undefined) return true;
+    const canonical = raw === undefined ? undefined : limit.canonical(raw);
+    if (canonical === undefined) return true;
 
     if (this.limiter === undefined) throw new LimiterUnavailableError();
+    let key = canonical;
+    if (limit.partition !== undefined) {
+      const partitioner = this.partitions?.[limit.partition];
+      if (partitioner === undefined) throw new LimiterUnavailableError();
+      key = await partitioner(request, canonical);
+    }
     const decision = await this.limiter.admit(limit.bucket, key);
     if (!decision.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
     return true;

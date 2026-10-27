@@ -58,9 +58,22 @@ p {
 }
 
 .app-header {
-  padding: var(--space-3) var(--space-6);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  /* Clear space around the logo is at least the height of the red square in its symbol, about a third of its height
+     (BRAND_FOUNDATION 4.5): 1rem around a 2.5rem logo. */
+  padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-surface-default);
+}
+
+/* The logo keeps its proportions: only the height is set, in rem so that enlarged text enlarges it too. */
+.app-logo {
+  display: block;
+  width: auto;
+  height: var(--space-10);
 }
 
 .app-name {
@@ -88,5 +101,103 @@ p {
   .app-main {
     padding-right: var(--space-4);
     padding-left: var(--space-4);
+  }
+}
+
+/*
+ * A notice the shell must show above the page, such as a sign-out that did not finish. It is the first thing in the main content, in its width.
+ */
+.app-shell-notice {
+  margin: 0 0 var(--space-4);
+}
+
+/* The retry sits under the notice it belongs to, not against it. */
+.app-shell-notice > p {
+  margin: var(--space-3) 0 0;
+}
+
+/*
+ * The three layouts of the frame (AppFrame, `FrameLayout`; DESIGN_SYSTEM section 13.1). The neutral one is the banner above the main content and
+ * needs no rule. The place beside the main content (`.app-chrome`) is empty outside the authenticated shell, which draws its side menu there.
+ */
+.app-frame--sidebar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* The menu stays where it is while the page scrolls, full height: its width is the menu's own, which collapses. */
+.app-frame--sidebar > .app-chrome {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Beside the menu the page is not centred in the whole window but in what is left of it. */
+.app-main--sidebar {
+  width: 100%;
+}
+
+/*
+ * The split screen of the pre-sign-in pages (DESIGN_SYSTEM section 13.1): imagery in one half, the form in the other. The form's half is the
+ * frame's own banner (the logo) above its main landmark, and the imagery is a decorative panel the layout route draws into the place beside
+ * the main content. Under 64rem there is room for the form alone, so the imagery is not drawn and the page is the neutral frame's one column.
+ */
+.app-frame--split > .app-chrome {
+  display: none;
+}
+
+.app-main--split {
+  width: 100%;
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+@media (min-width: 64rem) {
+  .app-frame--split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      'art header'
+      'art main';
+    min-height: 100vh;
+  }
+
+  .app-frame--split > .app-chrome {
+    display: block;
+    grid-area: art;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .app-frame--split > .app-header {
+    grid-area: header;
+    justify-content: center;
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .app-frame--split > .app-main {
+    grid-area: main;
+    align-self: center;
+  }
+}
+
+/* A narrow screen: no column for the menu. Its bar sticks to the top and its panel slides in over the page. */
+@media (max-width: 47.9375rem) {
+  .app-frame--sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-frame--sidebar > .app-chrome {
+    z-index: 20;
+    height: auto;
   }
 }

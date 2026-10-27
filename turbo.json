@@ -13,10 +13,15 @@
       "outputs": ["dist/**"]
     },
     "typecheck": {},
-    "test": {},
+    "test": {
+      "passThroughEnv": ["MELARC_TEST_WORKERS"]
+    },
     "test:db": {
       "cache": false,
       "passThroughEnv": [
+        "MELARC_TEST_WORKERS",
+        "MELARC_DB_WORKERS",
+        "JAVA_HOME",
         "MELARC_PG_HOST",
         "MELARC_PG_PORT",
         "MELARC_PG_ADMIN_PASSWORD",

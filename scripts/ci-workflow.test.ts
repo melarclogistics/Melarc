@@ -23,6 +23,7 @@ interface Jobs {
   database: Json;
   integrated: Json;
   audit: Json;
+  verifier: Json;
   ci: Json;
 }
 
@@ -70,7 +71,7 @@ const BROWSER_LIST = 'chromium,firefox,webkit';
 const INSTALL_BROWSERS =
   'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit';
 
-const JOB_IDS = ['static', 'unit', 'database', 'integrated', 'audit'];
+const JOB_IDS = ['static', 'unit', 'database', 'integrated', 'audit', 'verifier'];
 
 function job(steps: Json[]): Json {
   return {
@@ -115,6 +116,7 @@ function goodShared(): Json {
         BUILD_UPLOAD,
       ]),
       audit: job([run('pnpm audit --audit-level high')]),
+      verifier: job([run('pnpm run verifier:test')]),
       [AGGREGATE_JOB]: {
         name: 'CI result',
         if: 'always()',
@@ -183,6 +185,7 @@ const allJobs = (jobs: Jobs): Json[] => [
   jobs.database,
   jobs.integrated,
   jobs.audit,
+  jobs.verifier,
   jobs.ci,
 ];
 

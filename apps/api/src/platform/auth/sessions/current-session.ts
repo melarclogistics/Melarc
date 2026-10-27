@@ -34,6 +34,11 @@ export interface DisplayNames {
 /**
  * Builds the view of a session in the caller's transaction. The hubs are read by id, in the order of their names, and a hub the
  * snapshot names that no longer exists is not invented: the list is the hubs there are, and it is never truncated.
+ *
+ * **A principal whose snapshot holds a grant of the all-hub scope acts in every hub, so every hub is listed** (the Product Owner's
+ * decision of 25 October 2026: a Platform Admin's session carries no hub ids, because the reach is the scope of the grant and not an
+ * identity-level flag, and an interface that is shown no hub cannot offer one to choose). It is a label for the interface: the
+ * authority is the snapshot, `authorized_hub_ids` stays what the session was issued with, and the server decides every request.
  */
 export async function currentSessionOf(
   transaction: TransactionHandle,
@@ -42,17 +47,23 @@ export async function currentSessionOf(
 ): Promise<CurrentSessionView> {
   const ref: PrincipalRef = { type: session.principalType, id: session.principalId };
   const hubIds = [...session.authority.authorizedHubIds];
-  const hubs =
-    hubIds.length === 0
-      ? []
-      : (
+  const reachesEveryHub = session.authority.snapshot.grants.some(
+    (grant) => grant.hubScope === 'all',
+  );
+  const listed =
+    reachesEveryHub || hubIds.length > 0
+      ? (
           await transactionOf(transaction).execute(
-            sql`select id, name from hub where id = any(${`{${hubIds.join(',')}}`}::uuid[]) order by name, id`,
+            reachesEveryHub
+              ? sql`select id, name from hub order by name, id`
+              : sql`select id, name from hub where id = any(${`{${hubIds.join(',')}}`}::uuid[]) order by name, id`,
           )
-        ).rows.map((row) => {
-          const hub = row as unknown as { id: string; name: string };
-          return { id: hub.id, display_name: hub.name };
-        });
+        ).rows
+      : [];
+  const hubs = listed.map((row) => {
+    const hub = row as unknown as { id: string; name: string };
+    return { id: hub.id, display_name: hub.name };
+  });
   return {
     id: session.id,
     principal_type: session.principalType,

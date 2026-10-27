@@ -55,7 +55,7 @@ The following remain open:
 
 - original vector logo artwork, preferably SVG;
 - authoritative source color values from the vector artwork;
-- approved symbol-only logo variant;
+- approved symbol-only logo variant for any use beyond the Ops Portal's browser-tab icon (approved for that alone on 25 October 2026; its provisional use as the mark of the side menu and the split screen waits for confirmation);
 - approved logo treatment for dark backgrounds;
 - official minimum logo size based on vector artwork;
 - exact logo clear-space rule based on the source geometry;
@@ -714,12 +714,15 @@ files); this list only says what is missing:
 
 - `melarc-logo-primary.svg`, the approved vector master (`master/`);
 - `melarc-logo-primary.png`, the approved high-resolution transparent export (`exports/`);
-- `melarc-symbol.svg`, only after a symbol-only mark is approved (`exports/`);
+- ~~`melarc-symbol.svg`~~, supplied and approved on 25 October 2026 for the Ops Portal's browser-tab icon alone (`exports/`); its use as the mark of the side menu and the split screen is provisional, owner to confirm;
 - `melarc-logo-dark.svg`, only after a dark-background treatment is approved (`exports/`).
 
 Do not create placeholder production logos using generated text or traced artwork.
 
-Until the SVG master is obtained, retain the supplied PNG outside production asset decisions or use it only as an explicitly temporary reference where necessary.
+**Status (23 October 2026).** The Product Owner supplied vector artwork (the primary logo, the symbol, a white logo, and a
+pattern) and two low-resolution PNGs. The primary logo is the vector master and the symbol and the white logo are filed as
+supplied; the high-resolution transparent PNG export is still missing (the supplied PNGs are 218 × 70 and 55 × 70). The
+record, with checksums and what is used where, is [assets/brand/README.md](assets/brand/README.md).
 
 ---
 
@@ -775,9 +778,9 @@ Do not duplicate the same rule across all three documents when one document clea
 | Dark mode | **DEFERRED** |
 | Tailwind | **NOT DECIDED HERE** |
 | Radix | **NOT DECIDED HERE** |
-| Original SVG/vector logo | **REQUIRED ASSET — MISSING** |
-| Symbol-only production logo | **NOT YET APPROVED** |
-| Dark-background logo | **NOT YET APPROVED** |
+| Original SVG/vector logo | **SUPPLIED BY THE PRODUCT OWNER, 23 October 2026** — filed as `design/assets/brand/master/melarc-logo-primary.svg` and used in the Ops frame; the owner confirms it as the approved master ([the brand README](assets/brand/README.md)) |
+| Symbol-only production logo | **APPROVED 25 October 2026 as the Ops Portal's browser-tab icon (favicon) only** — filed as `exports/melarc-symbol.svg` and used as `apps/ops-web/public/favicon.svg`; no other use is approved, though the symbol is in provisional use as the mark of the side menu and the split screen (`BrandLockup`), from the owner's reference screenshot of 25 October 2026, **owner to confirm** ([the brand README](assets/brand/README.md)) |
+| Dark-background logo | **SUPPLIED, NOT YET APPROVED** — filed as `exports/melarc-logo-dark.svg`; no application uses it |
 
 ---
 

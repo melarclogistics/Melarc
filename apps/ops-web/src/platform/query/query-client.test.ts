@@ -75,6 +75,26 @@ describe('createQueryClient', () => {
     expect(mutationFn).toHaveBeenCalledTimes(1);
   });
 
+  // Break caught: a command's answer staying in the cache for minutes after the screen that sent it is gone. A command can
+  // answer with a secret (the provisioning of an authenticator, a setup token), and the mutation cache keeps the data of
+  // every mutation until it is collected, by default for five minutes. Nothing a command answered is kept longer than
+  // the screen that asked for it (plan section 3, Secrets).
+  it('keeps no mutation, and so nothing a command answered, once the screen that sent it has let go', async () => {
+    const client = createQueryClient();
+    const sentinel = 'sentinel-command-answer-6d2f';
+    const observer = new MutationObserver(client, {
+      mutationFn: () => Promise.resolve({ otpauth_uri: sentinel }),
+    });
+
+    await observer.mutate();
+    expect(JSON.stringify(observer.getCurrentResult().data)).toContain(sentinel);
+    observer.reset();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(client.getMutationCache().getAll()).toEqual([]);
+    expect(JSON.stringify(client.getMutationCache().getAll())).not.toContain(sentinel);
+  });
+
   // Break caught: one client shared between tests or users, carrying one session's cached data to another.
   it('creates an independent client each time', () => {
     expect(createQueryClient()).not.toBe(createQueryClient());

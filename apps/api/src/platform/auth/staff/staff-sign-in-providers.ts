@@ -7,9 +7,12 @@ import { AUDIT_WRITER, type AuditWriter } from '../ports/audit-writer.port.js';
 import { HASH_ADMISSION, type HashAdmission } from '../ports/hash-admission.port.js';
 import { HASHER, type Hasher } from '../ports/hasher.port.js';
 import { IDENTITY_DIRECTORY, type IdentityDirectory } from '../ports/identity-directory.port.js';
+import { TOKEN_SERVICE, type TokenService } from '../ports/token-service.port.js';
 import { UNIT_OF_WORK, type UnitOfWork } from '../ports/unit-of-work.port.js';
 import { SESSION_ISSUER } from '../sessions/session-providers.js';
 import type { SessionIssuer } from '../sessions/session-issuer.js';
+import { TRUSTED_BROWSER_STORE } from '../trusted-browsers/trusted-browser-providers.js';
+import type { TrustedBrowserStore } from '../trusted-browsers/trusted-browser-store.js';
 import { StaffSignInService } from './staff-sign-in.service.js';
 
 /** The injection token of the service of `staffSignIn` (S0.32), which its controller asks for. */
@@ -34,6 +37,8 @@ export const staffSignInProviders: readonly FactoryProvider[] = [
       challenges: MfaChallengeStore | undefined,
       issuer: SessionIssuer | undefined,
       audit: AuditWriter | undefined,
+      trustedBrowsers: TrustedBrowserStore | undefined,
+      tokens: TokenService | undefined,
     ): StaffSignInService | undefined =>
       unitOfWork === undefined ||
       directory === undefined ||
@@ -41,7 +46,9 @@ export const staffSignInProviders: readonly FactoryProvider[] = [
       hashAdmission === undefined ||
       challenges === undefined ||
       issuer === undefined ||
-      audit === undefined
+      audit === undefined ||
+      trustedBrowsers === undefined ||
+      tokens === undefined
         ? undefined
         : new StaffSignInService({
             unitOfWork,
@@ -52,6 +59,8 @@ export const staffSignInProviders: readonly FactoryProvider[] = [
             issuer,
             audit,
             settings: new SettingsReader(),
+            trustedBrowsers,
+            tokens,
           }),
     inject: [
       optional(UNIT_OF_WORK),
@@ -61,6 +70,8 @@ export const staffSignInProviders: readonly FactoryProvider[] = [
       optional(MFA_CHALLENGE_STORE),
       optional(SESSION_ISSUER),
       optional(AUDIT_WRITER),
+      optional(TRUSTED_BROWSER_STORE),
+      optional(TOKEN_SERVICE),
     ],
   },
 ];

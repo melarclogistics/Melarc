@@ -440,6 +440,59 @@ describe('createScopeProbe: an entity whose hub is carried by a column of anothe
   });
 });
 
+describe('createScopeProbe: an entity whose hub is on another record (S0.47)', () => {
+  const VIA = {
+    table: 'vendor_organization',
+    key: 'vendor_organization_id',
+    hubColumn: 'responsible_hub_id',
+  };
+
+  // Break caught: the probe of a vendor account reading a hub column the account does not have. Its hub is its organisation's, read
+  // through the key the account holds, and answered as the hub.
+  it('joins the record that carries the hub and reads its column, for the one id named', async () => {
+    const via = createScopeProbe({
+      vendor_account: { schema: 'public', table: 'vendor_account', hubVia: VIA },
+    });
+    const { run, inside } = harness((statement) =>
+      statement.text.startsWith('select r.id, h."responsible_hub_id" as responsible_hub_id')
+        ? [{ id: RECORD, responsible_hub_id: HUB }]
+        : undefined,
+    );
+
+    const hub = await run((tx) => via(tx, 'vendor_account', RECORD));
+
+    expect(hub).toBe(HUB);
+    expect(inside()[1]?.text.replaceAll(/\s+/g, ' ')).toBe(
+      'select r.id, h."responsible_hub_id" as responsible_hub_id from "public"."vendor_account" as r join "public"."vendor_organization" as h on h.id = r."vendor_organization_id" where r.id = $1::uuid',
+    );
+  });
+
+  // Break caught: a name of the joined record spliced into SQL as it stands, or an entity that names both its own hub column and another's.
+  it.each([
+    [{ ...VIA, table: 'vendor organization' }],
+    [{ ...VIA, key: 'id"; drop table x; --' }],
+    [{ ...VIA, hubColumn: 'Hub' }],
+    [{ ...VIA, table: '' }],
+  ])('refuses to be built from the join %j', (hubVia) => {
+    expect(() =>
+      createScopeProbe({ vendor_account: { schema: 'public', table: 'vendor_account', hubVia } }),
+    ).toThrow(/identifier/);
+  });
+
+  it('refuses an entity that names its own hub column and another record’s', () => {
+    expect(() =>
+      createScopeProbe({
+        vendor_account: {
+          schema: 'public',
+          table: 'vendor_account',
+          hubColumn: 'responsible_hub_id',
+          hubVia: VIA,
+        },
+      }),
+    ).toThrow(/identifier/);
+  });
+});
+
 describe('existingRecordHub, the one the application uses', () => {
   // Break caught: a hub-scoped entity being probed before the slice that owns its table registered it. Every
   // slice that adds a hub-scoped table adds its row to the registry in the same change.

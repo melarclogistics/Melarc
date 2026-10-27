@@ -140,6 +140,7 @@ describe('.gitignore', () => {
       'apps/api/migrations/meta/_journal.json',
       'apps/api/.env.example',
       'apps/ops-web/.env.example',
+      'apps/attestation-verifier/.env.example',
       'infrastructure/postgres/.env.example',
       '.github/workflows/ci.yml',
       'pnpm-lock.yaml',
@@ -154,6 +155,7 @@ describe('.gitignore', () => {
       'docs/pgpass.md',
       'docs/google-services.md',
       'google-services.json.example',
+      'apps/attestation-verifier/gradle/wrapper/gradle-wrapper.jar',
       'GoogleService-Info.plist.example',
       'design/assets/brand/logo.svg',
     ];

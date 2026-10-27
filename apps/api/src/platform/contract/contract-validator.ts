@@ -112,6 +112,11 @@ interface PreparedResponse {
   /** The cookies this response sets (`x-set-cookies`), each with what `x-cookies` says it must carry. */
   readonly cookies: ReadonlyMap<string, ExpectedCookie>;
   /**
+   * The cookies this response may also set (`x-set-cookies-optional`): none is owed, and one that is set is held to what `x-cookies`
+   * says it must carry. They are not subject to the `for` and `when` conditions, which limit the cookies that are owed.
+   */
+  readonly optionalCookies: ReadonlyMap<string, ExpectedCookie>;
+  /**
    * `x-set-cookies-for`: the cookies apply only to a request that presented this scheme's credential. Any other
    * request is owed none, and one that gets some has an undeclared cookie.
    */
@@ -392,6 +397,7 @@ export class ContractValidator {
     violations.push(
       ...this.cookieViolations(
         this.cookiesOwed(operationId, declared, request, context),
+        declared.optionalCookies,
         response.headers['set-cookie'],
       ),
     );
@@ -451,6 +457,7 @@ export class ContractValidator {
    */
   private cookieViolations(
     declared: ReadonlyMap<string, ExpectedCookie>,
+    optional: ReadonlyMap<string, ExpectedCookie>,
     header: unknown,
   ): ContractViolation[] {
     const known = isJsonObject(this.contract['x-cookies']) ? this.contract['x-cookies'] : {};
@@ -463,7 +470,7 @@ export class ContractValidator {
       }
     }
     for (const cookie of set) {
-      const expected = declared.get(cookie.name);
+      const expected = declared.get(cookie.name) ?? optional.get(cookie.name);
       if (expected === undefined) {
         const pointer = Object.hasOwn(known, cookie.name) ? cookie.name : '*';
         violations.push({ in: 'response-cookie', pointer, rule: 'undeclared' });
@@ -681,12 +688,36 @@ export class ContractValidator {
         }),
       );
 
+      // The cookies it may also set, defined the same way. A name cannot be both owed and optional, and a list that is not a list of names
+      // cannot be checked.
+      const optionalNames = response['x-set-cookies-optional'];
+      if (
+        optionalNames !== undefined &&
+        (!Array.isArray(optionalNames) ||
+          optionalNames.some((name) => typeof name !== 'string' || name === ''))
+      ) {
+        throw new Error(
+          `The contract's x-set-cookies-optional of ${operationId} must list cookie names.`,
+        );
+      }
+      const optionalCookies = new Map(
+        ((optionalNames ?? []) as string[]).map((name) => {
+          if (cookies.has(name)) {
+            throw new Error(
+              `The contract's ${operationId} lists ${name} as both set and optional (x-set-cookies and x-set-cookies-optional).`,
+            );
+          }
+          return [name, expectedCookie(name, definitions[name])] as const;
+        }),
+      );
+
       responses.set(status, {
         body: isJsonObject(json) ? this.compile(this.strictAjv, json.schema ?? {}) : undefined,
         declaresContent: content !== undefined && Object.keys(content).length > 0,
         requiredHeaders,
         headerValues,
         cookies,
+        optionalCookies,
         cookiesFor: this.cookiesFor(operationId, status, response, cookies.size),
         cookiesWhen: this.cookiesWhen(operationId, status, response, cookies.size),
       });

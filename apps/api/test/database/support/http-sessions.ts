@@ -40,6 +40,8 @@ export async function arrangedFixedSession(
   kit: IntegrationKit,
   admin: Pick<pg.Client, 'query'>,
   type: 'VENDOR' | 'RIDER',
+  /** The principal and the registered device the session is for, where a test has real ones (a rider whose handset is replaced). */
+  bound: { readonly principalId?: string; readonly registeredDeviceId?: string } = {},
 ): Promise<{
   readonly row: SessionRow;
   readonly token: string;
@@ -52,8 +54,8 @@ export async function arrangedFixedSession(
     admin,
     sessionRow({
       principalType: type,
-      principalId: randomUUID(),
-      registeredDeviceId: randomUUID(),
+      principalId: bound.principalId ?? randomUUID(),
+      registeredDeviceId: bound.registeredDeviceId ?? randomUUID(),
       policyRevision: 1,
       bundleId: type === 'VENDOR' ? BUNDLE_IDS.vendor : BUNDLE_IDS.rider,
       // The snapshot holds what the seed grants the fixed bundle (a Vendor holds none of this slice's keys), as an issue would copy it.
