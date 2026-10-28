@@ -4,6 +4,10 @@ const PREVIEW_PORT = 4173;
 const PREVIEW_ORIGIN = `http://127.0.0.1:${String(PREVIEW_PORT)}`;
 const DEV_PORT = 5199;
 const DEV_ORIGIN = `http://127.0.0.1:${String(DEV_PORT)}`;
+// The showcase built for production (`vite build --mode showcase`), served on a port of its own from a folder that is never the shell's.
+const SHOWCASE_PORT = 4174;
+const SHOWCASE_ORIGIN = `http://127.0.0.1:${String(SHOWCASE_PORT)}`;
+const SHOWCASE_BUILD = 'node_modules/.showcase-build';
 
 const ENGINES = {
   // The full Chromium in its new headless mode, not the separate stripped-down headless shell: it is
@@ -47,6 +51,9 @@ function requestedEngines(value: string | undefined): Engine[] {
  *   components  the real components in the development-only showcase, which the production build does not contain
  *               (test/build.test.ts proves that), so they run against the Vite development server. The secrets and dialogs specs
  *               are the same showcase in files of their own.
+ *   date-picker the date field of the showcase (COMPONENT_PATTERNS section 22a): the keyboard, reflow, enlarged text, forced colours and
+ *               reduced motion, against the development server; and, in a project of its own, the same showcase built for production and
+ *               served under the strict content-security policy (a build of its own, `--mode showcase`, that the shell build never holds).
  *   pre-sign-in the five screens a person reaches with no session, against the production build and, in a project of its own,
  *               the development server (strict mode), with a stand-in for the API.
  *   staff       the six signed-in identity screens (S0.44), the same two ways, with a stateful stand-in for the API.
@@ -91,6 +98,19 @@ export default defineConfig({
       name: `dialogs-${engine}`,
       testMatch: 'dialogs.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The date field of the showcase (COMPONENT_PATTERNS section 22a): what only a real browser can show of a calendar.
+      name: `date-picker-${engine}`,
+      testMatch: 'date-picker.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The showcase as a production build under the strict content-security policy: the library's popovers, focus handling and the one style
+      // it would insert must raise no violation, in every engine.
+      name: `date-picker-policy-${engine}`,
+      testMatch: 'date-picker-policy.spec.ts',
+      use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
     },
     {
       // The five pre-sign-in screens (S0.43) against the production build, with a stand-in for the API.
@@ -148,6 +168,14 @@ export default defineConfig({
       // Always a fresh build, and never a server that was already running: that could be stale.
       command: `pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --port ${String(PREVIEW_PORT)} --strictPort`,
       url: PREVIEW_ORIGIN,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      // The showcase as a production build, for the strict-policy project only. It is built into a folder below node_modules (never dist, which
+      // the shell's build empties at the same moment), and no deployed build contains it.
+      command: `pnpm exec vite build --mode showcase --outDir ${SHOWCASE_BUILD} --emptyOutDir && pnpm exec vite preview --outDir ${SHOWCASE_BUILD} --host 127.0.0.1 --port ${String(SHOWCASE_PORT)} --strictPort`,
+      url: SHOWCASE_ORIGIN,
       reuseExistingServer: false,
       timeout: 120_000,
     },

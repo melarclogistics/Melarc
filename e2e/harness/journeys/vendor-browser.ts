@@ -14,6 +14,8 @@ export interface VendorAnswer {
   readonly body: unknown;
   /** The names of the cookies the answer set, in order. */
   readonly setCookies: readonly string[];
+  /** The version the answer carried (`ETag`), for a command that sends it back as `If-Match`. */
+  readonly etag: string | null;
 }
 
 const MUTATIONS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -38,8 +40,17 @@ export class VendorBrowser {
     return twin;
   }
 
-  async send(method: string, path: string, body?: unknown): Promise<VendorAnswer> {
-    const headers: Record<string, string> = { origin: VENDOR_ORIGIN, accept: 'application/json' };
+  async send(
+    method: string,
+    path: string,
+    body?: unknown,
+    extra: Readonly<Record<string, string>> = {},
+  ): Promise<VendorAnswer> {
+    const headers: Record<string, string> = {
+      origin: VENDOR_ORIGIN,
+      accept: 'application/json',
+      ...extra,
+    };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (this.#jar.size > 0) {
       headers.cookie = [...this.#jar].map(([name, value]) => `${name}=${value}`).join('; ');
@@ -73,7 +84,12 @@ export class VendorBrowser {
         parsed = text;
       }
     }
-    return { status: response.status, body: parsed, setCookies };
+    return {
+      status: response.status,
+      body: parsed,
+      setCookies,
+      etag: response.headers.get('etag'),
+    };
   }
 
   /** `vendorSignIn` with the account identifier and the shared secret, from this browser. */

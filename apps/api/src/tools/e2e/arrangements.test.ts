@@ -74,6 +74,20 @@ describe('the arrangements of the integrated harness', () => {
     expect(asked).toEqual([]);
   });
 
+  // Break caught: a lapse that ages another bucket (the staff sign-in's, which a journey is meant to meet), or that takes a key and so can be
+  // pointed at a person; or that ages by less than the minute of the rolling window.
+  it('lets the minute of the rider challenge limit pass for that bucket only, and takes no argument', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 3 }]);
+    await expect(arrange(client, 'lapse-rider-challenge-window', [])).resolves.toBe(3);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.text).toBe(
+      "update rate_limit_admission set admitted_at = admitted_at - interval '61 seconds' where bucket = 'rate_limit_rider_challenge'",
+    );
+    await expect(arrange(client, 'lapse-rider-challenge-window', ['x'])).rejects.toThrow(
+      /takes 0 arguments/,
+    );
+  });
+
   // Break caught: the guard that stops the application from back-dating a session being left off for the update, or left off afterwards.
   it('turns the session guard off for the one update and on again whatever happened', async () => {
     const answers = [{ rowCount: 0 }, { rowCount: 1 }, { rowCount: 0 }];
@@ -157,7 +171,7 @@ describe('the observations of the integrated harness', () => {
   it('reads no column that holds a secret', () => {
     for (const [name, observation] of Object.entries(OBSERVATIONS)) {
       expect(observation.text, name).not.toMatch(
-        /credential_hash|token_hash|secret_|csrf_token|payload|bundle_snapshot/i,
+        /hash|secret|ciphertext|nonce|seed|private|csrf_token|payload|bundle_snapshot/i,
       );
     }
   });
@@ -168,5 +182,33 @@ describe('the observations of the integrated harness', () => {
       { status: 'REVOKED' },
       { status: 'ACTIVE' },
     ]);
+  });
+});
+
+describe('the vendor and rider entries of the lists (S0.62)', () => {
+  // Break caught: a vendor or rider entry that takes any text as its key, so that a journey could reach a row it does not name.
+  it('names a vendor by its identifier and a rider by its phone, and refuses anything else before a statement is sent', async () => {
+    const { client, asked } = fakeClient([
+      { rows: [] },
+      { rows: [] },
+      { rowCount: 0 },
+      { rowCount: 0 },
+    ]);
+    await observe(client, 'vendor-sessions', ['ABCDEFGH']);
+    await observe(client, 'rider-lock', ['+233200000001']);
+    expect(asked.map((statement) => statement.values)).toEqual([['ABCDEFGH'], ['+233200000001']]);
+    for (const [name, key] of [
+      ['vendor-sessions', 'a@b.example'],
+      ['vendor-lock', 'abcdefgh'],
+      ['rider-sessions', 'ABCDEFGH'],
+      ['rider-lock', '0200000001'],
+    ] as const) {
+      await expect(observe(client, name, [key]), name).rejects.toThrow();
+    }
+    await expect(arrange(client, 'expire-vendor-setup-grant', ['a@b.example'])).rejects.toThrow(
+      /account identifier/,
+    );
+    expect(asked).toHaveLength(2);
+    expect(ARRANGEMENTS['expire-vendor-setup-grant']?.arguments).toEqual(['account identifier']);
   });
 });

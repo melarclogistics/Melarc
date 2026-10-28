@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, type ReactNode } from 'react';
+import { createContext, useContext, useId, useRef, type ReactNode } from 'react';
 
 import { Icon } from '../icon/Icon';
 import './field.css';
@@ -6,6 +6,11 @@ import './field.css';
 /** What a control inside a Field needs in order to be tied to its label, help and error. */
 export interface FieldControl {
   readonly id: string;
+  /**
+   * The id of the label. A control that is not one labelable element (a date made of several parts) names itself with `aria-labelledby`
+   * pointing here, instead of taking the label's `for`.
+   */
+  readonly labelId: string;
   /** The ids of the help and error text that exist, space separated, or undefined when there are none. */
   readonly describedBy: string | undefined;
   readonly invalid: boolean;
@@ -41,6 +46,8 @@ const present = (text: string | undefined): text is string => text !== undefined
  */
 export function Field({ label, help, error, required = false, children }: FieldProps) {
   const id = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const labelId = `${id}-label`;
   const helpId = `${id}-help`;
   const errorId = `${id}-error`;
   const hasHelp = present(help);
@@ -50,8 +57,22 @@ export function Field({ label, help, error, required = false, children }: FieldP
     .join(' ');
 
   return (
-    <div className="ui-field">
-      <label className="ui-field__label" htmlFor={id}>
+    <div ref={root} className="ui-field">
+      <label
+        id={labelId}
+        className="ui-field__label"
+        htmlFor={id}
+        onClick={() => {
+          // A control made of parts (a date) is no one element for the label's `for`. A click on the label leads to its first part, as it
+          // leads to an input; an element that has the id is left to the browser.
+          if (document.getElementById(id) !== null) return;
+          root.current
+            ?.querySelector<HTMLElement>(
+              '[role="spinbutton"]:not([aria-disabled="true"]), input:not([disabled]), button:not([disabled])',
+            )
+            ?.focus();
+        }}
+      >
         {label}
         {required ? (
           <>
@@ -63,6 +84,7 @@ export function Field({ label, help, error, required = false, children }: FieldP
       <FieldContext
         value={{
           id,
+          labelId,
           describedBy: describedBy === '' ? undefined : describedBy,
           invalid: hasError,
           required,

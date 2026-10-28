@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 
 import type { DynamicModule, Type } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { ModulesContainer, NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { DestinationStream } from 'pino';
@@ -9,6 +9,9 @@ import type { DestinationStream } from 'pino';
 import type { AppModuleOptions } from './app.module.js';
 import { CLOCK, type Clock } from './platform/auth/ports/clock.port.js';
 import type { AppConfig } from './platform/config/load-config.js';
+import { listBoundOperations } from './platform/contract/contract-operation.js';
+import { ContractValidationService } from './platform/contract/contract-validation.service.js';
+import { refusalCheckOf, type RefusalCheck } from './platform/contract/declared-refusals.js';
 import { DISPOSAL_BOUND_MS } from './platform/execution/execution-parameters.js';
 import { AllExceptionsFilter } from './platform/http/all-exceptions.filter.js';
 import { createCors } from './platform/http/cors.js';
@@ -37,6 +40,40 @@ export interface CreateAppOptions {
   readonly rootModule: RootModuleFactory;
   /** Defaults to stdout. */
   readonly logDestination?: DestinationStream;
+}
+
+/** The contract service of the composition, or undefined for one built without the platform (a test's bare module). */
+function contractOf(app: NestExpressApplication): ContractValidationService | undefined {
+  try {
+    return app.get(ContractValidationService, { strict: false });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The check of every refusal against its operation's contract (`declared-refusals.ts`), wherever responses are checked at all (outside
+ * production): built at the first refusal, when the routes are bound and the contract has been read, and nothing where no handler is
+ * bound to an operation or the composition has no contract.
+ */
+function lazyRefusalCheck(app: NestExpressApplication): RefusalCheck {
+  let built: RefusalCheck | null | undefined;
+  return {
+    undeclared(request, exception) {
+      if (built === undefined) {
+        const contract = contractOf(app);
+        const bound =
+          contract?.validatesResponses === true
+            ? listBoundOperations(app.get(ModulesContainer))
+            : [];
+        built =
+          contract === undefined || bound.length === 0
+            ? null
+            : refusalCheckOf(contract.validator(), bound);
+      }
+      return built?.undeclared(request, exception);
+    },
+  };
 }
 
 /**
@@ -172,7 +209,7 @@ export async function createApp(options: CreateAppOptions): Promise<NestExpressA
       }),
     );
   }
-  app.useGlobalFilters(new AllExceptionsFilter(logger));
+  app.useGlobalFilters(new AllExceptionsFilter(logger, lazyRefusalCheck(app)));
   app.setGlobalPrefix(API_PREFIX, { exclude: [...TECHNICAL_ROUTE_PATHS] });
   return app;
 }

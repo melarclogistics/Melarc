@@ -297,9 +297,15 @@ const NOT_E2E: readonly string[] = [
   'packages/api-client/src/**/*.test.ts',
 ];
 
-/** The attested enrolment test builds and starts the real verifier: a change to the verifier reaches it. */
+/**
+ * The tests that build and start the real verifier service: the attested rider enrolment, and the alert rehearsal, which reads the
+ * verifier's own series. A change to the verifier reaches both, and both need a JDK.
+ */
 export const VERIFIER_RUNS = {
-  test: 'apps/api/test/database/alone/rider-device-enrolment-attested.db.test.ts',
+  tests: [
+    'apps/api/test/database/alone/rider-device-enrolment-attested.db.test.ts',
+    'apps/api/test/database/alone/alert-rehearsal.db.test.ts',
+  ] as readonly string[],
   inputs: ['apps/attestation-verifier/**', '.java-version', 'scripts/jdk.ts'],
 } as const;
 
@@ -332,6 +338,8 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
   'components.spec.ts': ['apps/ops-web/src/showcase/'],
   'secrets.spec.ts': ['apps/ops-web/src/showcase/'],
   'dialogs.spec.ts': ['apps/ops-web/src/showcase/'],
+  'date-picker.spec.ts': ['apps/ops-web/src/showcase/'],
+  'date-picker-policy.spec.ts': ['apps/ops-web/src/showcase/'],
   'pre-sign-in.spec.ts': ['apps/ops-web/src/app/pages/pre-sign-in/'],
   'recovery.spec.ts': [
     'apps/ops-web/src/app/pages/pre-sign-in/',
@@ -855,7 +863,7 @@ function chooseByGraph(
     else if (namesChanged) why = 'reads';
     else if (buildChanged && startsTheBuild && startsProcesses) why = 'build';
     else if (applicationChanged && runsVite) why = 'bundles';
-    else if (verifierChanged && test === VERIFIER_RUNS.test) why = 'verifier';
+    else if (verifierChanged && VERIFIER_RUNS.tests.includes(test)) why = 'verifier';
     if (why === undefined) continue;
     counts[why] += 1;
     chosen.push(test);
@@ -1091,7 +1099,9 @@ export const COMMAND_LINE_LIMIT = 24_000;
 /** What a choice needs of the machine: its target's needs, and a JDK when it runs the test that starts the attestation verifier. */
 export function needsOf(choice: Pick<Choice, 'target' | 'tests'>): Need[] {
   const own = definitionOf(choice.target).needs;
-  return choice.tests.includes(VERIFIER_RUNS.test) ? [...own, 'jdk'] : [...own];
+  return choice.tests.some((test) => VERIFIER_RUNS.tests.includes(test))
+    ? [...own, 'jdk']
+    : [...own];
 }
 
 /**
@@ -1104,7 +1114,7 @@ export function jdkBlock(
   if (check.ok) return undefined;
   return {
     status: 'not-run',
-    note: `${posix.basename(VERIFIER_RUNS.test)} starts the attestation verifier, which needs a JDK: ${check.problem} Set JAVA_HOME to it; DEVELOPMENT.md, "The attestation verifier", says how`,
+    note: `${VERIFIER_RUNS.tests.map((test) => posix.basename(test)).join(' and ')} start the attestation verifier, which needs a JDK: ${check.problem} Set JAVA_HOME to it; DEVELOPMENT.md, "The attestation verifier", says how`,
   };
 }
 

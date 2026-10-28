@@ -2,6 +2,7 @@ import type { StackConnection } from '../connection.ts';
 import { Inbox } from '../messages.ts';
 import { ADMINISTRATORS, type Person } from '../personas.ts';
 import type { Authenticator } from '../totp.ts';
+import type { VendorBrowser } from './vendor-browser.ts';
 
 /**
  * Who the journeys of one run have made, and what each of them holds. The journeys of S0.46 are one story told in order: the two
@@ -21,10 +22,20 @@ export interface PersonState {
   id?: string;
 }
 
+/** The demonstration vendor once its journey has set it up: what its people know, and the one browser it signs in from. */
+export interface VendorState {
+  readonly identifier: string;
+  readonly accountId: string;
+  secret: string;
+  browser: VendorBrowser;
+}
+
 export interface World {
   readonly inbox: Inbox;
   readonly people: Map<string, PersonState>;
   person(key: string): PersonState;
+  /** Set by the vendor's first journey (rows 10a and 11), and continued by the next (rows 10b, 13 and 15). */
+  vendor?: VendorState;
 }
 
 const worlds = new Map<string, World>();

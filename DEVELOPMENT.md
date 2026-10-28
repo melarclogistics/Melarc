@@ -14,13 +14,13 @@ screen can be reached before the first sign-in (section 5). The API serves its t
 
 ## Prerequisites
 
-| You need | Version                                                          | Notes                                                                                                                                                                                                           |
-| -------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git      | any recent                                                       |                                                                                                                                                                                                                 |
-| Node.js  | **24.21.0**, the version in [.node-version](.node-version)       | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json).                                                                           |
-| pnpm     | **11.1.3**, the `packageManager` in [package.json](package.json) | `npm install -g pnpm@11.1.3`                                                                                                                                                                                    |
-| Docker   | Docker Desktop, or Docker Engine with the Compose plugin         | Running before step 3. It only hosts the local PostgreSQL service.                                                                                                                                              |
-| JDK      | **21**, the major in [.java-version](.java-version)              | Temurin; for the verifier ([step 6](#the-attestation-verifier)) and for `pnpm run test:db`, whose attested rider enrolment test builds and starts it. Windows: `winget install EclipseAdoptium.Temurin.21.JDK`. |
+| You need | Version                                                          | Notes                                                                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git      | any recent                                                       |                                                                                                                                                                                                                                   |
+| Node.js  | **24.21.0**, the version in [.node-version](.node-version)       | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json).                                                                                             |
+| pnpm     | **11.1.3**, the `packageManager` in [package.json](package.json) | `npm install -g pnpm@11.1.3`                                                                                                                                                                                                      |
+| Docker   | Docker Desktop, or Docker Engine with the Compose plugin         | Running before step 3. It only hosts the local PostgreSQL service.                                                                                                                                                                |
+| JDK      | **21**, the major in [.java-version](.java-version)              | Temurin; for the verifier ([step 6](#the-attestation-verifier)) and for `pnpm run test:db`, whose attested rider enrolment test and alert rehearsal build and start it. Windows: `winget install EclipseAdoptium.Temurin.21.JDK`. |
 
 ## 1. Install dependencies
 
@@ -199,8 +199,19 @@ the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays 
 set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
 yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
 by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
-It reads a setup grant's standing before each send (SLICE-000 S0.29). The reader of recovery requests arrives with S0.50,
-and until then a message that serves one is not sent, and the worker says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+It reads the standing of a setup grant (SLICE-000 S0.29) or of a recovery request (S0.50) before each send, and sends nothing
+for a record it cannot confirm. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+
+#### The private metrics endpoints
+
+The API and the worker each have an endpoint of their own for their counters, and neither is a route of the API: the public
+port has no `/metrics`. Each is off until its port is set in `apps/api/.env` (`METRICS_PORT` for the API,
+`DELIVERY_WORKER_METRICS_PORT` for the worker; two different ports, neither the API's `HTTP_PORT`), listens on the loopback
+address unless `METRICS_HOST` or `DELIVERY_WORKER_METRICS_HOST` says otherwise, and answers `GET /metrics` alone in the
+Prometheus text format. Off the loopback address it needs a secret (`METRICS_SECRET`, `DELIVERY_WORKER_METRICS_SECRET`) that the
+scraper sends as `Authorization: Bearer`. The worker's also serves the age of the oldest message due to be sent. Nothing in
+either carries an identifier. The alert rules that read them are `apps/api/src/platform/metrics/alert-rules.ts`; which tool
+evaluates them in production is release gate G3 ([OBSERVABILITY_AND_RECOVERY.md](architecture/OBSERVABILITY_AND_RECOVERY.md) §3).
 
 ## 6. Run the checks and the smoke tests
 
@@ -208,15 +219,15 @@ These are the checks CI runs ([ci.yml](.github/workflows/ci.yml)), which also ru
 `pnpm --filter @melarc/api run db:check` and `pnpm audit --audit-level high`. The order to run them in, and the commands
 that run all of them once, are in [The development loop and the gate](#the-development-loop-and-the-gate) below.
 
-| Command                                                        | Needs                           | Proves                                                                                                                                                                       |
-| -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint, strict types                                                                                                                                               |
-| `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                     |
-| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                    |
-| `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment against the real verifier service (built on its first run) |
-| `pnpm run test:browser`                                        | Chromium (step 1)               | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit)                                                                                    |
-| `pnpm run test:e2e`                                            | the database, Chromium, builds  | a real browser, the API and a disposable database together                                                                                                                   |
-| `pnpm run verifier:test`                                       | a JDK 21                        | the attestation verifier: its vendored library, its build and every one of its tests                                                                                         |
+| Command                                                        | Needs                           | Proves                                                                                                                                                                                               |
+| -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint, strict types                                                                                                                                                                       |
+| `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                                             |
+| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                                            |
+| `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment and the alert rehearsal against the real verifier service (built on its first run) |
+| `pnpm run test:browser`                                        | Chromium (step 1)               | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit)                                                                                                            |
+| `pnpm run test:e2e`                                            | the database, Chromium, builds  | a real browser, the API and a disposable database together                                                                                                                                           |
+| `pnpm run verifier:test`                                       | a JDK 21                        | the attestation verifier: its vendored library, its build and every one of its tests                                                                                                                 |
 
 ```text
 pnpm test
@@ -288,7 +299,7 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    - The result. Its last lines say what passed and, as `Owed:`, what the change reaches that did not pass here: the
      end-to-end journeys left to the gate and every target that could not run, each with its reason. Exit code 0 means
      every test chosen passed, 1 a test failed or the API they needed did not build, 2 it would not start or a target
-     could not run here (the database does not answer, no JDK 21 for the verifier or for the database test that starts
+     could not run here (the database does not answer, no JDK 21 for the verifier or for the database tests that start
      it) and 3 the tree changed while it ran.
 
    It is not a gate. Report what it chose, what passed and what it left owed, never as the gate's result.
@@ -309,7 +320,7 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
      risk) and warns below 4 GB, because a run that starves fails for the machine and says nothing about the code. It
      refuses to start beside another gate or an affected run, and while the database does not answer (`pnpm run infra:check`): the database
      stages come half an hour in, and starting the database (step 3) is yours, never the gate's. It refuses to start,
-     too, without the JDK 21 that the verifier stage and one database test need
+     too, without the JDK 21 that the verifier stage and two database tests need
      ([the attestation verifier](#the-attestation-verifier)), for the same reason. It records the lowest
      free memory seen during each stage, and lists the test databases left behind, which it never drops (step 8). Every
      Vitest configuration runs four workers (`MELARC_TEST_WORKERS`; the API's parallel database files three,
@@ -381,6 +392,42 @@ its own settings and nothing else of your environment, writes its log below the 
 started there: `verifier:stop` ends that process and no other (it checks the command line first, so a recycled process id is never touched).
 On Linux or WSL2 install `temurin-21-jdk` (or `openjdk-21-jdk`) with your package manager; the Gradle wrapper is started with `sh`, so no file mode
 matters.
+
+### The two-build proof, the concurrency run, the alert rehearsal and the capacity measurement
+
+Four database tests of SLICE-000 Stage 8 need the database like the others; each runs alone, in
+`apps/api/test/database/alone/`, and two of them start processes:
+
+- `two-builds.db.test.ts` compiles the API twice from the tree (the current build, and a release with a higher compiled
+  policy revision and a changed predicate) into `apps/api/.policy-release/`, which git ignores, and starts both on one database.
+  A cold compile takes 15 to 20 seconds, and a tree that has not changed reuses it; delete the folder to force a compile.
+- `concurrency.db.test.ts` runs randomised interleavings by seed, in the test's own process (it starts none). It prints each
+  seed it ran; to run one again, set `MELARC_CONCURRENCY_SEED` to it (a whole number). The seed fixes the schedule of the
+  operations, not what the database does between them, so a failure is read from its printed outcomes and not only repeated.
+- `alert-rehearsal.db.test.ts` runs the alert rules on the readings of the real delivery queue, the worker's metrics endpoint
+  and the attestation verifier service, which it builds and starts: it needs a **JDK 21** like the attested rider enrolment
+  ([the attestation verifier](#the-attestation-verifier)), and its last test waits for the verifier's once-a-minute look at
+  its roots file, so the file takes about two minutes. To run it alone:
+
+```text
+pnpm --filter @melarc/api exec vitest run --project database-alone test/database/alone/alert-rehearsal.db.test.ts
+```
+
+- `capacity-benchmark.db.test.ts` measures sign-in, an authenticated read and a refusal at rising concurrency, and is skipped
+  unless asked. Run it on an idle machine, with nothing else open, in `cmd`:
+
+```text
+set MELARC_BENCHMARK=1&& set MELARC_BENCHMARK_OUTPUT=%TEMP%\melarc-capacity.json&& pnpm --filter @melarc/api exec vitest run --project database-alone test/database/alone/capacity-benchmark.db.test.ts
+```
+
+The raw figures of a run are written, as JSON, to the file `MELARC_BENCHMARK_OUTPUT` names (the report quotes them; the
+maxima are only there). To repeat the report's three- and four-slot rows, add `MELARC_BENCHMARK_HASH_SLOTS=3` and
+`MELARC_BENCHMARK_THREADPOOL=4`, or `=4` and `=8`, to the command in the same way.
+
+The single-hash measurement of the Argon2id cost is `node apps/api/dist/tools/benchmark-argon2.js --runs 15` after a build
+(the report's table is 15 runs; the default is 9), once for each profile, named with `--memory-kib`, `--passes` and
+`--parallelism 1`. What they measured, on which machine, and the values they propose are in
+[SLICE-000-CAPACITY-REPORT.md](delivery/planning/SLICE-000-CAPACITY-REPORT.md): proposals for the owner, never settings.
 
 ## 7. Stop safely
 

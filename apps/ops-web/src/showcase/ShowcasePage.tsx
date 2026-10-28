@@ -8,6 +8,7 @@ import { SideMenu } from '../components/side-menu/SideMenu';
 import { Button } from '../components/ui/button/Button';
 import { Checkbox } from '../components/ui/checkbox/Checkbox';
 import { CodeInput } from '../components/ui/code-input/CodeInput';
+import { DatePicker } from '../components/ui/date-picker/DatePicker';
 import { EmptyState } from '../components/ui/empty-state/EmptyState';
 import { Field } from '../components/ui/field/Field';
 import { Icon } from '../components/ui/icon/Icon';
@@ -158,6 +159,47 @@ function DemoForm() {
           The demo form was accepted. Nothing was saved.
         </Alert>
       ) : null}
+    </Section>
+  );
+}
+
+/**
+ * The date field (COMPONENT_PATTERNS section 22a) in every state a page gives it. The page holds the date as text and the demo shows it,
+ * so a browser test can see exactly what a page would be given. Nothing is sent or stored.
+ */
+function DateDemo() {
+  const [date, setDate] = useState<string | null>(null);
+  const [limited, setLimited] = useState<string | null>('2026-10-12');
+  const nothing = (): void => undefined;
+  return (
+    <Section title="Date field">
+      <div className="showcase-stack">
+        <Field label="Demo date" help="Day, month and year. Nothing is sent or stored." required>
+          <DatePicker value={date} onChange={setDate} />
+        </Field>
+        <p>The page holds: {date ?? 'no date'}</p>
+        <Field label="Demo date in a range" help="Only 5 to 20 October 2026 are offered.">
+          <DatePicker
+            value={limited}
+            onChange={setLimited}
+            minValue="2026-10-05"
+            maxValue="2026-10-20"
+          />
+        </Field>
+        <p>The page holds: {limited ?? 'no date'}</p>
+        <Field label="Demo date with an error" error="This is a synthetic error message.">
+          <DatePicker value="2026-10-12" onChange={nothing} />
+        </Field>
+        <Field label="Demo read-only date">
+          <DatePicker value="2026-10-12" onChange={nothing} isReadOnly />
+        </Field>
+        <Field label="Demo empty read-only date">
+          <DatePicker value={null} onChange={nothing} isReadOnly />
+        </Field>
+        <Field label="Demo disabled date">
+          <DatePicker value="2026-10-12" onChange={nothing} isDisabled />
+        </Field>
+      </div>
     </Section>
   );
 }
@@ -463,7 +505,7 @@ function DemoTable() {
 /** The identifier of the made-up record the confirmation demos act on. Nothing is behind it. */
 const DEMO_ID = '5b6c7d8e-9f01-4a2b-8c3d-4e5f6a7b8c9d';
 
-type DemoOpen = 'dialog' | 'confirmation' | 'reasoned' | 'keyed' | undefined;
+type DemoOpen = 'dialog' | 'dated' | 'confirmation' | 'reasoned' | 'keyed' | undefined;
 
 /**
  * The dialogs (S0.41): a plain dialog, an alert dialog, and the reason and confirmation workflow in both of its modes. The two workflow demos
@@ -475,6 +517,7 @@ function DialogDemos() {
   const [open, setOpen] = useState<DemoOpen>(undefined);
   const [outcome, setOutcome] = useState('none yet');
   const [reloads, setReloads] = useState(0);
+  const [datedValue, setDatedValue] = useState<string | null>(null);
   const close = () => {
     setOpen(undefined);
   };
@@ -485,6 +528,7 @@ function DialogDemos() {
         {(
           [
             ['dialog', 'Open the demo dialog'],
+            ['dated', 'Open the demo date dialog'],
             ['confirmation', 'Open the demo confirmation'],
             ['reasoned', 'Open the demo reason confirmation'],
             ['keyed', 'Open the demo keyed confirmation'],
@@ -521,6 +565,23 @@ function DialogDemos() {
         <DialogActions>
           <Button type="button" variant="secondary" onClick={close}>
             Close the demo dialog
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={open === 'dated'}
+        title="Demo dialog with a date"
+        description="A made-up dialog with a date field in it. Nothing in it is saved."
+        onRequestClose={close}
+      >
+        <Field label="Demo date in a dialog">
+          <DatePicker value={datedValue} onChange={setDatedValue} />
+        </Field>
+        <p>The dialog holds: {datedValue ?? 'no date'}</p>
+        <DialogActions>
+          <Button type="button" variant="secondary" onClick={close}>
+            Close the demo date dialog
           </Button>
         </DialogActions>
       </Dialog>
@@ -724,6 +785,7 @@ export function ShowcasePage() {
         </div>
       </Section>
       <DemoForm />
+      <DateDemo />
       <SubmissionDemo />
       <SecretDemo />
       <Section title="Loading">

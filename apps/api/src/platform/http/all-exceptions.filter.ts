@@ -1,9 +1,10 @@
 import { STATUS_CODES } from 'node:http';
 
 import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 
+import type { RefusalCheck } from '../contract/declared-refusals.js';
 import { REQUEST_ID_HEADER } from '../logging/request-middleware.js';
 import { PIPELINE_ANSWER_KEY } from './admission/response-keys.js';
 import { ApiException } from './api-exception.js';
@@ -181,11 +182,29 @@ export function writeFailure(response: Response, rendered: Rendered): void {
   });
 }
 
+/** What a refusal its operation's contract does not admit is answered with: the plain server error of a broken contract. */
+const UNDECLARED_REFUSAL: Rendered = { status: 500, body: { message: 'Internal server error' } };
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  constructor(private readonly logger: Logger) {}
+  /** `refusals`: the check of a refusal against its operation's contract, given outside production only (`declared-refusals.ts`). */
+  constructor(
+    private readonly logger: Logger,
+    private readonly refusals?: RefusalCheck,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    sendFailure(host.switchToHttp().getResponse<Response>(), exception, this.logger);
+    const http = host.switchToHttp();
+    const response = http.getResponse<Response>();
+    const undeclared = this.refusals?.undeclared(http.getRequest<Request>(), exception);
+    if (undeclared !== undefined) {
+      this.logger.error(
+        { operationId: undeclared.operationId, code: undeclared.code },
+        'a refusal its operation does not declare: the response breaks the contract',
+      );
+      writeFailure(response, UNDECLARED_REFUSAL);
+      return;
+    }
+    sendFailure(response, exception, this.logger);
   }
 }

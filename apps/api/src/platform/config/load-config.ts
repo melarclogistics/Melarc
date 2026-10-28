@@ -9,6 +9,7 @@ import {
   NODE_ENVS,
   OPTIONAL_KEYS,
   envShape,
+  isLoopbackAddress,
   isLoopbackHost,
   parseEndpoint,
   type ConfigKey,
@@ -122,6 +123,16 @@ export interface HashAdmissionConfig {
   readonly memoryBudgetMiB: number;
 }
 
+/**
+ * The private metrics endpoint (S0.68; `platform/metrics/metrics-listener.ts`): a listener of its own, on a port that is not the API's,
+ * off the loopback address only with a secret every request must carry.
+ */
+export interface MetricsEndpointConfig {
+  readonly host: string;
+  readonly port: number;
+  readonly secret?: Secret;
+}
+
 export interface AppConfig {
   /** Framework mode. Express and other libraries read the same variable directly. */
   readonly nodeEnv: (typeof NODE_ENVS)[number];
@@ -145,6 +156,8 @@ export interface AppConfig {
   /** How many hashes may run at once, and the memory they may take together. */
   readonly hashAdmission: HashAdmissionConfig;
   readonly adapters: AdaptersConfig;
+  /** The private metrics endpoint; absent when it is off (no `METRICS_PORT`). */
+  readonly metrics?: MetricsEndpointConfig;
   /**
    * Always present in a configuration that `loadConfig` returns, so the real API cannot start without
    * a database. It is optional in the type only so that code that builds a configuration by hand, the
@@ -230,7 +243,28 @@ function relationProblems(env: ParsedEnv): ConfigProblem[] {
   keyProblems(env, invalid);
   hashingProblems(env, invalid);
   adapterProblems(env, invalid, missing);
+  metricsProblems(env, invalid, missing);
   return problems;
+}
+
+/**
+ * The private metrics endpoint is its own listener: not on the API's port, and off the loopback address only with a secret (the Product
+ * Owner's decision of 27 October 2026; DEPLOYMENT_AND_ENVIRONMENTS.md §12.5, "Metrics"). A secret with no endpoint is a mistake, not a
+ * default.
+ */
+function metricsProblems(
+  env: ParsedEnv,
+  invalid: (key: ConfigKey) => void,
+  missing: (key: ConfigKey) => void,
+): void {
+  if (env.METRICS_PORT === undefined) {
+    if (env.METRICS_SECRET !== undefined) invalid('METRICS_SECRET');
+    return;
+  }
+  if (env.METRICS_PORT === env.HTTP_PORT) invalid('METRICS_PORT');
+  if (env.METRICS_SECRET === undefined && !isLoopbackAddress(env.METRICS_HOST)) {
+    missing('METRICS_SECRET');
+  }
 }
 
 /**
@@ -382,6 +416,18 @@ function verifierFrom(values: ParsedEnv): VerifierConfig {
   });
 }
 
+function metricsFrom(values: ParsedEnv): { readonly metrics?: MetricsEndpointConfig } {
+  const { METRICS_HOST: host, METRICS_PORT: port, METRICS_SECRET: secret } = values;
+  if (port === undefined) return {};
+  return {
+    metrics: Object.freeze({
+      host,
+      port,
+      ...(secret === undefined ? {} : { secret: new Secret(secret) }),
+    }),
+  };
+}
+
 /** Validates the process environment. Pure: reads only the keys this API owns. */
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): LoadConfigResult {
   // A blank optional setting is an absent one: a copied template leaves its optional lines empty.
@@ -450,6 +496,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
       }),
       attestationVerifier: verifierFrom(values),
     }),
+    ...metricsFrom(values),
     database: Object.freeze({
       url: values.DATABASE_URL,
       poolMax: values.DATABASE_POOL_MAX,

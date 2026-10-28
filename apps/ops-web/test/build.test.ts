@@ -6,6 +6,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { packageDirectory } from './support/package-directory';
+
 const require = createRequire(import.meta.url);
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const CONFIG_FILE = resolve(APP_ROOT, 'vite.config.ts');
@@ -157,6 +159,31 @@ describe('the production build', () => {
     expect(output.get('licenses/Lucide-ISC.txt')).toBe(packaged);
     expect(packaged).toContain('ISC License');
     expect(packaged).toContain('Cole Bemis');
+  });
+
+  // Break caught: React Aria Components, or a package it brings that ends up in the bundle, shipped without its licence (Apache-2.0 asks that a
+  // copy of the licence travel with the work, MIT that the notice does), or with a text that is not the package's own. The list of packages
+  // is held to the lockfile by aria-licences.test.ts.
+  it('ships React Aria Components and what it brings with their licences, byte for byte', async () => {
+    const aria = packageDirectory(APP_ROOT, 'react-aria-components');
+    const reactAria = packageDirectory(aria, 'react-aria');
+    const wanted: readonly (readonly [string, string])[] = [
+      ['React-Aria-Apache-2.0.txt', aria],
+      ['swc-helpers-Apache-2.0.txt', packageDirectory(aria, '@swc/helpers')],
+      ['use-sync-external-store-MIT.txt', packageDirectory(aria, 'use-sync-external-store')],
+      ['clsx-MIT.txt', packageDirectory(reactAria, 'clsx')],
+      ['aria-hidden-MIT.txt', packageDirectory(reactAria, 'aria-hidden')],
+    ];
+
+    for (const [file, directory] of wanted) {
+      const licence = (await readdir(directory)).find((entry) => /^licen[cs]e$/i.test(entry));
+      expect(licence, directory).toBeDefined();
+      const packaged = await readFile(join(directory, licence ?? ''), 'utf8');
+      expect(output.get(`licenses/${file}`), file).toBe(packaged);
+    }
+    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Apache License');
+    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Version 2.0');
+    expect(output.get('licenses/clsx-MIT.txt')).toContain('MIT License');
   });
 
   // Break caught: the logo inlined as a data: URI (Vite does that to any asset under 4 KiB, and this one is just under;

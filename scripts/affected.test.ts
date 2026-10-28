@@ -785,7 +785,7 @@ describe('the targets of this repository', () => {
     ]) {
       assert.ok((SPEC_AREAS[spec] ?? []).includes('apps/ops-web/src/app/pages/pre-sign-in/'), spec);
     }
-    assert.ok(files.has(VERIFIER_RUNS.test), VERIFIER_RUNS.test);
+    for (const test of VERIFIER_RUNS.tests) assert.ok(files.has(test), test);
   });
 
   // Break caught: the input lists naming folders that moved, so the rules they carry fire for nothing.
@@ -939,11 +939,14 @@ describe('the commands it runs', () => {
   it('needs a JDK for the database target only when it runs the test that starts the verifier', () => {
     const other = 'apps/api/test/database/a.db.test.ts';
     assert.deepEqual(needsOf(choice('api-db', [other])), ['api-build', 'database']);
-    assert.deepEqual(needsOf(choice('api-db', [other, VERIFIER_RUNS.test])), [
-      'api-build',
-      'database',
-      'jdk',
-    ]);
+    // Break caught: the alert rehearsal, which starts the verifier too, run with no JDK check, so that it fails on a Java error.
+    for (const test of VERIFIER_RUNS.tests) {
+      assert.deepEqual(
+        needsOf(choice('api-db', [other, test])),
+        ['api-build', 'database', 'jdk'],
+        test,
+      );
+    }
     assert.deepEqual(needsOf(choice('api-unit', ['apps/api/src/a.test.ts'])), []);
   });
 
@@ -961,7 +964,7 @@ describe('the commands it runs', () => {
     assert.equal(block.status, 'not-run');
     assert.match(
       block.note,
-      /rider-device-enrolment-attested\.db\.test\.ts starts the attestation verifier/,
+      /rider-device-enrolment-attested\.db\.test\.ts and alert-rehearsal\.db\.test\.ts start the attestation verifier/,
     );
     assert.match(block.note, /No JDK answers/);
     assert.match(block.note, /JAVA_HOME/);

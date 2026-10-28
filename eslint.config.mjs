@@ -4,6 +4,62 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
+// What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry the one door to the
+// icon library, and `components/ui/` the one door to React Aria Components and the date library it uses (DESIGN_SYSTEM section 24a).
+const OPS_RESTRICTED_PATHS = [
+  'axios',
+  'ky',
+  'superagent',
+  'node-fetch',
+  'cross-fetch',
+  'got',
+  'undici',
+  'isomorphic-fetch',
+]
+  .map((name) => ({
+    name,
+    message:
+      'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
+  }))
+  .concat([
+    {
+      name: 'lucide-react',
+      message:
+        'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
+    },
+  ]);
+
+const ARIA_MESSAGE =
+  'Behaviour a native element does not give (a calendar, a menu, a combobox) comes from React Aria Components through the components of components/ui only (DESIGN_SYSTEM section 24a): use or add a component there, and take a date as text from <DatePicker>.';
+const ARIA_PATHS = ['react-aria-components', 'react-aria', 'react-stately'].map((name) => ({
+  name,
+  message: ARIA_MESSAGE,
+}));
+// The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
+// (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
+const DOOR_PACKAGES =
+  '^(react-aria-components|react-aria|react-stately|@react-aria|@react-stately|@react-types|@internationalized|lucide-react)(\\x2f|$)';
+const DATE_HELPERS_MESSAGE =
+  'The date helpers of the DatePicker hand out objects of the date library. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
+const ARIA_PATTERNS = [
+  {
+    group: ['**/date-picker/date-value', '**/date-picker/date-value.ts'],
+    message: DATE_HELPERS_MESSAGE,
+  },
+  {
+    group: [
+      'react-aria-components/*',
+      'react-aria/*',
+      'react-stately/*',
+      '@react-aria/*',
+      '@react-stately/*',
+      '@react-types/*',
+      '@internationalized/*',
+    ],
+    message: ARIA_MESSAGE,
+  },
+];
+
 export default defineConfig(
   // The generated API client is machine output, checked for freshness rather than for style. So is what Gradle writes below the attestation
   // verifier (its build folders hold an HTML test report with JavaScript of its own, and `.gradle` its caches).
@@ -131,30 +187,7 @@ export default defineConfig(
       ],
       'no-restricted-imports': [
         'error',
-        {
-          paths: [
-            'axios',
-            'ky',
-            'superagent',
-            'node-fetch',
-            'cross-fetch',
-            'got',
-            'undici',
-            'isomorphic-fetch',
-          ]
-            .map((name) => ({
-              name,
-              message:
-                'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
-            }))
-            .concat([
-              {
-                name: 'lucide-react',
-                message:
-                  'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
-              },
-            ]),
-        },
+        { paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS], patterns: ARIA_PATTERNS },
       ],
       'no-restricted-syntax': [
         'error',
@@ -171,11 +204,27 @@ export default defineConfig(
           selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
           message: 'insertAdjacentHTML puts text into the page as HTML. Render text as text.',
         },
+        {
+          // `no-restricted-imports` looks at import declarations only; a dynamic import is a door of its own.
+          selector: `ImportExpression[source.value=/${DOOR_PACKAGES}/]`,
+          message: `${ARIA_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
+        },
+        {
+          selector: `CallExpression[callee.name='require'][arguments.0.value=/${DOOR_PACKAGES}/]`,
+          message: `${ARIA_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
+        },
       ],
       'no-eval': 'error',
       'no-new-func': 'error',
       'no-script-url': 'error',
     },
+  },
+  {
+    // The one place that may import React Aria Components and the date library: the components of the design system, which give a page a
+    // calendar, a menu or a combobox in the portal's own look and API. Everything else above still applies to them.
+    files: ['apps/ops-web/src/components/ui/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: { 'no-restricted-imports': ['error', { paths: OPS_RESTRICTED_PATHS }] },
   },
   {
     // The one file that may import the icon library: the registry that names every icon of the application by its meaning.

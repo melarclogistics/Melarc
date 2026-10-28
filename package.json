@@ -40,7 +40,7 @@
     "test:db": "turbo run test:db",
     "test:e2e": "turbo run test:e2e",
     "test:e2e:https": "turbo run test:e2e:https",
-    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/design-tokens.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts scripts/test-inventory.test.ts scripts/dependency-policy.test.ts scripts/gitignore.test.ts scripts/eslint-rules.test.ts scripts/markdown-links.test.ts scripts/repository-shape.test.ts scripts/shell-bundles.test.ts scripts/gate.test.ts scripts/affected.test.ts scripts/verifier.test.ts scripts/verifier-process.test.ts scripts/verifier-provenance.test.ts"
+    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/design-tokens.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts scripts/test-inventory.test.ts scripts/dependency-policy.test.ts scripts/gitignore.test.ts scripts/eslint-rules.test.ts scripts/markdown-links.test.ts scripts/repository-shape.test.ts scripts/shell-bundles.test.ts scripts/gate.test.ts scripts/affected.test.ts scripts/verifier.test.ts scripts/verifier-process.test.ts scripts/verifier-provenance.test.ts scripts/slice-000-citations.test.ts scripts/security-matrix-rows.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

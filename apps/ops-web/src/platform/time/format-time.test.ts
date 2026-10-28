@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatInstant } from './format-time';
+import { BUSINESS_TIME_ZONE, formatInstant, todayText } from './format-time';
 
 describe('formatInstant', () => {
   // Break caught: a format with a year, a weekday or a zone label, none of which the design system shows (COMPONENT_PATTERNS section 40).
@@ -25,5 +25,20 @@ describe('formatInstant', () => {
   // Break caught: an instant that is not one being drawn as "Invalid Date" or as the epoch.
   it.each([['not a time'], [''], ['2026-13-40T99:00:00Z']])('says nothing for %j', (text) => {
     expect(formatInstant(text)).toBeUndefined();
+  });
+});
+
+describe('todayText', () => {
+  // Break caught: a day taken from the machine's zone, or the instant's UTC date read where Accra is already (or still) on another day.
+  it('is the day in Accra, which is UTC+0 all year, whatever the machine is set to', () => {
+    expect(BUSINESS_TIME_ZONE).toBe('Africa/Accra');
+    expect(todayText(new Date('2026-10-28T23:59:59Z'))).toBe('2026-10-28');
+    expect(todayText(new Date('2026-10-29T00:00:00Z'))).toBe('2026-10-29');
+    expect(todayText(new Date('2027-01-01T00:00:00Z'))).toBe('2027-01-01');
+  });
+
+  // Break caught: a month or a day written without its zero, which is not the shape the page and the API hold.
+  it('writes the month and the day with two digits', () => {
+    expect(todayText(new Date('2026-02-03T12:00:00Z'))).toBe('2026-02-03');
   });
 });

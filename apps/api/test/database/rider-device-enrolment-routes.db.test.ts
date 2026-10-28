@@ -643,7 +643,7 @@ describe('completeRiderDeviceEnrolment: evidence the verifier rejected (AC-SLICE
     });
   });
 
-  // Break caught (AC-62 to -66): a failure class answered differently, the cause class lost from the ledger or told to the caller, a refusal
+  // Break caught (AC-SLICE-000-62, -63, -64, -65 and -66): a failure class answered differently, the cause class lost from the ledger or told to the caller, a refusal
   // that leaves a device, a spent grant or a PIN, or evidence that cannot be tried again with the same grant.
   it.each(ATTESTATION_INTEGRITY_CAUSES.map((cause) => [cause] as const))(
     'refuses evidence that fails at %s with DEVICE_INTEGRITY_FAILED, records the cause class and creates and consumes nothing',

@@ -1166,6 +1166,41 @@ the status pictures.
 
 ---
 
+## 24a. Interaction primitives
+
+Some behaviour has no native element that does it the same way in every browser: a calendar, a menu, a searchable list. For that, and
+for nothing a native element can do, the portal uses **React Aria Components** (Adobe's `react-aria-components`, Apache-2.0, an exact
+pin). It gives **behaviour** (keys, focus, names for assistive technology, positioning) and **no appearance**: the look is the portal's
+alone.
+
+**Decided (Product Owner, 28 October 2026).** It was chosen after the same screen was built with React Aria Components, Ant Design 6 and
+Mantine 9 and run under the portal's content-security policy (no inline style). The other two bring a look and a token system of their own,
+which BRAND_FOUNDATION §14 does not let a library impose; under that policy Ant Design drew nothing of its theme (it needs a nonce on every
+response of a static front, and three violations remained even then) and Mantine lost the portal's colours. Material UI was considered and
+not built. The two builds were scratch work and are not kept in the repository; [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026) records what each did.
+
+- **One door.** Only the components of `apps/ops-web/src/components/ui/` import the library, `react-aria`, `react-stately`, the
+  `@react-aria`, `@react-stately` and `@react-types` packages and `@internationalized/*` (a test and a lint rule say so). A page uses a
+  component of the portal, whose properties are the portal's own, and never a type, a date object or a styling hook of the library.
+- **Native first.** A native element is used wherever it does the job (button, input, select, `<dialog>`, table). The library is for what
+  none can do, and a component of it is built when a screen needs it (COMPONENT_PATTERNS §37), never as a catalogue.
+- **One look.** A component draws itself from `tokens.css` alone, as every component does (the token guard applies to it), takes the global
+  focus ring of `base.css` on every part that takes focus, keeps every part a pointer can press at least 24px (WCAG 2.2 target size; the
+  date field's buttons are 2rem, its parts 1.875rem) and its sizes in rem, and has forced-colours and reduced-motion rules of its own. The library's states reach the stylesheet as `data-*` attributes; the component's own states are classes.
+- **No inline style.** The first time a pressable thing mounts, the library inserts one `<style>` into the page, which a policy without
+  inline styles refuses. It does not when an element with its id exists: `index.html` has one, and the same rule is in `base.css`. A test
+  holds the rule to the installed library's, and a browser test serves a production build of the showcase under the strict policy and
+  requires no violation.
+- **Licences.** The licence of the library and of each package it brings that carries one ships with the build, byte for byte
+  (`public/licenses/`, held by a build test), and a test holds the list of those packages to the lockfile. Two carry none and are named in
+  the test: `client-only` (an empty module) and `tslib` (0BSD, which asks for no notice).
+- **Dates.** A date crosses into and out of a component as the text `YYYY-MM-DD`, as the API carries a calendar date. It is entered and
+  shown day, month, year, with the week from Monday and English month names, **fixed by the portal and not taken from the browser**
+  (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and
+  03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
+
+---
+
 ## 25. Logo inside product UI
 
 The logo belongs primarily in:
@@ -1259,7 +1294,6 @@ The first Melarc UI-foundation implementation should remain small, and each item
 - toast architecture;
 - dropdown/menu system;
 - tabs abstraction;
-- date picker;
 - command palette;
 - charts;
 - complex navigation variants;
@@ -1429,6 +1463,8 @@ This document does **not** approve:
 - another component workshop;
 - CSS Modules;
 - CSS-in-JS;
+- ~~a library for behaviour a native element lacks~~ (decided on 28 October 2026: React Aria Components, §24a; Ant Design and Mantine were
+  built and run for it and Material UI was considered, and React Aria Components was chosen over them);
 - ~~a specific icon library~~ (decided on 25 October 2026: Lucide, §24).
 
 Those should be selected based on the actual web implementation and project constraints.
@@ -1516,6 +1552,8 @@ Each pattern should eventually document:
 | The authenticated shell's navigation: a top band or a side menu (§13.1, §22) | **DECIDED** 25 October 2026 (Product Owner, with a reference screenshot): a collapsible **side menu** on Ink with an account card; the Ops Portal is an application, not a website |
 | Layout of the pre-sign-in screens (§13.1, §13.1a) | **DECIDED** 25 October 2026 (Product Owner): a **split screen**, photography beside the form; the photographs are theirs (`design/images`), their licence is theirs to confirm |
 | Icon family (§24) | **DECIDED** 25 October 2026 (Product Owner): **Lucide**, through one registry; IconButton is built |
+| Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field is its first component |
+| Date entry and display (§24a; COMPONENT_PATTERNS §22a) | **DECIDED** 28 October 2026 (Product Owner): day, month, year, week from Monday, English; fixed by the portal and not the browser's; "today" is Accra's |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |
 

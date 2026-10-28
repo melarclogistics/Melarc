@@ -1,6 +1,7 @@
-import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import './dialog.css';
+import { DialogContainer } from './dialog-container';
 
 export interface DialogProps {
   readonly open: boolean;
@@ -49,7 +50,13 @@ export function Dialog({
 }: DialogProps) {
   const titleId = useId();
   const descriptionId = useId();
-  const element = useRef<HTMLDialogElement>(null);
+  const element = useRef<HTMLDialogElement | null>(null);
+  // The element is also state, so that what is drawn inside the dialog (a calendar that opens over it) can be drawn into it.
+  const [host, setHost] = useState<HTMLDialogElement | null>(null);
+  const attach = useCallback((node: HTMLDialogElement | null) => {
+    element.current = node;
+    setHost(node);
+  }, []);
   const latest = useRef({ open, onRequestClose });
   /** How many `close` events are still to come from closes this component made itself: a browser queues the event, and it may arrive after the dialog was opened again. */
   const ownCloses = useRef(0);
@@ -77,7 +84,7 @@ export function Dialog({
 
   return (
     <dialog
-      ref={element}
+      ref={attach}
       className="ui-dialog"
       role={role === 'alertdialog' ? 'alertdialog' : undefined}
       aria-labelledby={titleId}
@@ -106,17 +113,19 @@ export function Dialog({
       }}
     >
       {open ? (
-        <div className="ui-dialog__panel">
-          <h2 id={titleId} className="ui-dialog__title">
-            {title}
-          </h2>
-          {description === undefined ? null : (
-            <div id={descriptionId} className="ui-dialog__description">
-              {description}
-            </div>
-          )}
-          {children}
-        </div>
+        <DialogContainer value={host}>
+          <div className="ui-dialog__panel">
+            <h2 id={titleId} className="ui-dialog__title">
+              {title}
+            </h2>
+            {description === undefined ? null : (
+              <div id={descriptionId} className="ui-dialog__description">
+                {description}
+              </div>
+            )}
+            {children}
+          </div>
+        </DialogContainer>
       ) : null}
     </dialog>
   );

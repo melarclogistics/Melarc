@@ -30,7 +30,8 @@ import type { TlsMaterial } from './tls-material.ts';
  */
 
 /**
- * The policy of the shell's compatibility baseline (`apps/ops-web/test/browser/shell.spec.ts`, `STRICT_POLICY`): nothing inline,
+ * The policy of the shell's compatibility baseline (`apps/ops-web/test/browser/support/strict-policy.ts`, `STRICT_POLICY`; a test of
+ * this folder holds the two equal): nothing inline,
  * no eval, nothing from another origin, no framing. The shell is held to work under it, so the front can send it for real.
  */
 export const CONTENT_SECURITY_POLICY = [

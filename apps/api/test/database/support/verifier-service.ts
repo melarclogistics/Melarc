@@ -61,6 +61,8 @@ export interface VerifierSettings {
 export interface RunningVerifier {
   /** The base URL the API is given (`ATTESTATION_VERIFIER_URL`). */
   readonly url: string;
+  /** The file of the accepted roots the service was given, which it reads again within a minute of its changing. */
+  readonly rootsFile: string;
   /** What the service has printed so far, for the message of a failure. */
   output(): string;
   stop(): Promise<void>;
@@ -142,6 +144,14 @@ async function ready(port: number, child: ChildProcess, output: () => string): P
   throw new Error(`The verifier was not READY within 90 seconds:\n${output()}`);
 }
 
+/** Every service started and not yet stopped: a hook that timed out while one was starting never received it, and stops it from here. */
+const alive = new Set<() => Promise<void>>();
+
+/** Stops every verifier service this process started that is still running, each in spite of the others. */
+export async function stopEveryVerifier(): Promise<void> {
+  await Promise.allSettled([...alive].map((stop) => stop()));
+}
+
 export async function startVerifierService(settings: VerifierSettings): Promise<RunningVerifier> {
   ensureInstalled();
   const directory = mkdtempSync(join(tmpdir(), 'melarc-verifier-test-'));
@@ -198,7 +208,7 @@ export async function startVerifierService(settings: VerifierSettings): Promise<
 
   // Read afresh each time: the process exits while the stop waits for it.
   const running = (): boolean => child.exitCode === null;
-  const stop = async (): Promise<void> => {
+  const stopOnce = async (): Promise<void> => {
     if (running()) {
       const ended = new Promise<void>((done) =>
         child.once('exit', () => {
@@ -214,13 +224,22 @@ export async function startVerifierService(settings: VerifierSettings): Promise<
         done();
       }),
     );
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   };
+  let stopping: Promise<void> | undefined;
+  const stop = (): Promise<void> => {
+    stopping ??= stopOnce().finally(() => {
+      alive.delete(stop);
+    });
+    return stopping;
+  };
+  // Known to the module from the moment it is spawned, so that a hook that gave up waiting for it still finds it to stop.
+  alive.add(stop);
   try {
     await ready(port, child, () => printed);
   } catch (failure) {
     await stop();
     throw failure;
   }
-  return { url: `http://127.0.0.1:${String(port)}`, output: () => printed, stop };
+  return { url: `http://127.0.0.1:${String(port)}`, rootsFile, output: () => printed, stop };
 }

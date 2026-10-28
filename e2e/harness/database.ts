@@ -231,6 +231,23 @@ export async function addVendorFixture(database: string): Promise<void> {
   }
 }
 
+/**
+ * Writes the demonstration rider of MIGRATION_AND_SEEDING.md section 4a with the real `db:seed --rider-fixture`, as an operator runs it
+ * (S0.53): one `ACTIVE` rider at the first seeded hub with no PIN and no device. The journeys of rows 7, 8, 9, 11 and 13 register its
+ * handset from the Ops screens (S0.62).
+ */
+export async function addRiderFixture(database: string): Promise<void> {
+  const printed = oneLineOfJson(
+    await runDatabaseTool(['rider-fixture', harnessName(database, 'rider-fixture')]),
+    'rider-fixture',
+  );
+  if (printed.riderFixture !== database) {
+    throw new Error(
+      'The database command did not say it wrote the rider fixture to this database.',
+    );
+  }
+}
+
 /** Runs the real `bootstrap:resume` for one stranded administrator (AC-SLICE-000-93): a fresh bundle in `folder`. */
 export async function resumeAdministrator(
   database: string,
@@ -258,7 +275,9 @@ export type Arrangement =
   | readonly ['expire-mfa-challenge', workEmail: string]
   | readonly ['idle-session', workEmail: string, minutes: string]
   | readonly ['age-trusted-browsers', workEmail: string, days: string]
-  | readonly ['lapse-lock', workEmail: string];
+  | readonly ['lapse-lock', workEmail: string]
+  | readonly ['lapse-rider-challenge-window']
+  | readonly ['expire-vendor-setup-grant', accountIdentifier: string];
 
 export async function arrange(database: string, ...arrangement: Arrangement): Promise<number> {
   const [name, ...args] = arrangement;
@@ -274,15 +293,26 @@ export async function arrange(database: string, ...arrangement: Arrangement): Pr
 
 /** What no operation shows, read from the run's database: a closed list in the same module (`factors`, `sessions`, `lock`, ...). */
 export type Observation =
-  'factors' | 'sessions' | 'setup-grants' | 'lock' | 'trusted-browsers' | 'audit-codes';
+  | 'factors'
+  | 'sessions'
+  | 'setup-grants'
+  | 'lock'
+  | 'trusted-browsers'
+  | 'audit-codes'
+  // Named by the vendor account's identifier, and by the rider's phone (S0.62).
+  | 'vendor-sessions'
+  | 'vendor-lock'
+  | 'rider-sessions'
+  | 'rider-lock';
 
 export async function observe<Row extends Record<string, unknown>>(
   database: string,
   observation: Observation,
-  workEmail: string,
+  /** The staff member's work email, the vendor account's identifier, or the rider's phone, as the observation names its identity. */
+  key: string,
 ): Promise<Row[]> {
   const printed = oneLineOfJson(
-    await runDatabaseTool(['observe', harnessName(database, 'observe'), observation, workEmail]),
+    await runDatabaseTool(['observe', harnessName(database, 'observe'), observation, key]),
     `observe ${observation}`,
   );
   if (printed.observed !== observation || !Array.isArray(printed.rows)) {

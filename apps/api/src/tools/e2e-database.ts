@@ -50,8 +50,9 @@ import { runSeedCommand } from './seed/seed-command.js';
  *   arrange <name> <arrangement> <argument>...
  *                 one of the closed list in `e2e/arrangements.ts`: lets time pass for a grant, a challenge, a session or a lock,
  *                 by changing the data (there is no production time-travel switch). Fails when it changed no row.
- *   observe <name> <observation> <work email>
- *                 one of the closed list in `e2e/arrangements.ts`: reads what no operation shows. Prints { rows }.
+ *   observe <name> <observation> <key>
+ *                 one of the closed list in `e2e/arrangements.ts`: reads what no operation shows. Prints { rows }. The key names the
+ *                 identity: the staff member's work email, the vendor account's identifier, or the rider's phone, as the observation says.
  *
  * There is no sweep. A database with no connection may belong to a run that is between two steps, so nothing
  * here removes a database because it looked idle; each run removes only the one it made.
@@ -64,7 +65,7 @@ import { runSeedCommand } from './seed/seed-command.js';
  *        node dist/tools/e2e-database.js bootstrap <database> <folder> <custodian> <custodian>
  *        node dist/tools/e2e-database.js resume <database> <folder> <work email>
  *        node dist/tools/e2e-database.js arrange <database> <arrangement> <argument>...
- *        node dist/tools/e2e-database.js observe <database> <observation> <work email>
+ *        node dist/tools/e2e-database.js observe <database> <observation> <key>
  *        node dist/tools/e2e-database.js vendor-fixture <database>
  *        node dist/tools/e2e-database.js rider-fixture <database>
  *
@@ -76,7 +77,7 @@ import { runSeedCommand } from './seed/seed-command.js';
  * no secret, no browser and no grant; the journey asks the API for the setup link, as an officer would.
  */
 const USAGE =
-  'usage: node dist/tools/e2e-database.js create [--seed] | drop <database> | list | bootstrap <database> <folder> <custodian> <custodian> | resume <database> <folder> <work email> | arrange <database> <arrangement> <argument>... | observe <database> <observation> <work email> | vendor-fixture <database> | rider-fixture <database>';
+  'usage: node dist/tools/e2e-database.js create [--seed] | drop <database> | list | bootstrap <database> <folder> <custodian> <custodian> | resume <database> <folder> <work email> | arrange <database> <arrangement> <argument>... | observe <database> <observation> <key> | vendor-fixture <database> | rider-fixture <database>';
 
 /** The only names this command creates and the only names it will drop or act on. */
 const HARNESS_DATABASE = /^melarc_test_[0-9a-f]{8}$/;

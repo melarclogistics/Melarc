@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -493,5 +496,37 @@ describe('what a journey asks of the database command (S0.45)', () => {
       'factors',
       'a@x.example',
     ]);
+  });
+});
+
+describe('the closed lists the harness mirrors by hand', () => {
+  const read = (file: string): string =>
+    readFileSync(join(repositoryPaths().root, file), 'utf8').replaceAll('\r\n', '\n');
+  const keysOf = (text: string, list: string): string[] => {
+    const start = text.indexOf(`export const ${list}`);
+    const open = text.indexOf('= {', start);
+    const close = text.indexOf('\n};', open);
+    // A key is quoted when it has a hyphen (`'expire-setup-grant'`) and bare when it has none (`factors`).
+    return [...text.slice(open, close).matchAll(/^ {2}(?:'([a-z-]+)'|([a-z]+)): \{/gm)]
+      .map((m) => m[1] ?? m[2] ?? '')
+      .toSorted();
+  };
+
+  // Break caught: an arrangement or an observation added to the database command and not to the types the journeys call it by (or the other
+  // way round), which a journey would meet as an error at run time, long after the change.
+  it('names the same arrangements and observations as the database command holds', () => {
+    const api = read('apps/api/src/tools/e2e/arrangements.ts');
+    const harness = read('e2e/harness/database.ts');
+    const arrangements = [...harness.matchAll(/\| readonly \['([a-z-]+)'[,\]]/g)].map(
+      (m) => m[1] ?? '',
+    );
+    const start = harness.indexOf('export type Observation');
+    const observations = [
+      ...harness.slice(start, harness.indexOf(';', start)).matchAll(/\| '([a-z-]+)'/g),
+    ].map((m) => m[1] ?? '');
+    expect(arrangements.toSorted()).toEqual(keysOf(api, 'ARRANGEMENTS'));
+    expect(observations.toSorted()).toEqual(keysOf(api, 'OBSERVATIONS'));
+    expect(arrangements.length).toBeGreaterThanOrEqual(6);
+    expect(observations.length).toBeGreaterThanOrEqual(10);
   });
 });

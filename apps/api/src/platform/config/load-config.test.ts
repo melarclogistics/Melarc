@@ -1047,3 +1047,57 @@ describe('loadConfig: production refuses what is only for tests (DEPLOYMENT_AND_
     expect(problems).toContainEqual(expect.objectContaining({ key: material, problem: 'missing' }));
   });
 });
+
+describe('the private metrics endpoint (S0.68; DEPLOYMENT_AND_ENVIRONMENTS.md §12.5, "Metrics")', () => {
+  it('is off unless a port is set, and listens on the loopback address by default', () => {
+    expect(configFor(validEnv()).metrics).toBeUndefined();
+    expect(configFor(validEnv({ METRICS_PORT: '9464' })).metrics).toEqual({
+      host: '127.0.0.1',
+      port: 9464,
+    });
+  });
+
+  // Break caught: a secret configured for an endpoint that is not there, which reads as protection and protects nothing.
+  it('refuses a secret with no endpoint', () => {
+    expect(problemsFor(validEnv({ METRICS_SECRET: randomKey() }))).toContainEqual(
+      expect.objectContaining({ key: 'METRICS_SECRET', problem: 'invalid' }),
+    );
+  });
+
+  // Break caught: the metrics listener taking the API's own port, which would make it a route of the application after all.
+  it('refuses the API’s own port', () => {
+    expect(keysOf(problemsFor(validEnv({ HTTP_PORT: '3000', METRICS_PORT: '3000' })))).toContain(
+      'METRICS_PORT',
+    );
+  });
+
+  // Break caught: an endpoint reachable off this host that anyone who can reach the address may read.
+  it('needs a secret off the loopback address, and holds it as a secret', () => {
+    expect(problemsFor(validEnv({ METRICS_PORT: '9464', METRICS_HOST: '0.0.0.0' }))).toContainEqual(
+      expect.objectContaining({ key: 'METRICS_SECRET', problem: 'missing' }),
+    );
+    const secret = randomKey();
+    const metrics = configFor(
+      validEnv({ METRICS_PORT: '9464', METRICS_HOST: '10.0.4.7', METRICS_SECRET: secret }),
+    ).metrics;
+    expect(metrics?.host).toBe('10.0.4.7');
+    expect(metrics?.secret?.reveal()).toBe(secret);
+    expect(JSON.stringify(metrics)).not.toContain(secret);
+    for (const host of ['127.0.0.1', '127.8.9.10', 'localhost', '::1']) {
+      expect(loadConfig(validEnv({ METRICS_PORT: '9464', METRICS_HOST: host })).ok, host).toBe(
+        true,
+      );
+    }
+  });
+
+  // Break caught: a host that only looks like the loopback block (a number that is not an address, a short form a resolver reads as
+  // anything) taken for the local machine, so that an endpoint off it is served with no secret.
+  it.each(['127.999.1.1', '127.0.0.300', '127.1', '127.0.0.1.5', '0127.0.0.1'])(
+    'does not take %s for the loopback address, and asks for a secret',
+    (host) => {
+      expect(problemsFor(validEnv({ METRICS_PORT: '9464', METRICS_HOST: host }))).toContainEqual(
+        expect.objectContaining({ key: 'METRICS_SECRET', problem: 'missing' }),
+      );
+    },
+  );
+});

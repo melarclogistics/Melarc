@@ -288,6 +288,14 @@ export class ContractValidator {
     return this.operations.has(operationId);
   }
 
+  /** The codes the operation lists in `x-error-codes`, or undefined for an operation that states no list (a test's fixture). */
+  errorCodesOf(operationId: string): readonly string[] | undefined {
+    const listed = this.operations.get(operationId)?.['x-error-codes'];
+    return Array.isArray(listed)
+      ? listed.filter((code): code is string => typeof code === 'string')
+      : undefined;
+  }
+
   /** Compiles everything the operation needs now. Throws if the contract has no such operation, or a schema will not compile. */
   prepare(operationId: string): void {
     this.preparedFor(operationId);

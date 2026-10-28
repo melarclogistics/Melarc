@@ -700,7 +700,7 @@ describe('the signature is decided before the PIN is looked at (AC-SLICE-000-38,
     expect((await credentialOf(subject.rider.id))?.failed_attempt_count).toBe(0);
   });
 
-  // Break caught (AC-49): a replaced handset still able to sign in, or its record deleted instead of kept.
+  // Break caught (AC-SLICE-000-49): a replaced handset still able to sign in, or its record deleted instead of kept.
   it('refuses the old handset of a replaced device as DEVICE_PROOF_INVALID, and keeps its record as REPLACED', async () => {
     const subject = await enrolledRider(routes, hasher);
     await routes.admin.query(
@@ -726,7 +726,7 @@ describe('the signature is decided before the PIN is looked at (AC-SLICE-000-38,
     expect((await sessionsOf(subject.rider.id))[0]?.registered_device_id).toBe(replacement.id);
   });
 
-  // Break caught (AC-48): a revoked device that signs in, or is told the rider has nothing to enrol (only the PIN's holder is told).
+  // Break caught (AC-SLICE-000-48): a revoked device that signs in, or is told the rider has nothing to enrol (only the PIN's holder is told).
   it('tells a rider whose device was revoked and who has not been re-registered DEVICE_NOT_ENROLLED for the right PIN and nothing else for a wrong one', async () => {
     const subject = await enrolledRider(routes, hasher, { device: 'REVOKED' });
     const key = subject.device?.key.privateKey ?? deviceKey().privateKey;

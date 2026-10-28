@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { SESSION_PATH, stubApi } from './support/api';
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
+import { enforceStrictPolicy, STRICT_POLICY } from './support/strict-policy';
 
 /**
  * The two widths the Ops Portal specification verifies (surfaces/ops-portal.md section 11), and 320 CSS pixels, where
@@ -15,49 +16,6 @@ const VERIFIED_VIEWPORTS = [
 
 /** From this width the menu is docked at the side; below it a bar with a menu button stands in its place (side-menu.css: 48rem). */
 const DOCKED_FROM = 768;
-
-/**
- * A strict policy used only as a compatibility baseline: no inline code, no eval, nothing from another
- * origin. The policy the edge will really send is not specified yet; a shell that works under this one
- * does not force that policy to weaken script-src or style-src.
- */
-const STRICT_POLICY = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self'",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
-
-/**
- * Sends STRICT_POLICY with every response of the page and returns the violations the browser reports, which the caller
- * reads after the page has run.
- */
-async function enforceStrictPolicy(page: Page): Promise<string[]> {
-  await page.route('**/*', async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      headers: { ...response.headers(), 'content-security-policy': STRICT_POLICY },
-    });
-  });
-  const violations: string[] = [];
-  await page.exposeFunction('reportViolation', (detail: string) => {
-    violations.push(detail);
-  });
-  await page.addInitScript(() => {
-    document.addEventListener('securitypolicyviolation', (event) => {
-      void (
-        window as unknown as { reportViolation: (detail: string) => Promise<void> }
-      ).reportViolation(`${event.violatedDirective} ${event.blockedURI}`);
-    });
-  });
-  return violations;
-}
 
 test.describe('the application shell in a browser', () => {
   // Break caught: a production build that does not start, logs errors, or reaches for anything other than its own

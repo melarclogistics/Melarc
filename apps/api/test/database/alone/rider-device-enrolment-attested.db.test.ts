@@ -204,7 +204,9 @@ describe('completeRiderDeviceEnrolment against the real verifier service (AC-SLI
     await rig.stop();
   });
 
-  // Break caught (one chain for each class of evidence): the API answering other than the service decided, or a decision lost on its way
+  // Break caught (one chain for each class of evidence; AC-SLICE-000-62 a package or a signer that is not ours, -63 a chain to no accepted root
+  // or through a revoked certificate, -64 evidence for another challenge, -65 a device unlocked or not verified, -66 a key that is not the attested
+  // one): the API answering other than the service decided, or a decision lost on its way
   // (the cause class missing from the ledger, a key registered that is not the one verified, a device or a PIN left by a refusal).
   it.each(VECTORS.cases.map((each) => [each.name, each] as const))(
     'answers as the service decides for %s',

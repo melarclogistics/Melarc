@@ -5,7 +5,7 @@ import {
 import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
 
-/**
+/*
  * The closed catalogue of metrics (S0.15; OBSERVABILITY_AND_RECOVERY.md §3). A metric exists only if it is defined here, with a
  * kind and, for each label, **the closed set of values the label can take**. That is what keeps a label bounded: a label value is
  * an outcome class, a bucket, a cause, never an identifier, an address, a destination or a token, and the registry refuses a
@@ -13,9 +13,14 @@ import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/deliver
  * is added here in the same change as the code that records it, and `metric-catalogue.test.ts` holds the figures the documents
  * state to the documents.
  *
- * Nothing here is served: the private endpoint that serves them, the thresholds and the alerts are S0.68's.
+ * What serves them is the private metrics endpoint of each process (`metrics-listener.ts`, S0.68; off unless its port is configured),
+ * and the thresholds and alerts that read them are `alert-rules.ts` (the alerting tool is release gate G3).
  */
-export type MetricKind = 'counter' | 'observation';
+/**
+ * A counter and an observation are recorded by the code as things happen (`Metrics`); a **gauge** is read when the metrics are served
+ * (S0.68), from the state it describes (the age of the oldest due delivery job), and the registry refuses to record one.
+ */
+export type MetricKind = 'counter' | 'observation' | 'gauge';
 
 export interface MetricDefinition {
   readonly kind: MetricKind;
@@ -178,6 +183,19 @@ export const METRIC_DEFINITIONS = Object.freeze({
       ],
     },
     description: 'Metric samples dropped for having an unbounded name, label or value.',
+  }),
+  /**
+   * How long ago the oldest credential message that is due was queued, in seconds (retries included: the time the person it is for has
+   * waited for the link): of the jobs whose next attempt is due, or whose lease ended with no outcome, and whose credential has not
+   * expired, which are what the worker would claim next. Zero when none is due. Read by
+   * the worker's metrics endpoint from the queue at each read (S0.68); the delivery-backlog alert of OBSERVABILITY_AND_RECOVERY.md
+   * section 3 is on it. No label: the job's id is the worker log's, never a metric's.
+   */
+  credential_delivery_oldest_due_age_seconds: define({
+    kind: 'gauge',
+    labels: {},
+    description:
+      'Seconds since the oldest due credential message was queued; zero when none is due.',
   }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 

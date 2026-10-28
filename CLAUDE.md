@@ -69,7 +69,7 @@ pnpm run verifier:test
 pnpm audit --audit-level high
 ```
 
-These are the checks of CI ([ci.yml](.github/workflows/ci.yml)). `test:db` and `test:e2e` need the local database; `test:browser` and `test:e2e` need Chromium; `verifier:test` and one test of `test:db` need a JDK 21 (`JAVA_HOME`); `contract:check` needs a build. `pnpm run precheck` runs the cheap ones and the dependency audit in parallel, `pnpm run test:affected` the tests a change can reach, and `pnpm run gate` all of them once, in the order of the loop in Working rules. Setup, ports and reset are in [DEVELOPMENT.md](DEVELOPMENT.md).
+These are the checks of CI ([ci.yml](.github/workflows/ci.yml)). `test:db` and `test:e2e` need the local database; `test:browser` and `test:e2e` need Chromium; `verifier:test` and two tests of `test:db` (the attested rider enrolment and the alert rehearsal) need a JDK 21 (`JAVA_HOME`); `contract:check` needs a build. `pnpm run precheck` runs the cheap ones and the dependency audit in parallel, `pnpm run test:affected` the tests a change can reach, and `pnpm run gate` all of them once, in the order of the loop in Working rules. Setup, ports and reset are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Never
 

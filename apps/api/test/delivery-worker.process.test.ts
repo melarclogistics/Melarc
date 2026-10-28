@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -7,6 +8,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { randomKey } from '../src/test-support/config-env.js';
 import {
   DEADLINES,
+  freePort,
   killAll,
   requireBuild,
   start,
@@ -46,7 +48,12 @@ const lines = (finished: { readonly stdout: string }): Record<string, unknown>[]
 
 const messages = (finished: Finished): unknown[] => lines(finished).map((line) => line.msg);
 
-async function until(condition: () => boolean, what: string, ms = 8_000): Promise<void> {
+/** A wait for something a process prints, as long as the wait for the API to be ready: the worker starts as slowly under load (the owner's decision of 27 October 2026). */
+async function until(
+  condition: () => boolean,
+  what: string,
+  ms: number = DEADLINES.ready,
+): Promise<void> {
   const deadline = Date.now() + ms;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -167,6 +174,44 @@ describe('the delivery worker refuses to start on settings it cannot accept (S0.
   });
 });
 
+describe('the real worker’s private metrics endpoint (S0.68)', () => {
+  // Break caught: a worker that starts claiming messages with its monitoring port taken, or one that fails to start and is then left alive
+  // by the listener it did open.
+  it('stops, with exit code 1 and one fatal line, when the port of its metrics endpoint is taken', async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolveListen) => blocker.listen(0, '127.0.0.1', resolveListen));
+    const { port } = blocker.address() as { port: number };
+    try {
+      const running = start(WORKER_MAIN, env({ DELIVERY_WORKER_METRICS_PORT: String(port) }));
+
+      const finished = await running.waitForExit(DEADLINES.finish, 'did not stop by itself');
+
+      expect(finished.code).toBe(1);
+      const said = messages(finished);
+      expect(said).toContain('the metrics endpoint could not start');
+      expect(said).not.toContain('delivery worker started');
+    } finally {
+      await new Promise((resolveClose) => blocker.close(resolveClose));
+    }
+  });
+
+  // Break caught: an endpoint that answers 200 with the counters alone while the queue cannot be read, which an alert would read as a
+  // backlog of nothing. With the database away the age of the oldest due message cannot be known, and the scrape says so.
+  it('opens before it claims anything, and answers 503 while its database is away', async () => {
+    const port = await freePort();
+    const running = start(WORKER_MAIN, env({ DELIVERY_WORKER_METRICS_PORT: String(port) }));
+    await until(() => running.stdout.includes('delivery worker started'), 'the worker to start');
+
+    const response = await fetch(`http://127.0.0.1:${String(port)}/metrics`, {
+      signal: AbortSignal.timeout(DEADLINES.ready),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe('Service Unavailable');
+    expect(messages(await running.stop('SIGKILL'))).toContain('metrics endpoint listening');
+  });
+});
+
 describe('a real worker process and its stop signal (S0.18; OB-24)', () => {
   // Break caught: a stop that does not stop the lanes, or leaves the process alive, or reports a clean end it did not make. The
   // fixture signals itself, so this runs on Windows as well: process.emit reaches the same handlers.
@@ -180,7 +225,6 @@ describe('a real worker process and its stop signal (S0.18; OB-24)', () => {
     expect(said).toEqual(
       expect.arrayContaining([
         'delivery worker started',
-        'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
         'signal received',
         'delivery worker stopping',
         'delivery worker stopped',
@@ -189,6 +233,8 @@ describe('a real worker process and its stop signal (S0.18; OB-24)', () => {
     );
     expect(said.indexOf('signal received')).toBeLessThan(said.indexOf('delivery worker stopped'));
     expect(said).not.toContain('exiting now');
+    // The worker as composed reads every kind of record it is given, and does not say a reader is missing (S0.69).
+    expect(said.some((line) => String(line).includes('not built yet'))).toBe(false);
     expect(finished.stdout).not.toContain('ENV-SECRET-WORKER');
     expect(lines(finished).find((line) => line.msg === 'delivery worker started')).toMatchObject({
       service: 'melarc-delivery-worker',

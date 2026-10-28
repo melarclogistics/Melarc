@@ -213,6 +213,33 @@ describe('startup refusals', () => {
       await new Promise((resolveClose) => blocker.close(resolveClose));
     }
   });
+
+  // Break caught: a failed start that leaves the private metrics endpoint open. It is a handle of its own, so the process never ends, a
+  // restart policy never fires, and a scraper sees the target up while no API listens.
+  it('ends a failed start when the metrics endpoint is on, and leaves nothing listening on its port', async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolveListen) => blocker.listen(0, '127.0.0.1', resolveListen));
+    const { port } = blocker.address() as { port: number };
+    const metricsPort = await freePort();
+    try {
+      const result = await run(MAIN, {
+        NODE_ENV: 'production',
+        APP_ENV: 'local',
+        HTTP_PORT: String(port),
+        METRICS_PORT: String(metricsPort),
+        DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      });
+
+      expect(result.code).toBe(1);
+      expect(records(result.stderr).at(-1)).toMatchObject({
+        level: 'fatal',
+        msg: 'startup failed',
+      });
+      await expect(bounded(`http://127.0.0.1:${String(metricsPort)}/metrics`)).rejects.toThrow();
+    } finally {
+      await new Promise((resolveClose) => blocker.close(resolveClose));
+    }
+  });
 });
 
 describe('a running API process', () => {

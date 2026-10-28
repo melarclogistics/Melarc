@@ -3,6 +3,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bike,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -66,6 +67,7 @@ export const ICONS = {
   'sort-none': ArrowUpDown,
   previous: ChevronLeft,
   next: ChevronRight,
+  calendar: Calendar,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

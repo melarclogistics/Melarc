@@ -52,6 +52,11 @@ export class TestResponse {
     return this.headers.get(name);
   }
 
+  /** Every header of the answer by its lower-case name, for a test that compares two answers whole. */
+  headerEntries(): [string, string][] {
+    return [...this.headers.entries()];
+  }
+
   json(): unknown {
     return JSON.parse(this.text);
   }

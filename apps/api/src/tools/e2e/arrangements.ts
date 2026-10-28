@@ -53,6 +53,15 @@ export interface Arrangement {
 }
 
 const IDENTITY = `(select id from staff_identity where work_email_canonical = $1)`;
+const VENDOR_ACCOUNT = `(select id from vendor_account where account_identifier = $1)`;
+
+/** A vendor account's identifier: eight characters of its alphabet (SECURITY_DESIGN.md section 13.7a). */
+function accountIdentifier(value: string | undefined): string {
+  const text = value ?? '';
+  if (!/^[2-9A-HJKMNP-Z]{8}$/.test(text))
+    throw new Error('the account identifier is eight characters of its alphabet');
+  return text;
+}
 
 /**
  * Runs `work` with a guard trigger of `table` switched off, and switches it on again whatever happened. The tables guard their own
@@ -95,6 +104,29 @@ export const ARRANGEMENTS: Readonly<Record<string, Arrangement>> = {
             where principal_type = 'STAFF' and principal_id = ${IDENTITY}
               and purpose = $2 and state = 'PENDING' and expires_at is not null`,
           [email, purpose],
+        ),
+      );
+      return result.rowCount ?? 0;
+    },
+  },
+
+  /**
+   * The same passing of time for a vendor's pending setup grant (row 12, the vendor half; S0.62), named by the account's identifier: the
+   * one key a vendor has that is not a person's.
+   */
+  'expire-vendor-setup-grant': {
+    arguments: ['account identifier'],
+    sample: ['ABCDEFGH'],
+    async run(client, args) {
+      const identifier = accountIdentifier(args[0]);
+      const result = await withTriggerOff(client, 'setup_grant', 'all', () =>
+        client.query(
+          `update setup_grant
+              set issued_at = issued_at - interval '2 hours',
+                  expires_at = clock_timestamp() - interval '1 minute'
+            where principal_type = 'VENDOR' and principal_id = ${VENDOR_ACCOUNT}
+              and purpose = 'VENDOR_CREDENTIAL_SETUP' and state = 'PENDING' and expires_at is not null`,
+          [identifier],
         ),
       );
       return result.rowCount ?? 0;
@@ -179,6 +211,24 @@ export const ARRANGEMENTS: Readonly<Record<string, Arrangement>> = {
     },
   },
 
+  /**
+   * Lets the minute of the rider challenge limit pass (`rate_limit_rider_challenge`: a rolling 60 seconds, counted on the database's clock):
+   * every admission of that bucket is a minute and a second older. The limiter is the product's and is not gone around; only the time it
+   * counts by moves, as it would in a minute. No argument: the run's database holds the run's admissions and no others, and a run that has
+   * made none has nothing to age (it fails, as every arrangement that reaches no row does).
+   */
+  'lapse-rider-challenge-window': {
+    arguments: [],
+    sample: [],
+    async run(client) {
+      const result = await client.query(
+        `update rate_limit_admission set admitted_at = admitted_at - interval '61 seconds'
+          where bucket = 'rate_limit_rider_challenge'`,
+      );
+      return result.rowCount ?? 0;
+    },
+  },
+
   /** Lets the fifteen minutes of a lock pass: the lock has ended and the count of failures is as it was. */
   'lapse-lock': {
     arguments: ['work email'],
@@ -214,6 +264,16 @@ export async function arrange(
 
 export interface Observation {
   readonly text: string;
+  /** What names the identity: a staff member's work email unless said otherwise, a vendor account's identifier, a rider's phone. */
+  readonly key?: 'account identifier' | 'phone';
+}
+
+/** A rider's phone, as it signs in: E.164. */
+function phone(value: string | undefined): string {
+  const text = value ?? '';
+  if (!/^\+[1-9][0-9]{7,14}$/.test(text))
+    throw new Error('the phone is a number in the form of E.164');
+  return text;
 }
 
 export const OBSERVATIONS: Readonly<Record<string, Observation>> = {
@@ -251,6 +311,35 @@ export const OBSERVATIONS: Readonly<Record<string, Observation>> = {
              from trusted_browser t join staff_identity s on s.id = t.staff_identity_id
             where s.work_email_canonical = $1 order by t.created_at, t.id`,
   },
+  /** The sessions of a vendor account, by its identifier, oldest first: whether each is live and, if not, why it ended (S0.62). */
+  'vendor-sessions': {
+    key: 'account identifier',
+    text: `select (x.terminated_at is null) as live, x.termination_reason as reason
+             from session x join vendor_account a on a.id = x.principal_id
+            where x.principal_type = 'VENDOR' and a.account_identifier = $1 order by x.issued_at, x.id`,
+  },
+  /** The failed-sign-in count of a vendor account, by its identifier, and whether it is locked now (row 13, the vendor). */
+  'vendor-lock': {
+    key: 'account identifier',
+    text: `select c.failed_attempt_count as failures,
+                  (c.locked_until is not null and c.locked_until > clock_timestamp()) as locked
+             from vendor_credential c join vendor_account a on a.id = c.vendor_account_id
+            where a.account_identifier = $1`,
+  },
+  /** The sessions of a rider, by the phone it signs in with, oldest first: whether each is live and, if not, why it ended (rows 7, 9). */
+  'rider-sessions': {
+    key: 'phone',
+    text: `select (x.terminated_at is null) as live, x.termination_reason as reason
+             from session x join rider_identity r on r.id = x.principal_id
+            where x.principal_type = 'RIDER' and r.phone = $1 order by x.issued_at, x.id`,
+  },
+  /** The failed-sign-in count of a rider, by phone, and whether it is locked now (row 13, the rider). */
+  'rider-lock': {
+    key: 'phone',
+    text: `select failed_attempt_count as failures,
+                  (locked_until is not null and locked_until > clock_timestamp()) as locked
+             from rider_identity where phone = $1`,
+  },
   /** The audit events that name an identity as their actor or their object, oldest first. */
   'audit-codes': {
     text: `select e.event_code as code, e.outcome
@@ -267,6 +356,13 @@ export async function observe(
 ): Promise<readonly unknown[]> {
   const observation = Object.hasOwn(OBSERVATIONS, name) ? OBSERVATIONS[name] : undefined;
   if (observation === undefined) throw new Error(`${name} is not an observation`);
-  if (args.length !== 1) throw new Error(`${name} takes 1 argument (work email)`);
-  return (await client.query(observation.text, [workEmail(args[0])])).rows;
+  const key = observation.key ?? 'work email';
+  if (args.length !== 1) throw new Error(`${name} takes 1 argument (${key})`);
+  const value =
+    key === 'account identifier'
+      ? accountIdentifier(args[0])
+      : key === 'phone'
+        ? phone(args[0])
+        : workEmail(args[0]);
+  return (await client.query(observation.text, [value])).rows;
 }

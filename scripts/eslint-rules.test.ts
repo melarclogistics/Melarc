@@ -116,6 +116,99 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     }
   });
 
+  // Break caught: a second door to React Aria Components, so that a page draws a library's widget in the library's own terms (its types, its
+  // date objects, its styling hooks) and the one look and the one API of the design system drift (DESIGN_SYSTEM section 24a). The components
+  // of components/ui are the one place that may import it, and the date library it uses.
+  it('lets only the components of the design system import React Aria Components and its date library', () => {
+    const component = 'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx';
+    for (const code of [
+      "import { Calendar } from 'react-aria-components';",
+      "import { Button } from 'react-aria-components/Button';",
+      "import { useDatePicker } from 'react-aria';",
+      "import { useCalendarState } from 'react-stately';",
+      "import { parseDate } from '@internationalized/date';",
+      "import type { DateValue } from '@react-types/shared';",
+      "import { useButton } from '@react-aria/button';",
+    ]) {
+      assert.deepEqual(
+        messagesFor(component, code),
+        [],
+        `${code} was refused in a component of the design system`,
+      );
+      for (const path of [
+        OPS,
+        'apps/ops-web/src/components/Probe.tsx',
+        'apps/ops-web/src/platform/Probe.ts',
+        'apps/ops-web/src/showcase/Probe.tsx',
+      ]) {
+        assert.match(
+          messagesFor(path, code).join('\n'),
+          /React Aria Components/,
+          `${path} was not refused: ${code}`,
+        );
+      }
+    }
+  });
+
+  // Break caught: a door `no-restricted-imports` does not watch (it reads import declarations only): a dynamic import or a require of the
+  // library, of its date library or of the icon library, which a page could use to draw a widget in the library's terms.
+  it('refuses the library and the icon library by a dynamic import or a require, wherever it is written', () => {
+    for (const path of [OPS, 'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx']) {
+      for (const code of [
+        "const library = await import('react-aria-components');",
+        "const state = await import('react-stately/useCalendarState');",
+        "const dates = await import('@internationalized/date');",
+        "const icons = await import('lucide-react');",
+        "const library = require('react-aria');",
+        "const types = require('@react-types/shared');",
+      ]) {
+        assert.match(
+          messagesFor(path, code).join('\n'),
+          /second door/,
+          `${path} was not refused: ${code}`,
+        );
+      }
+    }
+  });
+
+  // Break caught: the net cast so wide that it catches a package that merely begins like one of them.
+  it('lets an unrelated dynamic import or require through', () => {
+    for (const code of [
+      "const view = await import('./Other');",
+      "const aria = await import('react-ariana');",
+      "const fs = require('node:fs');",
+    ]) {
+      assert.deepEqual(messagesFor(OPS, code), [], code);
+    }
+  });
+
+  // Break caught: the helpers of the DatePicker (which hand out the date library's objects) imported by a page, so that a page holds a date as
+  // an object of a library it is not to know.
+  it('keeps the date helpers of the DatePicker inside the components of the design system', () => {
+    const helpers = "import { dateFromText } from '../components/ui/date-picker/date-value';";
+    assert.match(messagesFor(OPS, helpers).join('\n'), /holds a date as text/);
+    assert.deepEqual(
+      messagesFor(
+        'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx',
+        "import { dateFromText } from './date-value';",
+      ),
+      [],
+    );
+  });
+
+  // Break caught: the permission for the design system's components taking the other restrictions with it, so that a component could reach
+  // the API or draw a second family of icons.
+  it('still refuses the other restricted imports inside the components of the design system', () => {
+    const component = 'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx';
+    for (const code of [
+      "import axios from 'axios';",
+      "import { Eye } from 'lucide-react';",
+      "const response = fetch('/api/v1/x');",
+    ]) {
+      assert.notDeepEqual(messagesFor(component, code), [], `${code} was not refused`);
+    }
+  });
+
   it('allows the ordinary code a page is made of', () => {
     const code = [
       "import { useApiClient } from '../platform/api/api-client';",

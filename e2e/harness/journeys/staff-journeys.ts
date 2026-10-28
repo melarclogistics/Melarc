@@ -52,6 +52,7 @@ import {
   selfServiceStaffRecovery,
   vendorRecovery,
 } from './recovery-journeys.ts';
+import { riderHandsets, vendorBrowsersAndSessions } from './rider-journeys.ts';
 import { introduce, worldOf } from './world.ts';
 
 /**
@@ -943,5 +944,15 @@ export const STAFF_JOURNEYS: readonly Journey[] = [
     title:
       'rows 10a and 11 (vendor), AC-15, -22 and -23: a vendor recovers its secret itself and from a Platform Admin, its browsers rotate, and its sessions end',
     run: vendorRecovery,
+  },
+  {
+    title:
+      'rows 8, 7, 9, 11 (rider) and 13 (rider): a rider’s handset is registered by a QR it reads, signs in, signs in again, is replaced in person, and five wrong PINs lock it',
+    run: riderHandsets,
+  },
+  {
+    title:
+      'rows 10b, 15 and 13 (vendor): an unregistered browser is refused as a wrong secret, the vendor manages its browsers, a Platform Admin ends its session, and a lock is told',
+    run: vendorBrowsersAndSessions,
   },
 ];

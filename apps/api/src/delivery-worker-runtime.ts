@@ -45,6 +45,7 @@ import {
 } from './platform/delivery/worker/redemption-record-reader.js';
 import { RecoveryRequestRedemptionReader } from './platform/delivery/worker/recovery-request-redemption-reader.js';
 import { SetupGrantRedemptionReader } from './platform/delivery/worker/setup-grant-redemption-reader.js';
+import { WorkerJobStore } from './platform/delivery/worker/worker-job-store.js';
 import {
   assertWorkerConfigAccepted,
   type WorkerConfig,
@@ -56,6 +57,7 @@ import { ShutdownRegistry, type CloseReport } from './platform/lifecycle/shutdow
 import { createServiceLogger } from './platform/logging/create-logger.js';
 import { BoundedMetrics } from './platform/metrics/bounded.metrics.adapter.js';
 import { labelPolicyFor } from './platform/metrics/metric-catalogue.js';
+import { startProcessMetrics } from './platform/metrics/process-metrics.js';
 
 /**
  * The composition root of the delivery worker process (S0.18): the one file that binds the production clock, the database
@@ -63,7 +65,8 @@ import { labelPolicyFor } from './platform/metrics/metric-catalogue.js';
  * is on the architecture test's list of composition-root files, so the worker's own logic (`platform/delivery/worker/`) imports no
  * adapter.
  *
- * The worker is its own process with no inbound listener. It holds the `credential_delivery` key and no other, connects as
+ * The worker is its own process, and its only inbound listener is the optional private metrics endpoint (S0.68, off unless its port is
+ * set). It holds the `credential_delivery` key and no other, connects as
  * `melarc_worker_runtime` and nothing else, and sends only through the capture adapter: **no real provider is built** (the
  * providers are external deployment inputs no document has selected; release gate G3 builds the first), so selecting one is
  * refused at composition, with the setting named, rather than stubbed.
@@ -169,10 +172,10 @@ export interface RuntimeOptions {
   /** Builds a provider; the capture adapter by default. A test gives one, to see what stands in front of it. */
   readonly providerFactory?: ProviderFactory;
   /**
-   * How the worker reads a redemption record before it sends. By default the reader of setup grants (S0.29), over the worker's own
-   * database; the reader of recovery requests arrives with S0.50, and until then a message that serves one is not confirmed and is not
-   * sent. A test gives one that answers, to see a message sent, or `UNBUILT_REDEMPTION_READER`, which confirms nothing: the worker
-   * then claims no message at all.
+   * How the worker reads a redemption record before it sends. By default the reader of setup grants (S0.29) and of recovery requests
+   * (S0.50), over the worker's own database; a record of a kind it cannot read is not confirmed and its message is not sent. A test
+   * gives one that answers, to see a message sent, or `UNBUILT_REDEMPTION_READER`, which confirms nothing: the worker then claims no
+   * message at all.
    */
   readonly redemptionReader?: RedemptionRecordReader;
   /** How often the retention cleanup runs: `RETENTION_INTERVAL_MS` by default. A test gives a short one. */
@@ -187,6 +190,11 @@ export interface DeliveryWorkerRuntime {
   readonly worker: DeliveryWorker;
   readonly logger: Logger;
   readonly metrics: BoundedMetrics;
+  /**
+   * Starts the private metrics endpoint when it is configured (S0.68), and nothing when it is not: the delivery counters, and the age of
+   * the oldest due message read from the queue at each read. Closed with the other resources on shutdown.
+   */
+  startMetrics(): Promise<void>;
   /** Begins the lanes. */
   start(): void;
   /** Stops claiming, finishes or gives back what is in flight, and closes the pool, all inside the shutdown budget. */
@@ -285,18 +293,41 @@ export function createDeliveryWorkerRuntime(
     worker,
     logger,
     metrics,
+    startMetrics: async () => {
+      // A reader of the queue over the worker's own login and capability, for the backlog gauge; it reads two timestamps and no payload.
+      const backlog = new WorkerJobStore({ database, cipher: workerCipher(config), clock });
+      const listener = await startProcessMetrics({
+        endpoint: config.metrics,
+        source: metrics,
+        gauges: async () => [
+          {
+            name: 'credential_delivery_oldest_due_age_seconds',
+            value: await backlog.oldestDueAgeSeconds(),
+          },
+        ],
+        logger,
+      });
+      if (listener === undefined) return;
+      // A shutdown that began while the endpoint was opening has already closed what was registered by then, and would never close this
+      // one: it holds the event loop open, and a clean shutdown becomes a process that does not end.
+      if (stopped !== undefined) {
+        await listener.close();
+        return;
+      }
+      registry.register({ name: 'metrics endpoint', close: () => listener.close() });
+    },
     start: () => {
+      // A worker told to stop while its endpoint was opening does not begin: the shutdown ran first.
+      if (stopped !== undefined) return;
       // An operator who sees messages queue up must find out why: the worker does not claim them, and does not spend them.
       if (redemptionReader === UNBUILT_REDEMPTION_READER) {
         logger.warn(
           'redemption record readers are not built yet: the worker claims no message, and every queued message waits unspent until they are',
         );
-      } else if (options.redemptionReader === undefined) {
-        // As composed, the worker reads setup grants. A message that serves a recovery request is not confirmed (S0.50), and is not sent.
-        logger.warn(
-          'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
-        );
       }
+      // As composed, the worker reads both kinds of redemption record, a setup grant's (S0.29) and a recovery request's (S0.50), and says
+      // nothing; it said that the second was "not built yet" until S0.69 found the line out of date. A record of a kind it cannot read is
+      // still not confirmed and its message waits unspent (`redemptionReaderOver`).
       worker.start();
     },
     shutdown: () => {

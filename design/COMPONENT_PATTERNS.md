@@ -44,7 +44,7 @@ The initial scope is:
 - Application Frame;
 - Error / Not Found presentation.
 
-Future patterns such as dialogs, drawers, menus, data grids, toasts, date pickers, tabs, command palettes, charts, and complex navigation should be added only when real product requirements demand them.
+Future patterns such as drawers, menus, data grids, toasts, tabs, command palettes, charts, and complex navigation should be added only when real product requirements demand them (the dialogs and the date field have been: §20 and §22a).
 
 ---
 
@@ -95,7 +95,9 @@ Every reusable component must:
 7. preserve server-authoritative business outcomes;
 8. be tested for behavior, not only appearance;
 9. document any important density or responsive behavior;
-10. avoid product-specific business logic unless the component is explicitly a domain pattern.
+10. avoid product-specific business logic unless the component is explicitly a domain pattern;
+11. take behaviour that no native element gives (a calendar, a menu, a searchable list) from React Aria Components, through a component of
+    `components/ui`, and never from a hand-built widget or a second library (DESIGN_SYSTEM §24a).
 
 ---
 
@@ -1253,6 +1255,72 @@ A native `<button>` named by a required `label` and drawn with one icon of the f
 
 ---
 
+## 22a. DatePicker
+
+> **Status:** IMPLEMENTING (28 October 2026: built and proven in the showcase, and reviewed the same day, with the runs recorded in [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026); ACTIVE when a screen first uses it and the Product Owner accepts its look)  
+> **Code:** `apps/ops-web/src/components/ui/date-picker/`
+
+One calendar date, typed by its day, month and year or chosen from a calendar that opens under the control. Its behaviour is React Aria
+Components' (DESIGN_SYSTEM §24a); its properties and its look are the portal's.
+
+### 22a.1 Anatomy
+
+```text
+DatePicker (inside a Field)
+├── group    named by the Field's label, described by its help and error
+│   ├── day, month, year    three editable parts, each its own stop for Tab
+│   └── calendar button
+└── calendar    a popover holding a dialog: the month, previous and next, the days
+```
+
+### 22a.2 Rules
+
+- **The value is text.** `value` and `onChange` are `YYYY-MM-DD` or `null`; `minValue` and `maxValue` are `YYYY-MM-DD` or left out. A page never
+  sees a date object of the library. Text that is not a date of the calendar (`2026-02-30`) is drawn as no date, never as another one.
+- **When the page hears.** `onChange` gives a date once it is whole and real, and `null` when every part is cleared. While a date is typed
+  the page hears each whole date on the way (the year 2, then 20, then 202, then 2026), so what it holds is checked and never trusted. A
+  person who clears one part of a whole date and leaves the control would leave the page holding the date it last heard of and the control
+  blank in a place, and would submit it: on leaving, the control tells the page `null` and starts again from none. Moving between the parts,
+  to the calendar button or into the calendar is not leaving, and neither is the window losing focus (another window, the address bar): focus comes back to a control as it was left. A read-only or disabled control, and a value that is not a date, are never reconciled. A year typed in two digits is that year (26 is the year 26, shown as 26):
+  nothing guesses a century, and the page's check refuses it. A date that does not exist (30 February) is moved to the nearest real one when
+  the person leaves, and that is given.
+- **`minValue` and `maxValue`** draw the days outside them as unavailable in the calendar, where they cannot be chosen; a date typed outside
+  them is still given. They are hints about what is worth choosing, never a rule: the page checks what it can and the server decides
+  (sections 24 and 25). Which days a pickup can be booked for (Monday to Saturday, the cut-off, the zone's days) is the page's question and
+  the server's answer, not this component's.
+- **Language and day.** Day, month, year; the week starts on Monday; English month names; fixed by the portal and not the browser's
+  (DESIGN_SYSTEM §24a). Today is the day in Accra and is told by more than colour: bold, with a bar under the number. (A screen reader's word
+  "today" is the library's and follows the machine's zone: a known edge for a machine outside Ghana.)
+- **Inside a Field** it is named by the Field's label (`aria-labelledby`, because the control is not one labelable element; the Field
+  exposes its label's id), described by its help and error, invalid when the Field has an error (a 2px danger border, with the Field's icon
+  and message, so the red is never alone) and required when the Field says so. On its own it needs `aria-label`.
+- **States.** Empty (it shows `dd`, `mm` and `yyyy`), filled, focused (the global ring, on the part, the button or the day that has focus),
+  invalid, read-only (legible and focusable, no calendar: its parts are not styled as disabled, and its calendar button is, since it does nothing) and disabled (not focusable, no calendar). A day is today,
+  selected (the fill of Primary and bold, so not by colour alone; the system's highlight under forced colours), hovered or unavailable.
+- **Keys** (the library's): Tab walks the parts and the button; digits type and move to the next part; the arrows step a part; Backspace
+  takes a digit; Enter or Space on the button opens the calendar, which opens on the date, or on today; the arrows move by day and by week,
+  Page Up and Page Down by month; Enter chooses and closes and focus returns to the button; Escape closes and changes nothing.
+- **In a modal dialog** the calendar is drawn into the dialog (the page behind a modal dialog is inert, and the top layer is above the body): `Dialog` gives its element to what it holds, and the dialog lets an open calendar overhang its edge. The library marks the prop that sets the container deprecated; the use of it is the one noted in the code.
+- **A label** that is not one element's (a date is three parts) leads to the first part when it is clicked, as a label leads to an input.
+- **Size and reflow.** The control is at least `control.height.md` tall; the calendar button and the two month buttons are at least 2rem
+  square; a day is a square of 2.5rem that shrinks, if it must, until seven fit across the screen, so that the week fits at 320px;
+  everything is in rem, so enlarged text grows it; the calendar scrolls inside itself and never pushes the page sideways (WCAG 1.4.4 and
+  1.4.10).
+- **Motion.** The calendar fades in over `motion.normal`; under reduced motion nothing moves.
+- **Not here:** a range of dates, a time of day, a date with a time (section 37), and a native `<input type="date">` anywhere in the
+  application (a test fails on one).
+
+### 22a.3 Proof
+
+`DatePicker.test.tsx` (the keys the section names, but for Home and End, and each state, in jsdom), `test/browser/date-picker.spec.ts` (the keyboard,
+the focus ring on each stop, WCAG 2.2 with the calendar closed and open and with an empty part focused, the looks that only the stylesheet
+gives, the calendar inside a modal dialog, 320px, 200% text, forced colours and reduced motion, in three engines; forced colours in Chromium
+and Firefox only, since Playwright cannot emulate them in WebKit) and
+`test/browser/date-picker-policy.spec.ts` (a production build of the showcase under the strict content-security policy: no violation). The
+recorded keyboard-only and screen-reader passes, as for every component, are not part of this.
+
+---
+
 ## 23. Component composition rules
 
 Prefer composition over large option-heavy component APIs.
@@ -1684,7 +1752,7 @@ It simply records patterns intentionally **not** built during the initial founda
 | Tabs | first real tabbed workflow |
 | DropdownMenu | first real menu requirement |
 | Drawer | first real side-panel workflow |
-| Date/Time control | first date/time entry requirement |
+| Time of day, a range of dates | the first requirement for either (a single date is section 22a) |
 | QrCode (one-time credential display) | the rider device-enrolment screen: a small, reviewed, exactly pinned encoder drawing inline SVG under the content-security policy (no data URI), shown from memory only and cleared on navigation, expiry and completion, never rendered as text; proven by decoding the rendered output with an independent test-only decoder (`SECURITY_DESIGN.md` §13.6, `surfaces/ops-portal.md`) |
 | DataGrid | only if table requirements exceed a simpler table pattern |
 
@@ -1739,6 +1807,7 @@ Do not use this file to override a product contract.
 | NeutralFrame (`AppFrame`) | ACTIVE | Yes |
 | AuthenticatedOpsShell, SideMenu | ACTIVE | Identity implementation (S0.42; a side menu since 25 October 2026) |
 | Icon, IconButton | ACTIVE | 25 October 2026 |
+| DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); no screen uses it yet |
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |
@@ -1919,6 +1988,16 @@ the shell and the split screen against the production build, the side menu and i
 | AuthSplitLayout, AuthArt | `app/pages/pre-sign-in/AuthSplitLayout.tsx`, `components/auth-art/` | §12.7. Decorative photography, loaded lazily, one table for which photograph goes with which screen (`auth-art.ts`) |
 | Favicon | `public/favicon.svg`, `index.html` | The approved symbol, the browser-tab icon and nothing else |
 
+
+### 42.9 What the Product Owner's decision of 28 October 2026 added (React Aria Components, the date field)
+
+Paths are under `apps/ops-web/src/`. The date field has jsdom tests and a browser pass in three engines in the showcase, and a production
+build of the showcase is served under the strict content-security policy (`test/browser/date-picker-policy.spec.ts`).
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| DatePicker | `components/ui/date-picker/` (`DatePicker.tsx`, `date-value.ts`, `date-picker.css`) | §22a. The behaviour is the library's, behind the one door of DESIGN_SYSTEM §24a; the value is the text `YYYY-MM-DD`; the language is fixed (day, month, year, Monday first, English); today is Accra's (`platform/time`). Not built: a range of dates, a time of day |
+| The dialog's container | `components/ui/dialog/dialog-container.ts` | The element a modal dialog is, given to what it holds, so that a calendar is drawn into it |
 
 ---
 

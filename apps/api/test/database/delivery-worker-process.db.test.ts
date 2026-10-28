@@ -18,10 +18,12 @@ import { PostgresDeliveryQueue } from '../../src/platform/delivery/postgres.deli
 import { localKeys } from '../../src/test-support/key-config.js';
 import {
   DEADLINES,
+  freePort,
   killAll,
   requireBuild,
   start,
   WORKER_FIXTURE,
+  WORKER_MAIN,
   type Finished,
 } from '../support/api-process.js';
 import { openAdmin, type Admin } from './support/admin.js';
@@ -313,9 +315,7 @@ describe('a worker process that erases expired credential material while it runs
     // What was sent is in the capture sink, which is outside the checkout and clear by design; the process's own output holds none of it.
     expect(finished.stdout).not.toContain(issued.token);
     expect(finished.stdout).not.toContain('composed.recipient@example.test');
-    expect(said(finished)).toContain(
-      'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
-    );
+    expect(said(finished).some((line) => String(line).includes('not built yet'))).toBe(false);
   });
 });
 
@@ -392,5 +392,33 @@ describe('a worker process stopped with a message in flight (S0.18; OB-24)', () 
     const finished = await running.waitForExit(DEADLINES.stop, 'did not end after SIGTERM');
 
     await expectTheMessageGivenBack(finished, id);
+  });
+});
+
+describe('the real worker serves its private metrics endpoint against its database (S0.68)', () => {
+  // Break caught: an endpoint wired to a gauge that is not the queue's. With nothing due, the age of the oldest due message is 0 and the
+  // process serves it under the name the catalogue gives it. The ages above zero are read in alone/alert-rehearsal.db.test.ts, over a
+  // composition of the same store.
+  it('answers GET /metrics with the backlog gauge at zero while nothing is due, and is gone with the process', async () => {
+    const port = await freePort();
+    const url = `http://127.0.0.1:${String(port)}/metrics`;
+    const running = start(WORKER_MAIN, {
+      ...workerEnvironment(),
+      DELIVERY_WORKER_METRICS_PORT: String(port),
+    });
+    const scrape = async (): Promise<Response | undefined> => {
+      try {
+        return await fetch(url, { signal: AbortSignal.timeout(DEADLINES.request) });
+      } catch {
+        return undefined;
+      }
+    };
+    await until(async () => (await scrape())?.status === 200, 'the endpoint to answer');
+
+    const text = await (await fetch(url)).text();
+    expect(text).toMatch(/^credential_delivery_oldest_due_age_seconds 0$/m);
+
+    await running.stop('SIGKILL');
+    await expect(fetch(url, { signal: AbortSignal.timeout(DEADLINES.request) })).rejects.toThrow();
   });
 });

@@ -15,11 +15,13 @@ import { FrameErrorPage, RouteErrorPage } from './pages/RouteErrorPage';
 
 /**
  * The development-only component showcase (COMPONENT_PATTERNS section 27). `import.meta.env.DEV` is replaced by
- * `false` in a production build, so the route and the dynamic import behind it are removed, not merely hidden;
- * test/build.test.ts proves the built files hold no trace of it.
+ * `false` in a production build, and `import.meta.env.MODE` by `"production"`, so the route and the dynamic import behind it are
+ * removed, not merely hidden; test/build.test.ts proves the built files hold no trace of it. The one other build that holds the
+ * showcase is `vite build --mode showcase`, made by the browser tests (playwright.config.ts) so that the real components can be run
+ * as a production build, under the strict content-security policy, in `test/browser/date-picker-policy.spec.ts`. It is never deployed.
  */
 function showcaseRoutes(): RouteObject[] {
-  if (!import.meta.env.DEV) return [];
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'showcase') return [];
   return [
     {
       path: '__showcase',

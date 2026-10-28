@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test';
 
 import { VENDOR_ORIGIN } from '../api-environment.ts';
-import { addVendorFixture, observe } from '../database.ts';
+import { addVendorFixture, arrange, observe } from '../database.ts';
 import {
   approveProfile,
   createProfile,
@@ -238,6 +238,30 @@ export async function vendorRecovery({ page, context, stack }: JourneyContext): 
     page.getByText(/A new setup link is on its way to its registered email/),
   ).toBeVisible();
 
+  // Row 12 (the vendor): the first link lapses unused, the officer sends another with a reason, and the first is dead for good.
+  const lapsed = await world.inbox.next({ to: FIXTURE_EMAIL });
+  expect(lapsed.accountIdentifier).toBe(identifier);
+  await arrange(stack.database.name, 'expire-vendor-setup-grant', identifier);
+  const tooLate = await new VendorBrowser(api).send(
+    'POST',
+    '/api/v1/auth/vendor/setup/credential',
+    {
+      setup_token: tokenOf(lapsed.link),
+      secret: 'a secret set too late for its link',
+    },
+  );
+  expect([tooLate.status, (tooLate.body as { code?: string }).code]).toEqual([
+    422,
+    'SETUP_GRANT_INVALID',
+  ]);
+  await page.reload();
+  await expectHeading(page, identifier);
+  await page.getByRole('button', { name: 'Send a new setup link' }).click();
+  await giveReasonAndConfirm(page, 'Send new link');
+  await expect(
+    page.getByText(/A new setup link is on its way to its registered email/),
+  ).toBeVisible();
+
   // The vendor sets its secret from the message, which carries the identifier beside the link, and signs in.
   const setup = await world.inbox.next({ to: FIXTURE_EMAIL });
   expect(setup.accountIdentifier).toBe(identifier);
@@ -250,6 +274,34 @@ export async function vendorRecovery({ page, context, stack }: JourneyContext): 
   });
   expect([established.status, established.setCookies]).toEqual([200, ['melarc_vendor_device']]);
   expect((await first.signIn(identifier, secret)).status).toBe(200);
+  // The lapsed link stays dead after the new one was used (row 12), and an account that holds a secret is not set up again: it is
+  // recovered (AC-SLICE-000-120, the vendor): the page no longer offers a re-issue, and the server refuses one.
+  const stillDead = await new VendorBrowser(api).send(
+    'POST',
+    '/api/v1/auth/vendor/setup/credential',
+    {
+      setup_token: tokenOf(lapsed.link),
+      secret: 'a secret set too late for its link',
+    },
+  );
+  expect((stillDead.body as { code?: string }).code).toBe('SETUP_GRANT_INVALID');
+  await page.reload();
+  await expectHeading(page, identifier);
+  await expect(page.getByRole('button', { name: 'Send a new setup link' })).toHaveCount(0);
+  const readAgain = await fromPage(page, 'GET', `/api/v1/ops/vendors/${fixtureId}`);
+  const notAgain = await fromPage(
+    page,
+    'POST',
+    `/api/v1/ops/vendors/${fixtureId}/credential/setup/reissue`,
+    {
+      body: { reason_code: await reasonCodeFor(page, 'reissueVendorCredentialSetup') },
+      headers: { 'if-match': readAgain.etag ?? '' },
+    },
+  );
+  expect([notAgain.status, (notAgain.body as { code?: string }).code]).toEqual([
+    409,
+    'STATE_CONFLICT',
+  ]);
 
   // Row 10a: the vendor asks for recovery itself, and a browser of its own completes it.
   const asked = await new VendorBrowser(api).send('POST', '/api/v1/auth/recovery/request', {
@@ -329,4 +381,6 @@ export async function vendorRecovery({ page, context, stack }: JourneyContext): 
     'PERMISSION_DENIED',
   ]);
   await signOut(page);
+  // The vendor's story goes on in the next journey (rows 10b, 13 and 15) from the browser it last signed in from.
+  world.vendor = { identifier, accountId: fixtureId, secret: again, browser: third };
 }

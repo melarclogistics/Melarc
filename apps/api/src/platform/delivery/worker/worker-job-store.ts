@@ -145,6 +145,27 @@ export class WorkerJobStore {
     return this.#open(row);
   }
 
+  /**
+   * How long ago the oldest message that is due was queued, in seconds on the database's clock, and zero when none is due (S0.68; the
+   * delivery-backlog alert of OBSERVABILITY_AND_RECOVERY.md section 3, "the oldest due `CredentialDeliveryJob` is older than the Queue
+   * thresholds"). Its age is the time since it was queued, which is how long the person it is for has been waiting for the link,
+   * retries included. "Due" is exactly what `claim` takes: a queued or retryable job whose next attempt has come, or a leased one whose
+   * lease ended with no outcome, of a credential that has not expired. It reads timestamps of the rows it counts and nothing else: no
+   * id, no destination, no payload.
+   */
+  async oldestDueAgeSeconds(): Promise<number> {
+    const age = await this.#database.transactionWithContext(this.#context(), async (tx) => {
+      const result = await tx.execute(sql`
+        select coalesce(extract(epoch from clock_timestamp() - min(created_at)), 0)::float8 as age
+          from credential_delivery_job
+         where expires_at > clock_timestamp()
+           and ((state in ('QUEUED', 'RETRYABLE') and next_attempt_at <= clock_timestamp())
+             or (state = 'LEASED' and lease_expires_at <= clock_timestamp()))`);
+      return (result.rows[0] as { age: number } | undefined)?.age ?? 0;
+    });
+    return Math.max(0, age);
+  }
+
   async recordOutcome(leased: LeasedJob, outcome: RecordedOutcome): Promise<JobEnd> {
     const statement = this.#outcomeStatement(leased, outcome);
     const rows = await this.#database.transactionWithContext(this.#context(), async (tx) => {

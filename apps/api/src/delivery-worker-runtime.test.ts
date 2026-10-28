@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import type { DeliveryProvider } from './platform/auth/ports/delivery-provider.port.js';
@@ -452,10 +453,11 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     expect(text).toContain('melarc-delivery-worker');
   });
 
-  // Break caught (S0.29, OB-119): the worker as composed still unable to confirm a setup grant, so that no message is ever sent; or
-  // saying nothing about the one kind of record it still cannot read, which an operator who sees a recovery message wait must be able
-  // to find out. The database in this test is not reachable, so a worker that claims says so ("delivery claim failed").
-  it('as composed reads setup grants and claims, and says that the reader of recovery requests is not built yet', async () => {
+  // Break caught (S0.29, OB-119; S0.69): the worker as composed still unable to confirm a setup grant, so that no message is ever sent;
+  // or telling an operator that a kind of record it does read (a recovery request's, since S0.50) is not built, which sends them looking
+  // for a fault in mail that is going out. The database in this test is not reachable, so a worker that claims says so ("delivery claim
+  // failed").
+  it('as composed reads setup grants and recovery requests, claims, and says no reader is missing', async () => {
     const lines: string[] = [];
     const runtime = createDeliveryWorkerRuntime(
       configFor({ DELIVERY_WORKER_POLL_INTERVAL_MS: '100' }),
@@ -470,9 +472,7 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     expect(outcome).toBe('clean');
     expect(text).toContain('delivery claim failed');
     expect(text).not.toContain('redemption record readers are not built');
-    expect(text).toContain(
-      'the redemption record reader of recovery requests is not built yet: a message that serves one waits unspent until it is',
-    );
+    expect(text).not.toContain('not built yet');
     expect(text).not.toContain('SENTINEL-DB-PASSWORD');
   });
 
@@ -512,5 +512,65 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     expect(first).toBe('clean');
     expect(second).toBe('clean');
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+/** A port that nothing listens on now: one is asked for and given back. */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address() as { port: number };
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+const scrape = (port: number): Promise<Response> =>
+  fetch(`http://127.0.0.1:${String(port)}/metrics`, { signal: AbortSignal.timeout(5_000) });
+
+describe('the delivery worker’s private metrics endpoint (S0.68)', () => {
+  // Break caught: an endpoint composed with no gauge, which would serve a backlog of nothing as healthy: with the database away the age of
+  // the oldest due message cannot be read, so a scrape must say so (503) and not answer 200 with the counters alone.
+  it('serves the port it was given, reads the backlog gauge at each scrape, and is closed by the shutdown', async () => {
+    const port = await freePort();
+    const runtime = createDeliveryWorkerRuntime(
+      configFor({ DELIVERY_WORKER_METRICS_PORT: String(port) }),
+      { destination: { write: () => undefined } },
+    );
+    await runtime.startMetrics();
+
+    expect((await scrape(port)).status).toBe(503);
+    expect(await runtime.shutdown()).toBe('clean');
+    await expect(scrape(port)).rejects.toThrow();
+  });
+
+  it('opens no port when none is configured', async () => {
+    const runtime = createDeliveryWorkerRuntime(configFor(), {
+      destination: { write: () => undefined },
+    });
+
+    await runtime.startMetrics();
+
+    expect(await runtime.shutdown()).toBe('clean');
+  });
+
+  // Break caught: a shutdown that began while the endpoint was opening, after which the endpoint registers on a registry that has already
+  // been emptied and is never closed (a process that does not end after a clean shutdown), and a worker that begins its lanes after it
+  // was told to stop.
+  it('closes an endpoint that opened while the worker was being told to stop, and begins no lane after it', async () => {
+    const port = await freePort();
+    const runtime = createDeliveryWorkerRuntime(
+      configFor({ DELIVERY_WORKER_METRICS_PORT: String(port) }),
+      { destination: { write: () => undefined } },
+    );
+    const lanes = vi.spyOn(runtime.worker, 'start');
+
+    const opening = runtime.startMetrics();
+    const stopping = runtime.shutdown();
+    await opening;
+    runtime.start();
+    await stopping;
+
+    expect(lanes).not.toHaveBeenCalled();
+    await expect(scrape(port)).rejects.toThrow();
   });
 });

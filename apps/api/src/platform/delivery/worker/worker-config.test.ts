@@ -470,6 +470,7 @@ describe('the delivery worker’s configuration (S0.18)', () => {
       keyEnvName('limiter_digest', 'MATERIAL'),
       keyEnvName('password_pepper', 'MATERIAL'),
       'ATTESTATION_VERIFIER_CALLER_SECRET',
+      'METRICS_SECRET',
     ])('refuses, in staging, an environment that carries %s', (key) => {
       const env = deployed('staging', providerChannels(providerWindow()));
 
@@ -493,6 +494,9 @@ describe('the delivery worker’s configuration (S0.18)', () => {
         'DELIVERY_CAPTURE_DIRECTORY',
         'DELIVERY_PROVIDER_APPROVAL_REF',
         'DELIVERY_PROVIDER_ALLOWLIST',
+        'DELIVERY_WORKER_METRICS_HOST',
+        'DELIVERY_WORKER_METRICS_PORT',
+        'DELIVERY_WORKER_METRICS_SECRET',
       ]);
     });
   });
@@ -517,3 +521,40 @@ function providerChannels(
 function providerWindow(): Record<string, string> {
   return { DELIVERY_PROVIDER_APPROVAL_REF: 'G3-2026-001', DELIVERY_PROVIDER_ALLOWLIST: ALLOW_LIST };
 }
+
+describe('the worker’s private metrics endpoint (S0.68)', () => {
+  it('is off unless its own port is set, and then takes one more connection for its read of the queue', () => {
+    const off = loaded(workerEnv());
+    expect(off.metrics).toBeUndefined();
+    const on = loaded(workerEnv({ DELIVERY_WORKER_METRICS_PORT: '9465' }));
+    expect(on.metrics).toEqual({ host: '127.0.0.1', port: 9465 });
+    expect(on.database.poolMax).toBe(off.database.poolMax + 1);
+  });
+
+  // Break caught: the worker reading the API's port setting (the two would claim one port), a secret with no endpoint, or an
+  // endpoint off this host that anyone who reaches the address may read.
+  it('reads its own keys only, and needs a secret off the loopback address', () => {
+    expect(loaded(workerEnv({ METRICS_PORT: '9464' })).metrics).toBeUndefined();
+    expect(keysOf(workerEnv({ DELIVERY_WORKER_METRICS_SECRET: randomKey() }))).toEqual([
+      'DELIVERY_WORKER_METRICS_SECRET',
+    ]);
+    expect(
+      keysOf(
+        workerEnv({
+          DELIVERY_WORKER_METRICS_PORT: '9465',
+          DELIVERY_WORKER_METRICS_HOST: '0.0.0.0',
+        }),
+      ),
+    ).toEqual(['DELIVERY_WORKER_METRICS_SECRET']);
+    const secret = randomKey();
+    const metrics = loaded(
+      workerEnv({
+        DELIVERY_WORKER_METRICS_PORT: '9465',
+        DELIVERY_WORKER_METRICS_HOST: '0.0.0.0',
+        DELIVERY_WORKER_METRICS_SECRET: secret,
+      }),
+    ).metrics;
+    expect(metrics?.secret?.reveal()).toBe(secret);
+    expect(inspect(metrics)).not.toContain(secret);
+  });
+});
