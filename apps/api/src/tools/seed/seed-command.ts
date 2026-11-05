@@ -14,6 +14,7 @@ import { assertLocalHost } from '../database/safety.js';
 import { assertFixturesAllowed, fixturePlan } from '../fixtures/fixtures.js';
 import { riderFixturePlan } from '../fixtures/rider-fixture.js';
 import { vendorFixturePlan } from '../fixtures/vendor-fixture.js';
+import { hubConfigurationPlan } from './hub-configuration.js';
 import { referenceSeedPlan } from './reference-seed.js';
 import { openSeedTarget, type SeedTarget } from './seed-runtime.js';
 
@@ -21,7 +22,11 @@ import { openSeedTarget, type SeedTarget } from './seed-runtime.js';
  * The `db:seed` command (S0.9; MIGRATION_AND_SEEDING.md sections 4 and 5.1). It runs the seed helper as the provisioning login, the
  * one identity that holds the grants of the `seed` capability, and nothing else.
  *
- * - `db:seed` writes the reference data (`reference-seed.ts`) into an empty database. It refuses a database that has any of it.
+ * - `db:seed` writes the reference data (`reference-seed.ts`) into an empty database, then the launch hub's service zones and settings
+ *   (`hub-configuration.ts`, migration 0042). It refuses a database that has any of the reference data.
+ * - `db:seed --hub-configuration` writes the launch hub's service zones and settings alone, into a database that was seeded before
+ *   migration 0042 and so has the reference data and not these. It refuses one that has any of them. It is real reference data, not a
+ *   fixture, so production may run it.
  * - `db:seed --fixtures` writes the test-only fixtures (`tools/fixtures`) and refuses in production, before it connects.
  * - `db:seed --vendor-fixture` writes the demonstration vendor of MIGRATION_AND_SEEDING.md section 4b (S0.47), under the same refusal.
  * - `db:seed --rider-fixture` writes the demonstration riders of MIGRATION_AND_SEEDING.md section 4a (S0.53), under the same refusal.
@@ -69,28 +74,33 @@ const DEFAULTS: SeedCommandDependencies = {
   runSeed,
 };
 
-const USAGE = 'usage: db:seed [--fixtures | --vendor-fixture | --rider-fixture]';
+const USAGE =
+  'usage: db:seed [--hub-configuration | --fixtures | --vendor-fixture | --rider-fixture]';
 
-type SeedRun = 'reference' | 'fixtures' | 'vendor-fixture' | 'rider-fixture';
+type SeedRun = 'reference' | 'hub-configuration' | 'fixtures' | 'vendor-fixture' | 'rider-fixture';
 
 function parseArguments(argv: readonly string[]): SeedRun {
   if (argv.length === 0) return 'reference';
+  if (argv.length === 1 && argv[0] === '--hub-configuration') return 'hub-configuration';
   if (argv.length === 1 && argv[0] === '--fixtures') return 'fixtures';
   if (argv.length === 1 && argv[0] === '--vendor-fixture') return 'vendor-fixture';
   if (argv.length === 1 && argv[0] === '--rider-fixture') return 'rider-fixture';
   throw new CliUsageError(`unexpected arguments. ${USAGE}`);
 }
 
-function planOf(run: SeedRun): SeedPlan {
+/** The plans of a run, in the order they are applied, each in its own transaction. */
+function plansOf(run: SeedRun): SeedPlan[] {
   switch (run) {
     case 'reference':
-      return referenceSeedPlan();
+      return [referenceSeedPlan(), hubConfigurationPlan()];
+    case 'hub-configuration':
+      return [hubConfigurationPlan()];
     case 'fixtures':
-      return fixturePlan();
+      return [fixturePlan()];
     case 'vendor-fixture':
-      return vendorFixturePlan();
+      return [vendorFixturePlan()];
     case 'rider-fixture':
-      return riderFixturePlan();
+      return [riderFixturePlan()];
   }
 }
 
@@ -147,14 +157,16 @@ export async function runSeedCommand(
 ): Promise<void> {
   const run = parseArguments(argv);
   const { appEnv, url } = resolveTarget(env, dependencies);
-  // Before anything is opened: production has no way to reach the fixtures.
-  if (run !== 'reference') assertFixturesAllowed(appEnv);
+  // Before anything is opened: production has no way to reach the fixtures. The reference data and the hub configuration are real data.
+  if (run !== 'reference' && run !== 'hub-configuration') assertFixturesAllowed(appEnv);
 
   const target = dependencies.open(url);
   try {
-    const report = await dependencies.runSeed(target.database, planOf(run));
-    for (const [table, rows] of Object.entries(report)) {
-      write(`seeded ${table}: ${String(rows)} ${rows === 1 ? 'row' : 'rows'}`);
+    for (const plan of plansOf(run)) {
+      const report = await dependencies.runSeed(target.database, plan);
+      for (const [table, rows] of Object.entries(report)) {
+        write(`seeded ${table}: ${String(rows)} ${rows === 1 ? 'row' : 'rows'}`);
+      }
     }
   } finally {
     // What the run found is what is reported: a pool that would not close must not hide it (and rows already committed stay).

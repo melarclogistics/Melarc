@@ -132,18 +132,45 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
       ...on(
         ['Setting'],
         ['SELECT'],
-        'the six rate_limit_* rows (the buckets names, settings.md section 7.7) and no other row; no write (migration 0012, the Gate 2 correction, OB-102)',
+        'the six rate_limit_* rows (the buckets names, settings.md section 7.7) and the sub-ceiling that is counted beside them (provider_initiating_operation_ceiling_per_minute, migration 0073), and no other row; no write (migration 0012, the Gate 2 correction, OB-102)',
       ),
     ],
     lookups: 'A bucket and a key digest',
     returns:
       'The admitted timestamps in the window and nothing else; reads the bucket limit in its own transaction',
   },
+  configuration: {
+    identity: 'api',
+    opener:
+      'The configuration reader of platform/settings, for a server-side rule evaluated on behalf of any principal',
+    openedUnder: ['platform/settings/'],
+    tables: [
+      ...on(['HubSetting', 'ServiceZone', 'ServiceZoneAlias'], ['SELECT']),
+      ...on(
+        ['Hub'],
+        ['SELECT'],
+        'the hub the rule is evaluated for, for its name (the hub code of an operational code, MSC-DEC-202); no write (migration 0045)',
+      ),
+      ...on(
+        ['Setting'],
+        ['SELECT'],
+        'the COMPANY-scope rows (the company-wide business rules, settings.md section 7.1) and no PLATFORM row; no write (migration 0042)',
+      ),
+    ],
+    lookups: 'A hub and an instant; the company rules by key',
+    returns:
+      'The values in force at that instant with their hub, key, scope, version and value, and never a row of another hub or a PLATFORM setting',
+  },
   seed: {
     identity: 'provisioning',
     opener: 'The seed command',
     openedUnder: ['platform/database/seed/', 'tools/seed/', 'tools/fixtures/'],
     tables: [
+      ...on(
+        ['ServiceZone', 'ServiceZoneAlias', 'HubSetting'],
+        ['INSERT'],
+        'additive and idempotent, and only inside melarc.seed_hub_configuration (migration 0042): the identity holds no privilege on these tables',
+      ),
       ...on(
         [
           'Hub',
@@ -184,6 +211,53 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
       'Claims jobs from its own table by state, due time and lease, never by scanning another table',
     returns:
       'Decrypts a payload in memory for the one send and never writes the decrypted value anywhere',
+  },
+  notification: {
+    identity: 'worker',
+    opener: 'The notification lane of the delivery worker process',
+    openedUnder: ['platform/notifications/'],
+    tables: [
+      ...on(
+        ['Outbox'],
+        ['SELECT', 'UPDATE'],
+        'UPDATE of the relay bookkeeping only (state, schedule, lease, outcome); the envelope never changes',
+      ),
+      ...on(
+        ['Notification'],
+        ['SELECT', 'INSERT', 'UPDATE'],
+        'INSERT queued, held-back or feed rows only, under the leased envelope; UPDATE of state, schedule, lease, outcome, provider reference and receipt bookkeeping',
+      ),
+      ...on(
+        ['PickupRequest'],
+        ['SELECT'],
+        'the one request the envelope names, and the columns a message is made from',
+      ),
+      ...on(['AdHocSender'], ['SELECT'], 'the one sender of that request: name and number'),
+      ...on(
+        ['PickupManifest'],
+        ['SELECT'],
+        'the one manifest the envelope names (S1.21, migration 0062): its code, state, day, hub and rider, the columns the rider’s text is made from',
+      ),
+      ...on(
+        ['RiderIdentity'],
+        ['SELECT'],
+        'the one rider that manifest is given to: id and number, the number read for one send and held in memory only (migration 0062)',
+      ),
+      ...on(
+        ['CollectionHandshake'],
+        ['SELECT'],
+        'the one handshake of the request the envelope names (S1.27, migrations 0070 and 0073): its stop, direction, state, generation, key version, code length and end, the columns a code is made from, the length being the one the code was made with; never the digest, the counters or the officer’s note. The lane also executes the one operation that records a delivered code, which writes the row as the owner, and the one that gives it the number a fallback code is texted to (the vendor credential’s registered phone, for this request and while a fallback code is live; it reads neither the organisation nor the credential)',
+      ),
+      ...on(
+        ['Setting'],
+        ['SELECT'],
+        'the key and the value of the three text-message rows (sms_enabled, sms_per_number_daily_limit, sms_daily_limit) and no other row; no write (migration 0056). It no longer reads the length of a handshake code: the length is kept with the code (migration 0073)',
+      ),
+    ],
+    lookups:
+      'Leases envelopes and messages from its own tables by state, due time and lease; reads a business table only for the one aggregate the leased envelope names, by that envelope’s identifiers',
+    returns:
+      'A message is made in memory from the aggregate and its template and handed to the provider; the number and the text are written nowhere, and the table keeps a masked hint and a count digest',
   },
   bootstrap: {
     identity: 'provisioning',

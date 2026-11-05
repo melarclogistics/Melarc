@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../../app.module.js';
 import { InMemoryRateLimiter } from '../limiter/in-memory.rate-limiter.adapter.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
-import { RATE_LIMIT_BUCKETS, type RateLimiter } from '../auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS, type RateLimiter } from '../auth/ports/rate-limiter.port.js';
 import { ManualClock } from '../../test-support/manual-clock.js';
 import { startTestApp, TEST_CONFIG, type TestApp } from '../../test-support/test-app.js';
 import { PlatformModule } from '../platform.module.js';
@@ -173,7 +173,7 @@ class Root {}
 let running: TestApp | undefined;
 let clock = new ManualClock();
 
-const LIMITS = Object.fromEntries(RATE_LIMIT_BUCKETS.map((bucket) => [bucket, LIMIT_PER_MINUTE]));
+const LIMITS = Object.fromEntries(RATE_LIMIT_COUNTERS.map((bucket) => [bucket, LIMIT_PER_MINUTE]));
 
 function runtimeConfig(): AppConfig {
   return {

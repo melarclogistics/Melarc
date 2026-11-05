@@ -1,0 +1,8 @@
+/*
+ * MoneyAmount (COMPONENT_PATTERNS section 24.1): figures of one width, so that amounts compared down a column line up, and an amount that is
+ * never broken across two lines.
+ */
+.ui-money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

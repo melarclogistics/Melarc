@@ -58,6 +58,11 @@ function requestedEngines(value: string | undefined): Engine[] {
  *               the development server (strict mode), with a stand-in for the API.
  *   staff       the six signed-in identity screens (S0.44), the same two ways, with a stateful stand-in for the API.
  *   riders      the four rider screens (S0.60), the same two ways, with a stateful stand-in for the API.
+ *   pickup      the four pickup screens (S1.19), the same two ways, with a stateful stand-in for the API.
+ *   manifests   the four manifest screens (S1.25), the same two ways, with a stateful stand-in for the API (its custody half is written from
+ *               the contract and answered by the stand-in).
+ *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
+ *               answers that never carry them.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -160,6 +165,45 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice, which a page that holds a credential must survive).
       name: `riders-dev-${engine}`,
       testMatch: 'riders.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The four pickup screens (S1.19) against the production build, with a stateful stand-in for the API that plants a price in answers
+      // that never carry one.
+      name: `pickup-${engine}`,
+      testMatch: 'pickup.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice).
+      name: `pickup-dev-${engine}`,
+      testMatch: 'pickup.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The four manifest screens (S1.25) against the production build, with a stateful stand-in for the API. Its custody half is written from
+      // the contract and answered by the stand-in: it plants a count of the hub's in every custody answer, which no screen may draw.
+      name: `manifests-${engine}`,
+      testMatch: 'manifests.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice).
+      name: `manifests-dev-${engine}`,
+      testMatch: 'manifests.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The message log (S1.12e) against the production build, with a stand-in for the API that plants a number in clear, a message's text
+      // and a code in answers that never carry them.
+      name: `messages-${engine}`,
+      testMatch: 'messages.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice).
+      name: `messages-dev-${engine}`,
+      testMatch: 'messages.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),

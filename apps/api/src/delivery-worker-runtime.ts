@@ -11,6 +11,9 @@ import type { Clock } from './platform/auth/ports/clock.port.js';
 import type { DeliveryProvider } from './platform/auth/ports/delivery-provider.port.js';
 import type { DeliveryChannel } from './platform/auth/ports/delivery-queue.port.js';
 import type { DeliveryAdapterConfig } from './platform/config/load-config.js';
+import { composeNotificationSender } from './notification-sender.js';
+import { HandshakeCodes } from './platform/auth/crypto/handshake-codes.js';
+import type { TextMessageSender } from './platform/auth/ports/text-message-sender.port.js';
 import { createPool } from './platform/database/database.module.js';
 import { DatabaseService } from './platform/database/database.service.js';
 import { postgresConnectionSettings } from './platform/database/postgres-url.js';
@@ -52,6 +55,20 @@ import {
 } from './platform/delivery/worker/worker-config.js';
 import { DISPOSAL_BOUND_MS } from './platform/execution/execution-parameters.js';
 import { ReadinessRegistry } from './platform/health/readiness.registry.js';
+import {
+  createLanePolicy,
+  type NotificationSettings,
+} from './platform/notifications/lane-policy.js';
+import { NotificationLane } from './platform/notifications/notification-lane.js';
+import {
+  NOTIFICATION_LANE_INTERVAL_MS,
+  notificationRunBudgetMs,
+} from './platform/notifications/notification-parameters.js';
+import {
+  DatabaseNotificationSettings,
+  DatabaseSettingsReader,
+} from './platform/notifications/notification-settings.js';
+import { NotificationStore } from './platform/notifications/notification-store.js';
 import type { ShutdownOutcome } from './platform/lifecycle/graceful-shutdown.js';
 import { ShutdownRegistry, type CloseReport } from './platform/lifecycle/shutdown.registry.js';
 import { createServiceLogger } from './platform/logging/create-logger.js';
@@ -178,6 +195,10 @@ export interface RuntimeOptions {
    * message at all.
    */
   readonly redemptionReader?: RedemptionRecordReader;
+  /** The text-message sender of the notification lane; built from the configuration by default (`composeNotificationSender`). */
+  readonly notificationSender?: TextMessageSender;
+  /** What the notification lane reads of the settings (the switch and the day's limits); the platform settings of the database by default. */
+  readonly notificationSettings?: NotificationSettings;
   /** How often the retention cleanup runs: `RETENTION_INTERVAL_MS` by default. A test gives a short one. */
   readonly retentionIntervalMs?: number;
   /** Where to look for the checkout the sink must stay out of: the working directory and the application's own folder by default. */
@@ -260,6 +281,53 @@ export function createDeliveryWorkerRuntime(
     },
   });
 
+  // The notification lane (S1.12): the relay of the outbox, the sending of the business texts and the network's word on them, in this
+  // process and under the worker's own login, as one periodic task beside the lanes. Its sender reaches nobody (capture) or Hubtel behind
+  // the guards of the controlled window; the wording a real provider may send is the approved wording only (`createLanePolicy`).
+  const workerId = workerNameFor(hostname(), process.pid, randomBytes(4).toString('hex'));
+  const notificationSms = config.delivery.notificationSms;
+  // One answer for the two uses: a real provider is put behind the wording gate (only wording the owner approved is sent to it), and the
+  // worker says so when it starts, so that an operator can read which mode the lane is in and a test can see the gate was composed.
+  const realProvider = notificationSms.kind === 'provider';
+  const notificationTimeoutMs =
+    notificationSms.kind === 'provider' ? notificationSms.timeoutMs : CAPTURE_CALL_TIMEOUT_MS;
+  const notificationStore = new NotificationStore({ database, clock, workerId });
+  // The same store answers the gauge of the metrics endpoint: the age of the oldest work that is due and not done.
+  const notificationBacklog = notificationStore;
+  const notificationLane = new NotificationLane({
+    store: notificationStore,
+    sender:
+      options.notificationSender ??
+      composeNotificationSender(config, clock, {
+        ...(options.startingPoints === undefined ? {} : { startingPoints: options.startingPoints }),
+        ...(options.privacyProbe === undefined ? {} : { privacyProbe: options.privacyProbe }),
+      }),
+    metrics,
+    policy: createLanePolicy({
+      realProvider,
+      // The switch and the day's limits are the platform's settings, read through the lane's capability and kept for a few seconds. A
+      // setting that is missing or unusable holds the texts back, and the log names the key.
+      settings:
+        options.notificationSettings ??
+        new DatabaseNotificationSettings({
+          reader: new DatabaseSettingsReader({ database, clock }),
+          clock,
+          onUnusable: (key) => {
+            logger.error(
+              { setting: key },
+              'a text-message setting is missing or unusable: texts are held back',
+            );
+          },
+        }),
+    }),
+    logger,
+    leaseMs: leaseMsFor(notificationTimeoutMs),
+    providerTimeoutMs: notificationTimeoutMs,
+    // The collection handshake's codes (S1.27): the lane makes the code it texts from the same `credential_delivery` key the API makes the rider's from,
+    // in memory and at the send, so that no code is stored anywhere.
+    handshakeCodes: new HandshakeCodes(config.keys),
+  });
+
   const worker = new DeliveryWorker({
     queue,
     providers,
@@ -268,7 +336,7 @@ export function createDeliveryWorkerRuntime(
     clock,
     logger,
     metrics,
-    workerId: workerNameFor(hostname(), process.pid, randomBytes(4).toString('hex')),
+    workerId,
     concurrency: config.delivery.concurrency,
     pollIntervalMs: config.delivery.pollIntervalMs,
     leaseMs,
@@ -285,6 +353,12 @@ export function createDeliveryWorkerRuntime(
         metrics,
         intervalMs: options.retentionIntervalMs ?? RETENTION_INTERVAL_MS,
       }),
+      {
+        name: 'notifications',
+        intervalMs: NOTIFICATION_LANE_INTERVAL_MS,
+        budgetMs: notificationRunBudgetMs(notificationTimeoutMs),
+        run: (stop) => notificationLane.runOnce(stop),
+      },
     ],
   });
 
@@ -304,6 +378,14 @@ export function createDeliveryWorkerRuntime(
             name: 'credential_delivery_oldest_due_age_seconds',
             value: await backlog.oldestDueAgeSeconds(),
           },
+          {
+            name: 'notification_oldest_due_age_seconds',
+            value: await notificationBacklog.oldestDueAgeSeconds(),
+          },
+          {
+            name: 'notification_dead_envelopes',
+            value: await notificationBacklog.deadEnvelopeCount(),
+          },
         ],
         logger,
       });
@@ -319,6 +401,10 @@ export function createDeliveryWorkerRuntime(
     start: () => {
       // A worker told to stop while its endpoint was opening does not begin: the shutdown ran first.
       if (stopped !== undefined) return;
+      logger.info(
+        { notification_sms: notificationSms.kind, wording_gate: realProvider },
+        'notification lane composed',
+      );
       // An operator who sees messages queue up must find out why: the worker does not claim them, and does not spend them.
       if (redemptionReader === UNBUILT_REDEMPTION_READER) {
         logger.warn(

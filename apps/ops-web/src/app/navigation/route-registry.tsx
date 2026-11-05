@@ -7,6 +7,16 @@ import { RequirePermission } from '../../platform/session/RequirePermission';
 import { isPermissionKey } from '../../platform/session/session-shape';
 import { LandingPage } from '../pages/LandingPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
+import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
+import { ManifestDetailPage } from '../pages/manifests/ManifestDetailPage';
+import { ManifestListPage } from '../pages/manifests/ManifestListPage';
+import { StopSkipPage } from '../pages/manifests/StopSkipPage';
+import { MessageLogPage } from '../pages/messages/MessageLogPage';
+import { ApprovalsPage } from '../pages/pickup/ApprovalsPage';
+import { PickupExceptionPage } from '../pages/pickup/PickupExceptionPage';
+import { PickupRequestCreatePage } from '../pages/pickup/PickupRequestCreatePage';
+import { PickupRequestDetailPage } from '../pages/pickup/PickupRequestDetailPage';
+import { PickupRequestListPage } from '../pages/pickup/PickupRequestListPage';
 import { SessionsPage } from '../pages/staff/SessionsPage';
 import { StaffCreatePage } from '../pages/staff/StaffCreatePage';
 import { StaffDetailPage } from '../pages/staff/StaffDetailPage';
@@ -34,7 +44,16 @@ import { VendorListPage } from '../pages/vendors/VendorListPage';
 /** Who may open a route: any signed-in session, or one that holds the permission key. */
 export const ANY_SIGNED_IN_SESSION = 'any-signed-in-session';
 
-export type RouteAccess = typeof ANY_SIGNED_IN_SESSION | { readonly permission: string };
+export type RouteAccess =
+  | typeof ANY_SIGNED_IN_SESSION
+  | {
+      readonly permission: string;
+      /**
+       * The key of whoever decides what the page asks for, when that is another person: a session without the page's key is then told who
+       * decides, by this key, and not that it lacks access (`RequirePermission`).
+       */
+      readonly decidedBy?: string;
+    };
 
 /**
  * The areas of the Ops Portal's navigation (surfaces/ops-portal.md section 4), plus the overview the landing belongs to. The order is the
@@ -88,6 +107,113 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     element: <LandingPage />,
     access: ANY_SIGNED_IN_SESSION,
     menu: { label: 'Overview', icon: 'overview', area: 'overview', order: 0 },
+  },
+  // Pickup intake (S1.19): the queue and the booking are entries of the menu, as the identity screens' list and form are; one request and the
+  // exception of one are reached from the queue. Each is behind the key of the operation that is its point, and never a role.
+  {
+    path: '/pickup-requests',
+    element: <PickupRequestListPage />,
+    access: { permission: 'pickup.read' },
+    menu: {
+      label: 'Pickup requests',
+      icon: 'pickup-requests',
+      area: 'pickup-intake',
+      order: 0,
+      description: 'See the pickups booked at your hubs, and confirm, reschedule or cancel them.',
+    },
+  },
+  {
+    path: '/pickup-requests/new',
+    element: <PickupRequestCreatePage />,
+    access: { permission: 'pickup.request.create' },
+    menu: {
+      label: 'Book a pickup',
+      icon: 'book-pickup',
+      area: 'pickup-intake',
+      order: 1,
+      description: 'Enter a booking from WhatsApp, a vendor’s call or a walk-in sender.',
+    },
+  },
+  {
+    path: '/pickup-requests/:id',
+    element: <PickupRequestDetailPage />,
+    access: { permission: 'pickup.read' },
+    menu: null,
+  },
+  // A one-package exception is decided by a holder of `pickup.exception.approve`: a session that may not ask for one is told who decides
+  // (ops-portal.md section 7), by the key and not by a role.
+  {
+    path: '/pickup-requests/:id/exception',
+    element: <PickupExceptionPage />,
+    access: { permission: 'pickup.exception.request', decidedBy: 'pickup.exception.approve' },
+    menu: null,
+  },
+  // The checker's queue of the one-package exception (ops-portal.md section 7): behind the key of the approval, which names no role.
+  {
+    path: '/approvals',
+    element: <ApprovalsPage />,
+    access: { permission: 'pickup.exception.approve' },
+    menu: {
+      label: 'Exceptions to approve',
+      icon: 'exception-approvals',
+      area: 'pickup-intake',
+      order: 2,
+      description: 'Approve the single-package pickups waiting for a one-package exception.',
+    },
+  },
+  // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
+  // `notification.read`, and never a role. It is reached from the menu and, for one request, from that request's page.
+  {
+    path: '/messages',
+    element: <MessageLogPage />,
+    access: { permission: 'notification.read' },
+    menu: {
+      label: 'Messages',
+      icon: 'messages',
+      area: 'pickup-intake',
+      order: 3,
+      description: 'See the messages the platform sent about pickups, and what became of each.',
+    },
+  },
+  // Manifests and runs (S1.25): the list, the builder, one run and the Ops skip of one of its stops. Each is behind the key of the operation that
+  // is its point, and never a role: the list and the run open for the read, the builder for the key that makes a manifest, and the skip for the
+  // key of the act. What a run's page offers inside is offered to the session that holds that act's own key.
+  {
+    path: '/manifests',
+    element: <ManifestListPage />,
+    access: { permission: 'pickup.read' },
+    menu: {
+      label: 'Manifests',
+      icon: 'manifests',
+      area: 'pickup-runs',
+      order: 0,
+      description:
+        'See the pickup runs at your hubs, and open one to order, assign and dispatch it.',
+    },
+  },
+  {
+    path: '/manifests/new',
+    element: <ManifestBuilderPage />,
+    access: { permission: 'pickup.manifest.create' },
+    menu: {
+      label: 'Build a manifest',
+      icon: 'build-manifest',
+      area: 'pickup-runs',
+      order: 1,
+      description: 'Choose confirmed pickups for one run, and the day it is worked.',
+    },
+  },
+  {
+    path: '/manifests/:id',
+    element: <ManifestDetailPage />,
+    access: { permission: 'pickup.read' },
+    menu: null,
+  },
+  {
+    path: '/manifests/:id/stops/:stopId/skip',
+    element: <StopSkipPage />,
+    access: { permission: 'pickup.stop.skip' },
+    menu: null,
   },
   {
     path: '/admin/staff',
@@ -239,6 +365,15 @@ export function registryProblems(routes: readonly SignedInRoute[]): string[] {
         `The permission "${access.permission}" of "${path}" is not a key of the catalogue's shape.`,
       );
     }
+    if (
+      access !== ANY_SIGNED_IN_SESSION &&
+      access.decidedBy !== undefined &&
+      !isPermissionKey(access.decidedBy)
+    ) {
+      problems.push(
+        `The deciding permission "${access.decidedBy}" of "${path}" is not a key of the catalogue's shape.`,
+      );
+    }
 
     if (menu !== null) {
       if (menu.label.trim() === '') problems.push(`The menu entry of "${path}" has no label.`);
@@ -338,7 +473,12 @@ export function signedInRouteObjects(
       route.access === ANY_SIGNED_IN_SESSION ? (
         route.element
       ) : (
-        <RequirePermission permission={route.access.permission}>{route.element}</RequirePermission>
+        <RequirePermission
+          permission={route.access.permission}
+          {...(route.access.decidedBy === undefined ? {} : { decidedBy: route.access.decidedBy })}
+        >
+          {route.element}
+        </RequirePermission>
       );
     return route.path === '/' ? { index: true, element } : { path: route.path.slice(1), element };
   });

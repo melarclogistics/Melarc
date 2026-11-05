@@ -1,0 +1,111 @@
+/*
+ * Picker: a search field with its button, the results as a list, each with the button that chooses it, and the choice once made. The field
+ * and the button sit in a row that wraps, and a result's text wraps beside its button, so nothing is clipped at 320 px or at enlarged text.
+ * Every colour, size and space comes from tokens.css; the focus ring is the frame's own (base.css), on the choice too when focus lands there.
+ */
+.ui-picker {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.ui-picker__legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-picker__required {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-picker__search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 var(--space-3);
+}
+
+.ui-picker__field {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+/* The button lines up with the field, below its label. */
+.ui-picker__action {
+  margin-top: calc(var(--text-label-md-line-height) + var(--space-1));
+  margin-bottom: var(--space-4);
+}
+
+.ui-picker__count {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+.ui-picker__results {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  list-style: none;
+}
+
+.ui-picker__result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+}
+
+.ui-picker__result + .ui-picker__result {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.ui-picker__result-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.ui-picker__result-label,
+.ui-picker__chosen-label {
+  margin: 0;
+  font-weight: var(--text-label-md-weight);
+  overflow-wrap: anywhere;
+}
+
+.ui-picker__description {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+.ui-picker__chosen {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.ui-picker__none {
+  margin-bottom: var(--space-2);
+}
+
+.ui-picker__none p {
+  margin: 0;
+}
+
+@media (forced-colors: active) {
+  .ui-picker__results,
+  .ui-picker__chosen {
+    border-color: CanvasText;
+  }
+}

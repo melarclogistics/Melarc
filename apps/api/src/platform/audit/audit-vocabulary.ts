@@ -28,6 +28,20 @@ export const AUDIT_OBJECT_TYPES = [
   'RecoveryRequest',
   'RegisteredDevice',
   'HUB',
+  // SLICE-001 (S1.13): the entities the events of the pickup journey are about, named as domain-model.md names them. Added together so that
+  // each task of the slice does not need a migration of the audit table's CHECK for the one it writes first.
+  'PickupRequest',
+  'AdHocSender',
+  'PickupManifest',
+  'PickupStop',
+  'CollectionRecord',
+  'CollectionHandshake',
+  'CollectionDispute',
+  'RunCustodyHandover',
+  'PickupIntake',
+  'Order',
+  'PayerCorrection',
+  'Evidence',
 ] as const;
 
 export type AuditObjectType = (typeof AUDIT_OBJECT_TYPES)[number];

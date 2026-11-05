@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { RATE_LIMIT_BUCKETS, type RateLimitBucket } from '../auth/ports/rate-limiter.port.js';
+import {
+  RATE_LIMIT_BUCKETS,
+  RATE_LIMIT_COUNTERS,
+  RATE_LIMIT_SUB_CEILINGS,
+  type RateLimitCounter,
+} from '../auth/ports/rate-limiter.port.js';
 import { ManualClock } from '../../test-support/manual-clock.js';
 import { BoundedMetrics } from '../metrics/bounded.metrics.adapter.js';
 import { InMemoryRateLimiter } from './in-memory.rate-limiter.adapter.js';
 import { MAX_KEY_BYTES, WINDOW_SECONDS } from './limiter-parameters.js';
 
-const LIMITS: Readonly<Record<RateLimitBucket, number>> = {
+const LIMITS: Readonly<Record<RateLimitCounter, number>> = {
   rate_limit_staff_signin: 10,
   rate_limit_privileged_mfa: 10,
   rate_limit_vendor_signin: 10,
   rate_limit_rider_challenge: 20,
   rate_limit_recovery: 10,
   rate_limit_authenticated_api: 120,
+  provider_initiating_operation_ceiling_per_minute: 20,
 };
 
 const make = (maxTotalEntries?: number) => {
@@ -27,7 +33,7 @@ const make = (maxTotalEntries?: number) => {
 
 async function admitMany(
   limiter: InMemoryRateLimiter,
-  bucket: RateLimitBucket,
+  bucket: RateLimitCounter,
   key: string,
   times: number,
 ): Promise<number> {
@@ -41,12 +47,42 @@ async function admitMany(
 describe('the in-memory limiter (unit tests and local diagnostics only)', () => {
   // Break caught: a threshold that differs from the authoritative limiter’s, which this one stands in for in unit tests.
   it('admits exactly the limit of each bucket in a window and refuses the next', async () => {
-    for (const bucket of RATE_LIMIT_BUCKETS) {
+    for (const bucket of RATE_LIMIT_COUNTERS) {
       const { limiter } = make();
       expect(await admitMany(limiter, bucket, 'k', LIMITS[bucket] + 5), bucket).toBe(
         LIMITS[bucket],
       );
     }
+  });
+
+  // Break caught: the sub-ceiling counted in the bucket it sits inside (spending it would spend the whole allowance), or the bucket counted in it, or a closed set that
+  // grows a seventh bucket instead of a sub-ceiling.
+  it('counts the sub-ceiling apart from the bucket it sits inside, and the six buckets stay six', async () => {
+    expect(RATE_LIMIT_BUCKETS).toHaveLength(6);
+    expect(RATE_LIMIT_SUB_CEILINGS).toEqual(['provider_initiating_operation_ceiling_per_minute']);
+    expect(RATE_LIMIT_COUNTERS).toHaveLength(7);
+
+    const { limiter } = make();
+    expect(
+      await admitMany(limiter, 'provider_initiating_operation_ceiling_per_minute', 's', 30),
+    ).toBe(20);
+    // The bucket was not touched by the 20 the ceiling took, and the ceiling is not touched by the bucket.
+    expect(await admitMany(limiter, 'rate_limit_authenticated_api', 's', 120)).toBe(120);
+    expect(
+      (await limiter.admit('provider_initiating_operation_ceiling_per_minute', 's')).allowed,
+    ).toBe(false);
+    // Another session has its own place in the ceiling.
+    expect(
+      (await limiter.admit('provider_initiating_operation_ceiling_per_minute', 'other')).allowed,
+    ).toBe(true);
+  });
+
+  // Break caught: a counter the limiter does not know taken as one (a typo that would be counted under no limit).
+  it('refuses a counter that is neither a bucket nor a sub-ceiling', async () => {
+    const { limiter } = make();
+    await expect(
+      limiter.admit('report_export_initiation_ceiling_per_minute' as never, 'k'),
+    ).rejects.toThrow(TypeError);
   });
 
   // Break caught: a fixed window (a double burst at its boundary) in place of a rolling one.
@@ -118,14 +154,14 @@ describe('the in-memory limiter (unit tests and local diagnostics only)', () => 
 
   // Break caught: a limit table missing a bucket (the limiter would read undefined as no limit).
   it('is not composed without a limit for every bucket', () => {
-    const missing = { ...LIMITS } as Partial<Record<RateLimitBucket, number>>;
+    const missing = { ...LIMITS } as Partial<Record<RateLimitCounter, number>>;
     delete missing.rate_limit_recovery;
 
     expect(
       () =>
         new InMemoryRateLimiter({
           clock: new ManualClock(),
-          limits: missing as Record<RateLimitBucket, number>,
+          limits: missing as Record<RateLimitCounter, number>,
         }),
     ).toThrow(RangeError);
     expect(

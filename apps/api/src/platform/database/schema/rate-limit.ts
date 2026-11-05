@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
-import { RATE_LIMIT_BUCKETS } from '../../auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS } from '../../auth/ports/rate-limiter.port.js';
 import { bytea } from './types.js';
 
 /**
@@ -41,7 +41,7 @@ export const rateLimitAdmission = pgTable(
     index('rate_limit_admission_version_idx').on(table.digestVersion, table.admittedAt),
     check(
       'rate_limit_admission_bucket_closed',
-      sql`${table.bucket} IN (${sql.raw(RATE_LIMIT_BUCKETS.map((bucket) => `'${bucket}'`).join(', '))})`,
+      sql`${table.bucket} IN (${sql.raw(RATE_LIMIT_COUNTERS.map((bucket) => `'${bucket}'`).join(', '))})`,
     ),
     check('rate_limit_admission_digest_length', sql`length(${table.keyDigest}) = 32`),
     check('rate_limit_admission_digest_version_positive', sql`${table.digestVersion} >= 1`),

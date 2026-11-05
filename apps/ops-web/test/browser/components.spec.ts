@@ -777,3 +777,205 @@ test.describe('the components in a browser: a healthy page', () => {
     await expect(frame.getByRole('button')).toHaveCount(0);
   });
 });
+
+/**
+ * The five components of the pickup screens (S1.19) in a real browser: the radio group, the money display, the searchable picker, the queue
+ * table and the timeline. The showcase-wide checks above (WCAG 2.2 at three widths, 320 px, 200% text) already sweep their demos; these are
+ * the keyboard and forced-colour checks of each.
+ */
+test.describe('the components of the pickup screens', () => {
+  // Break caught: a radio group whose arrows do not move the choice, or that chooses for the person before they do.
+  test('the radio group is one Tab stop, chooses nothing first, and moves with the arrows', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    const first = page.getByRole('radio', { name: 'Demo choice one' });
+    await expect(first).not.toBeChecked();
+    await expect(page.getByText('The demo page holds: no choice')).toBeVisible();
+
+    await first.focus();
+    await page.keyboard.press('ArrowDown');
+
+    await expect(page.getByRole('radio', { name: 'Demo choice two' })).toBeChecked();
+    await expect(page.getByRole('radio', { name: 'Demo choice two' })).toBeFocused();
+    // One stop: Tab leaves the group from the choice it is on, and lands on none of the group's other choices.
+    await page.keyboard.press('Tab');
+    await expect(page.locator('input[name="demo-radio"]:focus')).toHaveCount(0);
+    const ring = await page.getByRole('radio', { name: 'Demo choice two' }).evaluate((element) => {
+      (element as HTMLElement).focus();
+      return getComputedStyle(element).outlineStyle;
+    });
+    expect(['solid', 'auto']).toContain(ring);
+  });
+
+  // Break caught: Enter in the search submitting the form around it, or a choice made by moving through the list.
+  test('the picker searches with Enter, chooses with a button and moves focus to the choice', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    const search = page.getByRole('searchbox', { name: /Search demo shops by name/ });
+    await search.fill('shop');
+    await search.press('Enter');
+    await expect(page.getByText('2 found.')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Choose: Demo shop beta' }).focus();
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByText('The demo page holds: Demo shop beta')).toBeVisible();
+    await expect(page.locator('.ui-picker__chosen')).toBeFocused();
+    await page.getByRole('button', { name: 'Choose another demo shop' }).click();
+    await expect(page.getByRole('searchbox', { name: /Search demo shops by name/ })).toBeFocused();
+  });
+
+  test('the queue table pages by keyboard and puts focus on the rows of the page it moved to', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    await expect(
+      page.getByText('Showing 2 demo rows. More follow on the next page.'),
+    ).toBeVisible();
+
+    await page
+      .getByRole('navigation', { name: 'Pages of demo queue' })
+      .getByRole('button', { name: 'Next page' })
+      .focus();
+    await page.keyboard.press('Enter');
+
+    await expect(
+      page.getByText('Showing 2 demo rows on page 2. More follow on the next page.'),
+    ).toBeVisible();
+    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+  });
+
+  test('the timeline is an ordered list that marks its current step in words and to assistive technology', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    const timeline = page.getByRole('list', { name: 'Demo attempts, oldest first' });
+
+    await expect(timeline.getByRole('listitem')).toHaveCount(3);
+    await expect(timeline.locator('[aria-current="step"]')).toContainText('(the demo step shown)');
+  });
+
+  test('money is shown from pesewas in cedis, in figures of one width', async ({ page }) => {
+    await openShowcase(page);
+
+    await expect(page.getByText('GH₵1,234,567.89')).toBeVisible();
+    expect(
+      await page
+        .getByText('GH₵25.50')
+        .evaluate((element) => getComputedStyle(element).fontVariantNumeric),
+    ).toContain('tabular-nums');
+  });
+
+  // Break caught: an error, a current step or a boundary told by a colour that forced colours paint away.
+  test('under forced colours the radio group’s error rule and the timeline’s markers remain', async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', 'Playwright cannot emulate forced colours in WebKit.');
+    await page.emulateMedia({ forcedColors: 'active' });
+    await openShowcase(page);
+
+    const rule = await page
+      .locator('.ui-radio-group--invalid')
+      .first()
+      .evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          style: style.borderInlineStartStyle,
+          width: parseFloat(style.borderInlineStartWidth),
+        };
+      });
+    expect(rule.style).toBe('solid');
+    expect(rule.width).toBeGreaterThanOrEqual(2);
+    const markers = await page.locator('.ui-timeline__marker').evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element);
+        return { style: style.borderTopStyle, width: parseFloat(style.borderTopWidth) };
+      }),
+    );
+    expect(markers).toHaveLength(3);
+    for (const marker of markers) {
+      expect(marker.style).toBe('solid');
+      expect(marker.width).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+/**
+ * The three components of the manifest screens (S1.25) in a real browser: the stop-reordering control, the queue table's row selection and the
+ * rider picker. The showcase-wide checks above (WCAG 2.2 at three widths, 320 px, 200% text) already sweep their demos; these are the keyboard
+ * checks of each, which only a real browser can show: where focus is after an item moves, and what is kept when the queue changes page.
+ */
+test.describe('the components of the manifest screens', () => {
+  // Break caught: a reordering control that works with a pointer alone, that drops focus when an item moves, or that moves an item onto a place
+  // that is held.
+  test('the reorder list moves an item by the keyboard, keeps focus on it and steps over an item that keeps its place', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    const list = page.getByRole('list', { name: 'Demo stops' });
+    await expect(list.getByRole('listitem')).toHaveCount(4);
+
+    const down = page.getByRole('button', { name: 'Move Demo stop beta down' });
+    await down.focus();
+    await page.keyboard.press('Enter');
+
+    // Beta stepped over gamma, which keeps the third place, and landed in the fourth; focus is on the button that is still open.
+    await expect(
+      page.getByText(
+        'The demo page holds the order: Demo stop alpha, Demo stop delta, Demo stop gamma, Demo stop beta',
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Move Demo stop beta down' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Move Demo stop beta up' })).toBeFocused();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'moved to place 4 of 4' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Move Demo stop gamma/ })).toHaveCount(0);
+  });
+
+  test('the queue table’s boxes are chosen by the keyboard and kept across pages', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    await page.getByRole('checkbox', { name: 'Choose demo rows' }).check();
+    const first = page.getByRole('checkbox', { name: 'Choose Demo row alpha' });
+
+    await first.focus();
+    await page.keyboard.press('Space');
+    await expect(first).toBeChecked();
+    await expect(page.getByText('1 demo row chosen.')).toBeVisible();
+
+    await page
+      .getByRole('navigation', { name: 'Pages of demo queue' })
+      .getByRole('button', { name: 'Next page' })
+      .click();
+    await page.getByRole('checkbox', { name: 'Choose Demo row gamma' }).check();
+    await expect(page.getByText('2 demo rows chosen.')).toBeVisible();
+    await page
+      .getByRole('navigation', { name: 'Pages of demo queue' })
+      .getByRole('button', { name: 'Previous page' })
+      .click();
+
+    await expect(page.getByRole('checkbox', { name: 'Choose Demo row alpha' })).toBeChecked();
+  });
+
+  test('the rider picker lists the riders at once, narrows by search and chooses with a button', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    await expect(page.getByText('3 found.')).toBeVisible();
+    const search = page.getByRole('searchbox', { name: /Search demo riders by name or phone/ });
+    await search.fill('kofi');
+    await search.press('Enter');
+    await expect(page.getByText('1 found.')).toBeVisible();
+    await expect(page.getByText('+233 20 000 0002 · no registered device')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Choose: Demo rider Kofi' }).focus();
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByText('The demo page holds: Demo rider Kofi')).toBeVisible();
+  });
+});

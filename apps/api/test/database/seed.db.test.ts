@@ -25,11 +25,15 @@ import { runSeedCommand } from '../../src/tools/seed/seed-command.js';
 import { BUNDLES, BUNDLE_IDS, FIXED_POLICIES, GRANTS } from '../../src/tools/seed/bundles.js';
 import { HUBS } from '../../src/tools/seed/hubs.js';
 import { IDENTITY_REASONS } from '../../src/tools/seed/reasons.js';
+import { hubConfigurationPlan } from '../../src/tools/seed/hub-configuration.js';
 import { referenceSeedPlan } from '../../src/tools/seed/reference-seed.js';
 import { SETTINGS } from '../../src/tools/seed/settings.js';
+import { WORKFLOW_REASONS } from '../../src/tools/seed/workflow-reasons.js';
 import {
   parseIdentityReasons,
   parsePermissionCatalogue,
+  parsePickupCatalogueReasons,
+  parseStopSkipReasons,
   statedGrantableKeys,
 } from '../../src/test-support/seed-documents.js';
 import { DB_SEED, killAll, requireBuild, run } from '../support/api-process.js';
@@ -237,15 +241,16 @@ describe('the seed capability, before anything is seeded (GBT-E6, GBT-E7)', () =
     },
   );
 
-  // Break caught: the seed starting a bundle or a fixed policy at a revision or a floor above the first, which would make a later
-  // reduction look like it had already happened (MIGRATION_AND_SEEDING.md section 5.1: revision 1, floor 1).
-  it('admits a bundle and a fixed policy at revision 1 and floor 1 only', async () => {
+  // Break caught: the seed starting a bundle at a revision or a floor above the first, or any policy at a floor above the first, which
+  // would make a later reduction look like it had already happened (MIGRATION_AND_SEEDING.md section 5.1). A fixed policy may start at
+  // the revision of the build that seeds (migration 0046) because its floor is still 1: nothing has been reduced.
+  it('admits a bundle at revision 1 and floor 1 only, and a fixed policy at any revision with floor 1 only', async () => {
     await asOwner(database, SEED_LABEL, async (client) => {
       for (const statement of [
         "insert into role_bundle (id, name, audience, privileged, revision) values ('5eed0001-0000-4000-8000-0000000000c1', 'Raised', 'STAFF', false, 2)",
         "insert into role_bundle (id, name, audience, privileged, revision, reduction_floor) values ('5eed0001-0000-4000-8000-0000000000c2', 'Floored', 'STAFF', false, 2, 2)",
-        "insert into fixed_permission_policy (principal_type, revision) values ('VENDOR', 2)",
         "insert into fixed_permission_policy (principal_type, revision, minimum_revision) values ('RIDER', 2, 2)",
+        "insert into fixed_permission_policy (principal_type, revision, minimum_revision) values ('RIDER', 3, 3)",
       ]) {
         // Each failure aborts the transaction, so each runs in a savepoint.
         await client.query('savepoint attempt');
@@ -258,6 +263,15 @@ describe('the seed capability, before anything is seeded (GBT-E6, GBT-E7)', () =
           "insert into role_bundle (id, name, audience, privileged) values ('5eed0001-0000-4000-8000-0000000000c3', 'First', 'STAFF', false)",
         ),
       ).toBeUndefined();
+      // The latest released revision, nothing reduced: the first row of a new database built at revision 2 (or at 1, as an older seed did).
+      for (const statement of [
+        "insert into fixed_permission_policy (principal_type, revision) values ('VENDOR', 2)",
+        "insert into fixed_permission_policy (principal_type) values ('RIDER')",
+      ]) {
+        await client.query('savepoint attempt');
+        expect(await sqlState(client, statement), statement).toBeUndefined();
+        await client.query('rollback to savepoint attempt');
+      }
     });
   });
 
@@ -373,7 +387,7 @@ describe('the seed helper over the real database', () => {
     expect(counts.role_bundle_grant).toBe(GRANTS.length);
     expect(counts.fixed_permission_policy).toBe(FIXED_POLICIES.length);
     expect(counts.setting).toBe(SETTINGS.length);
-    expect(counts.reason_code).toBe(IDENTITY_REASONS.length);
+    expect(counts.reason_code).toBe(IDENTITY_REASONS.length + WORKFLOW_REASONS.length);
   });
 
   // Break caught: a seed that adds to what is there, and a second run that "completes" a database. It refuses, names the first
@@ -455,10 +469,13 @@ describe('the db:seed command over a real database', () => {
   it('seeds an empty database from the URL of the provisioning login and reports each table', async () => {
     const lines = await run([], other, 'staging');
     const plan = referenceSeedPlan();
+    // The reference data first, then the launch hub’s configuration (migration 0042), each table reported.
     expect(lines).toEqual(
-      Object.entries(plan.payload).map(
-        ([table, rows]) =>
-          `seeded ${table}: ${String(rows.length)} ${rows.length === 1 ? 'row' : 'rows'}`,
+      [plan, hubConfigurationPlan()].flatMap((each) =>
+        Object.entries(each.payload).map(
+          ([table, rows]) =>
+            `seeded ${table}: ${String(rows.length)} ${rows.length === 1 ? 'row' : 'rows'}`,
+        ),
       ),
     );
     expect((await countAll(other)).permission).toBe(plan.payload.permission?.length);
@@ -570,7 +587,9 @@ describe('what was seeded, against the documents that own it (Family Z)', () => 
         valid_checkpoints: string[] | null;
         attribution: string;
         active: boolean;
-      }>('select * from reason_code');
+      }>('select * from reason_code where domain <> all($1::text[])', [
+        WORKFLOW_REASONS.map((reason) => reason.domain),
+      ]);
       return result.rows.toSorted((a, b) => (a.code < b.code ? -1 : 1));
     });
     const documented = parseIdentityReasons(DOMAIN_MODEL).toSorted((a, b) =>
@@ -600,6 +619,72 @@ describe('what was seeded, against the documents that own it (Family Z)', () => 
     expect(
       rows.filter((row) => row.permitted_operations.some((entry) => entry.includes('#'))),
     ).toHaveLength(4);
+  });
+
+  // The workflow reasons the launch seed carries (S1.7): the four of the stop skip and the 25 of the three pickup catalogues the Product
+  // Owner approved on 29 October 2026, as the document gives them (domain-model.md section 3.9), and no other code of a workflow domain.
+  it('holds the 29 workflow reasons of domain-model.md: the four of the stop skip and the 25 of the pickup catalogues', async () => {
+    const rows = await withClient(database.urlFor('postgres'), async (client) => {
+      const result = await client.query<{
+        code: string;
+        domain: string;
+        attribution: string;
+        requires_note: boolean;
+        requires_photo: boolean;
+        requires_contact_attempt: boolean;
+        requires_approval: boolean;
+        requires_ops_review: boolean;
+        requires_escalation: boolean;
+        valid_checkpoints: string[] | null;
+        permitted_operations: string[] | null;
+        consumes_delivery_attempt: boolean;
+        active: boolean;
+      }>(
+        'select code, domain, attribution, requires_note, requires_photo, requires_contact_attempt, requires_approval, requires_ops_review, requires_escalation, valid_checkpoints, permitted_operations, consumes_delivery_attempt, active from reason_code where domain = any($1::text[]) order by code collate "C"',
+        [['PICKUP_STOP_SKIP', 'PICKUP_CANCELLATION', 'PICKUP_FAILURE', 'PICKUP_SHORT_COUNT']],
+      );
+      return result.rows;
+    });
+    const documented = [
+      ...parseStopSkipReasons(DOMAIN_MODEL).map((row) => ({
+        ...row,
+        domain: 'PICKUP_STOP_SKIP',
+        requiresContactAttempt: false,
+        requiresPhoto: false,
+      })),
+      ...parsePickupCatalogueReasons(DOMAIN_MODEL),
+    ].toSorted((a, b) => (a.code < b.code ? -1 : 1));
+    expect(rows).toHaveLength(29);
+    expect(
+      rows.map((row) => [
+        row.code,
+        row.domain,
+        row.attribution,
+        row.requires_note,
+        row.requires_contact_attempt,
+        row.requires_photo,
+      ]),
+    ).toEqual(
+      documented.map((row) => [
+        row.code,
+        row.domain,
+        row.attribution,
+        row.requiresNote,
+        row.requiresContactAttempt,
+        row.requiresPhoto,
+      ]),
+    );
+    for (const row of rows) {
+      expect(row, row.code).toMatchObject({
+        valid_checkpoints: null,
+        permitted_operations: null,
+        consumes_delivery_attempt: false,
+        requires_approval: false,
+        requires_ops_review: false,
+        requires_escalation: false,
+        active: true,
+      });
+    }
   });
 
   it('holds the settings, each with the value, type, scope and unit of the data', async () => {
@@ -660,7 +745,7 @@ describe('what was seeded, against the documents that own it (Family Z)', () => 
       expect(fixed.rows.toSorted((a, b) => (a.principal_type < b.principal_type ? -1 : 1))).toEqual(
         FIXED_POLICIES.map((policy) => ({
           principal_type: policy.principalType,
-          revision: 1,
+          revision: policy.revision,
           minimum_revision: 1,
         })).toSorted((a, b) => (a.principal_type < b.principal_type ? -1 : 1)),
       );

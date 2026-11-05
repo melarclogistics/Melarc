@@ -52,6 +52,7 @@ import {
   selfServiceStaffRecovery,
   vendorRecovery,
 } from './recovery-journeys.ts';
+import { manifestsAndCustody } from './manifest-journeys.ts';
 import { riderHandsets, vendorBrowsersAndSessions } from './rider-journeys.ts';
 import { introduce, worldOf } from './world.ts';
 
@@ -954,5 +955,10 @@ export const STAFF_JOURNEYS: readonly Journey[] = [
     title:
       'rows 10b, 15 and 13 (vendor): an unregistered browser is refused as a wrong secret, the vendor manages its browsers, a Platform Admin ends its session, and a lock is told',
     run: vendorBrowsersAndSessions,
+  },
+  {
+    title:
+      'S1.25: Ops builds a manifest from the pool, assigns a rider and dispatches, the rider starts the run, custody is handed to a rider and to the hub, and a stale act is refused',
+    run: manifestsAndCustody,
   },
 ];

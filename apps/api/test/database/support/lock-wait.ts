@@ -63,6 +63,46 @@ export async function waitUntilBlockedBy(
 }
 
 /**
+ * Resolves with the server process of the backend that is waiting for a lock the backend `holderPid` holds, as the database itself reports
+ * it, for a test that then has to wait for what **that** backend holds in its turn (a real operation held part-way through, with the rows it
+ * has locked so far). Fails, saying so, if none waits within the bound or if `unless` (the work itself) ends first.
+ */
+export async function waitForBlockedBackend(
+  observer: pg.Client,
+  holderPid: number,
+  what = 'the work under test',
+  unless?: Promise<unknown>,
+): Promise<number> {
+  const work = { ended: false };
+  void unless?.then(
+    () => {
+      work.ended = true;
+    },
+    () => {
+      work.ended = true;
+    },
+  );
+  const deadline = Date.now() + OBSERVATION_BOUND_MS;
+  for (;;) {
+    const result = await observer.query<{ pid: number }>(
+      `select pid from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and $1::int = any (pg_blocking_pids(pid))
+        order by pid limit 1`,
+      [holderPid],
+    );
+    const found = result.rows[0]?.pid;
+    if (found !== undefined) return found;
+    if (work.ended) throw new Error(`${what} ended before it was seen waiting for the lock.`);
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${what} was not seen waiting for the lock within ${String(OBSERVATION_BOUND_MS)} ms.`,
+      );
+    }
+    await sleep(POLL_MS);
+  }
+}
+
+/**
  * Resolves when a statement the database answers `true` to is true: for something that only the database's clock can bring about (a
  * moment passing), asked of the database and never of this process's clock. `text` selects one boolean column named `ready`.
  */

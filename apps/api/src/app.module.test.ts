@@ -1,5 +1,9 @@
 import { DispatchModule } from './dispatch/dispatch.module.js';
+import { DomainPortsModule } from './domain-ports.module.js';
+import { FleetModule } from './fleet/fleet.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 import { PermissionModule } from './permission/permission.module.js';
+import { PickupModule } from './pickup/pickup.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { StaffModule } from './staff/staff.module.js';
 import { VendorModule } from './vendor/vendor.module.js';
@@ -819,7 +823,11 @@ describe('the credential setup operations (S0.31)', () => {
 
 const DOMAIN_MODULES = [
   DispatchModule,
+  DomainPortsModule,
+  FleetModule,
+  NotificationsModule,
   PermissionModule,
+  PickupModule,
   SettingsModule,
   StaffModule,
   VendorModule,
@@ -858,13 +866,13 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     expect(module.providers).toHaveLength(5);
   });
 
-  // Break caught: the describe composition exporting more than the sixteen tokens, or fewer.
-  it('exports the sixteen port tokens and nothing else in the describe composition', () => {
+  // Break caught: the describe composition exporting more than the seventeen tokens, or fewer.
+  it('exports the seventeen port tokens and nothing else in the describe composition', () => {
     const module = AppModule.register(options);
 
     expect(module.global).toBe(true);
     expect(module.exports).toEqual(PORTS.map((entry) => entry.token));
-    // The sixteen bindings and the check that each is a singleton; the check is not exported.
+    // The seventeen bindings and the check that each is a singleton; the check is not exported.
     expect(module.providers).toHaveLength(PORTS.length + 1);
     expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
     expect(module.imports?.slice(1)).toEqual(DOMAIN_MODULES);
@@ -1383,6 +1391,7 @@ describe('portProviders keeps the port its own token and refuses a malformed bin
       unitOfWork: { useExisting: 'X' },
       deliveryQueue: { useExisting: 'X' },
       deliveryProvider: { useExisting: 'X' },
+      textMessageSender: { useExisting: 'X' },
       attestationVerifier: { useExisting: 'X' },
       metrics: { useExisting: 'X' },
     });

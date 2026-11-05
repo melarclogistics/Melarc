@@ -1,8 +1,8 @@
 import type { Clock } from '../auth/ports/clock.port.js';
 import type { Metrics } from '../auth/ports/metrics.port.js';
 import {
-  RATE_LIMIT_BUCKETS,
-  type RateLimitBucket,
+  RATE_LIMIT_COUNTERS,
+  type RateLimitCounter,
   type RateLimitDecision,
   type RateLimiter,
 } from '../auth/ports/rate-limiter.port.js';
@@ -16,8 +16,8 @@ import {
 
 export interface InMemoryRateLimiterOptions {
   readonly clock: Pick<Clock, 'now'>;
-  /** The limit of every bucket: all six, whole numbers from one to the cap. */
-  readonly limits: Readonly<Record<RateLimitBucket, number>>;
+  /** The limit of every counter: the six buckets and the sub-ceiling, whole numbers from one to the cap. */
+  readonly limits: Readonly<Record<RateLimitCounter, number>>;
   /** The most live admissions held. At it, admissions are refused uniformly and nothing is evicted. */
   readonly maxTotalEntries?: number;
   /** Counts the refusals as the authoritative limiter does (`rate_limited_total`). */
@@ -37,21 +37,23 @@ export interface InMemoryRateLimiterOptions {
  */
 export class InMemoryRateLimiter implements RateLimiter {
   readonly #clock: Pick<Clock, 'now'>;
-  readonly #limits: Readonly<Record<RateLimitBucket, number>>;
+  readonly #limits: Readonly<Record<RateLimitCounter, number>>;
   readonly #maxTotalEntries: number;
   readonly #metrics: Metrics | undefined;
   /** Admitted times in milliseconds, ascending, by bucket and key. */
   readonly #admitted = new Map<string, number[]>();
 
   constructor(options: InMemoryRateLimiterOptions) {
-    for (const bucket of RATE_LIMIT_BUCKETS) {
+    for (const bucket of RATE_LIMIT_COUNTERS) {
       const limit: unknown = options.limits[bucket];
       if (
         !Number.isInteger(limit) ||
         (limit as number) < 1 ||
         (limit as number) > MAX_BUCKET_LIMIT
       ) {
-        throw new RangeError('Every bucket has a limit that is a whole number from one to the cap');
+        throw new RangeError(
+          'Every counter has a limit that is a whole number from one to the cap',
+        );
       }
     }
     this.#clock = options.clock;
@@ -60,10 +62,12 @@ export class InMemoryRateLimiter implements RateLimiter {
     this.#metrics = options.metrics;
   }
 
-  admit(bucket: RateLimitBucket, canonicalKey: string): Promise<RateLimitDecision> {
-    if (!(RATE_LIMIT_BUCKETS as readonly string[]).includes(bucket)) {
+  admit(bucket: RateLimitCounter, canonicalKey: string): Promise<RateLimitDecision> {
+    if (!(RATE_LIMIT_COUNTERS as readonly string[]).includes(bucket)) {
       return Promise.reject(
-        new TypeError('A rate-limit bucket is one of the six canonical buckets'),
+        new TypeError(
+          'A rate-limit counter is one of the six canonical buckets or a sub-ceiling inside one',
+        ),
       );
     }
     if (typeof canonicalKey !== 'string') {

@@ -88,6 +88,23 @@ const VENDOR_SELF = new Set([
   'listVendorDevices',
   'revokeVendorDevice',
 ]);
+/**
+ * The operations of the pickup domain that the Vendor app serves (S1.13, S1.17): a vendor is not refused them before the body, which they
+ * judge for its own organisation (`createPickupRequest`) or its own request (`cancelPickupRequest`). The sweep's clause for a vendor is about
+ * the operations it does not serve, and these two were never in it; the list was missing until the sweep was run again (2 November 2026).
+ */
+const VENDOR_SERVED = new Set([
+  'createPickupRequest',
+  'cancelPickupRequest',
+  // S1.27 and S1.29: the vendor enters the code its rider shows, and disputes the collection of its own pickup.
+  'verifyHandshake',
+  'disputeCollection',
+]);
+/**
+ * The operations whose key a rider's bundle holds and whose security takes its session, and that the Rider app is nonetheless not served: the key
+ * `pickup.collection.confirm` is a vendor's too, and `disputeCollection` is the Vendor app's alone (S1.29), so a rider is refused it by its surface.
+ */
+const RIDER_REFUSED_BY_SURFACE = new Set(['disputeCollection']);
 /** The pre-session operations of the Rider app, a native client: the challenge, the sign-in and the device's enrolment. */
 const isRiderNative = (operation: Operation): boolean => operation.path.startsWith('/auth/rider/');
 const OPS_STAFF_KEYS = new Set(
@@ -177,6 +194,24 @@ async function send(operation: Operation, sent: Sent): Promise<[number, string |
   return [response.status, code];
 }
 
+/** The keys the Rider's fixed bundle holds, as the seed grants them. */
+const RIDER_KEYS = new Set(
+  GRANTS.filter((grant) => grant.bundleId === BUNDLE_IDS.rider).map((grant) => grant.permissionKey),
+);
+
+/**
+ * The operations with a body that a rider is served, **named here and not derived from the seed alone**: the sweep below expects a served rider to be
+ * told its body is not valid and every other rider request to be refused before the body, so a staff-only key added to the rider's bundle by mistake
+ * would otherwise move an operation into the served set and be expected to pass. A new one is a decision, and is added to this list with it.
+ */
+const SERVED_TO_A_RIDER_WITH_A_BODY = [
+  'acceptRunCustodyHandover',
+  'recordCollection',
+  'reportPickupFailure',
+  'requestSmsHandshakeFallback',
+  'verifyHandshake',
+] as const;
+
 const withBody = OPERATIONS.filter(
   (operation) => operation.hasBody && operation.permission !== 'none',
 );
@@ -251,7 +286,12 @@ describe('a malformed body tells nothing to a caller who may not proceed (AC-SLI
 
   it.each(
     withBody
-      .filter((operation) => !VENDOR_SELF.has(operation.id) && operation.path !== '/auth/session')
+      .filter(
+        (operation) =>
+          !VENDOR_SELF.has(operation.id) &&
+          !VENDOR_SERVED.has(operation.id) &&
+          operation.path !== '/auth/session',
+      )
       .map((operation) => [operation.id, operation]),
   )('%s: from a Vendor it does not serve, refused before the body', async (_id, operation) => {
     const [status, code] = await send(operation, {
@@ -267,14 +307,36 @@ describe('a malformed body tells nothing to a caller who may not proceed (AC-SLI
     );
   });
 
+  // Break caught: the rider's bundle gaining a key (or an operation gaining one the bundle holds) that this sweep would then expect to be served.
+  it('serves a rider exactly the operations with a body that are named above', () => {
+    const served = withBody
+      .filter(
+        (operation) =>
+          RIDER_KEYS.has(operation.permission) &&
+          operation.schemes.has('riderSession') &&
+          !RIDER_REFUSED_BY_SURFACE.has(operation.id),
+      )
+      .map((operation) => operation.id)
+      .toSorted();
+    expect(served).toEqual([...SERVED_TO_A_RIDER_WITH_A_BODY].toSorted());
+  });
+
   it.each(withBody.map((operation) => [operation.id, operation]))(
     '%s: from a Rider it does not serve, refused before the body',
     async (_id, operation) => {
       const [status, code] = await send(operation, { bearer: riderToken, body: MALFORMED });
+      // A rider is served an operation whose key its fixed bundle holds and whose security takes its session (S1.24: the acceptance of a custody
+      // handover is the first with a body): authorised, it is then told its body is not valid. Any other operation is refused before the body.
+      const served =
+        RIDER_KEYS.has(operation.permission) &&
+        operation.schemes.has('riderSession') &&
+        !RIDER_REFUSED_BY_SURFACE.has(operation.id);
       expect([status, code]).toEqual(
-        operation.schemes.has('riderSession')
-          ? [403, 'PERMISSION_DENIED']
-          : [401, 'SESSION_INVALID'],
+        served
+          ? [400, 'VALIDATION_FAILED']
+          : operation.schemes.has('riderSession')
+            ? [403, 'PERMISSION_DENIED']
+            : [401, 'SESSION_INVALID'],
       );
     },
   );

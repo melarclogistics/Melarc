@@ -72,7 +72,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 6. **Payer allocation resolves** into vendor/sender and recipient portions (§23.5).
 7. **The commercial gate has three outcomes, not two**. Test the **resolved vendor portion** first: if `payer_allocation.sender_minor` is zero the order enters **`NO_VENDOR_CHARGE`** and the gate is satisfied — no reservation, no payment, and **the account's overdue status is not consulted**, because there is no vendor amount to gate. Only a non-zero portion reaches the credit conditions.
 8. **The price freezes at itemized-order confirmation** and the commercial gate runs: credit reservation where allowance permits, otherwise `PAYMENT_REQUIRED` (§36.11, `MSC-DEC-176`). **HIGH-10 audit remediation (13 September 2026):** the reservation this step creates is guarded twice against exactly the retry this feature's own §22.8 concurrency rule warns about — *"backend transition and idempotency controls are still required; a visual lock alone is not sufficient."* `itemizeOrder` requires both `Idempotency-Key` and `If-Match`, added because a receiving officer retrying over a flaky hub connection would otherwise have produced two priced `Order`s, and a duplicate credit reservation, for one physical parcel ([openapi.yaml](../../contracts/openapi.yaml)). Underneath that, `Order.commercial_state`'s own machine reserves exposure **exactly once, keyed by a uniqueness constraint on the order** — not by retry semantics — and releases it through a defined `→ REVERSED` transition on formal Return initiation ([state-machines.md](../../contracts/state-machines.md) §8). **What is not yet settled is narrower than "idempotency or rollback"**: the ledger mechanics behind *adjusting* a reservation when a correction changes the amount owed — `OQ-005`, §14 below.
-8. **The intake closes** when every hub-received parcel is accounted for. Closure emits `intake.completed` and generates the vendor-facing order summary (§23.10).
+9. **The intake closes** when every hub-received parcel is accounted for. Closure emits `intake.completed` and generates the vendor-facing order summary (§23.10).
 
 ### 5.2 Exception paths
 
@@ -171,7 +171,7 @@ Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resol
 
 ## 12. API operations — *pointer*
 
-`itemizeOrder` and `closeHubIntake` — [openapi.yaml](../../contracts/openapi.yaml). `OrderItemize` is `additionalProperties: false`. It carries `carrier_cost` — an observed cost, not a price — and **no price and no destination zone**: a client that could send either could set its own price.
+`itemizeOrder`, `closeHubIntake` (its optional body is the approved parity exception), `getOrder`, `requestPayerCorrection` and `approvePayerCorrection` — [openapi.yaml](../../contracts/openapi.yaml). The payer arrangement before the freeze is edited with `amendPickupRequest` ([pickup-request.md](../pickup/pickup-request.md)). `OrderItemize` is `additionalProperties: false`. It carries `carrier_cost` — an observed cost, not a price — and **no price and no destination zone**: a client that could send either could set its own price.
 
 ---
 
@@ -197,7 +197,7 @@ And the client never influences the resulting price.
 Given a parcel whose destination is KASOA_CORRIDOR,
 When it is delivered on Friday, its batch day,
 Then the fee is service_area_base_fee, the same as any in-area doorstep parcel,
-And when it is delivered on any other operating day the fee is corridor_off_day_fee,
+And when it is delivered on any other operating day the fee is that corridor's corridor_off_day_fee (one value per corridor),
 And the off-day request is accepted and priced rather than refused,
 And origin has no effect on either fee.
 ```
@@ -308,10 +308,10 @@ And Ops may also flag a lower-value parcel as high value manually.
 ### `AC-SLICE-001-55` — The freeze is the boundary for payer edits
 
 ```text
-Given an order whose price is not yet frozen,
-When the vendor or authorized Ops edits the payer arrangement,
+Given a request none of whose parcels is itemized, so that no price is frozen,
+When the vendor or authorized Ops edits the payer arrangement (amendPickupRequest),
 Then the edit succeeds,
-And after freeze the same edit requires an Ops correction approved by Senior Ops,
+And after freeze the same edit is an Ops correction (requestPayerCorrection) approved by Senior Ops (approvePayerCorrection),
 And the approver may not be the requester, unless the approver is a Platform Admin,
 And complete before and after history is retained.
 ```
@@ -357,6 +357,8 @@ And pricing is refused when no class has been selected.
 ```
 
 **Governs:** `MSC-DEC-209`, §38 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `SIZE_CLASS_REQUIRED`
+
+The itemization request does not mark `size_class` as required in its schema, so that an omitted class reaches this rule and is refused with `SIZE_CLASS_REQUIRED` instead of a schema `400`.
 
 **This is the whole mitigation for a deliberate decision.** The Product Owner ruled that Ops classifies by judgement with no thresholds. That means two officers can grade the same parcel differently and change the fee by up to GH₵30. The audit record is what makes such a disagreement adjudicable instead of merely arguable — so an implementation that prices correctly but records no selector has failed this criterion.
 

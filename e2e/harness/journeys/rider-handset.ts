@@ -77,6 +77,8 @@ export interface HandsetAnswer {
   readonly status: number;
   readonly code: string | undefined;
   readonly body: Record<string, unknown>;
+  /** The version the answer carried (`ETag`), for the act that takes it back as `If-Match`. */
+  readonly etag?: string;
 }
 
 export class RiderHandset {
@@ -97,8 +99,9 @@ export class RiderHandset {
     path: string,
     body?: unknown,
     bearer?: string,
+    extra: Readonly<Record<string, string>> = {},
   ): Promise<HandsetAnswer> {
-    const headers: Record<string, string> = { accept: 'application/json' };
+    const headers: Record<string, string> = { accept: 'application/json', ...extra };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (bearer !== undefined) headers.authorization = `Bearer ${bearer}`;
     const response = await fetch(`${this.#api}${path}`, {
@@ -108,11 +111,26 @@ export class RiderHandset {
     });
     const text = await response.text();
     const parsed = (text === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
+    const etag = response.headers.get('etag');
     return {
       status: response.status,
       code: typeof parsed.code === 'string' ? parsed.code : undefined,
       body: parsed,
+      ...(etag === null ? {} : { etag }),
     };
+  }
+
+  /**
+   * An operation of the Rider app, as the handset sends it: a bearer token, no `Origin`, no cookie, and the headers the operation declares
+   * (`If-Match`, `Idempotency-Key`). The answer carries the `ETag` it was given.
+   */
+  call(
+    method: 'GET' | 'POST',
+    path: string,
+    token: string,
+    options: { body?: unknown; headers?: Record<string, string> } = {},
+  ): Promise<HandsetAnswer> {
+    return this.#send(method, path, options.body, token, options.headers);
   }
 
   /** `completeRiderDeviceEnrolment`: this handset's key, the PIN the rider chose, and the attestation of the key. */

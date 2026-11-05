@@ -106,8 +106,14 @@ export class AuthorizationGuard implements CanActivate {
 
     // 7. The scope of this grant, and the record the route names if it names one (and, once it is found, the tier it needs).
     const scope = effectiveScope(grant, session.authority.authorizedHubIds);
-    const recordId: unknown =
-      options.record === undefined ? undefined : request.params[options.record.param];
+    // A record scope limited to some surfaces (S1.24) is asked of the callers of those and of no other: the operation answers the rest itself.
+    const record =
+      options.record !== undefined &&
+      (options.record.surfaces === undefined ||
+        (options.record.surfaces as readonly string[]).includes(surface))
+        ? options.record
+        : undefined;
+    const recordId: unknown = record === undefined ? undefined : request.params[record.param];
     const authorized: AuthorizedRequest = {
       session,
       credential: authenticated.credential,
@@ -118,25 +124,25 @@ export class AuthorizationGuard implements CanActivate {
       scope,
       activity: options.activity,
       stateChanging: !SAFE_METHODS.has(request.method),
-      ...(options.record === undefined || typeof recordId !== 'string'
+      ...(record === undefined || typeof recordId !== 'string'
         ? {}
         : {
             target: {
-              entity: options.record.entity,
+              entity: record.entity,
               id: recordId,
               ...(tier?.rule === undefined ? {} : { tierRule: tier.rule }),
             },
           }),
     };
 
-    if (options.record !== undefined && typeof recordId === 'string') {
+    if (record !== undefined && typeof recordId === 'string') {
       if (this.records === undefined || this.contexts === undefined) {
         // A route names a record and nothing is composed to look for it: the platform does not guess.
         throw new RecordScopeUnavailableError();
       }
       const correlationId = currentRequestContext()?.requestId ?? randomUUID();
       await this.records.require(
-        options.record,
+        record,
         recordId,
         await this.contexts.of(authorized, correlationId),
         tier?.rule === undefined ? undefined : { rule: tier.rule, grantTier: grant?.tier ?? null },

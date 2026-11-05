@@ -1,14 +1,14 @@
 # Melarc Master Product and System Specification
 
-> **Status:** Product Owner–Approved Product and System Baseline — Stage 6 Complete, with Product Owner–approved post-baseline amendments through Sprint 023
-> **Version:** 1.15
-> **Date:** 2026-07-23
+> **Status:** Product Owner–Approved Product and System Baseline — Stage 6 Complete, with Product Owner–approved post-baseline amendments through Sprint 023 and the Slice 001 reconciliation of 29 October 2026
+> **Version:** 1.16
+> **Date:** 2026-10-29
 > **Approval:** Approved by the Product Owner as the controlling product and system baseline  
 > **Control authority:** `00_SPECIFICATION_CHARTER.md`
 
 ## How to read this approved baseline
 
-This file is the complete 52-section Product Owner–approved version 1.15 controlling baseline, incorporating the approved version 1.0 baseline and all approved amendments through Sprint 023. Stages 1–6 are complete: sources were consolidated, all sections were drafted, Product Owner policy was confirmed through controlled decision sprints, every registered source contradiction was resolved or delegated by authority, the review edition was normalized, all 52 sections were manually reviewed and approved, and the final audit passed. Requirements classified `CONFIRMED` or `CONFIRMED_WITH_FOLLOW_UP` carry product-policy authority; baseline approval does not silently promote inferred, proposed, current-implementation, deferred, superseded, conflicting-ledger, or technical-design follow-up statements. The normative requirements in this specification and the retained contracts, features, surfaces, architecture, standards and delivery specifications form the implementation authority. Historical requirement classifications remain provenance only.
+This file is the complete 52-section Product Owner–approved version 1.16 controlling baseline, incorporating the approved version 1.0 baseline and all approved amendments through Sprint 023 and the reconciliation of 29 October 2026. Stages 1–6 are complete: sources were consolidated, all sections were drafted, Product Owner policy was confirmed through controlled decision sprints, every registered source contradiction was resolved or delegated by authority, the review edition was normalized, all 52 sections were manually reviewed and approved, and the final audit passed. Requirements classified `CONFIRMED` or `CONFIRMED_WITH_FOLLOW_UP` carry product-policy authority; baseline approval does not silently promote inferred, proposed, current-implementation, deferred, superseded, conflicting-ledger, or technical-design follow-up statements. The normative requirements in this specification and the retained contracts, features, surfaces, architecture, standards and delivery specifications form the implementation authority. Historical requirement classifications remain provenance only.
 
 ## Source consolidation baseline
 
@@ -108,6 +108,7 @@ A statement is implementation authority only when it is classified `CONFIRMED`, 
 | 1.13 | 23 July 2026 | Post-baseline amendment (Sprint 021) | `MSC-DEC-172–174` closed three of four `OQ-038` sub-questions: individual/ad-hoc sender phone verified by SMS OTP at first use; a five-category prohibited-item catalogue (drugs, weapons, explosives/hazardous materials, live animals, cash/negotiable instruments); and no individual credit facility in Version 1, formally closing what `MSC-DEC-017` already implied. The Product Owner explicitly declined to decide the fourth sub-question — who may refuse/block an individual sender and on what grounds — which remains open. |
 | 1.14 | 23 July 2026 | Post-baseline amendment (Sprint 022) | `MSC-DEC-175` closed `OQ-046`, a booking-time-estimate data gap surfaced by external audit of v1.13: a standard multi-package pickup request shows no monetary price estimate at booking, since the Sprint 019 zone-pair matrix needs both origin and destination zone and destination isn't known until itemization. The first authoritative price now appears at itemization for the standard case; the one-package exception is unaffected (destination already captured at booking). This same audit pass corrected numerous stale Stage 2/3-era approval-status labels, an outdated Section 47 assumptions table, and other text/consistency defects across the document without any change to confirmed product behaviour. |
 | 1.15 | 23 July 2026 | Post-baseline amendment (Sprint 023) | `MSC-DEC-176–181` resolved the standard-booking prepayment-timing contradiction, made the GH₵25 Station Drop fee a governed company-wide setting, defined the one-package estimate composition, explicitly confirmed GHS as the launch currency, normalized corridor terminology/codes, and made terminal outcomes mode-specific. The same pass synchronized approval language, risk/assumption/open-question sections, glossary, acceptance criteria, and review history. |
+| 1.16 | 29 October 2026 | Post-baseline amendment (Slice 001 readiness, Stage 0) | The Product Owner's decisions of 29 October 2026 on the Slice 001 readiness check: where a later feature, contract, setting, domain model or state machine disagrees with this baseline, the later document governs, and the pricing, pickup, handover, settings, rules, criteria and glossary sections were reconciled to it. A flat fee per service area independent of origin replaces the zone-pair matrix (`MSC-DEC-207`); there are three size classes selected by judgement, with the surcharge outside the service area only (`MSC-DEC-209`); a parcel outside the service area is carrier cost plus a flat margin (`MSC-DEC-210`); every booking shows an indicative estimate (`MSC-DEC-211`); fees are hub-scoped (`MSC-DEC-218`); a request declares one of three pickup intents (`MSC-DEC-335`); the handover has one row per collected request (`MSC-DEC-416`); each corridor's batch day is Friday and its off-day fee is set per corridor; and the stop closes when the handshake is verified or overridden. Fee values live in settings.md and are not stated here. |
 
 # 2. Executive summary
 
@@ -249,11 +250,11 @@ Detailed reservation/release events, payment-provider failure/reversal handling,
 - Version 1 uses one standard configurable company-wide credit limit for every approved registered vendor. Confirmed vendor-paid itemized orders reserve credit at itemized-order confirmation, and earned unpaid charges continue to consume that exposure without double-counting. An itemized order whose vendor-paid amount would exceed available exposure enters `PAYMENT_REQUIRED`; its full vendor-paid amount must be paid before dispatch readiness. The exact limit amount and detailed release mechanics remain open.
 - An individual/ad-hoc sender may assign an approved recipient portion for collection at delivery; every sender-paid amount is paid after itemization calculates it and before the affected order becomes dispatch-ready.
 - Melarc earns the normal doorstep-delivery fee at successful doorstep delivery.
-- Outbound third-party work has two commercial modes. `STATION_DROP` uses the effective company-wide `station_drop_fee`, initially GH₵25, before station dispatch and earns that captured fee at verified waybill/photo handoff; the recipient separately pays the third party's destination/last-mile charge. `MELARC_COVERED_THIRD_PARTY_DELIVERY` collects one combined waybill-plus-Melarc amount before station dispatch, the recipient pays nothing at destination, and Melarc remains responsible through the recorded final external outcome.
+- Outbound third-party work has two commercial modes. `STATION_DROP` uses the effective hub-scoped `station_drop_fee` before station dispatch and earns that captured fee at verified waybill/photo handoff; the recipient separately pays the third party's destination/last-mile charge. `MELARC_COVERED_THIRD_PARTY_DELIVERY` collects one combined waybill-plus-Melarc amount before station dispatch, the recipient pays nothing at destination, and Melarc remains responsible through the recorded final external outcome.
 - The outbound prepayment gate overrides normal vendor weekly-account allowance for those outbound charges: the captured Station Drop or combined amount must be paid before rider dispatch to the station/agent.
 - After ultimate failed delivery, the original delivery fee is cancelled/reversed and the vendor pays only the separate return fee.
 - The return fee becomes earned and billable when formal return-to-vendor processing starts.
-- Version 1 uses one configurable flat return fee; the captured charge uses the setting value effective when return processing starts. It is a single company-wide value, but hub Senior Ops proposes a new amount and Platform Admin approves or rejects it before the change takes effect for every hub.
+- Version 1 uses one configurable flat return fee; the captured charge uses the setting value effective when return processing starts. It is a hub-scoped value: hub Senior Ops proposes a new amount and Platform Admin approves or rejects it before the change takes effect for that hub.
 - Approved registered vendors receive the earned return fee on the next periodic statement; individual/ad-hoc senders must pay before physical return handover.
 - Ops may request a full or partial waiver with a reason; Senior Ops independently approves or rejects it, and the original charge remains auditable. A waiver reason must be one of three confirmed categories — Melarc-caused operational error, unresolved documented dispute at return-start, or a one-time goodwill/service-recovery exception for a vendor in good standing — with no fixed numeric cap on how many a vendor may receive.
 
@@ -741,7 +742,7 @@ A parcel journey is not complete merely because it was dispatched. It must reach
 ## 14.3 Confirmed service exclusions and Phase 2 items
 
 - Express service is excluded from Version 1 for every customer type.
-- ~~Parcel-size classification definitions and size-based surcharges are deferred to Phase 2.~~ Superseded: pulled into Version 1 as a universal surcharge on the zone-pair/corridor base fee (Section 23.4). Categories are Small, Medium, Large, and Extra Large; Small is a fixed GH₵0 baseline. `[MSC-DEC-021 superseded by MSC-DEC-165]`
+- ~~Parcel-size classification definitions and size-based surcharges are deferred to Phase 2.~~ Superseded: pulled into Version 1 as a surcharge on a parcel delivered outside the service area (Section 23.4). Categories are Small, Medium and Large (Extra Large withdrawn); Small carries no surcharge. `[MSC-DEC-021 superseded by MSC-DEC-165]`
 - A one-package pickup is not self-service, but it is not out of scope: registered vendors and individual/ad-hoc senders may use the controlled Ops/Platform-Admin exception path.
 
 # 15. Future roadmap
@@ -955,7 +956,7 @@ Detailed verification evidence, rejection/reapplication, duplicate detection, an
 
 - Show understandable custody and status milestones from booking through the mode-specific terminal outcome: doorstep delivery/return, Station Drop verified handoff, or the final external outcome for Melarc-covered third-party delivery.
 - Show approved vendor-safe pickup failure and exception information.
-- For standard multi-package requests, show a clear no-estimate/pending-pricing state until itemization; for the one-package exception, show only the approved provisional estimate; always show the authoritative frozen fee after itemization.
+- For every request, show a clearly labelled indicative estimate at booking (the in-area doorstep fee for a standard multi-package request, the destination's base fee for the one-package exception); always show the authoritative frozen fee after itemization, visibly distinct from the estimate.
 - Show the vendor's own payer allocation, commitments, statement/payment status, return fees, approved adjustments, and account-allowance state where needed.
 - Do not expose route construction, internal hub discrepancies, other vendors, or privileged notes.
 
@@ -1188,9 +1189,10 @@ A pickup request is the front door of the parcel journey.
 
 ### Business rules
 
+- Every request declares one pickup intent, chosen first: the vendor's own packages (`OWN_PACKAGES`), goods the rider collects from a third-party seller for a vendor (`COLLECT_FOR_VENDOR`), or an ad-hoc sender's goods (`ADHOC_SENDER`). The intent decides what the rest of the request requires; the pickup-request feature owns that detail (`MSC-DEC-335`).
 - Standard self-booking requires at least two packages.
 - Neither registered vendors nor individual/ad-hoc senders may self-book one package.
-- A one-package request may be created by Ops for either customer type and requires Platform Admin approval; recipient name, phone, and delivery address are mandatory.
+- A one-package request may be created by Ops for either customer type and requires approval by a holder of the one-package approval permission (permissions.md names the holders), who may not be the requester unless a Platform Admin; recipient name, phone, and delivery address are mandatory.
 - One request has one origin.
 - Per-request contact/location edits do not rewrite sender defaults or saved vendor locations.
 - Registered vendors may maintain multiple saved pickup locations and one default; serviceability is revalidated per request.
@@ -1210,7 +1212,7 @@ A pickup request is the front door of the parcel journey.
 - A rider explicitly starts the owned run.
 - Starting changes all member pickup work to dispatched/active context atomically.
 - Stops may be completed out of planned order, while the system maintains a recommended next stop.
-- The manifest completes when all physical stops are `COMPLETED` or `FAILED`.
+- The manifest completes when every stop is terminal (collected, partially collected, failed or skipped): by the hub handover where anything was collected, or by the system where nothing was. Ops may skip a stop that cannot be attempted, with a reason; a rider may not.
 
 ## 21.3 Pickup completion
 
@@ -1222,18 +1224,18 @@ The rider records:
 
 A rider cannot complete a pickup with zero packages. Zero collection must use the pickup-failure flow with an approved category and reason; the system must not create an empty completed stop, sender set, or hub handover.
 
-Physical completion may promote a provisional ad-hoc sender to reusable status without waiting for the handshake response.
+A provisional ad-hoc sender is promoted to reusable status when a collection with a count above zero is recorded for it, without waiting for the handshake response.
 
 ## 21.4 Collection confirmation
 
-The confirmation overlay records `pending_vendor`, `confirmed`, `disputed`, or `unconfirmed` independently from physical pickup status.
+The rider records the collected count first; the system then generates a one-time code, and the stop closes as collected or partially collected when the handshake is verified or overridden by authorized Ops. The handshake lifecycle (code generated, delivered, verified, expired, exhausted, disputed, manually resolved) is owned by the state machines.
 
 - Correct code within TTL confirms.
 - Wrong code returns remaining attempts.
 - Attempt exhaustion invalidates the code and routes to ops.
 - TTL expiry routes to ops and blocks late self-confirmation.
-- Vendor dispute raises reconciliation without reversing physical completion.
-- Manifest completion does not wait for confirmation.
+- A vendor dispute raised after confirmation raises reconciliation without reversing physical completion.
+- A dispute does not hold up manifest completion.
 
 For registered vendors, Melarc Rider displays the one-time code and the vendor enters it in Melarc Vendor. For ad-hoc senders, Melarc sends the code by SMS to the recorded sender; the sender or named pickup reference gives it to the rider for entry in Melarc Rider. Build-status and detailed reconciliation mechanics remain controlled follow-ups.
 
@@ -1266,7 +1268,7 @@ A Celery backstop escalates undecided failures after a configured period.
 
 - Request created, confirmed, and declined events.
 - Run dispatched and started.
-- Pickup completed, completed with variance, failed, confirmed, disputed, or unconfirmed.
+- Pickup completed, completed with variance, failed, confirmed, disputed, or manually resolved.
 - Manifest completed.
 - Sender saved/promoted.
 - Registered/ad-hoc notifications according to channel rules.
@@ -1292,12 +1294,12 @@ Hub receiving is the custody boundary between rider road operations and Melarc�
 ## 22.2 Rider handover
 
 - Available after all pickup-run stops are terminal.
-- Shows one count row per sender set/request/pickup identifier.
+- Shows one count row per pickup request collected on the run; each row opens one intake at the hub (`MSC-DEC-416`).
 - Pre-fills rider completion count but permits correction before submission.
 - Shows total rollup.
 - Submits idempotently.
 - Supports the approved offline queue/retry interaction.
-- A zero collected count must use the pickup-failure flow and must not create a completed handover or empty intake.
+- A zero collected count must use the pickup-failure flow and must not create a completed handover or empty intake. A run on which nothing was collected completes by itself, with no handover and no intake.
 
 ## 22.3 Awaiting-receive queue
 
@@ -1376,7 +1378,7 @@ Itemization converts each physically received parcel into an operational Order w
 
 - Recipient name and phone.
 - Delivery address/GhanaPost GPS and resolved responsible-hub service zone.
-- Size class: Small, Medium, Large, or Extra Large — a required Version 1 classification input; the associated surcharge applies at pricing composition (Section 23.4).
+- Size class: Small, Medium, or Large, selected by the receiving officer at itemization — a required Version 1 classification input; the associated surcharge applies only to a parcel delivered outside the service area (Section 23.4).
 - Declared value, high-value flag, and required evidence.
 - Electronics/serialized-goods flag and serial/IMEI where applicable.
 - Delivery-fee payer arrangement: recipient, vendor/sender, or split.
@@ -1390,28 +1392,28 @@ Merchandise COD must not be captured because Melarc does not collect vendor prod
 ## 23.3 Address, service zone, and base price
 
 - Each hub owns its service-zone catalogue. The launch hub's catalogue is seven zones: Tema, Accra Central, Lapaz/Sowutuom, Madina/Adenta, Dansoman, Amasaman & Environs, and Kasoa Corridor.
-- The Version 1 base delivery fee depends on **both the parcel's origin zone and its destination zone** — a zone-pair matrix — not one flat fee per zone. Same-zone (diagonal) delivery, e.g. Dansoman → Dansoman, is valid and has its own price, typically the lowest tier.
-- Two of the seven zones — Amasaman & Environs and Kasoa Corridor — are never priced as an ordinary matrix cell when they are the **destination**. A delivery into either uses that zone's corridor rate card instead (Section 23.11); they remain ordinary matrix zones when they are the origin.
+- The Version 1 base delivery fee is a **flat fee for the destination's service area, independent of the origin zone and of parcel size** (`MSC-DEC-207`). The launch hub has three service areas: Accra & Tema, Amasaman & Environs, and Kasoa Corridor. The zone answers whether an address is served, in which service area and on which days; it is no longer half of a price lookup. A parcel delivered outside the service area is priced as the third-party carrier's actual charge plus a flat Melarc margin plus the size surcharge (Section 23.4, `MSC-DEC-210`).
+- Two of the seven zones — Amasaman & Environs and Kasoa Corridor — are corridors: a delivery into either is priced at that corridor's base fee on its batch day and at its off-day fee on any other day (Section 23.11). As an origin they carry no special price.
 - The base fee is not calculated from live distance in Version 1.
 - Save/final pricing is blocked until both the origin and destination resolve to an active zone (or, for a corridor destination, an active corridor) belonging to the responsible hub.
 - Ambiguous resolution requires a clear authorized selection; out-of-coverage addresses cannot be priced under the normal flow.
-- Zone-pair resolution and pricing are server-validated even when the frontend provides live feedback.
-- The system preserves the hub, origin zone, destination zone, price-table version, and effective value used for the parcel.
-- **Origin zone** is the zone of the pickup request's one origin (Section 21.1: "one request has one origin") — the vendor's selected saved pickup location, or the ad-hoc sender's pickup location. It is resolved and snapshotted once per request, the same way destination zone is snapshotted per parcel; a mid-request pickup-location correction re-resolves it before price freeze, under the same controlled-correction rule as a destination change.
+- Zone resolution and pricing are server-validated even when the frontend provides live feedback.
+- The system preserves the hub, origin zone, destination zone, and, for each price component, the setting key, version and value used for the parcel.
+- **Origin zone** is the zone of the pickup request's one origin (Section 21.1: "one request has one origin") — the vendor's selected saved pickup location, or the ad-hoc sender's pickup location. It is resolved and snapshotted once per request, the same way destination zone is snapshotted per parcel; a mid-request pickup-location correction re-resolves it before price freeze, under the same controlled-correction rule as a destination change. It is retained for reporting and dispute adjudication and is no longer a pricing input.
 
 ## 23.4 Size and high value
 
-- Small, Medium, Large, and Extra Large are the Version 1 parcel-size categories. Small is a fixed GH₵0 baseline; Medium, Large, and Extra Large each carry their own configurable flat surcharge.
-- The size surcharge is universal: `final price = base fee + size surcharge`, applied on top of whichever base fee is in play — the zone-pair matrix price (Section 23.3) or a corridor rate (Section 23.11). It is never itself a base fee.
-- The size surcharge and the high-value surcharge (below) are independent parcel attributes, not alternatives, and stack additively when both apply — a Large, high-value parcel pays the zone-pair/corridor base fee plus the Large surcharge plus the high-value surcharge. The size surcharge does not apply to `STATION_DROP` or `MELARC_COVERED_THIRD_PARTY_DELIVERY` outbound charges (Section 23.9, Section 24), which remain their own separate fixed-fee structures untouched by `MSC-DEC-164–167`.
-- Exact surcharge amounts for Medium, Large, and Extra Large remain open, entered later through the admin dashboard; only the category structure and the GH₵0 Small baseline are confirmed.
-- Parcel-size classification *mechanics* — how a parcel is measured or assigned a category at itemization — remain a separate operational/technical-design detail, not resolved by `MSC-DEC-165`.
+- Small, Medium, and Large are the Version 1 parcel-size categories (Extra Large is withdrawn). Small carries no surcharge; Medium and Large each carry their own configurable flat surcharge.
+- The size surcharge applies **only to a parcel delivered outside the service area**: carrier cost + Melarc margin + size surcharge (`MSC-DEC-209`). A doorstep delivery inside the service area, including a corridor delivery, and a `STATION_DROP` are flat regardless of size.
+- The size surcharge and the high-value surcharge (below) are independent parcel attributes, not alternatives, and stack additively when both apply.
+- The surcharge amounts are confirmed settings (settings.md), not stated here.
+- The receiving officer selects the size class by judgement at itemization; no weight or dimension threshold exists or may be derived (`MSC-DEC-209`), and the selecting officer is recorded.
 - Dimensional and live-distance pricing remain deferred.
 - Declared value may auto-flag high value using the first configured tier.
 - Ops may manually flag a lower-value parcel as high value.
 - High-value parcels require verified itemization-time evidence.
 - Serialized electronics require serial/IMEI.
-- The high-value surcharge funds enhanced handling/evidence diligence only; it does not promise a fixed reimbursement, cap, or insurance-style guarantee. A high-value parcel's loss/damage is adjudicated through the existing Damaged/Dispute process (Section 22.5), using declared value and evidence as inputs. Exact tier structure and surcharge amounts remain open.
+- The high-value surcharge funds enhanced handling/evidence diligence only; it does not promise a fixed reimbursement, cap, or insurance-style guarantee. A high-value parcel's loss/damage is adjudicated through the existing Damaged/Dispute process (Section 22.5), using declared value and evidence as inputs. The tier structure and amounts are confirmed settings (settings.md); how the surcharge enters the locked price remains open.
 
 ## 23.5 Delivery-fee payer allocation
 
@@ -1425,18 +1427,17 @@ For Version 1 group coverage, multiple parcels in the current pickup request may
 
 ## 23.6 Booking estimate and authoritative price freeze
 
-- A standard (≥2-package) pickup request shows **no monetary price estimate at booking**: the zone-pair matrix (Section 23.3) needs both origin and destination zone, and destination is not captured until itemization for the standard case.
-- The one-package Ops-created exception is different: it mandatorily captures recipient/delivery-address data at booking (Section 21.1), so both zones are known. It may show a provisional **base-fee estimate only** using the effective zone-pair or corridor rate. The UI must state that size and high-value surcharges are excluded until itemization unless those inputs were explicitly captured and validated at booking.
-- Hub itemization confirms the origin and destination zone and every approved pricing input, calculates the authoritative zone-pair/corridor fee plus applicable size and high-value surcharges, applies the vendor-credit or payment gate, and freezes the fee at itemized-order confirmation. For the standard case, this is the parcel's **first** price; for a one-package exception, it replaces the provisional base-fee estimate.
-- The system must clearly label any shown estimate versus the frozen final price and preserve both the estimate inputs (where an estimate exists) and the frozen pricing snapshot.
+- A pickup request shows an **indicative estimate** at booking (`MSC-DEC-211`). A standard (≥2-package) request has no destination until itemization, so its estimate is the in-area doorstep base fee for the package count; the one-package Ops-created exception, which mandatorily captures recipient/delivery-address data at booking (Section 21.1), uses the base fee for that destination. The estimate assumes the smallest size class, and the UI states that size and high-value surcharges are excluded until itemization.
+- Hub itemization confirms the origin and destination zone and every approved pricing input, calculates the authoritative fee (the flat service-area fee, a corridor's batch-day or off-day fee, the Station Drop fee, or carrier cost plus margin) plus applicable size and high-value surcharges, applies the vendor-credit or payment gate, and freezes the fee at itemized-order confirmation. This is the parcel's **first** authoritative price; it never inherits the booking estimate.
+- The system must clearly label any shown estimate versus the frozen final price, must never store or present an estimate as a price, and preserves the estimate's inputs and the frozen pricing snapshot.
 - A locked price cannot change silently; post-freeze correction uses the approved reasoned maker-checker workflow.
-- Cross-zone post-freeze address corrections use controlled repricing under `MSC-DEC-118`. Vendor-facing UX for the standard case's no-estimate state remains a UI-design follow-up.
+- A post-freeze address correction that changes the service area or the commercial mode uses controlled repricing under `MSC-DEC-118`; a correction within a service area moves no money and starts no repricing.
 
 ## 23.7 Service level and schedule
 
 Melarc offers no express service in Version 1. Legacy express/off-service-day surcharge rules are inactive. Service-day scheduling (uniform Monday–Saturday) and booking cutoff (per-hub, Senior Ops proposes/Platform Admin approves) are confirmed at Section 21.1.
 
-The `AMASAMAN_ENVIRONS` and `KASOA_CORRIDOR` zones additionally carry a day-of-week price variation (Section 23.11): batch day(s) use the lower batch rate and any other operating day uses the higher **non-batch rate**. `NON_BATCH_RATE` is the stable machine term and is not an Express service.
+The `AMASAMAN_ENVIRONS` and `KASOA_CORRIDOR` corridors additionally carry a day-of-week price variation (Section 23.11): on its batch day a corridor delivery is priced at the corridor's base fee, and on any other operating day at its higher **off-day fee**. `CORRIDOR_OFF_DAY` is the stable machine term (it replaces the withdrawn `NON_BATCH_RATE`) and is not an Express service.
 
 ## 23.8 Lane classification
 
@@ -1444,19 +1445,14 @@ After itemization, authorized Ops assigns or corrects the final delivery lane fr
 
 ## 23.9 Pricing values still required
 
-The product-policy calculation model is approved (zone-pair matrix, universal size surcharge, and corridor rates — `MSC-DEC-164–167`), but settings/technical artifacts must still define:
+The product-policy calculation model is approved (a flat fee per service area independent of origin, corridor batch-day and off-day fees, the size surcharge outside the service area only, Station Drop, and carrier cost plus a flat margin — `MSC-DEC-207` and later). The launch hub's Ghana-cedi values for the fees, surcharges, high-value tiers, outbound charges and return fee are confirmed settings (settings.md), not stated here. Settings and technical artifacts must still define:
 
-- exact Ghana-cedi price for every zone-pair matrix cell in the launch hub's catalogue;
-- exact Ghana-cedi surcharge for Medium, Large, and Extra Large sizes (Small is fixed at GH₵0);
-- exact Ghana-cedi batch, non-batch, and intra-corridor rates for Amasaman & Environs and Kasoa Corridor;
-- price-table versioning and effective dates;
-- high-value and approved outbound/courier charges;
-- exact flat return-fee amount (governance and waiver-reason structure confirmed — Section 28.4, `MSC-DEC-162–163`);
+- price-table versioning and effective dates (the hub-setting model);
 - taxes, permitted discounts, rounding, and receipts;
 - approved overrides and cross-zone address-correction treatment; and
 - historical traceability to the exact pricing snapshot.
 
-Every value above is entered through the admin dashboard, not this specification; none is treated as final by `MSC-DEC-164–167`. Version 1 has no subscription pricing model and no live-distance base-price calculation.
+Every fee is hub-scoped, effective-dated and snapshotted, and a hub that lacks one fails visibly rather than borrowing another hub's value (Section 33.4). Values are entered as settings through the approved pricing-governance workflow, not in this specification. Version 1 has no subscription pricing model and no live-distance base-price calculation.
 
 ## 23.10 Intake closure
 
@@ -1470,17 +1466,15 @@ Every value above is entered through the admin dashboard, not this specification
 ## 23.11 Corridor pricing
 
 - The canonical corridor codes are `AMASAMAN_ENVIRONS` and `KASOA_CORRIDOR`; their display names are **Amasaman & Environs** and **Kasoa Corridor**.
-- When either corridor is the delivery destination, it is priced independently of the ordinary zone-pair matrix.
+- A delivery into either corridor is priced by the corridor rule below, not by the in-area flat fee.
 - Each corridor has:
-  - a lower **batch rate** on its designated batch day(s);
-  - a higher **non-batch rate** on any other operating day; and
-  - an **intra-corridor rate** for pickup and delivery within the same corridor on a batch day.
-- Amasaman & Environs batch days are Tuesday and Friday. Kasoa Corridor's batch day is Friday.
-- `NON_BATCH_RATE` is the stable machine/API term. “Express service” remains excluded from Version 1 and must not be used as the machine concept for this price tier.
-- Corridor rates are base fees. The Section 23.4 size surcharge applies on top of the applicable corridor rate.
-- Corridor rates, batch-day assignments, and intra-corridor rates are independent configuration records from the zone-pair matrix.
-- Both corridors remain serviceable Monday–Saturday; a non-batch-day delivery is fulfilled at the non-batch rate.
-- Exact GH₵ batch, non-batch, and intra-corridor amounts remain required launch configuration under the approved pricing-governance workflow.
+  - a **base fee** on its designated batch day, which is Friday for both corridors; and
+  - a higher **off-day fee**, set separately for each corridor, on any other operating day.
+- `CORRIDOR_OFF_DAY` is the stable machine/API term (it replaces the withdrawn `NON_BATCH_RATE`). “Express service” remains excluded from Version 1 and must not be used as the machine concept for this price tier.
+- A corridor delivery is flat regardless of size; the Section 23.4 size surcharge does not apply to it. Intra-corridor pricing no longer exists: pickup and delivery within one corridor are priced like any other delivery into it.
+- Corridor fees and batch-day assignments are hub-scoped configuration records, versioned and snapshotted like every other fee.
+- Both corridors remain serviceable Monday–Saturday; an off-day delivery is accepted and priced at the off-day fee, never refused.
+- The Ghana-cedi amounts are confirmed settings (settings.md), not stated here.
 
 # 24. Dispatch management
 
@@ -1554,7 +1548,7 @@ Version 1 uses a Melarc-managed approved courier/station registry and manually r
 ### 24.7.1 Station Drop
 
 - Melarc transports the parcel to an approved third-party station/courier and performs the verified handoff.
-- Melarc charges the effective company-wide **Station Drop fee**, whose launch value is **GH₵25**.
+- Melarc charges the effective hub-scoped **Station Drop fee** (`station_drop_fee`, settings.md), a flat charge regardless of size.
 - Hub Senior Ops proposes a fee change and Platform Admin independently approves or rejects it. Changes are effective-dated, apply only to newly created Station Drop charges, and every charge snapshots the applied value and setting version.
 - The captured Station Drop fee must be fully paid and backend-confirmed before a rider is dispatched to the station.
 - The recipient separately pays the third party's onward or last-mile charge at destination.
@@ -1584,7 +1578,7 @@ For doorstep work, dispatch does not equal delivery. The parcel reaches its term
 
 ## 24.9 Outbound financial boundary
 
-Every outbound third-party charge is prepaid before rider dispatch to the station/agent. Station Drop creates a charge using the effective company-wide fee snapshot (GH₵25 at launch) and reaches its Melarc service-earning event at verified handoff. Melarc-covered third-party delivery creates one customer charge composed of the waybill cost plus Melarc fee and remains open through the final external outcome. Detailed agent payable/settlement, cost variance, cancellation/refund, reversal, and accounting-recognition entries must be defined in finance/domain/OpenAPI/integration design without changing these commercial rules.
+Every outbound third-party charge is prepaid before rider dispatch to the station/agent. Station Drop creates a charge using the effective hub-scoped fee snapshot and reaches its Melarc service-earning event at verified handoff. Melarc-covered third-party delivery creates one customer charge composed of the waybill cost plus Melarc fee and remains open through the final external outcome. Detailed agent payable/settlement, cost variance, cancellation/refund, reversal, and accounting-recognition entries must be defined in finance/domain/OpenAPI/integration design without changing these commercial rules.
 
 # 25. Delivery management
 
@@ -1709,7 +1703,7 @@ An ad-hoc sender-paid portion is paid after itemization calculates it and before
 
 Version 1 must digitally distinguish:
 
-- no-estimate/pending-pricing state for standard bookings, any provisional estimate that actually existed, and the frozen delivery fee;
+- any booking estimate shown, and the frozen delivery fee;
 - recipient amount versus vendor/sender amount;
 - cash expected, collected, handed over, received, short, or over;
 - mobile-money attempt, pending result, success, failure, expiry, or reversal;
@@ -1836,7 +1830,7 @@ After the third unsuccessful delivery attempt:
 - An ad-hoc sender must satisfy the return-fee payment gate before physical handover unless an authorized auditable exception applies.
 - Physical return custody closes through a valid return OTP sent to the recorded vendor/sender contact. The contact may forward the OTP to another receiver. No additional name, relationship, signature, or photograph is required by Product Owner policy.
 
-The flat return-fee amount is a single company-wide setting: hub Senior Ops proposes a new value and Platform Admin independently approves or rejects it before the new amount takes effect for every hub, not only the proposing one — reusing the existing hub-setting maker-checker pattern even though the fee itself is not hub-scoped. A waiver (Section 5.3, `MSC-DEC-031`) is limited to three confirmed reason categories — a Melarc-caused operational error, an unresolved documented dispute still open at return-workflow start, or a one-time goodwill/service-recovery exception for a vendor account in good standing — with no fixed numeric cap; Senior Ops still approves each waiver instance individually with a mandatory audit record. The exact initial GH₵ amount remains open.
+The flat return-fee amount is a hub-scoped setting (`MSC-DEC-218`): hub Senior Ops proposes a new value and Platform Admin independently approves or rejects it before the new amount takes effect for that hub. A waiver (Section 5.3, `MSC-DEC-031`) is limited to three confirmed reason categories — a Melarc-caused operational error, an unresolved documented dispute still open at return-workflow start, or a one-time goodwill/service-recovery exception for a vendor account in good standing — with no fixed numeric cap; Senior Ops still approves each waiver instance individually with a mandatory audit record. The amount is a confirmed setting (settings.md).
 
 This same OTP-based closure mechanism is reused, not replaced, when a return is triggered by vendor suspension rather than exhausted delivery attempts (Section 29.6). The return fee above applies to a suspension-triggered return exactly as it applies to any other return, with no cause-based carve-out.
 
@@ -2018,6 +2012,7 @@ Offboarding a staff member or rider immediately revokes system access and creden
 | Pickup run dispatched | Rider push/in-app |
 | Collection completion/handshake | Registered vendor in-app or approved flow; ad-hoc SMS path |
 | Pickup failure | Ops event; registered vendor in-app/email; ad-hoc PII-safe SMS |
+| Pickup stop skipped by Ops (MSC-DEC-412) | Registered vendor: in-app feed, with the reason and the requested action; no raw note |
 | Failure escalation | Senior Ops internal queue/notification |
 | Hub handover submitted | Ops receive queue |
 | Intake completed | Registered vendor in-app order summary; ad-hoc tracking SMS |
@@ -2157,9 +2152,12 @@ Settings must be stored and changed through a controlled mechanism with:
 |---|---|---|
 | `transaction_currency` | `GHS` — Ghana cedi, only launch transaction currency | Platform-wide product policy; use ISO 4217 code `GHS` and fixed-decimal money representation. Multi-currency requires a later Product Owner decision. |
 | Hub service-zone catalogue | Launch hub: 7 named zones confirmed (Tema, Accra Central, Lapaz/Sowutuom, Madina/Adenta, Dansoman, Amasaman & Environs, Kasoa Corridor) — `MSC-DEC-164` | Hub Senior Ops proposes; Platform Admin approves/rejects further creation, boundary, deactivation, and service-day changes; define zone fields, versioning, effective dating, overlap, rollback, and historical snapshots |
-| `zone_pair_matrix` | OPEN — exact GH₵ value per origin/destination cell not yet defined | Model confirmed by `MSC-DEC-164`: price depends on both origin and destination zone; same-zone (diagonal) pricing valid; a corridor-zone destination is priced by `corridor_rates` instead. Editing authority confirmed by `MSC-DEC-167`: hub Senior Ops proposes, Platform Admin approves. Exact cell values remain pricing configuration, entered via the admin dashboard |
-| `size_category_surcharges` | Small = GH₵0 fixed baseline — confirmed; Medium/Large/Extra Large amounts OPEN | Universal composition rule (`final price = base fee + size surcharge`) and category structure confirmed by `MSC-DEC-165`. Editing authority confirmed by `MSC-DEC-167`: hub Senior Ops proposes, Platform Admin approves. Exact Medium/Large/Extra Large amounts remain pricing configuration |
-| `corridor_rates` | OPEN — exact GH₵ batch/non-batch/intra-corridor value per corridor not yet defined | Structure confirmed by `MSC-DEC-166` and terminology by `MSC-DEC-180`: `AMASAMAN_ENVIRONS` (batch days Tue/Fri) and `KASOA_CORRIDOR` (batch day Fri) each have a batch rate, a `NON_BATCH_RATE`, and an intra-corridor rate. Hub Senior Ops proposes and Platform Admin approves. Exact amounts remain required pricing configuration. |
+| `zone_pair_matrix` | **Withdrawn by `MSC-DEC-207`** | The origin x destination grid is replaced by a flat `service_area_base_fee` |
+| `size_class_surcharges` | Confirmed (settings.md); renamed from `size_category_surcharges`; Small carries none, Extra Large withdrawn | Applies only to a parcel delivered outside the service area (`MSC-DEC-207`, `MSC-DEC-209`). Editing authority confirmed by `MSC-DEC-167`: hub Senior Ops proposes, Platform Admin approves |
+| `corridor_rates` | **Withdrawn by `MSC-DEC-207`** | Replaced by `service_area_base_fee` (per service area, charged on a corridor's batch day) and `corridor_off_day_fee` (per corridor), both confirmed in settings.md. Hub Senior Ops proposes and Platform Admin approves |
+| `service_area_base_fee` | Confirmed (settings.md); hub-scoped, per service area | Flat fee independent of origin and of size; each corridor charges it on its batch day only. Hub Senior Ops proposes and Platform Admin approves; effective-dated and snapshotted |
+| `corridor_off_day_fee` | Confirmed (settings.md); hub-scoped, one value per corridor | Charged for a corridor delivery requested off its batch day. Same authority and snapshot rules |
+| `outside_accra_margin` | Confirmed (settings.md); hub-scoped | Flat margin on the third-party carrier's actual charge outside the service area (`MSC-DEC-210`). Same authority and snapshot rules |
 | Hub pricing configuration | Hub-specific; values not yet defined | Hub Senior Ops proposes; Platform Admin approves/rejects; define price structures, effective dating, emergency handling, and historical snapshots |
 | Hub operational settings | Hub-specific; values not yet defined | Hub Senior Ops proposes; Platform Admin approves/rejects; classify settings, bootstrap values, emergency handling, and safe missing-value behaviour |
 | `booking_cutoff_time` | Per-hub setting; exact time values not yet defined | Cutoff scope, late-booking handling, service-day uniformity, and editing authority confirmed by `MSC-DEC-147–149`; hub Senior Ops proposes, Platform Admin approves; exact per-hub time values remain operational configuration |
@@ -2171,12 +2169,12 @@ Settings must be stored and changed through a controlled mechanism with:
 | `handshake_max_wrong_attempts` | 5 — source default, security review required | Define lockout, recovery, monitoring, and abuse controls in security design |
 | `adhoc_failure_sms_enabled` | On — source default | Define kill-switch permission, outage behaviour, and audit in notification/operations design |
 | `heads_up_sms_enabled` | On — source default | Define kill-switch permission, operational consequence, and customer fallback |
-| `flat_return_fee_amount` | OPEN — exact GH₵ value not yet defined | Editing authority confirmed by `MSC-DEC-162`: hub Senior Ops proposes, Platform Admin approves company-wide — reusing the hub-setting maker-checker pattern even though the fee itself is one company-wide value; exact amount remains pricing configuration |
+| `flat_return_fee_amount` | Confirmed (settings.md); hub-scoped since `MSC-DEC-218` | Editing authority confirmed by `MSC-DEC-162`: hub Senior Ops proposes, Platform Admin approves |
 | `return_fee_waiver_reasons` | CONFIRMED — three standard categories, no hard numeric cap | Reason list (Melarc-caused operational error; unresolved documented dispute at return-start; one-time goodwill/service-recovery exception) and no-cap structure confirmed by `MSC-DEC-163`; Senior Ops approves each waiver instance individually with a mandatory audit record (`MSC-DEC-031` authority unchanged) |
 | `MELARC_HIGH_VALUE_TIERS` | OPEN — tier structure/amounts not yet defined | Liability promise (none beyond standard adjudication) and claims relationship (existing Damaged/Dispute process) confirmed by `MSC-DEC-156–157`; tier structure, thresholds, and effective dates remain operational/pricing configuration |
 | `high_value_threshold` | Legacy audit snapshot | Retain only for historical compatibility until the approved high-value model replaces it |
 | `high_value_surcharge` | Legacy audit snapshot | Retain only for historical compatibility until the approved high-value model replaces it |
-| `station_drop_fee` | Company-wide; launch value GH₵25 | Hub Senior Ops proposes and Platform Admin approves/rejects; changes are effective-dated, apply to new Station Drop charges only, and every charge snapshots the applied value/version. |
+| `station_drop_fee` | Hub-scoped; confirmed (settings.md) | Hub Senior Ops proposes and Platform Admin approves/rejects; changes are effective-dated, apply to new Station Drop charges only, and every charge snapshots the applied value/version. |
 | `MELARC_EXPRESS_SURCHARGE` | NOT APPLICABLE IN VERSION 1 | Express service is outside Version 1 and must not create a launch charge |
 | `cod_ceiling` | SUPERSEDED / NOT APPLICABLE | Merchandise COD is not supported; the legacy setting must not govern target behaviour |
 | `intake_parcel_cap` | 100 — source default, technical review required | Validate operational capacity, error handling, and safe change governance |
@@ -2265,7 +2263,7 @@ Melarc does not require a vendor SaaS tenancy model. The eventual architecture m
 | Delivery Run | An ordered group of eligible stops assigned to one rider, subject to lane compatibility rules. A run may freely mix registered-courier/informal-carrier stops and `STATION_DROP`/`MELARC_COVERED_THIRD_PARTY_DELIVERY` commercial-mode stops; each order's own carrier-identity and commercial-mode facts remain independently tracked regardless of which run carries it. |
 | Delivery Stop | The execution record for one order within a delivery run |
 | Third-Party Handoff | The evidence-backed custody transfer to an approved courier/station, including waybill and mandatory receipt/handoff photo |
-| Station Drop | The GH₵25 prepaid mode in which Melarc earns its service fee at verified third-party handoff and the recipient separately pays the onward third-party charge at destination |
+| Station Drop | The prepaid mode in which Melarc earns its flat service fee at verified third-party handoff and the recipient separately pays the onward third-party charge at destination |
 | Melarc-Covered Third-Party Delivery | The prepaid combined waybill-plus-Melarc-fee mode in which the recipient pays nothing at destination and Melarc remains responsible through the recorded final external outcome |
 | Proof of Delivery | A valid recipient OTP recorded after any required recipient-paid delivery fee is backend-confirmed and before parcel handover; evidence retention remains a downstream policy/design item |
 | Failed Delivery | An unsuccessful doorstep attempt recorded with the approved reason/contact/evidence data, followed by return to the responsible hub; three total attempts are permitted before return-to-vendor processing begins |
@@ -2418,13 +2416,13 @@ The following rules consolidate the product's strongest behavioural constraints.
 
 1. Each physical parcel becomes an individually traceable order/delivery unit.
 2. Itemization captures recipient, destination, responsible-hub zone, descriptive size, high-value/handling attributes, payer allocation, service level, lane, and source custody links.
-3. Version 1 base pricing depends on both the origin and destination zone within the responsible hub's service-zone catalogue — a zone-pair matrix, not one flat fee per zone; two zones (Amasaman & Environs, Kasoa Corridor) are priced by a corridor rate card instead when they are the destination. It is not calculated from live distance.
-4. A standard multi-package booking displays no monetary estimate. The one-package exception may display only the approved provisional base-fee estimate. Hub itemization calculates the authoritative fee and freezes it at itemized-order confirmation.
-5. The no-estimate state, any provisional estimate that actually existed, and the frozen price must be visibly distinct and historically preserved with their pricing inputs/version.
+3. Version 1 base pricing is a flat fee for the destination's service area, independent of the origin zone and of parcel size; a corridor delivery is priced at its batch-day base fee or its off-day fee; a parcel delivered outside the service area is priced as carrier cost plus a flat margin plus the size surcharge. It is not calculated from live distance.
+4. A pickup request shows an indicative estimate at booking, never presented or stored as a price. Hub itemization calculates the authoritative fee and freezes it at itemized-order confirmation.
+5. Any booking estimate shown and the frozen price must be visibly distinct and historically preserved with their pricing inputs/version.
 6. Destination zone must be server-resolved or explicitly authorized; free-text address alone is not authoritative.
 7. A locked price cannot change silently. Corrections require the approved reasoned maker-checker workflow and audit history.
 8. A post-freeze address correction that crosses a pricing zone requires Ops-requested, hub-Senior-Ops-approved repricing with full history and affected-party notification.
-9. The size surcharge (Small/Medium/Large/Extra Large, Small = GH₵0) applies on top of the zone-pair matrix price or a corridor rate, stacking additively with the separate high-value surcharge where both apply; it does not apply to `STATION_DROP`/`MELARC_COVERED_THIRD_PARTY_DELIVERY` outbound charges. Exact zone-pair/corridor/surcharge values, tax/discount tables, and outbound charges remain controlled settings/policy follow-up.
+9. The size surcharge (Small/Medium/Large, Small = none) applies only to a parcel delivered outside the service area, stacking additively with the separate high-value surcharge where both apply; a doorstep delivery inside the service area and `STATION_DROP` are flat regardless of size. Fee and surcharge values are confirmed settings (settings.md); tax/discount tables remain controlled settings/policy follow-up.
 10. After pricing, each vendor-paid amount must satisfy either credit reservation or successful prepayment before the order becomes dispatch-ready; pickup-request confirmation itself creates neither.
 11. The itemized count used to close an intake must compare against the authoritative hub count; a valid `PAYMENT_REQUIRED` parcel still counts toward physical parity.
 
@@ -2436,7 +2434,7 @@ The following rules consolidate the product's strongest behavioural constraints.
 4. Doorstep delivery runs have controlled rider assignment and stop order.
 5. Dispatch must be atomic: the same order cannot be dispatched to two destinations or mechanisms through concurrent actions.
 6. Every outbound order has one authoritative commercial mode: `STATION_DROP` or `MELARC_COVERED_THIRD_PARTY_DELIVERY`.
-7. Station Drop cannot be dispatched until the effective company-wide fee snapshot—GH₵25 at launch—is backend-confirmed as paid; the recipient separately pays the third party's destination charge. Fee changes follow `MSC-DEC-177`.
+7. Station Drop cannot be dispatched until the effective hub-scoped fee snapshot is backend-confirmed as paid; the recipient separately pays the third party's destination charge. Fee changes follow `MSC-DEC-177` and `MSC-DEC-218`.
 8. Melarc-covered third-party delivery cannot be dispatched until the complete combined waybill-plus-Melarc charge is backend-confirmed as paid; the recipient owes nothing at destination.
 9. Outbound handoff to a provider or informal agent requires identity/evidence appropriate to that handoff type, and registered handoff requires waybill plus photo evidence.
 10. Price, recipient data, commercial mode, carrier, payment state, and confirmation status visible at dispatch must come from the authoritative order record.
@@ -3221,12 +3219,12 @@ And a drafting user who is not a Platform Admin cannot approve their own excepti
 And the approval is audited.
 ```
 
-### Standard booking no-estimate and itemized-order payment gate
+### Standard booking estimate and itemized-order payment gate
 
 ```text
 Given a standard multi-package pickup request has no parcel destinations,
 When the request is created or confirmed,
-Then the system shows no monetary delivery-price estimate,
+Then the system shows an indicative delivery-price estimate, labelled provisional,
 And no vendor credit is reserved and no vendor-paid delivery amount is collected at pickup-request confirmation.
 
 Given hub itemization calculates a vendor-paid amount,
@@ -3245,7 +3243,7 @@ Then the vendor-paid amount reserves credit exactly once at that milestone.
 ```text
 Given an approved one-package exception contains origin and destination data,
 When the system shows a booking estimate,
-Then it uses the effective base zone-pair or corridor rate,
+Then it uses the effective base fee for that destination,
 And clearly states that size and high-value surcharges are excluded unless those inputs were captured and validated,
 And itemization still calculates and freezes the authoritative final fee.
 ```
@@ -3516,12 +3514,12 @@ Then the system displays a clearly labelled delivery-fee estimate.
 
 Given a standard (≥2-package) request has no destination data yet,
 When the booking is created,
-Then the system displays no monetary price estimate.
+Then the system displays a clearly labelled indicative estimate for the in-area doorstep fee.
 
 Given hub itemization confirms the origin and destination zone,
 When the order is confirmed,
-Then the backend calculates and freezes the authoritative zone-pair (or corridor) fee plus size surcharge — the parcel's first price if the standard case showed no estimate,
-And preserves the hub, origin zone, destination zone, price-table version, estimate (where one existed), final fee, and timestamp.
+Then the backend calculates and freezes the authoritative fee plus any applicable size surcharge — the parcel's first authoritative price,
+And preserves the hub, origin zone, destination zone, setting versions, the estimate inputs, final fee, and timestamp.
 ```
 
 ### Rider cash reconciliation
@@ -3905,10 +3903,10 @@ Every implementation-affecting assumption must identify its authority or owner, 
 - interim legal/compliance accountability and the starting Ghana regulatory reference point;
 - risk owners and ratings;
 - return-fee governance and waiver reasons;
-- the zone-pair matrix, universal size surcharge, and corridor pricing model;
+- the zone-pair matrix, universal size surcharge, and corridor pricing model (superseded by `MSC-DEC-207`, `MSC-DEC-209` and `MSC-DEC-210`; see Section 23);
 - vendor and staff/rider suspension grounds and suspension-triggered return-fee applicability;
 - ad-hoc sender phone verification, prohibited-item catalogue, and no individual credit; and
-- no monetary estimate for standard multi-package pickup requests before itemization.
+- no monetary estimate for standard multi-package pickup requests before itemization (reversed by `MSC-DEC-211`; see Section 23.6).
 
 ## 48.4 Sprint 023 decisions
 
@@ -3920,7 +3918,7 @@ A standard pickup request may be confirmed and physically collected before a ven
 
 ### `MSC-DEC-177` — Station Drop fee governance
 
-`station_drop_fee` is one company-wide, effective-dated setting with a launch value of GH₵25. Hub Senior Ops proposes a change and Platform Admin independently approves or rejects it. New Station Drop charges snapshot the approved effective value/version; existing charges do not reprice.
+`station_drop_fee` is one company-wide, effective-dated setting with a launch value of GH₵25. Hub Senior Ops proposes a change and Platform Admin independently approves or rejects it. New Station Drop charges snapshot the approved effective value/version; existing charges do not reprice. Superseded in part: the fee is hub-scoped since `MSC-DEC-218`, and its value is in settings.md.
 
 ### `MSC-DEC-178` — One-package estimate composition
 
@@ -3932,7 +3930,7 @@ The one-package exception may show a provisional base-fee estimate using the kno
 
 ### `MSC-DEC-180` — Corridor codes and non-batch terminology
 
-The corridor machine codes are `AMASAMAN_ENVIRONS` and `KASOA_CORRIDOR`, displayed as “Amasaman & Environs” and “Kasoa Corridor.” `NON_BATCH_RATE` is the stable machine/API term for the higher corridor rate outside batch days. It is not an Express service.
+The corridor machine codes are `AMASAMAN_ENVIRONS` and `KASOA_CORRIDOR`, displayed as “Amasaman & Environs” and “Kasoa Corridor.” `NON_BATCH_RATE` is the stable machine/API term for the higher corridor rate outside batch days. It is not an Express service. Superseded: `CORRIDOR_OFF_DAY` replaces `NON_BATCH_RATE` (`MSC-DEC-207`).
 
 ### `MSC-DEC-181` — Mode-specific terminal outcomes
 
@@ -4014,7 +4012,7 @@ This section lists only the remaining implementation-gating residue. It delibera
 ## 50.1 Remaining Product Owner/legal/operational follow-ups
 
 - `OQ-003`, `OQ-004` — exceptional OTP recovery, vendor/sender refusal or unavailability, loss/damage, claims, unpaid-return custody/escalation, and exceptional final disposition.
-- `OQ-020` — exact launch monetary values: zone-pair cells, size surcharges, corridor rates, high-value tiers/surcharge, global vendor credit limit, and the initial configurable return-fee amount. The pricing models and editing authorities are approved.
+- `OQ-020` — exact launch monetary values: zone-pair cells, size surcharges, corridor rates, high-value tiers/surcharge, global vendor credit limit, and the initial configurable return-fee amount. The pricing models and editing authorities are approved. The zone-pair cells are withdrawn; the fees, surcharges, corridor fees, high-value tiers and return fee are confirmed in settings.md.
 - `OQ-033` — vendor reactivation, termination, offboarding retention details, rejection/reapplication, and business-verification evidence.
 - `OQ-038` — who may refuse or block an individual/ad-hoc sender from future bookings and the permitted grounds.
 - `OQ-042` — return-workflow cancellation/failed-return adjustments, immediate-payment methods, unpaid-return storage/escalation, post-payment/reconciliation corrections, and split validation/rounding. Return-fee setting governance, waiver reasons, and suspension applicability are resolved.
@@ -4034,7 +4032,7 @@ This section lists only the remaining implementation-gating residue. It delibera
 
 ## 50.3 Terminology and configuration follow-ups
 
-- `OQ-037` remains assigned to UI/content design for final customer-facing labels. Stable machine terms in Section 51—especially `NON_BATCH_RATE`, official application names, and no merchandise COD—must not be changed by display-copy choices.
+- `OQ-037` remains assigned to UI/content design for final customer-facing labels. Stable machine terms in Section 51—especially `CORRIDOR_OFF_DAY` (replacing the withdrawn `NON_BATCH_RATE`), official application names, and no merchandise COD—must not be changed by display-copy choices.
 - Exact per-hub booking cutoff times, maintenance intervals, compliance warning lead times, failure backstop hours, recipient-confirmation attempt limits, and other approved operational settings must be configured before their affected slice launches.
 
 ## 50.4 Change-control rule
@@ -4049,8 +4047,8 @@ No follow-up may be silently deleted or treated as solved merely because impleme
 | Term | Canonical meaning |
 |---|---|
 | Ad-hoc Sender | An individual or non-portal sender served through Ops-assisted intake. The phone is verified by SMS OTP at first use; no Version 1 credit facility exists. |
-| Amasaman & Environs | Display name for corridor code `AMASAMAN_ENVIRONS`. Batch days are Tuesday and Friday. |
-| Batch day | A corridor's configured operating day on which the lower batch rate applies. |
+| Amasaman & Environs | Display name for corridor code `AMASAMAN_ENVIRONS`. Its batch day is Friday. |
+| Batch day | A corridor's configured operating day (Friday for both corridors) on which its base fee applies rather than its off-day fee. |
 | Credit account | The approved registered vendor commercial account. Vendor-paid itemized orders reserve exposure at itemized-order confirmation when allowance and available limit permit; earned unpaid charges consume the same exposure without double-counting. |
 | Delivery fee | The amount Melarc charges for its logistics service, distinct from merchandise value. |
 | Delivery Lane | The authorized post-itemization choice between Melarc doorstep delivery and approved third-party handoff. |
@@ -4058,7 +4056,7 @@ No follow-up may be silently deleted or treated as solved merely because impleme
 | Express service | A legacy priority/same-day service concept explicitly excluded from Version 1. It is not the corridor non-batch rate. |
 | Group coverage | Selection of multiple parcels/orders in one current pickup request whose full delivery fees are assigned to the vendor/sender; not a reusable customer group. |
 | Hub | A Melarc operating location where custody is received, reconciled, itemized, and dispatched. One is active at launch; the model supports multiple hubs. |
-| Intra-corridor rate | The configured base rate for pickup and delivery within the same corridor on that corridor's batch day. |
+| Intra-corridor rate | Withdrawn (`MSC-DEC-207`): pickup and delivery within one corridor are priced like any other delivery into it. |
 | Kasoa Corridor | Display name for corridor code `KASOA_CORRIDOR`. Its batch day is Friday. |
 | Locked Price | The authoritative historical price frozen at itemized-order confirmation and changeable only through the approved correction workflow. |
 | Melarc-Covered Third-Party Delivery | Prepaid combined waybill-plus-Melarc service in which the recipient pays nothing at destination and Melarc remains responsible until the recorded final external outcome. |
@@ -4068,24 +4066,24 @@ No follow-up may be silently deleted or treated as solved merely because impleme
 | Melarc Vendor | Mobile-first PWA for a registered vendor's eligible booking, own-order tracking, payer/account activity, notifications, and returns. |
 | Merchandise COD | Collection of the vendor's product value from the recipient. **Not supported by Melarc.** |
 | Mini POS | Melarc Rider workflow for approved cash or mobile-money delivery-fee collection at the door. |
-| Non-batch rate | Stable machine/API term `NON_BATCH_RATE`: the higher corridor base rate outside configured batch days. It is not an Express service. |
+| Non-batch rate | Withdrawn term `NON_BATCH_RATE`; the stable machine/API term is now `CORRIDOR_OFF_DAY`: the corridor's higher off-day fee outside its batch day, set per corridor. It is not an Express service. |
 | Origin zone | The active service zone containing the pickup request's one origin: the selected vendor pickup location or ad-hoc sender pickup location. It is snapshotted for pricing. |
-| Parcel size category | Small, Medium, Large, or Extra Large. Small has GH₵0 surcharge; the other categories use configurable flat surcharges. |
+| Parcel size category | Small, Medium, or Large. Small has no surcharge; Medium and Large use configurable flat surcharges that apply only to a parcel delivered outside the service area. |
 | Payer intent | The request-level recipient/vendor/split choice recorded before parcel prices exist. Itemization converts it into authoritative per-order monetary allocations. |
 | Payer split | The authoritative allocation of a delivery fee between vendor/sender and recipient, expressed as a fixed GHS amount or percentage. |
 | Payment-required state | `PAYMENT_REQUIRED`: an itemized order whose vendor-paid amount cannot use credit and must be fully paid before dispatch readiness. It does not block physical intake closure. |
 | Permission | A named atomic backend authorization capability such as `pricing.correction.approve`. |
 | Recipient | The person expected to receive the parcel and the default delivery-fee payer; no general Version 1 portal account. |
-| Return fee | A separate company-wide configurable charge earned when formal return-to-vendor processing starts. Hub Senior Ops proposes changes and Platform Admin approves them; the applied value is snapshotted. |
+| Return fee | A separate hub-scoped configurable charge earned when formal return-to-vendor processing starts. Hub Senior Ops proposes changes and Platform Admin approves them; the applied value is snapshotted. |
 | Role | A named editable bundle of permissions. It carries no authority beyond its current permissions and is not the backend enforcement primitive. |
 | Sender | The contracting or presenting party for pickup; may be a registered vendor or eligible ad-hoc sender. |
-| Standard multi-package booking | A pickup request with at least two packages. It has no monetary price estimate because parcel destinations are captured at itemization. |
+| Standard multi-package booking | A pickup request with at least two packages. It shows an indicative estimate that assumes in-area doorstep delivery, because parcel destinations are captured at itemization. |
 | Station Drop | Prepaid service in which Melarc transports a parcel to an approved station/courier and completes its service at verified handoff; the recipient pays the third party's onward charge. |
-| Station Drop fee | Company-wide effective-dated setting `station_drop_fee`, GH₵25 at launch. New charges snapshot the applied value/version. |
+| Station Drop fee | Hub-scoped, effective-dated setting `station_drop_fee` (value in settings.md). New charges snapshot the applied value/version. |
 | Terminal outcome | Mode-specific final parcel state: doorstep delivered or returned; Station Drop verified handoff; Melarc-covered final external delivery/failure resolution/return; or another approved exceptional disposition with custody and financial closure. |
 | Vendor | The registered contracting organization/customer. |
 | Vendor account | The shared Version 1 vendor credential and related commercial record. It is not a SaaS tenant-admin account or a named employee identity. |
-| Zone-pair price | The Version 1 base delivery fee for an origin-zone/destination-zone combination, except where a corridor destination uses its corridor rate card. |
+| Zone-pair price | Withdrawn (`MSC-DEC-207`): the origin-zone/destination-zone price lookup is replaced by a flat fee per service area. |
 
 # 52. Review and approval history
 
@@ -4101,10 +4099,11 @@ Section 1.3 retains the historical amendment summary. Git history records future
 | 1.1–1.8 | 21 July 2026 | Approved amendments, Sprints 009–016 | Permission architecture/bundles, suspended-vendor parcel disposition, staff/rider lifecycle, booking calendar/cutoff, retention, mixed delivery runs, high-value policy, and launch targets added. |
 | 1.9–1.14 | 23 July 2026 | Approved amendments, Sprints 017–022 | Legal/risk governance, return-fee governance, zone/size/corridor pricing, suspension grounds, ad-hoc sender policy, and standard-booking no-estimate policy added. |
 | 1.15 | 23 July 2026 | Product Owner–approved amendment, Sprint 023 | Itemized-order prepayment timing, Station Drop fee governance, one-package estimate composition, GHS currency, corridor terminology, and mode-specific terminal outcomes approved; audit normalization completed. |
+| 1.16 | 29 October 2026 | Product Owner–approved reconciliation, Slice 001 readiness | The later documents govern where they disagree with this baseline; pricing, pickup, handover, settings, rules, criteria and glossary reconciled to them. |
 
 ## 52.1 Current approval status
 
-This document is the **Product Owner–approved controlling Master Product and System Specification v1.15**, consisting of the approved v1.0 baseline plus amendments through Sprint 023. It controls product behaviour, scope, roles, journeys, commercial rules, acceptance expectations, and downstream design constraints.
+This document is the **Product Owner–approved controlling Master Product and System Specification v1.16**, consisting of the approved v1.0 baseline plus amendments through Sprint 023 and the reconciliation of 29 October 2026. It controls product behaviour, scope, roles, journeys, commercial rules, acceptance expectations, and downstream design constraints.
 
 Approval does not make every implementation slice automatically ready. Each slice must satisfy the applicable Section 50 follow-ups, approved downstream artifacts, Definition of Ready, and Definition of Done.
 

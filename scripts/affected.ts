@@ -354,6 +354,16 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/riders/',
     'apps/ops-web/src/app/pages/pre-sign-in/',
   ],
+  'pickup.spec.ts': ['apps/ops-web/src/app/pages/pickup/'],
+  // The manifest screens reuse the pickup screens' note dialog and words, so a change to those reruns this spec too.
+  'manifests.spec.ts': [
+    'apps/ops-web/src/app/pages/manifests/',
+    'apps/ops-web/src/app/pages/pickup/',
+  ],
+  'messages.spec.ts': [
+    'apps/ops-web/src/app/pages/messages/',
+    'apps/ops-web/src/app/pages/pickup/',
+  ],
 };
 export const OPS_ENTRY = 'apps/ops-web/src/main.tsx';
 const OPS_PAGES = 'apps/ops-web/src/app/pages/';

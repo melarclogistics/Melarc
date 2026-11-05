@@ -2,6 +2,7 @@ import type { StackConnection } from '../connection.ts';
 import { Inbox } from '../messages.ts';
 import { ADMINISTRATORS, type Person } from '../personas.ts';
 import type { Authenticator } from '../totp.ts';
+import type { RiderHandset } from './rider-handset.ts';
 import type { VendorBrowser } from './vendor-browser.ts';
 
 /**
@@ -30,12 +31,24 @@ export interface VendorState {
   browser: VendorBrowser;
 }
 
+/** A rider of the demonstration whose handset a journey has registered: the number it signs in with, its PIN, and the handset itself. */
+export interface RiderState {
+  readonly name: string;
+  readonly phone: string;
+  readonly pin: string;
+  /** The identifier the API gave the rider, once a journey has read it from the officer's page. */
+  readonly id?: string;
+  readonly handset: RiderHandset;
+}
+
 export interface World {
   readonly inbox: Inbox;
   readonly people: Map<string, PersonState>;
   person(key: string): PersonState;
   /** Set by the vendor's first journey (rows 10a and 11), and continued by the next (rows 10b, 13 and 15). */
   vendor?: VendorState;
+  /** The riders whose handsets the journeys have registered, by a key of the journey's own (`one`: the rider journey's; `two`: the manifest journey's). */
+  readonly riders: Map<string, RiderState>;
 }
 
 const worlds = new Map<string, World>();
@@ -59,6 +72,7 @@ export function worldOf(stack: StackConnection): World {
   const world: World = {
     inbox: new Inbox(stack.captureDirectory),
     people,
+    riders: new Map<string, RiderState>(),
     person(key) {
       const found = people.get(key);
       if (found === undefined) throw new Error(`The journeys have not made ${key} yet.`);

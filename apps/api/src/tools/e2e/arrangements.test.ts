@@ -4,6 +4,7 @@ import {
   ARRANGEMENTS,
   OBSERVATIONS,
   arrange,
+  fixturePickupCode,
   observe,
   type ArrangementClient,
 } from './arrangements.js';
@@ -210,5 +211,60 @@ describe('the vendor and rider entries of the lists (S0.62)', () => {
     );
     expect(asked).toHaveLength(2);
     expect(ARRANGEMENTS['expire-vendor-setup-grant']?.arguments).toEqual(['account identifier']);
+  });
+});
+
+describe('the pool and the rider lock of the manifest journey (S1.25)', () => {
+  // Break caught: a pool made of anything but confirmed, unmanifested requests of the named vendor, or one that takes its values in the text.
+  it('adds confirmed requests of the named vendor for the day given, with every value as a parameter', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 3 }]);
+
+    expect(await arrange(client, 'add-confirmed-pickups', ['ABCDEFGH', '2026-11-03', '3'])).toBe(3);
+
+    expect(asked).toHaveLength(1);
+    const [statement] = asked;
+    expect(statement?.text).toContain("'CONFIRMED'");
+    expect(statement?.text).toContain('join vendor_account a on a.account_identifier = $1');
+    expect(statement?.text).not.toMatch(/manifest/);
+    expect(statement?.values[0]).toBe('ABCDEFGH');
+    expect(statement?.values[1]).toBe('2026-11-03');
+    expect(statement?.values[3]).toEqual([
+      fixturePickupCode(0),
+      fixturePickupCode(1),
+      fixturePickupCode(2),
+    ]);
+  });
+
+  it.each([
+    ['no request', ['ABCDEFGH', '2026-11-03', '0']],
+    ['more than eight', ['ABCDEFGH', '2026-11-03', '9']],
+    ['a count that is not a whole number', ['ABCDEFGH', '2026-11-03', 'two']],
+    ['a day that is not a date', ['ABCDEFGH', '03/11/2026', '2']],
+    ['a vendor that is not an identifier', ['a@b.example', '2026-11-03', '2']],
+  ])('refuses %s, before a statement is sent', async (_why, args) => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }]);
+
+    await expect(arrange(client, 'add-confirmed-pickups', args)).rejects.toThrow();
+
+    expect(asked).toEqual([]);
+  });
+
+  // Break caught: a code outside the alphabet of an operational code, which the screens would refuse to show, or two requests with one code.
+  it('names each request by its place in the run, in the alphabet of an operational code, and never twice', () => {
+    const codes = Array.from({ length: 8 }, (_, at) => fixturePickupCode(at));
+
+    expect(new Set(codes).size).toBe(8);
+    for (const code of codes) expect(code).toMatch(/^ACC-PR-[2-9A-HJKMNP-Z]{6}$/);
+  });
+
+  it('lets the lock of a rider pass by its phone, and refuses a number that is not E.164', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }]);
+
+    expect(await arrange(client, 'lapse-rider-lock', ['+99900000001'])).toBe(1);
+    await expect(arrange(client, 'lapse-rider-lock', ['0200000001'])).rejects.toThrow();
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.text).toContain('update rider_identity set locked_until');
+    expect(asked[0]?.values).toEqual(['+99900000001']);
   });
 });

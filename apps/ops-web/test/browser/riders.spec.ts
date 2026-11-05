@@ -307,14 +307,102 @@ test.describe('the enrolment code in a real browser', () => {
 
     await expect(page.getByText(/We could not confirm whether the code was made/)).toBeVisible();
     await expect(qr(page)).toHaveCount(0);
+    // The button that asked has gone, and the way out has the focus: not the top of the document, where a screen reader says nothing.
+    await expect(page.getByRole('button', { name: 'Check the rider' })).toBeFocused();
     await page.getByRole('button', { name: 'Try again' }).click();
 
     await expect(qr(page)).toBeVisible();
+    // And the code has it when it arrives, the button of the retry having gone in turn.
+    await expect(
+      page.getByRole('region', { name: 'Scan this code with the rider’s handset' }),
+    ).toBeFocused();
     const keys = acts(api).map((call) => call.idempotencyKey);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
     expect(await decodePainted(page, qr(page))).toBe(CODES.first);
   });
+
+  // Break caught: the earlier code left on the screen, with no news and no way out, when the answer to a new code is lost (the new code may have
+  // been made and the earlier one ended). The engine judges what jsdom cannot: where the focus goes when the buttons of the code leave, and the key.
+  test('a lost answer to a new code takes the earlier one off the screen, and trying again repeats the attempt under its key', async ({
+    page,
+  }) => {
+    const api = await showFirstCode(page);
+    api.world.dropNext = true;
+
+    await page.getByRole('button', { name: 'Make a new code' }).click();
+
+    await expect(page.getByText(/We could not confirm whether the code was made/)).toBeVisible();
+    await expect(qr(page)).toHaveCount(0);
+    await expect(page.getByText(/The earlier code is no longer shown/)).toBeVisible();
+    expect(await whereIsTheCode(page)).toEqual([]);
+    // The button that was clicked has gone: focus is on the page, not at the top of the document.
+    expect(await focusPlace(page)).toBe('outside');
+    await page.getByRole('button', { name: 'Try again' }).click();
+
+    await expect(qr(page)).toBeVisible();
+    await expect(qr(page)).toHaveCount(1);
+    const keys = acts(api).map((call) => call.idempotencyKey);
+    expect(keys).toHaveLength(3);
+    expect(keys[2]).toBe(keys[1]);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(await decodePainted(page, qr(page))).toBe(CODES.second);
+    expect(await whereIsTheCode(page)).toEqual([]);
+  });
+
+  // Break caught: the focus left at the top of the document when the control that had it goes with a request: the notice of the earlier code
+  // keeps it for a new code asked for from the code, and the control for what comes next takes it when the new code is asked for from the lapsed
+  // screen, whatever the answer is (found by an independent review: lost and refused answers left it on the document).
+  for (const [how, answer, news, next] of [
+    [
+      'lost',
+      { dropNext: true },
+      /We could not confirm whether the code was made/,
+      'Check the rider',
+    ],
+    [
+      'refused',
+      { refuseNext: { status: 400, code: 'VALIDATION_FAILED' } },
+      /The code could not be made/,
+      'Show the QR code',
+    ],
+    [
+      'in conflict',
+      { refuseNext: { status: 409, code: 'STATE_CONFLICT' } },
+      /A first device cannot be registered for this rider/,
+      'Reload the rider',
+    ],
+  ] as const) {
+    test(`the focus stays on the notice of the earlier code when the answer to a new code is ${how}`, async ({
+      page,
+    }) => {
+      const api = await showFirstCode(page);
+      Object.assign(api.world, answer);
+
+      await page.getByRole('button', { name: 'Make a new code' }).click();
+
+      await expect(page.getByText(news)).toBeVisible();
+      await expect(
+        page.locator('.staff-notice', { hasText: 'The earlier code is no longer shown' }),
+      ).toBeFocused();
+    });
+
+    test(`after the earlier code lapsed, the focus goes to ${next} when the answer to a new code is ${how}`, async ({
+      page,
+    }) => {
+      await page.clock.install();
+      const api = await showFirstCode(page);
+      await page.clock.runFor(5 * 60 * 1000 + 2000);
+      await expect(page.getByText(/The QR code is no longer displayed\./)).toBeVisible();
+      Object.assign(api.world, answer);
+
+      await page.getByRole('button', { name: 'Make a new code' }).click();
+
+      await expect(page.getByText(news)).toBeVisible();
+      await expect(page.getByRole('button', { name: next })).toBeFocused();
+      await expect(qr(page)).toHaveCount(0);
+    });
+  }
 
   // Break caught: the picture staying on the screen once the rider has scanned it.
   test('is gone when the rider has scanned it, and the officer is back at the rider', async ({
@@ -340,7 +428,7 @@ test.describe('the enrolment code in a real browser', () => {
 
     await page.clock.runFor(5 * 60 * 1000 + 2000);
 
-    await expect(page.getByText(/The code has expired and is no longer shown/)).toBeVisible();
+    await expect(page.getByText(/The QR code is no longer displayed\./)).toBeVisible();
     await expect(qr(page)).toHaveCount(0);
     expect(await whereIsTheCode(page)).toEqual([]);
     await page.getByRole('button', { name: 'Make a new code' }).click();
@@ -640,6 +728,34 @@ test.describe('replacing the handset', () => {
     expect(acts(api)).toHaveLength(2);
   });
 
+  // Break caught: the earlier code left on the screen, with no news and no way out, when the answer to a new replacement code is lost; and a retry
+  // offered for an act that takes no key.
+  test('a lost answer to a new replacement code takes the earlier one off the screen and offers only a look at the rider', async ({
+    page,
+  }) => {
+    const { api } = await open(page, DEVICE);
+    await fillReplacement(page, 'Checked the rider’s Ghana card in person.');
+    await page.getByRole('button', { name: 'Show the QR code' }).click();
+    await expect(qr(page)).toBeVisible();
+    api.world.dropNext = true;
+
+    await page.getByRole('button', { name: 'Make a new code' }).click();
+
+    await expect(page.getByText(/a new code ends any earlier one/)).toBeVisible();
+    await expect(qr(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Check the rider' })).toBeFocused();
+    expect(await whereIsTheCode(page)).toEqual([]);
+    expect(acts(api)).toHaveLength(2);
+
+    await page.getByRole('button', { name: 'Check the rider' }).click();
+    await page.getByRole('button', { name: 'Show the QR code' }).click();
+
+    await expect(qr(page)).toBeVisible();
+    expect(acts(api)).toHaveLength(3);
+    expect(await whereIsTheCode(page)).toEqual([]);
+  });
+
   test('the replacement is not offered to a session without its key, which is told by name', async ({
     page,
   }) => {
@@ -745,6 +861,16 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     },
   },
   {
+    name: 'the first binding after the answer to a new code was lost',
+    reach: async (page) => {
+      const api = await showFirstCode(page);
+      api.world.dropNext = true;
+      await page.getByRole('button', { name: 'Make a new code' }).click();
+      await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+      await expect(page.getByText(/The earlier code is no longer shown/)).toBeVisible();
+    },
+  },
+  {
     name: 'the device page',
     reach: async (page) => {
       await open(page, DEVICE);
@@ -771,6 +897,24 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
         .fill('Checked the rider’s Ghana card in person.');
       await page.getByRole('button', { name: 'Show the QR code' }).click();
       await expect(qr(page)).toBeVisible();
+    },
+  },
+  {
+    name: 'the replacement after the answer to a new code was lost',
+    reach: async (page) => {
+      const { api } = await open(page, DEVICE);
+      await page
+        .getByRole('combobox', { name: 'Reason (required)' })
+        .selectOption('HANDSET_REPLACED');
+      await page
+        .getByRole('textbox', { name: 'How you verified the rider in person (required)' })
+        .fill('Checked the rider’s Ghana card in person.');
+      await page.getByRole('button', { name: 'Show the QR code' }).click();
+      await expect(qr(page)).toBeVisible();
+      api.world.dropNext = true;
+      await page.getByRole('button', { name: 'Make a new code' }).click();
+      await expect(page.getByRole('button', { name: 'Check the rider' })).toBeVisible();
+      await expect(page.getByText(/The earlier code is no longer shown/)).toBeVisible();
     },
   },
   {

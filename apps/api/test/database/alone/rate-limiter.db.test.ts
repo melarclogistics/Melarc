@@ -9,7 +9,9 @@ import { LimiterDigest } from '../../../src/platform/auth/crypto/limiter-digest.
 import type { Clock } from '../../../src/platform/auth/ports/clock.port.js';
 import {
   RATE_LIMIT_BUCKETS,
+  RATE_LIMIT_COUNTERS,
   type RateLimitBucket,
+  type RateLimitCounter,
 } from '../../../src/platform/auth/ports/rate-limiter.port.js';
 import {
   RATE_LIMIT_CAPACITY,
@@ -56,14 +58,16 @@ const MIGRATION = readFileSync(
 
 const STAFF_SIGNIN: RateLimitBucket = 'rate_limit_staff_signin';
 /** The launch values of settings.md §7.7. */
-const LAUNCH: Readonly<Record<RateLimitBucket, number>> = {
+const LAUNCH: Readonly<Record<RateLimitCounter, number>> = {
   rate_limit_staff_signin: 10,
   rate_limit_privileged_mfa: 10,
   rate_limit_vendor_signin: 10,
   rate_limit_rider_challenge: 20,
   rate_limit_recovery: 10,
   rate_limit_authenticated_api: 120,
+  provider_initiating_operation_ceiling_per_minute: 20,
 };
+const PROVIDER_CEILING: RateLimitCounter = 'provider_initiating_operation_ceiling_per_minute';
 
 let database: TestDatabase;
 let built: BuiltService;
@@ -133,7 +137,7 @@ const rowCount = async (): Promise<number> =>
 /** Admits `times` requests one after another and returns how many were allowed. */
 async function admitMany(
   limiter: PostgresRateLimiter,
-  bucket: RateLimitBucket,
+  bucket: RateLimitCounter,
   key: string,
   times: number,
 ): Promise<{ allowed: number; last: Awaited<ReturnType<PostgresRateLimiter['admit']>> }> {
@@ -151,14 +155,63 @@ describe('the threshold of a bucket', () => {
   it('admits exactly the configured number in a window, for each of the six buckets, and refuses the next', async () => {
     const limiter = limiterFor();
 
-    for (const bucket of RATE_LIMIT_BUCKETS) {
+    for (const bucket of RATE_LIMIT_COUNTERS) {
       const key = freshKey(bucket);
       const { allowed, last } = await admitMany(limiter, bucket, key, LAUNCH[bucket] + 1);
 
       expect(allowed, bucket).toBe(LAUNCH[bucket]);
       expect(last.allowed, bucket).toBe(false);
     }
+    // Six buckets and no seventh: the sub-ceiling is a counter inside the authenticated-API bucket, not a bucket (settings.md 7.7).
     expect(RATE_LIMIT_BUCKETS).toHaveLength(6);
+    expect(RATE_LIMIT_COUNTERS).toHaveLength(7);
+  });
+
+  // Break caught (R76; the review of 5 November 2026): the sub-ceiling counted in the bucket it sits inside, so that spending the one spends the other, or a refusal of it
+  // writing a row. The two are separate counters of one session: the ceiling takes twenty, the bucket still takes its hundred and twenty.
+  it('counts the provider-initiating sub-ceiling apart from the bucket it sits inside, and a refusal writes nothing', async () => {
+    const limiter = limiterFor();
+    const session = freshKey('session');
+
+    const ceiling = await admitMany(limiter, PROVIDER_CEILING, session, 25);
+    expect(ceiling.allowed).toBe(20);
+    expect(ceiling.last.allowed).toBe(false);
+    expect(await rowCount()).toBe(20);
+
+    const bucket = await admitMany(limiter, 'rate_limit_authenticated_api', session, 121);
+    expect(bucket.allowed).toBe(120);
+    expect(await rowCount()).toBe(140);
+
+    // Another session has places of its own in the ceiling.
+    expect((await limiter.admit(PROVIDER_CEILING, freshKey('other'))).allowed).toBe(true);
+    const rows = await observer.rows<{ bucket: string; n: number }>(
+      'select bucket, count(*)::int as n from rate_limit_admission group by bucket order by bucket',
+    );
+    expect(rows).toEqual([
+      { bucket: 'provider_initiating_operation_ceiling_per_minute', n: 21 },
+      { bucket: 'rate_limit_authenticated_api', n: 120 },
+    ]);
+  });
+
+  // Break caught (R76): a limit for the sub-ceiling that is read from anywhere but its own setting (the bucket's, or a constant), or a window that is not the bucket's.
+  it('reads the sub-ceiling’s limit from its own setting, in the admission transaction', async () => {
+    const limiter = limiterFor();
+    try {
+      await admin.query(
+        "update setting set value = '3'::jsonb where key = 'provider_initiating_operation_ceiling_per_minute'",
+      );
+      const session = freshKey('lowered');
+      const lowered = await admitMany(limiter, PROVIDER_CEILING, session, 6);
+      expect(lowered.allowed).toBe(3);
+      // The bucket's limit is untouched by the sub-ceiling's setting.
+      expect((await admitMany(limiter, 'rate_limit_authenticated_api', session, 5)).allowed).toBe(
+        5,
+      );
+    } finally {
+      await admin.query(
+        "update setting set value = '20'::jsonb where key = 'provider_initiating_operation_ceiling_per_minute'",
+      );
+    }
   });
 
   // Break caught: a refused request writing a row (it would extend the penalty), or a decision that is not a count of what is admitted.
@@ -401,6 +454,19 @@ describe('two requests at once for one key', () => {
 
     expect(decisions.filter((decision) => decision.allowed)).toHaveLength(10);
     expect(await rowCount()).toBe(10);
+  });
+
+  // Break caught (R76; the review of 5 November 2026): concurrent requests of one session each seeing room in the sub-ceiling, so that more than twenty cause a text.
+  it('never admits more than the sub-ceiling’s limit when many arrive together', async () => {
+    const limiter = limiterFor();
+    const session = freshKey('burst-ceiling');
+
+    const decisions = await Promise.all(
+      Array.from({ length: 40 }, () => limiter.admit(PROVIDER_CEILING, session)),
+    );
+
+    expect(decisions.filter((decision) => decision.allowed)).toHaveLength(20);
+    expect(await rowCount()).toBe(20);
   });
 
   // Break caught (review of 10 October 2026, finding 8): one lock for all keys, or a lock a caller holds across keys, so that

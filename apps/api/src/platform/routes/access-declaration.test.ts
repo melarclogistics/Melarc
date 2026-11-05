@@ -115,6 +115,37 @@ describe('what an authenticated route must state (S0.26)', () => {
     });
   });
 
+  // Break caught (R76; the review of 5 November 2026): the ceiling of the operations that cause a text declared with a value that does not mean it ("false", "yes", 1), which a
+  // guard testing for truth would read as a declaration and a reader of the route would read as none; or declared and lost, so that the guard never admits the counter.
+  it('keeps providerInitiating when it is true, and refuses it as anything else', () => {
+    const stated = detailOf(
+      Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying', providerInitiating: true }),
+    );
+    expect(stated?.authenticated?.providerInitiating).toBe(true);
+    expect(
+      detailOf(Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying' }))?.authenticated,
+    ).not.toHaveProperty('providerInitiating');
+
+    for (const given of [false, 'true', 1, null, {}]) {
+      expect(
+        () =>
+          Self({
+            surfaces: ['OPS_PORTAL'],
+            activity: 'qualifying',
+            providerInitiating: given,
+          } as never),
+        JSON.stringify(given),
+      ).toThrow(/providerInitiating: true/);
+      expect(() =>
+        RequiresPermission('staff.read', {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          providerInitiating: given,
+        } as never),
+      ).toThrow(/providerInitiating: true/);
+    }
+  });
+
   // Break caught: a stated option that a caller can change afterwards, so a declaration is not what the guard reads.
   it('freezes what it keeps', () => {
     const surfaces = ['OPS_PORTAL' as const];
@@ -151,6 +182,44 @@ describe('what an authenticated route must state (S0.26)', () => {
       ).toThrow(/entity and the path parameter/);
     }
   });
+});
+
+describe('a record scope limited to some surfaces (S1.24)', () => {
+  const detailOf = (decorator: MethodDecorator): AccessDetail | undefined => {
+    const handler = (): void => undefined;
+    decorator({}, 'handler', { value: handler });
+    return Reflect.getMetadata(ACCESS_DETAIL_KEY, handler) as AccessDetail | undefined;
+  };
+
+  // Break caught: a limit that is lost on the way to the guard (every surface asked again, so a rider is told NOT_FOUND where the operation
+  // owes it NOT_ASSIGNED_RIDER), or one that can be changed after the declaration.
+  it('keeps the surfaces it names, frozen', () => {
+    const kept = detailOf(
+      RequiresPermission('staff.read', {
+        surfaces: ['OPS_PORTAL', 'RIDER_ANDROID'],
+        activity: 'qualifying',
+        record: { entity: 'pickup_manifest', param: 'id', surfaces: ['OPS_PORTAL'] },
+      }),
+    )?.authenticated?.record;
+    expect(kept).toEqual({ entity: 'pickup_manifest', param: 'id', surfaces: ['OPS_PORTAL'] });
+    expect(Object.isFrozen(kept)).toBe(true);
+    expect(Object.isFrozen(kept?.surfaces)).toBe(true);
+  });
+
+  // Break caught: a limit that names a surface the route does not serve (it would never ask anyone), an empty one (it would ask nobody and
+  // leave the record unlooked-for), or one that is not a list of surfaces.
+  it.each([[[]], [['VENDOR_PWA']], [['OPS_PORTAL', 'NOWHERE']], ['OPS_PORTAL'], [[1]]])(
+    'refuses the limit %j',
+    (surfaces) => {
+      expect(() =>
+        RequiresPermission('staff.read', {
+          surfaces: ['OPS_PORTAL', 'RIDER_ANDROID'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_manifest', param: 'id', surfaces: surfaces as never },
+        }),
+      ).toThrow(/surfaces the route serves/);
+    },
+  );
 });
 
 describe('the tier an authenticated route needs (the review of 12 October 2026, F01)', () => {

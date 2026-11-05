@@ -175,8 +175,61 @@ describe('the generated description of the real application', () => {
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],
+      // S1.24: the custody of a run's parcels moving to another rider or to the hub (the `fleet` domain).
+      ['/pickup-manifests/{id}/custody-handover', ['post'], ['initiateRunCustodyHandover']],
+      ['/pickup-manifests/{id}/custody-handover/accept', ['post'], ['acceptRunCustodyHandover']],
+      ['/pickup-manifests/{id}/custody-handover/fail', ['post'], ['failRunCustodyHandover']],
+      ['/run-custody-handovers', ['get'], ['listRunCustodyHandovers']],
+      ['/run-custody-handovers/{id}', ['get'], ['getRunCustodyHandover']],
+      // S1.12e: the Ops message log.
+      ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
       ['/staff-role-bundles/assignable', ['get'], ['listAssignableStaffRoleBundles']],
+      // S1.13 and S1.14: the pickup domain's booking and its reads, and the lookup of a returning walk-in.
+      ['/pickup-requests', ['get', 'post'], ['listPickupRequests', 'createPickupRequest']],
+      ['/pickup-requests/{id}', ['get'], ['getPickupRequest']],
+      // S1.20: the manifest, built from confirmed requests, listed, and read with its stops.
+      ['/pickup-manifests', ['post', 'get'], ['createPickupManifest', 'listPickupManifests']],
+      ['/pickup-manifests/{id}', ['get'], ['getPickupManifest']],
+      // S1.21: ordering, assigning a rider to, sending out and cancelling a manifest that has not started.
+      ['/pickup-manifests/{id}/stops', ['put'], ['setManifestStopOrder']],
+      ['/pickup-manifests/{id}/assign-rider', ['post'], ['assignRider']],
+      ['/pickup-manifests/{id}/cancel', ['post'], ['cancelPickupManifest']],
+      ['/pickup-manifests/{id}/dispatch', ['post'], ['dispatchManifest']],
+      // S1.22: the rider's two acts on a run, the first operations of the pickup domain that only a rider performs.
+      ['/pickup-manifests/{id}/start', ['post'], ['startRun']],
+      ['/pickup-stops/{id}', ['get'], ['getPickupStop']],
+      ['/pickup-stops/{id}/arrive', ['post'], ['arriveAtPickupStop']],
+      ['/pickup-stops/{id}/skip', ['post'], ['skipPickupStop']],
+      // S1.28: the rider's report that a stop failed.
+      ['/pickup-stops/{id}/fail', ['post'], ['reportPickupFailure']],
+      // S1.26: the rider's count at the door.
+      ['/pickup-stops/{id}/collect', ['post'], ['recordCollection']],
+      // S1.27: the collection handshake, the two-party proof that closes a counted stop.
+      ['/pickup-stops/{id}/handshake', ['post'], ['initiateHandshake']],
+      ['/pickup-stops/{id}/handshake/verify', ['post'], ['verifyHandshake']],
+      ['/pickup-stops/{id}/handshake/sms-fallback', ['post'], ['requestSmsHandshakeFallback']],
+      ['/pickup-stops/{id}/handshake/ops-override', ['post'], ['authoriseHandshakeOverride']],
+      ['/pickup-stops/{id}/handshake/resolve', ['post'], ['resolveHandshake']],
+      // S1.29: the vendor's dispute of a collection.
+      ['/pickup-stops/{id}/dispute', ['post'], ['disputeCollection']],
+      // S1.15: the confirmation of a pending request, and the decision on a booking that was confirmed past the cutoff.
+      ['/pickup-requests/{id}/confirm', ['post'], ['confirmPickupRequest']],
+      ['/pickup-requests/{id}/cutoff-exception', ['post'], ['resolveCutoffException']],
+      // S1.16: the one-package exception, asked for and decided.
+      ['/pickup-requests/{id}/one-package-exception', ['post'], ['requestOnePackageException']],
+      [
+        '/pickup-requests/{id}/one-package-exception/approve',
+        ['post'],
+        ['approveOnePackageException'],
+      ],
+      // S1.17: the cancellation, and the waiver of its charge.
+      ['/pickup-requests/{id}/cancel', ['post'], ['cancelPickupRequest']],
+      ['/pickup-requests/{id}/cancellation-charge/waiver', ['post'], ['waiveCancellationCharge']],
+      // S1.18: the force-extension of the attempt cap, and the escalation.
+      ['/pickup-requests/{id}/attempt-extension', ['post'], ['extendPickupAttempts']],
+      ['/pickup-requests/{id}/escalate', ['post'], ['escalatePickupRequest']],
+      ['/ad-hoc-senders', ['get'], ['findAdHocSender']],
       ['/reason-definitions', ['get'], ['listReasonDefinitions']],
       // S0.36: the maker creates the profile, the checker approves it, and a credential setup is re-issued.
       ['/staff-identities', ['get', 'post'], ['listStaffIdentities', 'createStaffIdentity']],
@@ -201,6 +254,8 @@ describe('the generated description of the real application', () => {
       ['/ops/vendors/{id}', ['get'], ['getVendorAccount']],
       ['/ops/vendors/{id}/credential/setup/reissue', ['post'], ['reissueVendorCredentialSetup']],
       ['/ops/vendors/{id}/credential/recover', ['post'], ['recoverVendorCredential']],
+      // S1.14: a vendor organisation's saved pickup locations.
+      ['/vendor-organizations/{id}/pickup-locations', ['get'], ['listVendorPickupLocations']],
     ]);
     expect(document.servers).toEqual([{ url: '/api/v1' }]);
     expect(document.info.title).toContain('derived from the implementation');

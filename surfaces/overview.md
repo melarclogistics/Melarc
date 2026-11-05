@@ -118,7 +118,7 @@ Gate PD-3R1. **The three surfaces each specify their own authentication screens,
 
 | Owed| Blocks which DoR area| Owner|
 |---|---|---|
-| The controlled page and screen inventory for each surface that §10.4 requires; these documents carry the model and the boundaries| D (frontend)| `OQ-030`|
+| The controlled page and screen inventory for each surface that §10.4 requires. The route and screen inventories of [ops-portal.md](ops-portal.md), [vendor-pwa.md](vendor-pwa.md) and [rider-android.md](rider-android.md) are accepted as the low-fidelity interaction specification for `SLICE-001` (`MSC-DEC-223`); the fields and columns of each route and the screens those documents do not yet list are owed| D (frontend)| `OQ-030`|
 | Final customer-facing labels| D| `OQ-037`|
 
 
@@ -131,3 +131,4 @@ What they do deliver now: every feature can name which surface renders it, what 
 - **Down:** [ops-portal.md](ops-portal.md) · [vendor-pwa.md](vendor-pwa.md) · [rider-android.md](rider-android.md) · [recipient-channel.md](recipient-channel.md)
 - **Across:** [features/README.md](../features/README.md) — surfaces link down to features; features link back up
 - **Authority:** [contracts/permissions.md](../contracts/permissions.md) for every gate named here
+- **Design:** [design/PRODUCT_DESIGN_DIRECTION.md](../design/PRODUCT_DESIGN_DIRECTION.md) for how screens of these surfaces are composed and which references inform them. The surface documents keep the inventory, the permissions and the interface states

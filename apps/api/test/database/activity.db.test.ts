@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../../src/app.module.js';
 import { InMemoryRateLimiter } from '../../src/platform/limiter/in-memory.rate-limiter.adapter.js';
-import { RATE_LIMIT_BUCKETS } from '../../src/platform/auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS } from '../../src/platform/auth/ports/rate-limiter.port.js';
 import { OPERATION_RUNNER } from '../../src/platform/authorization/authorization-providers.js';
 import { authorizationOf } from '../../src/platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../../src/platform/authorization/operation-runner.js';
@@ -188,7 +188,7 @@ async function start(options: { limit?: number } = {}): Promise<TestApp> {
                       useValue: new InMemoryRateLimiter({
                         clock,
                         limits: Object.fromEntries(
-                          RATE_LIMIT_BUCKETS.map((bucket) => [bucket, options.limit]),
+                          RATE_LIMIT_COUNTERS.map((bucket) => [bucket, options.limit]),
                         ) as never,
                       }),
                     },

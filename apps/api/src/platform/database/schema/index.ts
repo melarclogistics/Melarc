@@ -16,3 +16,7 @@ export * from './session.js';
 export * from './setup-grant.js';
 // S0.50 adds the recovery request, the record that repairs an existing credential.
 export * from './recovery-request.js';
+// S1.4 (SLICE-001) adds the hub's configuration: its service zones, their aliases and its versioned settings.
+export * from './hub-configuration.js';
+// S1.12a (SLICE-001) adds the outbox envelope a business act writes, and the notification the lane of the delivery worker keeps.
+export * from './notifications.js';

@@ -347,3 +347,90 @@ describe('ReadState: the other refusals', () => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/**
+ * A screen may offer a way out of a failure that asking again is not (`recovery`): the first page of a queue whose saved page the server will
+ * not open. It stands under the failure's message, for a failure only.
+ */
+describe('ReadState: a way out that a retry is not', () => {
+  const failed = (error: unknown): ReadQuery<string[]> => ({
+    status: 'error',
+    data: undefined,
+    error,
+    refetch: () => Promise.resolve(),
+    isFetching: false,
+  });
+  const refused = new OperationFailure(
+    new ApiError({ kind: 'http', status: 400, code: 'VALIDATION_FAILED' }),
+    [],
+  );
+  const recovery = <button type="button">Back to the start</button>;
+
+  function draw(query: ReadQuery<string[]>) {
+    return renderWithProviders(
+      <ReadState
+        query={query}
+        isEmpty={(data) => data.length === 0}
+        empty={<p>nothing</p>}
+        permission="pickup.read"
+        recovery={recovery}
+      >
+        {(data) => <p>{data.join()}</p>}
+      </ReadState>,
+    );
+  }
+
+  it('is drawn under the message of a failure that offers no retry', () => {
+    draw(failed(refused));
+
+    const alert = screen.getByRole('alert');
+    const button = screen.getByRole('button', { name: 'Back to the start' });
+    expect(alert.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('is drawn after the retry of a failure that offers one', () => {
+    draw(failed(new TypeError('Failed to fetch')));
+
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    const button = screen.getByRole('button', { name: 'Back to the start' });
+    expect(retry.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // Break caught: a way out drawn in every state, so that a queue would offer its first page beside rows, a message of nothing or a spinner.
+  const states: [string, ReadQuery<string[]>][] = [
+    ['loading', { ...failed(null), status: 'pending', isFetching: true }],
+    ['read', { ...failed(null), status: 'success', data: ['Demo row'] }],
+    ['empty', { ...failed(null), status: 'success', data: [] }],
+  ];
+  it.each(states)('is not drawn while the read is %s', (_what, query) => {
+    draw(query);
+
+    expect(screen.queryByRole('button', { name: 'Back to the start' })).toBeNull();
+  });
+
+  it('is not drawn for a refusal of authority, which no way out of the queue would mend', () => {
+    draw(
+      failed(
+        new OperationFailure(
+          new ApiError({ kind: 'http', status: 403, code: 'PERMISSION_DENIED' }),
+          [],
+        ),
+      ),
+    );
+
+    expect(screen.getByText(/pickup\.read/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Back to the start' })).toBeNull();
+  });
+
+  it('is not asked for by a screen that gives none: a failure is drawn as it always was', () => {
+    renderWithProviders(
+      <ReadState query={failed(refused)} isEmpty={() => false} empty={null}>
+        {() => <p>content</p>}
+      </ReadState>,
+    );
+
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+});

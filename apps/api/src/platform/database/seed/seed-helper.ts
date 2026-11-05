@@ -12,11 +12,12 @@ import type { SecurityContext } from '../transaction-context.js';
  *
  * - **The provisioning login holds no privilege on the seven reference tables.** It cannot insert into one under the seed label or
  *   without it, before the seed or after: asserting the label reaches nothing, because there is no INSERT to assert it against.
- * - **The only ways in are four `SECURITY DEFINER` functions** that `melarc_provisioning` alone may execute:
+ * - **The only ways in are five `SECURITY DEFINER` functions** that `melarc_provisioning` alone may execute:
  *   `melarc.initialize_reference_data` (the seven tables, in one statement), `melarc.add_reason_fixtures` (reasons whose code
  *   starts with `FIXTURE_`, and nothing else), `melarc.add_vendor_fixture` (the one demonstration vendor of migration 0034, S0.47) and
- *   `melarc.add_rider_fixture` (the demonstration riders of migration 0040, S0.53). They name every table and column themselves, fix
- *   their `search_path`, and take the rows as one JSON document. This file calls them by those four names and by no other.
+ *   `melarc.add_rider_fixture` (the demonstration riders of migration 0040, S0.53) and `melarc.seed_hub_configuration` (the launch
+ *   hub's service zones and settings, migration 0042, `SLICE-001`). They name every table and column themselves, fix their
+ *   `search_path`, and take the rows as one JSON document. This file calls them by those five names and by no other.
  * - **Once, atomically, serialized.** The initialization locks the seven tables in one order and refuses (SQLSTATE 55000) unless all
  *   seven are empty, so a second run changes nothing, a run that fails leaves nothing and can be run again, and two runs at once
  *   cannot both fill the tables. This file maps that refusal to `SeedRefusedError` and cannot weaken it.
@@ -65,7 +66,11 @@ const SEED_CORRELATION_ID = 'reference-seed';
 
 /** The database functions a plan can be applied by. A plan names one of these; it never names a function of its own. */
 export type SeedEntryPoint =
-  'initialize_reference_data' | 'add_reason_fixtures' | 'add_vendor_fixture' | 'add_rider_fixture';
+  | 'initialize_reference_data'
+  | 'add_reason_fixtures'
+  | 'add_vendor_fixture'
+  | 'add_rider_fixture'
+  | 'seed_hub_configuration';
 
 /** The rows of a plan, by table: one array of objects whose keys are the table's column names. */
 export type SeedPayload = Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
@@ -164,9 +169,14 @@ async function apply(
     case 'add_rider_fixture':
       result = await tx.execute(sql`select melarc.add_rider_fixture(${document}::jsonb) as report`);
       break;
+    case 'seed_hub_configuration':
+      result = await tx.execute(
+        sql`select melarc.seed_hub_configuration(${document}::jsonb) as report`,
+      );
+      break;
     default:
-      // A plan is data and can say anything; only these four functions are ever called.
-      throw new RangeError('A seed plan names one of the four seed functions');
+      // A plan is data and can say anything; only these five functions are ever called.
+      throw new RangeError('A seed plan names one of the five seed functions');
   }
   const report: unknown = result.rows[0]?.report;
   return typeof report === 'object' && report !== null ? (report as Record<string, unknown>) : {};

@@ -22,15 +22,22 @@ import { fieldText, useSubmission } from '../components/ui/form/use-submission';
 import { Input } from '../components/ui/input/Input';
 import { Link } from '../components/ui/link/Link';
 import { LoadingIndicator } from '../components/ui/loading/LoadingIndicator';
+import { MoneyAmount } from '../components/ui/money/MoneyAmount';
 import { OneTimeSecret } from '../components/ui/one-time-secret/OneTimeSecret';
 import { PasswordInput } from '../components/ui/password-input/PasswordInput';
+import { Picker, type PickerOption } from '../components/ui/picker/Picker';
 import { QrCode } from '../components/ui/qr-code/QrCode';
+import { QueueFilters, QueueTable } from '../components/ui/queue-table/QueueTable';
+import { useQueuePaging } from '../components/ui/queue-table/use-queue-paging';
+import { RadioGroup } from '../components/ui/radio/RadioGroup';
+import { ReorderList, type ReorderItem } from '../components/ui/reorder-list/ReorderList';
 import { ReasonConfirmationDialog } from '../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { Select } from '../components/ui/select/Select';
 import { Skeleton } from '../components/ui/skeleton/Skeleton';
 import { StatusBadge, type StatusMap } from '../components/ui/status-badge/StatusBadge';
 import { Table, type SortDirection, type TableColumn } from '../components/ui/table/Table';
 import { Textarea } from '../components/ui/textarea/Textarea';
+import { Timeline } from '../components/ui/timeline/Timeline';
 import { useApiClient } from '../platform/api/api-client';
 import { answerOf } from '../platform/api/api-response';
 import { manualKeyOf } from '../platform/secrets/otpauth';
@@ -502,6 +509,318 @@ function DemoTable() {
   );
 }
 
+/** A choice of three, with nothing chosen until a person chooses (S1.19). */
+function RadioDemo() {
+  const [choice, setChoice] = useState<string | null>(null);
+  return (
+    <Section title="Radio group">
+      <div className="showcase-stack">
+        <RadioGroup
+          legend="Demo question"
+          name="demo-radio"
+          required
+          help="Nothing is chosen until you choose. Nothing is sent or stored."
+          options={[
+            { value: 'one', label: 'Demo choice one', help: 'What choosing one would do.' },
+            { value: 'two', label: 'Demo choice two' },
+            { value: 'three', label: 'Demo choice three' },
+          ]}
+          value={choice}
+          onChange={setChoice}
+        />
+        <p>
+          The demo page holds: <span>{choice ?? 'no choice'}</span>
+        </p>
+        <RadioGroup
+          legend="Demo question with an error"
+          name="demo-radio-error"
+          error="This is a synthetic error message."
+          options={[
+            { value: 'a', label: 'Demo choice A' },
+            { value: 'b', label: 'Demo choice B, not available here', disabled: true },
+          ]}
+          value={null}
+          onChange={() => undefined}
+        />
+      </div>
+    </Section>
+  );
+}
+
+/** Amounts as the server sends them, in pesewas, shown in cedis (S1.19). */
+function MoneyDemo() {
+  return (
+    <Section title="Money">
+      <ul>
+        {[0, 5, 2550, 125_000, 123_456_789].map((amount) => (
+          <li key={amount}>
+            <code>{amount}</code> pesewas: <MoneyAmount amountMinor={amount} currency="GHS" />
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+const DEMO_SHOPS: readonly PickerOption[] = [
+  { value: 'a', label: 'Demo shop alpha', description: 'Demo account A1' },
+  { value: 'b', label: 'Demo shop beta', description: 'Demo account B2' },
+  { value: 'c', label: 'Demo stall gamma' },
+];
+
+/** A searchable picker over a synthetic list held in the page; nothing is asked of a server (S1.19). */
+function PickerDemo() {
+  const [searched, setSearched] = useState<string | undefined>(undefined);
+  const [chosen, setChosen] = useState<PickerOption | null>(null);
+  const results =
+    searched === undefined
+      ? undefined
+      : {
+          status: 'success' as const,
+          data: DEMO_SHOPS.filter((shop) =>
+            shop.label.toLowerCase().includes(searched.toLowerCase()),
+          ),
+          error: null,
+          isFetching: false,
+          refetch: () => Promise.resolve(),
+        };
+  return (
+    <Section title="Searchable picker">
+      <Picker
+        label="Demo shop"
+        required
+        searchLabel="Search demo shops by name"
+        searchHelp="Try “shop”, “stall” or a name that is not there."
+        searchAction="Search"
+        onSearch={setSearched}
+        results={results}
+        noResults={<p>No demo shop matches. Try another name.</p>}
+        value={chosen}
+        onChange={setChosen}
+        chooseAction="Choose"
+        changeAction="Choose another demo shop"
+      />
+      <p>
+        The demo page holds: <span>{chosen?.label ?? 'no shop'}</span>
+      </p>
+    </Section>
+  );
+}
+
+const DEMO_QUEUE_PAGE = 2;
+
+/** A paged, filtered queue over the demo rows, two to a page, with the pages held by token as a server would (S1.19). */
+function QueueDemo() {
+  const [state, setState] = useState<DemoState | ''>('');
+  // Row selection (S1.25): off until the person asks for it, so that the queue is drawn as it always was; the choice is kept by the row's key,
+  // so it survives a move to another page.
+  const [choosing, setChoosing] = useState(false);
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  const paging = useQueuePaging(state);
+  const rows = DEMO_ROWS.filter((row) => state === '' || row.state === state);
+  const start = (paging.page - 1) * DEMO_QUEUE_PAGE;
+  const shown = rows.slice(start, start + DEMO_QUEUE_PAGE);
+  const next = start + DEMO_QUEUE_PAGE < rows.length ? `demo-${String(paging.page + 1)}` : null;
+  const columns: readonly TableColumn<DemoRow>[] = [
+    { key: 'name', header: 'Name', cell: (row) => row.name, rowHeader: true },
+    {
+      key: 'state',
+      header: 'State',
+      cell: (row) => <StatusBadge status={row.state} map={DEMO_STATES} />,
+    },
+    { key: 'parcels', header: 'Parcels', cell: (row) => String(row.parcels), numeric: true },
+  ];
+  return (
+    <Section title="Queue table">
+      <QueueFilters label="Filter the demo queue">
+        <Field label="Demo state">
+          <Select
+            value={state}
+            onChange={(event) => {
+              const value = (Object.keys(DEMO_STATES) as DemoState[]).find(
+                (key) => key === event.target.value,
+              );
+              setState(value ?? '');
+            }}
+          >
+            <option value="">Every demo state</option>
+            {(Object.keys(DEMO_STATES) as DemoState[]).map((key) => (
+              <option key={key} value={key}>
+                {DEMO_STATES[key].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </QueueFilters>
+      <Checkbox
+        label="Choose demo rows"
+        help="Turns on a box for each demo row; the choice is kept as you move between pages."
+        checked={choosing}
+        onChange={(event) => {
+          setChoosing(event.target.checked);
+        }}
+      />
+      {choosing ? (
+        <p role="status">
+          {`${String(chosen.size)} demo ${chosen.size === 1 ? 'row' : 'rows'} chosen.`}
+        </p>
+      ) : null}
+      {shown.length === 0 ? (
+        <EmptyState
+          kind="filtered"
+          heading="Nothing matches the demo state"
+          action={
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setState('');
+              }}
+            >
+              Show every demo row
+            </Button>
+          }
+        >
+          The demo filter hides every demo row.
+        </EmptyState>
+      ) : (
+        <QueueTable
+          caption="Demo queue"
+          columns={columns}
+          rows={shown}
+          rowKey={(row) => row.id}
+          noun={{ one: 'demo row', other: 'demo rows' }}
+          paging={paging}
+          nextPageToken={next}
+          {...(choosing
+            ? {
+                selection: {
+                  selected: chosen,
+                  rowLabel: (row: DemoRow) => `Choose ${row.name}`,
+                  onToggle: (row: DemoRow, ticked: boolean) => {
+                    setChosen((current) => {
+                      const next2 = new Set(current);
+                      if (ticked) next2.add(row.id);
+                      else next2.delete(row.id);
+                      return next2;
+                    });
+                  },
+                },
+              }
+            : {})}
+        />
+      )}
+    </Section>
+  );
+}
+
+const DEMO_STOPS: readonly (ReorderItem & { readonly line: string })[] = [
+  { id: 's1', label: 'Demo stop alpha', line: 'Demo stop alpha · 14 Demo Lane', content: null },
+  { id: 's2', label: 'Demo stop beta', line: 'Demo stop beta · 2 Demo Close', content: null },
+  {
+    id: 's3',
+    label: 'Demo stop gamma',
+    line: 'Demo stop gamma · 9 Demo Street',
+    content: null,
+    fixed: true,
+    fixedNote: 'Cancelled with its request: it keeps its place.',
+  },
+  { id: 's4', label: 'Demo stop delta', line: 'Demo stop delta · 5 Demo Road', content: null },
+];
+
+/** The stop-reordering control over four demo stops, one of which keeps its place (S1.25). Nothing is asked of a server. */
+function ReorderDemo() {
+  const [order, setOrder] = useState<readonly string[]>(DEMO_STOPS.map((item) => item.id));
+  const items = order.flatMap((id) => {
+    const found = DEMO_STOPS.find((item) => item.id === id);
+    return found === undefined ? [] : [{ ...found, content: <p>{found.line}</p> }];
+  });
+  return (
+    <Section title="Reorder list">
+      <ReorderList label="Demo stops" items={items} onChange={setOrder} />
+      <p>
+        The demo page holds the order:{' '}
+        <span>
+          {order.map((id) => DEMO_STOPS.find((item) => item.id === id)?.label ?? id).join(', ')}
+        </span>
+      </p>
+    </Section>
+  );
+}
+
+const DEMO_RIDERS: readonly PickerOption[] = [
+  { value: 'r1', label: 'Demo rider Ama', description: '+233 20 000 0001' },
+  { value: 'r2', label: 'Demo rider Kofi', description: '+233 20 000 0002 · no registered device' },
+  { value: 'r3', label: 'Demo rider Esi', description: '+233 20 000 0003 · no PIN set' },
+];
+
+/**
+ * The rider picker as the manifest screens use it (S1.25): the searchable picker over the active riders of one hub, listed at once and narrowed
+ * by name, each told by the facts a roster returns. The list is held in the page; nothing is asked of a server.
+ */
+function RiderPickerDemo() {
+  const [search, setSearch] = useState('');
+  const [chosen, setChosen] = useState<PickerOption | null>(null);
+  const results = {
+    status: 'success' as const,
+    data: DEMO_RIDERS.filter((rider) => rider.label.toLowerCase().includes(search.toLowerCase())),
+    error: null,
+    isFetching: false,
+    refetch: () => Promise.resolve(),
+  };
+  return (
+    <Section title="Rider picker">
+      <Picker
+        label="Demo rider"
+        required
+        searchLabel="Search demo riders by name or phone"
+        searchHelp="Leave it empty to list the demo riders."
+        searchAction="Search riders"
+        onSearch={setSearch}
+        results={results}
+        noResults={<p>No demo rider matches. Try another name.</p>}
+        value={chosen}
+        onChange={setChosen}
+        chooseAction="Choose"
+        changeAction="Choose another demo rider"
+      />
+      <p>
+        The demo page holds: <span>{chosen?.label ?? 'no rider'}</span>
+      </p>
+    </Section>
+  );
+}
+
+/** Three demo attempts, the second the one the page is about (S1.19). */
+function TimelineDemo() {
+  return (
+    <Section title="Timeline">
+      <Timeline
+        label="Demo attempts, oldest first"
+        currentLabel="(the demo step shown)"
+        entries={[
+          {
+            key: 'one',
+            title: <Link to="/__showcase">Demo attempt 1</Link>,
+            details: <p>Demo cancelled, for a demo date</p>,
+          },
+          {
+            key: 'two',
+            title: 'Demo attempt 2',
+            details: <p>Demo confirmed, for a demo date</p>,
+            current: true,
+          },
+          {
+            key: 'three',
+            title: <Link to="/__showcase">Demo attempt 3</Link>,
+            details: <p>Demo waiting, for a demo date</p>,
+          },
+        ]}
+      />
+    </Section>
+  );
+}
+
 /** The identifier of the made-up record the confirmation demos act on. Nothing is behind it. */
 const DEMO_ID = '5b6c7d8e-9f01-4a2b-8c3d-4e5f6a7b8c9d';
 
@@ -800,6 +1119,13 @@ export function ShowcasePage() {
       <EmptyStates />
       <ForbiddenStates />
       <DemoTable />
+      <QueueDemo />
+      <RadioDemo />
+      <MoneyDemo />
+      <PickerDemo />
+      <RiderPickerDemo />
+      <ReorderDemo />
+      <TimelineDemo />
       <DialogDemos />
       <SideMenuDemo />
       <IconsDemo />

@@ -58,27 +58,27 @@ The mechanism is a **blind count**: the receiver enters what is physically prese
 3. **A receiver acquires the advisory soft lock** (`acquireIntakeLock`, §22.8), which shows who is receiving and permits takeover after an idle TTL.
 4. **The receiver enters the physical count without seeing the declaration** (§22.4 steps 1–2).
 5. **The backend reveals the server-owned rider declaration and calculates variance** (§22.4 steps 3–4).
-6. **Any required discrepancy or condition workflow completes** (§22.4 step 5, §22.5) — **including a zero declaration**, which always goes to Senior Ops.
+6. **Any required discrepancy or condition workflow completes** (§22.4 step 5, §22.5): the receiver records a condition and its supporting evidence with `recordIntakeCondition`, and Senior Ops adjudicates with `adjudicateDiscrepancy` — **including a zero declaration**, which always goes to Senior Ops.
 7. **The intake records `received_at`, `received_by` and the hub received count** and becomes eligible for itemization (§22.4 steps 6–7).
 
 ### 5.2 Exception paths
 
 | Path| Behaviour| Error code|
 |---|---|---|
-| **Declaration served before commit**| The read model must not carry it. §22.3: the queue "must not expose the rider-declared count before the receiver submits the blind physical count"| `BLIND_COUNT_VIOLATED`|
-| **Client submits the declaration as input**| Refused. §22.4: "the client must never submit the hidden declared count as authoritative input"| `BLIND_COUNT_VIOLATED`|
+| **Declaration served before commit**| The read model must not carry it. §22.3: the queue "must not expose the rider-declared count before the receiver submits the blind physical count"| `BLIND_COUNT_VIOLATED` — an internal invariant, never a response to a client request; tested as an absence|
+| **Client submits the declaration as input**| Refused. §22.4: "the client must never submit the hidden declared count as authoritative input"| `VALIDATION_FAILED` — the count request is `additionalProperties: false`|
 | Count variance `SHORT` or `OVER`| Intake moves to `RECONCILIATION_REQUIRED`; the discrepancy workflow runs| —|
-| Condition `DAMAGED` or `TAMPERED`| **Supporting evidence and controlled review are required**, and senior review is mandatory (§22.5). `adjudicateDiscrepancy`'s `condition` enum carries all four §22.5 values and `evidence_ids` gates on a `STORED` reference (HIGH-11 audit remediation)| `INSUFFICIENT_AUTHORITY`, `REASON_REQUIRED`, `EVIDENCE_NOT_STORED`|
+| Condition `DAMAGED` or `TAMPERED`| **Supporting evidence and controlled review are required**, and senior review is mandatory (§22.5). `adjudicateDiscrepancy`'s `condition` enum carries all four §22.5 values and `evidence_ids` gates on a `STORED` reference (HIGH-11 audit remediation)| `PERMISSION_DENIED`, `REASON_REQUIRED`, `EVIDENCE_NOT_STORED`|
 | **Condition finding on a matching count**| Fully supported. §22.5: damage, tampering or dispute "may be recorded even when the physical count matches"| —|
 | Two receivers on one intake| The soft lock shows the active receiver; takeover after idle TTL. **The lock is advisory** — §22.8 requires backend transition and idempotency controls regardless| `STATE_CONFLICT`|
 | Handover before all stops terminal| Refused (§22.2)| `STOPS_UNRESOLVED`|
 | Zero collected count reaching here| Impossible by rule — routed to pickup failure upstream| `ZERO_COLLECTION_IS_FAILURE`|
-| **Zero declared for a collected request**| Legal. The intake opens; after the blind count it goes to `RECONCILIATION_REQUIRED` whatever the variance, and **Senior Ops** resolves it with a reason| `INSUFFICIENT_AUTHORITY` for anyone else|
+| **Zero declared for a collected request**| Legal. The intake opens; after the blind count it goes to `RECONCILIATION_REQUIRED` whatever the variance, and **Senior Ops** resolves it with a reason| `PERMISSION_DENIED` for anyone else (a missing key is never `INSUFFICIENT_AUTHORITY`)|
 | Handover rows not exactly the run's collected requests| Refused — a row omitted, repeated, or naming a request not collected on the run| `VALIDATION_FAILED`|
 | Same idempotency key, different rows| Refused| `IDEMPOTENCY_KEY_CONFLICT`|
 | Run with nothing collected| No handover and no intake: System completes the run (`MSC-DEC-416`, [pickup-manifest.md](../pickup/pickup-manifest.md))| —|
 | Rider offline at handover| Queues and retries under the approved offline interaction (§22.2) — Version 1's one offline command. Each intake keeps the device's capture time apart from the server's receipt (§35.3.9)| —|
-| Reopen a closed intake| Platform Admin only, privileged and audited (§36.6)| `INSUFFICIENT_AUTHORITY`|
+| Reopen a closed intake| Platform Admin only, privileged and audited (§36.6)| `PERMISSION_DENIED`|
 
 ### 5.3 What this feature must never do
 
@@ -133,7 +133,7 @@ Non-obvious: `rider_declared_count` is **never readable before commit and never 
 
 ## 12. API operations — *pointer*
 
-`getHubIntake`, **`listHubIntakes`**, **`acquireIntakeLock`**, `submitBlindCount`, `closeHubIntake`, `adjudicateDiscrepancy` and `submitHubHandover` — [openapi.yaml](../../contracts/openapi.yaml). **`listHubIntakes` and `acquireIntakeLock` were added at `MSC-DEC-416`**: the queue and the lock this feature describes had no operation. **The last three were missing from this pointer until 23 August**, though this feature owns intake close, OS&D adjudication and handover receipt. The blind-count guarantee is carried by the schema: `HubIntakePreCount` omits the declaration entirely, and the count request declares `additionalProperties: false`.
+`getHubIntake`, **`listHubIntakes`**, **`acquireIntakeLock`**, `submitBlindCount`, `closeHubIntake`, `adjudicateDiscrepancy`, `recordIntakeCondition` (the receiver's condition and evidence, under the key the receiver holds) and `submitHubHandover`, and `getIntakeSummary` (the vendor-facing summary of a closed intake) — [openapi.yaml](../../contracts/openapi.yaml). **`listHubIntakes` and `acquireIntakeLock` were added at `MSC-DEC-416`**: the queue and the lock this feature describes had no operation. **The last three were missing from this pointer until 23 August**, though this feature owns intake close, OS&D adjudication and handover receipt. The blind-count guarantee is carried by the schema: `HubIntakePreCount` omits the declaration entirely, and the count request declares `additionalProperties: false`.
 
 ---
 
@@ -149,7 +149,7 @@ And the awaiting-receive queue likewise does not expose it,
 And it becomes readable only in the response to the committed physical count.
 ```
 
-**Governs:** §22.3, §22.4, §43.2 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `BLIND_COUNT_VIOLATED`
+**Governs:** §22.3, §22.4, §43.2 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none returned — the property is asserted absent (the internal invariant is named BLIND_COUNT_VIOLATED and is never a response)
 
 ### `AC-SLICE-001-38` — The client cannot submit the declaration
 
@@ -202,12 +202,12 @@ And the case routes to senior review.
 ```text
 Given a receiver recording a condition of TAMPERED,
 When no supporting evidence is attached,
-Then the submission is rejected,
-And when evidence is attached the case requires Senior Ops adjudication,
-And an Ops Staff user cannot adjudicate it.
+Then the submission is rejected with REASON_REQUIRED,
+And when stored evidence is attached the case requires Senior Ops adjudication,
+And an Ops Staff user cannot adjudicate it and is refused with PERMISSION_DENIED, because adjudication needs a key Ops Staff do not hold.
 ```
 
-**Governs:** §22.5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `REASON_REQUIRED`, `INSUFFICIENT_AUTHORITY`
+**Governs:** §22.5, `MSC-DEC-416` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `REASON_REQUIRED`, `PERMISSION_DENIED`
 
 ### `AC-SLICE-001-43` — The soft lock is advisory, not a substitute
 
@@ -278,10 +278,10 @@ When the custody holder's handover declares 0 for P,
 Then P's intake opens at AWAITING_COUNT with rider_declared_count 0, and no pre-count view reveals it,
 And when the receiver commits a blind count of 0, the intake moves to RECONCILIATION_REQUIRED although the variance is MATCH,
 And only Senior Ops, with a reason, can move it to READY_FOR_ITEMIZATION,
-And an Ops user attempting that resolution is refused with INSUFFICIENT_AUTHORITY.
+And an Ops Staff user attempting that resolution is refused with PERMISSION_DENIED, because it needs a key Ops Staff do not hold.
 ```
 
-**Governs:** §22.2, §22.5, `MSC-DEC-416`, state-machines.md §7 · **Surface:** Melarc Rider, Melarc Ops · **Test level:** integration · **Expected code on rejection:** `INSUFFICIENT_AUTHORITY`
+**Governs:** §22.2, §22.5, `MSC-DEC-416`, state-machines.md §7 · **Surface:** Melarc Rider, Melarc Ops · **Test level:** integration · **Expected code on rejection:** `PERMISSION_DENIED`
 
 ### `AC-SLICE-001-77` — The awaiting-receive queue lists pre-count intakes and never a declaration
 

@@ -49,6 +49,25 @@ export function reachableNames(page: Page, includeLinks: boolean): Promise<strin
             getComputedStyle(element).visibility !== 'hidden' &&
             element.closest('[inert]') === null,
         )
+        // A group of radio buttons is one stop, as a browser makes it: Tab lands on the chosen one, or on the first when none is chosen
+        // (moving forward), and the arrow keys move within the group.
+        .filter((element, _index, list) => {
+          if (
+            !(element instanceof HTMLInputElement) ||
+            element.type !== 'radio' ||
+            element.name === ''
+          ) {
+            return true;
+          }
+          const group = list.filter(
+            (other): other is HTMLInputElement =>
+              other instanceof HTMLInputElement &&
+              other.type === 'radio' &&
+              other.name === element.name &&
+              other.form === element.form,
+          );
+          return element === (group.find((radio) => radio.checked) ?? group[0]);
+        })
         .map((element) => {
           const labelled =
             element instanceof HTMLInputElement ||

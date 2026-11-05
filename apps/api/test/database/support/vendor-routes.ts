@@ -1,6 +1,8 @@
 import type pg from 'pg';
 
 import { SystemClock } from '../../../src/platform/auth/clock/system.clock.adapter.js';
+import { HandshakeCodes } from '../../../src/platform/auth/crypto/handshake-codes.js';
+import { loadConfig } from '../../../src/platform/config/load-config.js';
 import { normaliseNewCredential } from '../../../src/platform/auth/credentials/credential-rule.js';
 import { HASHER, type Hasher } from '../../../src/platform/auth/ports/hasher.port.js';
 import { BoundedMetrics } from '../../../src/platform/metrics/bounded.metrics.adapter.js';
@@ -48,6 +50,11 @@ export interface VendorRoutes {
   readonly machinery: Machinery;
   readonly admin: pg.Client;
   readonly deliveredFor: DeliveredReader;
+  /**
+   * The collection handshake's codes under the key material the application was given (S1.27): a test that stands in for the notification lane
+   * (the text that carries a sender's code) or checks what the rider was shown makes the code of a stop and a generation as the application does.
+   */
+  readonly handshakeCodes: HandshakeCodes;
   /** The application's metrics registry. */
   readonly metrics: BoundedMetrics;
   /** An `ACTIVE` vendor of an `ACTIVE` organisation at the seeded hub, with a secret and one registered browser. */
@@ -63,7 +70,20 @@ export interface VendorRoutes {
   stop(): Promise<void>;
 }
 
-export async function startVendorRoutes(): Promise<VendorRoutes> {
+/** The codes of the collection handshake under the key material of the environment the application is started with. */
+function handshakeCodesOf(env: Readonly<Record<string, string>>): HandshakeCodes {
+  const loaded = loadConfig(env);
+  if (!loaded.ok) throw new Error('the test configuration was refused');
+  return new HandshakeCodes(loaded.config.keys);
+}
+
+/**
+ * `env` replaces settings of the application's environment for a test that has a reason to (a race test lengthens the database's lock wait
+ * so that its own synchronisation, and not a bound, decides when the wait ends, as `startStaffRoutes` allows); no test of the timeouts uses it.
+ */
+export async function startVendorRoutes(
+  options: { readonly env?: Readonly<Record<string, string>> } = {},
+): Promise<VendorRoutes> {
   const keys = deliveryKeyEnv();
   const database = await createTestDatabase();
   await seedReferenceData(database);
@@ -74,7 +94,11 @@ export async function startVendorRoutes(): Promise<VendorRoutes> {
   const machinery = assemble(built);
   // A registry the test can read, bound to the port as the private metrics endpoint will bind one (S0.68).
   const metrics = new BoundedMetrics({ policy: 'throw', clock: new SystemClock() });
-  const kit = await startIntegrationKit(database, { poolMax: 4, env: keys.keysOnly, metrics });
+  const kit = await startIntegrationKit(database, {
+    poolMax: 4,
+    env: { ...keys.keysOnly, ...options.env },
+    metrics,
+  });
   const hasher = kit.app.app.get<Hasher>(HASHER, { strict: false });
 
   async function vendor(
@@ -121,6 +145,7 @@ export async function startVendorRoutes(): Promise<VendorRoutes> {
     machinery,
     admin,
     deliveredFor: deliveredReader(keys.env),
+    handshakeCodes: handshakeCodesOf(keys.env),
     metrics,
     vendor,
     anotherDevice: (arranged, overrides = {}) =>
