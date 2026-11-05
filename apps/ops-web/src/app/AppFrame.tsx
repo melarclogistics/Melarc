@@ -1,8 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 
+import logoDarkUrl from '../assets/brand/melarc-logo-dark.svg?no-inline';
 import logoUrl from '../assets/brand/melarc-logo-primary.svg?no-inline';
 import { SkipLink } from '../components/SkipLink';
+import { useResolvedTheme } from '../platform/theme/use-resolved-theme';
 import {
   FrameChromeContext,
   FrameControlsContext,
@@ -21,8 +23,8 @@ const MAIN_CONTENT_ID = 'main-content';
  *
  * It is drawn in one of three layouts (`FrameLayout`), which the route tree chooses through `useFrameLayout` and no page does: the
  * neutral one (the banner above the main content), the sidebar of the shell (the menu at the side, full height, and no banner, because
- * the menu carries the product's name) and the split screen of the pre-sign-in pages (imagery beside the form, and no banner, because
- * the form carries the logo). The landmarks, the skip link and the move of focus are the frame's in all three.
+ * the menu carries the product's name) and the split screen of the pre-sign-in pages (imagery beside the form, the banner above the form's
+ * half). The landmarks, the skip link and the move of focus are the frame's in all three.
  *
  * After a client-side navigation focus moves to the new page's heading, so assistive technology
  * announces the page change. It does not move on first load.
@@ -37,6 +39,7 @@ export function AppFrame() {
   const [chrome, setChrome] = useState<HTMLElement | null>(null);
   const [layout, setLayout] = useState<FrameLayout>('neutral');
   const [mainInert, setMainInert] = useState(false);
+  const theme = useResolvedTheme();
   const controls = useMemo<FrameControls>(() => ({ setLayout, setMainInert }), []);
   const { pathname } = useLocation();
   const previousPathname = useRef(pathname);
@@ -75,8 +78,14 @@ export function AppFrame() {
           {layout !== 'sidebar' ? (
             <header className="app-header">
               {/* The logo identifies the product and is not a link (DESIGN_SYSTEM 26.1). It is the only thing that says "Melarc"
-                  here, so it carries the name; the text beside it says which application this is. */}
-              <img className="app-logo" src={logoUrl} alt="Melarc Logistics" />
+                  here, so it carries the name; the text beside it says which application this is. On a dark ground it is the approved
+                  all-white lockup (BRAND_FOUNDATION 4.7), chosen by the theme that applies (the root's `data-theme`, then the system
+                  setting, as tokens.css does): the black wordmark of the primary logo would vanish there. One image, so the name is read once. */}
+              <img
+                className="app-logo"
+                src={theme === 'dark' ? logoDarkUrl : logoUrl}
+                alt="Melarc Logistics"
+              />
               <p className="app-name">Ops Portal</p>
             </header>
           ) : null}

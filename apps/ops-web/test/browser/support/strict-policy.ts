@@ -1,14 +1,18 @@
 import type { Page } from '@playwright/test';
 
 /**
- * A strict policy used as a compatibility baseline: no inline code, no eval, nothing from another origin. It is the policy the edge of the
+ * A strict policy used as a compatibility baseline: no inline script, no eval, nothing from another origin. It is the policy the edge of the
  * HTTPS run really sends (e2e/harness/https-front.ts, CONTENT_SECURITY_POLICY). A page that works under this one does not force the policy
- * to weaken script-src or style-src.
+ * to weaken script-src.
+ *
+ * style-src allows inline style, and only style-src does (Product Owner, 5 November 2026; architecture/SECURITY_DESIGN.md): the UI library
+ * under the shadcn primitives (Radix) inserts <style> elements at run time, which `style-src 'self'` refuses. script-src is the protection
+ * against injected code acting as the officer, and inline style cannot run code. The refusals are proved, in a browser, by test/browser/shell.spec.ts.
  */
 export const STRICT_POLICY = [
   "default-src 'none'",
   "script-src 'self'",
-  "style-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self'",
   "font-src 'self'",
   "connect-src 'self'",

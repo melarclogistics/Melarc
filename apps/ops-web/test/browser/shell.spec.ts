@@ -181,7 +181,7 @@ test.describe('the application shell in a browser', () => {
     expect(seen.problems).toEqual([]);
   });
 
-  // Break caught: a policy with 'unsafe-inline' or 'unsafe-eval' being needed to run the shell.
+  // Break caught: script-src needing 'unsafe-inline' or 'unsafe-eval' to run the shell. (style-src allows inline style by decision, below.)
   test('runs under a strict Content-Security-Policy', async ({ page }) => {
     const violations = await enforceStrictPolicy(page);
     await stubApi(page);
@@ -197,6 +197,106 @@ test.describe('the application shell in a browser', () => {
 
     expect(violations).toEqual([]);
     expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught: the relaxation of style-src (Product Owner, 5 November 2026) spreading to code. These are the three ways a page can run code
+  // that `script-src 'self'` refuses, tried against the real policy in a real engine: a script written into the page, `eval`, and a script from
+  // another origin. Each must not run, and the browser must report each as a violation of script-src. If one of them runs, the policy is
+  // no longer the protection against injected code acting as the officer, whatever else is true of it.
+  test('still refuses an inline script, eval and a script from another origin', async ({
+    page,
+  }) => {
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    // A script of the page's own origin, which script-src lets run: what it then tries is what an injected script would try. (The test cannot call
+    // eval from page.evaluate: Playwright runs that through DevTools, which a content-security policy does not apply to.)
+    await page.route('**/policy-probe.js', (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: [
+          "window.evalError = 'none';",
+          "try { (0, eval)('window.evalRan = true;'); } catch (error) { window.evalError = error.name; }",
+          "window.functionError = 'none';",
+          "try { new Function('window.functionRan = true;')(); } catch (error) { window.functionError = error.name; }",
+        ].join('\n'),
+      }),
+    );
+    await page.goto('/no-such-page');
+    await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
+
+    const outcome = await page.evaluate(async () => {
+      const probes = window as unknown as Record<string, unknown>;
+      const inline = document.createElement('script');
+      inline.textContent = 'window.inlineScriptRan = true;';
+      document.head.append(inline);
+
+      const own = document.createElement('script');
+      own.src = '/policy-probe.js';
+      const loaded = new Promise((resolve) => {
+        own.addEventListener('load', resolve);
+        own.addEventListener('error', resolve);
+      });
+      document.head.append(own);
+      await loaded;
+
+      const foreign = document.createElement('script');
+      foreign.src = 'https://scripts.example.invalid/injected.js';
+      document.head.append(foreign);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      return {
+        inlineRan: probes.inlineScriptRan === true,
+        evalRan: probes.evalRan === true,
+        evalError: probes.evalError,
+        functionRan: probes.functionRan === true,
+        functionError: probes.functionError,
+      };
+    });
+
+    expect(outcome).toEqual({
+      inlineRan: false,
+      evalRan: false,
+      evalError: 'EvalError',
+      functionRan: false,
+      functionError: 'EvalError',
+    });
+    const report = violations.join('\n');
+    expect(report).toMatch(/script-src[\w-]* inline/);
+    expect(report).toMatch(/script-src[\w-]* eval/);
+    expect(report).toMatch(/script-src[\w-]* https:\/\/scripts\.example\.invalid/);
+  });
+
+  // Break caught: the decision of 5 November 2026 not holding, so that a UI library which inserts <style> elements at run time (Radix does)
+  // is refused, or the relaxation being wider than inline style. A style element and a style attribute are the two inline styles; both apply,
+  // and neither is a violation.
+  test('allows the inline style a library inserts at run time, and a style attribute', async ({
+    page,
+  }) => {
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    await page.goto('/no-such-page');
+    await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
+
+    const applied = await page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent = ':root { --policy-probe: applied; }';
+      document.head.append(style);
+
+      const box = document.createElement('div');
+      box.setAttribute('style', 'min-width: 123px');
+      box.textContent = 'An element with a style attribute';
+      document.body.append(box);
+
+      return {
+        fromElement: getComputedStyle(document.documentElement)
+          .getPropertyValue('--policy-probe')
+          .trim(),
+        fromAttribute: getComputedStyle(box).minWidth,
+      };
+    });
+
+    expect(applied).toEqual({ fromElement: 'applied', fromAttribute: '123px' });
+    expect(violations).toEqual([]);
   });
 
   // Break caught: the typeface being declared but never loading under the policy of this file (font-src 'self'), so that

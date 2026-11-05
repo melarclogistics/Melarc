@@ -8,6 +8,8 @@ import { ICON_NAMES, ICONS } from '../src/components/ui/icon/icons';
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const SRC = join(APP_ROOT, 'src');
 const REGISTRY = join(SRC, 'components/ui/icon/icons.ts');
+/** The shadcn/ui primitives are generated source that draws its own icons (a check, a chevron); a page reaches an icon through the registry. */
+const PRIMITIVES = 'components/primitives/';
 
 interface Source {
   readonly path: string;
@@ -33,13 +35,19 @@ function applicationSources(): Source[] {
 
 const relativePath = (source: Source): string => relative(SRC, source.path).replaceAll('\\', '/');
 
+/** The sources that name an icon by its meaning: all but the primitives, which draw their own and never use the registry. */
+const namingSources = (): Source[] =>
+  applicationSources().filter((source) => !relativePath(source).startsWith(PRIMITIVES));
+
 describe('the icons of the design system (DESIGN_SYSTEM section 24)', () => {
   // Break caught: a second door to the icon library, so that a screen names a picture of the library and the one family drifts. The registry
-  // is the one file that imports it, and the lint rule says so too.
-  it('are imported from the icon library by the registry alone', () => {
+  // is the one file that imports it, apart from the primitives (generated source, which names the few icons it draws itself), and the lint rule
+  // says so too.
+  it('are imported from the icon library by the registry alone, apart from the primitives', () => {
     const importing = applicationSources()
       .filter((source) => /from\s+['"]lucide-react(?:\/[^'"]*)?['"]/.test(source.text))
-      .map(relativePath);
+      .map(relativePath)
+      .filter((path) => !path.startsWith(PRIMITIVES));
 
     expect(importing).toEqual(['components/ui/icon/icons.ts']);
   });
@@ -56,7 +64,7 @@ describe('the icons of the design system (DESIGN_SYSTEM section 24)', () => {
   // Break caught: a catalogue of icons nobody uses ("until then none is installed and no icon catalogue is built"): every name of the
   // registry is used by the application, by name, outside the registry.
   it('are used: every name of the registry is named somewhere in the application', () => {
-    const others = applicationSources().filter((source) => source.path !== REGISTRY);
+    const others = namingSources().filter((source) => source.path !== REGISTRY);
     const unused = ICON_NAMES.filter(
       (name) =>
         !others.some(
@@ -69,7 +77,7 @@ describe('the icons of the design system (DESIGN_SYSTEM section 24)', () => {
 
   // Break caught: a name used on a screen that the registry does not have, which would draw nothing (or throw) at run time.
   it('are only named from the registry: every name the application gives <Icon> or an icon button exists', () => {
-    const named = applicationSources().flatMap((source) =>
+    const named = namingSources().flatMap((source) =>
       [...source.text.matchAll(/(?:<Icon\b[^>]*?\bname|\bicon)=["']([a-z-]+)["']/g)].map(
         (match) => match[1] ?? '',
       ),

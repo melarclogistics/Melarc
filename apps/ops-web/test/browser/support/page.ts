@@ -107,9 +107,18 @@ export function watchPage(page: Page) {
   return { problems, requests };
 }
 
-/** One line per violation: the rule, what it asks for and the first elements that break it. */
-export async function wcagViolations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+/**
+ * One line per violation: the rule, what it asks for and the first elements that break it. `disable` names rules of axe to leave out of this
+ * scan, for the one state in which axe is known to be wrong, with the reason written where it is used.
+ */
+export async function wcagViolations(
+  page: Page,
+  options: { readonly disable?: readonly string[] } = {},
+): Promise<string[]> {
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules([...(options.disable ?? [])])
+    .analyze();
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.help} (${violation.nodes

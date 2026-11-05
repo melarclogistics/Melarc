@@ -5,8 +5,9 @@ import { enforceStrictPolicy } from './support/strict-policy';
 
 /**
  * The date field in the showcase built for production (`vite build --mode showcase`, made by playwright.config.ts and never deployed),
- * served with the strict content-security policy of the portal: nothing inline, nothing from another origin (support/strict-policy.ts). The
- * development server cannot show this, because it injects its own styles; a production build can. The browser reports every violation, and
+ * served with the strict content-security policy of the portal: no inline script, no eval, nothing from another origin, and inline style
+ * allowed since 5 November 2026 (support/strict-policy.ts). The development server cannot show this, because it injects its own styles and
+ * scripts; a production build can. The browser reports every violation, and
  * the library must raise none: not for its popover, its calendar, its focus handling or the one style it would insert (index.html, base.css,
  * and test/aria-wiring: src/components/ui/aria-wiring.test.tsx).
  */

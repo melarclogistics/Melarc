@@ -54,6 +54,11 @@ function requestedEngines(value: string | undefined): Engine[] {
  *   date-picker the date field of the showcase (COMPONENT_PATTERNS section 22a): the keyboard, reflow, enlarged text, forced colours and
  *               reduced motion, against the development server; and, in a project of its own, the same showcase built for production and
  *               served under the strict content-security policy (a build of its own, `--mode showcase`, that the shell build never holds).
+ *   primitives  the shadcn/ui primitives of the showcase (`/__showcase/primitives`): an automated WCAG 2.2 scan in both themes with each overlay open,
+ *               and every overlay by keyboard, against the development server; and, in a project of its own, the same page built for production
+ *               and served under the strict content-security policy.
+ *   logo        the logo in the banner of the sign-in screen (BRAND_FOUNDATION 4.7): the primary logo on a light ground and the all-white lockup on
+ *               a dark one, read back from the pixels, against the production build under the strict policy.
  *   pre-sign-in the five screens a person reaches with no session, against the production build and, in a project of its own,
  *               the development server (strict mode), with a stand-in for the API.
  *   staff       the six signed-in identity screens (S0.44), the same two ways, with a stateful stand-in for the API.
@@ -116,6 +121,27 @@ export default defineConfig({
       name: `date-picker-policy-${engine}`,
       testMatch: 'date-picker-policy.spec.ts',
       use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The shadcn/ui primitives of the showcase (DESIGN_SYSTEM section 29): WCAG 2.2 in both themes, and every overlay by keyboard, against the
+      // development server.
+      name: `primitives-${engine}`,
+      testMatch: 'primitives.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The same page as a production build under the strict content-security policy: Radix UI and Sonner raise no violation in any engine, and the
+      // styles they insert at run time are the only thing the policy was relaxed for.
+      name: `primitives-policy-${engine}`,
+      testMatch: 'primitives-policy.spec.ts',
+      use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The logo in the banner of the sign-in screen: the primary logo on a light ground, the all-white lockup on a dark one (BRAND_FOUNDATION 4.7),
+      // against the production build under the strict policy.
+      name: `logo-${engine}`,
+      testMatch: 'logo.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
     },
     {
       // The five pre-sign-in screens (S0.43) against the production build, with a stand-in for the API.

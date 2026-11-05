@@ -4,9 +4,11 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
-// What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry the one door to the
-// icon library, and `components/ui/` the one door to React Aria Components and the date library it uses (DESIGN_SYSTEM section 24a).
-const OPS_RESTRICTED_PATHS = [
+// What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry (and the shadcn/ui
+// primitives, which are generated source that imports its icons) the door to the icon library, `components/ui/` the one door to React Aria
+// Components and the date library it uses, and `components/primitives/` the one door to Radix UI and the libraries beside it (DESIGN_SYSTEM
+// section 24a).
+const API_RESTRICTED_PATHS = [
   'axios',
   'ky',
   'superagent',
@@ -15,19 +17,45 @@ const OPS_RESTRICTED_PATHS = [
   'got',
   'undici',
   'isomorphic-fetch',
-]
-  .map((name) => ({
-    name,
+].map((name) => ({
+  name,
+  message:
+    'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
+}));
+
+const ICON_RESTRICTED_PATH = {
+  name: 'lucide-react',
+  message:
+    'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
+};
+const OPS_RESTRICTED_PATHS = [...API_RESTRICTED_PATHS, ICON_RESTRICTED_PATH];
+
+// Radix UI and the libraries beside it under the shadcn/ui primitives: imported by `components/primitives/` and nowhere else. And a primitive is
+// imported by the components of `components/ui/` (and the dev-only showcase) and by nothing else: a page uses the Melarc component.
+const PRIMITIVE_LIBRARIES_MESSAGE =
+  'Radix UI, cmdk, vaul, sonner and react-day-picker are imported by components/primitives only (DESIGN_SYSTEM section 24a): use a component of components/ui, or add the primitive from the official shadcn registry into components/primitives and compose it in components/ui.';
+const PRIMITIVE_LIBRARY_PATHS = ['radix-ui', 'cmdk', 'vaul', 'sonner', 'react-day-picker'].map(
+  (name) => ({ name, message: PRIMITIVE_LIBRARIES_MESSAGE }),
+);
+const PRIMITIVE_LIBRARY_PATTERNS = [
+  {
+    group: ['radix-ui/*', '@radix-ui/*', 'cmdk/*', 'vaul/*', 'sonner/*', 'react-day-picker/*'],
+    message: PRIMITIVE_LIBRARIES_MESSAGE,
+  },
+];
+const PRIMITIVE_FILES_PATTERNS = [
+  {
+    group: [
+      '**/components/primitives',
+      '**/components/primitives/*',
+      '@/components/primitives',
+      '@/components/primitives/*',
+      '**/primitives/*',
+    ],
     message:
-      'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
-  }))
-  .concat([
-    {
-      name: 'lucide-react',
-      message:
-        'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
-    },
-  ]);
+      'A primitive (components/primitives) is generated source over Radix UI: the components of components/ui import it, and the dev-only showcase. A page uses the Melarc component, never the primitive (DESIGN_SYSTEM section 24a).',
+  },
+];
 
 const ARIA_MESSAGE =
   'Behaviour a native element does not give (a calendar, a menu, a combobox) comes from React Aria Components through the components of components/ui only (DESIGN_SYSTEM section 24a): use or add a component there, and take a date as text from <DatePicker>.';
@@ -38,7 +66,7 @@ const ARIA_PATHS = ['react-aria-components', 'react-aria', 'react-stately'].map(
 // The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
 // (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
 const DOOR_PACKAGES =
-  '^(react-aria-components|react-aria|react-stately|@react-aria|@react-stately|@react-types|@internationalized|lucide-react)(\\x2f|$)';
+  '^(react-aria-components|react-aria|react-stately|@react-aria|@react-stately|@react-types|@internationalized|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker)(\\x2f|$)';
 const DATE_HELPERS_MESSAGE =
   'The date helpers of the DatePicker hand out objects of the date library. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
 const ARIA_PATTERNS = [
@@ -187,7 +215,10 @@ export default defineConfig(
       ],
       'no-restricted-imports': [
         'error',
-        { paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS], patterns: ARIA_PATTERNS },
+        {
+          paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: [...ARIA_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS, ...PRIMITIVE_FILES_PATTERNS],
+        },
       ],
       'no-restricted-syntax': [
         'error',
@@ -207,11 +238,11 @@ export default defineConfig(
         {
           // `no-restricted-imports` looks at import declarations only; a dynamic import is a door of its own.
           selector: `ImportExpression[source.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
+          message: `${ARIA_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
         },
         {
           selector: `CallExpression[callee.name='require'][arguments.0.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
+          message: `${ARIA_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
         },
       ],
       'no-eval': 'error',
@@ -224,7 +255,43 @@ export default defineConfig(
     // calendar, a menu or a combobox in the portal's own look and API. Everything else above still applies to them.
     files: ['apps/ops-web/src/components/ui/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
-    rules: { 'no-restricted-imports': ['error', { paths: OPS_RESTRICTED_PATHS }] },
+    rules: {
+      // They may import a primitive, but not the libraries under it: a component composes the primitive and never names Radix.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: PRIMITIVE_LIBRARY_PATTERNS,
+        },
+      ],
+    },
+  },
+  {
+    // The dev-only showcase draws every primitive beside the Melarc components, so it may import a primitive; it names no library under one.
+    files: ['apps/ops-web/src/showcase/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: [...ARIA_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS],
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may import Radix UI and the libraries beside it (cmdk, vaul, sonner, react-day-picker): the shadcn/ui primitives, which
+    // are generated source from the official registry, restyled through the tokens. They import their icons from the icon library directly
+    // (the generated code does), which no other file may; React Aria and the API client stay out of them.
+    files: ['apps/ops-web/src/components/primitives/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { paths: [...API_RESTRICTED_PATHS, ...ARIA_PATHS], patterns: ARIA_PATTERNS },
+      ],
+    },
   },
   {
     // The one file that may import the icon library: the registry that names every icon of the application by its meaning.

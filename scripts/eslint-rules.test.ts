@@ -150,10 +150,101 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     }
   });
 
+  // Break caught: a second door to Radix UI and the libraries beside it, so that a page draws a widget in the library's own terms and the one
+  // look and the one API of the design system drift (DESIGN_SYSTEM section 24a). The shadcn/ui primitives (components/primitives) are the one
+  // place that may import them; the components of components/ui import a primitive and never the library under it.
+  it('lets only the primitives import Radix UI, cmdk, vaul, sonner and react-day-picker', () => {
+    const primitive = 'apps/ops-web/src/components/primitives/dialog.tsx';
+    for (const code of [
+      "import { Dialog } from 'radix-ui';",
+      "import * as Dialog from '@radix-ui/react-dialog';",
+      "import { Slot } from '@radix-ui/react-slot';",
+      "import { Command } from 'cmdk';",
+      "import { Drawer } from 'vaul';",
+      "import { Toaster } from 'sonner';",
+      "import { DayPicker } from 'react-day-picker';",
+    ]) {
+      assert.deepEqual(messagesFor(primitive, code), [], `${code} was refused in a primitive`);
+      for (const path of [
+        OPS,
+        'apps/ops-web/src/components/Probe.tsx',
+        'apps/ops-web/src/components/ui/button/Probe.tsx',
+        'apps/ops-web/src/platform/Probe.ts',
+        'apps/ops-web/src/showcase/Probe.tsx',
+      ]) {
+        assert.match(
+          messagesFor(path, code).join('\n'),
+          /components\/primitives/,
+          `${path} was not refused: ${code}`,
+        );
+      }
+    }
+  });
+
+  // Break caught: a page that draws a primitive, so that the Melarc component (its words, its states, its tokens) is skipped. Only the components
+  // of components/ui import a primitive, and the dev-only showcase, which draws every primitive beside the components; a primitive may import
+  // another (the calendar draws a button).
+  it('lets only the components of the design system and the showcase import a primitive', () => {
+    for (const code of [
+      "import { Button } from '@/components/primitives/button';",
+      "import { Button } from '../../primitives/button';",
+      "import { buttonVariants } from '../primitives/button';",
+    ]) {
+      for (const path of [
+        'apps/ops-web/src/components/ui/button/Probe.tsx',
+        'apps/ops-web/src/showcase/Probe.tsx',
+        'apps/ops-web/src/components/primitives/sheet.tsx',
+      ]) {
+        assert.deepEqual(messagesFor(path, code), [], `${path} was refused: ${code}`);
+      }
+      for (const path of [
+        OPS,
+        'apps/ops-web/src/components/Probe.tsx',
+        'apps/ops-web/src/components/side-menu/Probe.tsx',
+        'apps/ops-web/src/platform/Probe.ts',
+      ]) {
+        assert.match(
+          messagesFor(path, code).join('\n'),
+          /primitive/,
+          `${path} was not refused: ${code}`,
+        );
+      }
+    }
+  });
+
+  // Break caught: the primitives being a second door to the icon library for everyone, or to what the rest of the code may not reach. The
+  // generated source imports its own icons from the library, which is the one exception; it stays out of React Aria and out of the API.
+  it('lets the primitives import the icon library and still keeps React Aria and the API out of them', () => {
+    const primitive = 'apps/ops-web/src/components/primitives/select.tsx';
+    assert.deepEqual(messagesFor(primitive, "import { CheckIcon } from 'lucide-react';"), []);
+    for (const code of [
+      "import { Calendar } from 'react-aria-components';",
+      "import axios from 'axios';",
+      "const response = fetch('/api/v1/x');",
+    ]) {
+      assert.notDeepEqual(messagesFor(primitive, code), [], `${code} was not refused`);
+    }
+    for (const path of [
+      'apps/ops-web/src/components/ui/button/Probe.tsx',
+      'apps/ops-web/src/showcase/Probe.tsx',
+    ]) {
+      assert.match(
+        messagesFor(path, "import { CheckIcon } from 'lucide-react';").join('\n'),
+        /icon registry|icons\.ts/,
+        `${path} was not refused`,
+      );
+    }
+  });
+
   // Break caught: a door `no-restricted-imports` does not watch (it reads import declarations only): a dynamic import or a require of the
   // library, of its date library or of the icon library, which a page could use to draw a widget in the library's terms.
   it('refuses the library and the icon library by a dynamic import or a require, wherever it is written', () => {
-    for (const path of [OPS, 'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx']) {
+    for (const path of [
+      OPS,
+      'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx',
+      'apps/ops-web/src/components/primitives/dialog.tsx',
+      'apps/ops-web/src/showcase/Probe.tsx',
+    ]) {
       for (const code of [
         "const library = await import('react-aria-components');",
         "const state = await import('react-stately/useCalendarState');",
@@ -161,6 +252,14 @@ describe('the Ops Portal reaches the API through the generated client only', () 
         "const icons = await import('lucide-react');",
         "const library = require('react-aria');",
         "const types = require('@react-types/shared');",
+        "const radix = await import('radix-ui');",
+        "const dialog = await import('@radix-ui/react-dialog');",
+        "const palette = await import('cmdk');",
+        "const drawer = await import('vaul');",
+        "const toasts = await import('sonner');",
+        "const days = await import('react-day-picker');",
+        "const radix = require('radix-ui');",
+        "const dialog = require('@radix-ui/react-dialog');",
       ]) {
         assert.match(
           messagesFor(path, code).join('\n'),

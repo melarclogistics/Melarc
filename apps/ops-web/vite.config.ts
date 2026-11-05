@@ -1,4 +1,7 @@
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { resolve } from 'node:path';
+
 import { defineConfig, loadEnv } from 'vite';
 
 // Explicit extensions: Vite plans to load its config natively in a future major version, and the Node
@@ -16,7 +19,11 @@ export default defineConfig(({ mode }) => {
   const apiTarget = serverEnv.OPS_API_PROXY_TARGET ?? DEFAULT_API_TARGET;
 
   return {
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      // `@/` is src/ (components.json and tsconfig.json say the same): what the shadcn primitives import their helpers by.
+      alias: { '@': resolve(import.meta.dirname, 'src') },
+    },
     // The guard above and the exposure rule here must name the same prefix, so it is stated once.
     envPrefix: CLIENT_ENV_PREFIX,
     server: {

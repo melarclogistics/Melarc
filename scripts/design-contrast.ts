@@ -1,11 +1,13 @@
 /**
  * Holds the colour tables of design/DESIGN_SYSTEM.md to the colours they name. A table of contrast ratios is what an
- * implementation will encode, so each figure is recomputed here from the hex values in the same document:
+ * implementation will encode, so each figure is recomputed here from the hex values in the same document. There are two
+ * themes (§31), so every table that pairs colours is written once for each and checked against that theme's values:
  *
- *   §4.2 and §4.3   the token values, which every later table must agree with
- *   §4.5            the nine verified pairs: `#foreground` | `#background` | ratio:1
- *   §4.6            the matrices of foreground, border and focus colour against each surface: a ratio, a ✗ where it is
- *                   below the threshold of that table, and "thin" where it passes by less than 0.25
+ *   §4.2 to §4.4    the token values, light in the second cell and dark in the third, which every later table must agree with
+ *   §4.5            the verified pairs of each theme: `#foreground` | `#background` | ratio:1
+ *   §4.6            the matrices of foreground, border and focus colour against each surface, under a heading that names the
+ *                   theme: a ratio, a ✗ where it is below the threshold of that table, and "thin" where it passes by less
+ *                   than 0.25
  *
  * Only the tables are checked. The sentences around them quote the same figures and are reviewed with the tables.
  * It uses only Node built-ins.
@@ -13,6 +15,10 @@
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const THIN_MARGIN = 0.25;
+
+export type Theme = 'light' | 'dark';
+
+export const THEMES: readonly Theme[] = ['light', 'dark'];
 
 function luminance(hex: string): number {
   if (!HEX.test(hex)) throw new Error(`not a six-digit hex colour: ${JSON.stringify(hex)}`);
@@ -73,13 +79,20 @@ function definedColours(markdown: string): Set<string> {
   );
 }
 
-/** The token values of §4.2 and §4.3: `| \`color.text.muted\` | \`#667085\` | ...`. */
-function tokenValues(markdown: string): Map<string, string> {
-  const values = new Map<string, string>();
+/**
+ * The token values of §4.2 to §4.4 for each theme: `| \`color.text.muted\` | \`#626B81\` | \`#8E98AC\` | ...`. The second cell is the light
+ * value and the third the dark one; a row with no colour in the third cell (a fixed colour such as `white`) is the same in both themes.
+ */
+function tokenValues(markdown: string): Record<Theme, Map<string, string>> {
+  const values: Record<Theme, Map<string, string>> = { light: new Map(), dark: new Map() };
   for (const line of markdown.split('\n')) {
-    const match = /^\|\s*`([A-Za-z]+(?:\.[A-Za-z0-9]+)+)`\s*\|\s*`(#[0-9a-fA-F]{6})`/.exec(line);
-    if (match?.[1] !== undefined && match[2] !== undefined)
-      values.set(match[1], match[2].toUpperCase());
+    const match =
+      /^\|\s*`([A-Za-z]+(?:\.[A-Za-z0-9]+)*)`\s*\|\s*`(#[0-9a-fA-F]{6})`(?:\s*\|\s*`(#[0-9a-fA-F]{6})`)?/.exec(
+        line,
+      );
+    if (match?.[1] === undefined || match[2] === undefined) continue;
+    values.light.set(match[1], match[2].toUpperCase());
+    values.dark.set(match[1], (match[3] ?? match[2]).toUpperCase());
   }
   return values;
 }
@@ -89,10 +102,10 @@ export function checkDesignContrast(markdown: string): ContrastCheck {
   const checked = { tokens: 0, colours: 0, baseline: 0, matrices: 0, matrixCells: 0 };
 
   const tokens = tokenValues(markdown);
-  checked.tokens = tokens.size;
-  if (tokens.size === 0) problems.push('no token values were found in §4.2 or §4.3');
-  const tokenFor = (name: string): string | undefined =>
-    tokens.get(`color.${name}`) ?? tokens.get(name);
+  checked.tokens = tokens.light.size;
+  if (tokens.light.size === 0) problems.push('no token values were found in §4.2 to §4.4');
+  const tokenFor = (name: string, theme: Theme): string | undefined =>
+    tokens[theme].get(`color.${name}`) ?? tokens[theme].get(name);
 
   // A colour used in a later table must be one the document defines, so a mistyped hex that happens to round to the
   // same ratio is still caught.
@@ -100,7 +113,7 @@ export function checkDesignContrast(markdown: string): ContrastCheck {
   checked.colours = colours.size;
   if (colours.size === 0) problems.push('no colours were found in §4.2 to §4.4');
 
-  // §4.5: the nine verified pairs.
+  // §4.5: the verified pairs, nine for each theme.
   const baseline = section(markdown, /^## 4\.5 .*$/m, 2);
   for (const line of baseline.split('\n').filter(isTableRow)) {
     const match =
@@ -125,91 +138,98 @@ export function checkDesignContrast(markdown: string): ContrastCheck {
   }
   if (checked.baseline === 0) problems.push('no verified pairs were found in §4.5');
 
-  // §4.6: the matrices, each under a heading that fixes its threshold.
+  // §4.6: the matrices, each under a heading that fixes its threshold and names its theme.
   const supported = section(markdown, /^## 4\.6 .*$/m, 2);
-  const kinds: [heading: RegExp, name: string, threshold: number][] = [
-    [/^### Text on surfaces$/m, 'text', 4.5],
-    [/^### Control boundary$/m, 'control boundary', 3],
-    [/^### Focus$/m, 'focus', 3],
+  const kinds: [title: string, name: string, threshold: number][] = [
+    ['Text on surfaces', 'text', 4.5],
+    ['Control boundary', 'control boundary', 3],
+    ['Focus', 'focus', 3],
   ];
-  for (const [heading, name, threshold] of kinds) {
-    const lines = section(supported, heading, 3).split('\n').filter(isTableRow);
-    const header = lines[0];
-    if (header === undefined) {
-      problems.push(`§4.6 has no ${name} table`);
-      continue;
-    }
-    checked.matrices += 1;
-
-    // The surfaces: a name, and a hex that must agree with the token table when the header gives one.
-    const surfaces = cellsOf(header)
-      .slice(1)
-      .map((cell) => {
-        const surface = /`(surface\.[A-Za-z]+)`/.exec(cell)?.[1];
-        const given = /`(#[0-9a-fA-F]{6})`/.exec(cell)?.[1]?.toUpperCase();
-        const expected = surface === undefined ? undefined : tokenFor(surface);
-        if (surface === undefined || expected === undefined) {
-          problems.push(`§4.6 ${name} table: no token for the surface in "${cell}"`);
-        } else if (given !== undefined && given !== expected) {
-          problems.push(
-            `§4.6 ${name} table: ${surface} is ${given} in the header but ${expected} in §4.3`,
-          );
-        }
-        return { surface, hex: expected };
-      });
-
-    for (const line of lines.slice(1).filter((candidate) => !isSeparator(candidate))) {
-      const [label = '', ...cells] = cellsOf(line);
-      const token = /`([A-Za-z]+\.[A-Za-z]+)`/.exec(label)?.[1];
-      const hex = /`(#[0-9a-fA-F]{6})`/.exec(label)?.[1]?.toUpperCase();
-      if (token === undefined || hex === undefined) {
-        problems.push(`§4.6 ${name} table: no token and colour in "${label}"`);
+  for (const theme of THEMES) {
+    for (const [title, kind, threshold] of kinds) {
+      const name = `${kind}, ${theme} theme`;
+      const lines = section(supported, new RegExp(`^### ${title}, ${theme} theme$`, 'm'), 3)
+        .split('\n')
+        .filter(isTableRow);
+      const header = lines[0];
+      if (header === undefined) {
+        problems.push(`§4.6 has no ${name} table`);
         continue;
       }
-      const expected = tokenFor(token);
-      if (expected !== undefined && expected !== hex) {
-        problems.push(`§4.6 ${name} table: ${token} is ${hex} in the row but ${expected} in §4.3`);
-      } else if (expected === undefined && !/proposed/i.test(label)) {
-        problems.push(
-          `§4.6 ${name} table: ${token} is not a token in §4.3, and the row does not say it is proposed`,
-        );
-      }
-      if (!colours.has(hex)) {
-        problems.push(
-          `§4.6 ${name} table: ${hex} (${token}) is not a colour defined in §4.2 to §4.4`,
-        );
-      }
+      checked.matrices += 1;
 
-      cells.forEach((cell, index) => {
-        const surface = surfaces[index];
-        const stated = /^(✗ )?(\d+\.\d\d)( thin)?$/.exec(cell);
-        if (surface?.hex === undefined || stated?.[2] === undefined) {
-          problems.push(
-            `§4.6 ${name} table: cannot read "${cell}" for ${token} on ${surface?.surface ?? `column ${String(index + 1)}`}`,
-          );
-          return;
+      // The surfaces: a name, and a hex that must agree with the token table when the header gives one.
+      const surfaces = cellsOf(header)
+        .slice(1)
+        .map((cell) => {
+          const surface = /`(surface\.[A-Za-z]+)`/.exec(cell)?.[1];
+          const given = /`(#[0-9a-fA-F]{6})`/.exec(cell)?.[1]?.toUpperCase();
+          const expected = surface === undefined ? undefined : tokenFor(surface, theme);
+          if (surface === undefined || expected === undefined) {
+            problems.push(`§4.6 ${name} table: no token for the surface in "${cell}"`);
+          } else if (given !== undefined && given !== expected) {
+            problems.push(
+              `§4.6 ${name} table: ${surface} is ${given} in the header but ${expected} in §4.3`,
+            );
+          }
+          return { surface, hex: expected };
+        });
+
+      for (const line of lines.slice(1).filter((candidate) => !isSeparator(candidate))) {
+        const [label = '', ...cells] = cellsOf(line);
+        const token = /`([A-Za-z]+\.[A-Za-z]+)`/.exec(label)?.[1];
+        const hex = /`(#[0-9a-fA-F]{6})`/.exec(label)?.[1]?.toUpperCase();
+        if (token === undefined || hex === undefined) {
+          problems.push(`§4.6 ${name} table: no token and colour in "${label}"`);
+          continue;
         }
-        checked.matrixCells += 1;
-        const where = `${token} on ${surface.surface ?? '?'}`;
-        const actual = contrastRatio(hex, surface.hex);
-        if (actual.toFixed(2) !== stated[2]) {
+        const expected = tokenFor(token, theme);
+        if (expected !== undefined && expected !== hex) {
           problems.push(
-            `§4.6 ${name} table, ${where}: the table says ${stated[2]}, the colours give ${actual.toFixed(2)}`,
+            `§4.6 ${name} table: ${token} is ${hex} in the row but ${expected} in §4.3`,
+          );
+        } else if (expected === undefined && !/proposed/i.test(label)) {
+          problems.push(
+            `§4.6 ${name} table: ${token} is not a token in §4.3, and the row does not say it is proposed`,
           );
         }
-        const fails = actual < threshold;
-        if ((stated[1] !== undefined) !== fails) {
+        if (!colours.has(hex)) {
           problems.push(
-            `§4.6 ${name} table, ${where}: ${actual.toFixed(2)} ${fails ? 'is below' : 'meets'} ${String(threshold)}:1 but the cell is marked ${stated[1] === undefined ? 'as a pass' : 'as a failure'}`,
+            `§4.6 ${name} table: ${hex} (${token}) is not a colour defined in §4.2 to §4.4`,
           );
         }
-        const thin = !fails && actual - threshold < THIN_MARGIN;
-        if ((stated[3] !== undefined) !== thin) {
-          problems.push(
-            `§4.6 ${name} table, ${where}: ${actual.toFixed(2)} ${thin ? 'passes by less than 0.25 and must say "thin"' : 'does not pass narrowly, so it must not say "thin"'}`,
-          );
-        }
-      });
+
+        cells.forEach((cell, index) => {
+          const surface = surfaces[index];
+          const stated = /^(✗ )?(\d+\.\d\d)( thin)?$/.exec(cell);
+          if (surface?.hex === undefined || stated?.[2] === undefined) {
+            problems.push(
+              `§4.6 ${name} table: cannot read "${cell}" for ${token} on ${surface?.surface ?? `column ${String(index + 1)}`}`,
+            );
+            return;
+          }
+          checked.matrixCells += 1;
+          const where = `${token} on ${surface.surface ?? '?'}`;
+          const actual = contrastRatio(hex, surface.hex);
+          if (actual.toFixed(2) !== stated[2]) {
+            problems.push(
+              `§4.6 ${name} table, ${where}: the table says ${stated[2]}, the colours give ${actual.toFixed(2)}`,
+            );
+          }
+          const fails = actual < threshold;
+          if ((stated[1] !== undefined) !== fails) {
+            problems.push(
+              `§4.6 ${name} table, ${where}: ${actual.toFixed(2)} ${fails ? 'is below' : 'meets'} ${String(threshold)}:1 but the cell is marked ${stated[1] === undefined ? 'as a pass' : 'as a failure'}`,
+            );
+          }
+          const thin = !fails && actual - threshold < THIN_MARGIN;
+          if ((stated[3] !== undefined) !== thin) {
+            problems.push(
+              `§4.6 ${name} table, ${where}: ${actual.toFixed(2)} ${thin ? 'passes by less than 0.25 and must say "thin"' : 'does not pass narrowly, so it must not say "thin"'}`,
+            );
+          }
+        });
+      }
     }
   }
   return { problems, checked };

@@ -1,7 +1,7 @@
 /*
  * The side menu of the authenticated Ops shell (design/COMPONENT_PATTERNS.md section 12.6; DESIGN_SYSTEM sections 4.6 and 13.1): Ink, full
  * height, docked at the left on a wide screen and collapsible to a rail of icons; on a narrow screen a slim bar with a menu button stands in
- * its place and the menu slides in over the page. Every colour is a token; the two widths are layout tokens; text on Ink is at least 5.7:1.
+ * its place and the menu slides in over the page. Every colour is a token; the two widths are layout tokens; text on Ink is at least 5:1.
  */
 .ui-side-menu {
   color: var(--shell-text);
@@ -111,7 +111,7 @@
   display: none;
 }
 
-/* Focus on Ink uses the inverse recipe: the default ring is only 2.64:1 here. */
+/* Focus on Ink uses the inverse recipe: the default ring is only 2.96:1 here. */
 .ui-side-menu :focus-visible {
   outline: var(--focus-width) solid var(--focus-ring-inverse);
   outline-offset: var(--focus-offset-width);

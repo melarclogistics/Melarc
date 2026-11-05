@@ -992,6 +992,18 @@ Both reverse-proxied to the backend. **No parent-domain authentication cookie.**
 
 **The login-CSRF threat model §13.12 deferred is answered by that last clause.** A session-fixation or login-CSRF attempt necessarily arrives at an endpoint where no session yet exists, which is precisely where a session-cookie-based defence has nothing to check.
 
+**The Content-Security-Policy of the browser surfaces (Product Owner, 5 November 2026).** The edge sends one policy on every response of a browser surface, and the Ops Portal is held to work under it (`e2e/harness/https-front.ts`, `CONTENT_SECURITY_POLICY`; `apps/ops-web/test/browser/support/strict-policy.ts`, `STRICT_POLICY`; a test holds the two equal). Its text is:
+
+```text
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+- **One directive is relaxed, `style-src`, and no other.** Radix UI, the library under the shadcn/ui primitives that are the Ops Portal's component foundation, inserts `<style>` elements into the page when it runs, and `style-src 'self'` refuses them. Every other directive is exactly as it was before.
+- **`script-src` is `'self'` and is never relaxed.** It is the protection against injected code acting as the officer: no inline script, no `eval`, no `new Function`, no script from another origin. Inline style alone cannot run code.
+- **What the relaxation still needs from an attacker.** To make use of an inline style an attacker must first get markup into the page, which is an HTML-injection bug, and React escapes what it renders (and the code base refuses `dangerouslySetInnerHTML`, `innerHTML` and `insertAdjacentHTML`, `apps/ops-web/CLAUDE.md`). Styles that reach out are stopped by the directives that did not move: `img-src`, `font-src` and `connect-src` are `'self'` and `default-src` is `'none'`, so a style cannot send what it reads to another origin. What remains is a page that looks wrong (a hidden or overlaid element) after such a bug, which is a weaker thing than running code.
+- **Held by tests, in a real browser.** `e2e/harness/https-front.test.ts` pins the nine directives and that `'unsafe-inline'` appears in `style-src` alone and `'unsafe-eval'` nowhere. `apps/ops-web/test/browser/shell.spec.ts` proves an inline script, `eval`, `new Function` and a script from another origin are still refused and reported, and that a `<style>` element and a style attribute apply. The showcase of the primitives, built for production, runs under the policy with no violation, every overlay of it opened and closed (`apps/ops-web/test/browser/primitives-policy.spec.ts`, and `date-picker-policy.spec.ts` for the date field), and the sign-in screen draws its logo under it (`logo.spec.ts`); the same run under `style-src 'self'` alone reports the inline style elements (`style-src-elem`) that the libraries insert as they run, a dozen of them, and nothing else, which is why that directive and no other is relaxed.
+- **If a primitive needs anything else the policy refuses** (an inline script, a `data:` image, a cross-origin font), the work stops and the need is reported. This decision relaxes `style-src` and nothing else.
+
 ### 14.9 Key, secret and credential custody
 
 `MSC-DEC-281`. Managed secret store; managed KMS; **workload or federated identity** for production workloads where the platform supports it, rather than embedded long-lived cloud credentials.

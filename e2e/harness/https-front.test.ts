@@ -107,14 +107,28 @@ describe('what the front adds to a response (GBT-W9)', () => {
   });
 
   // Break caught: the policy of the front drifting from the baseline the shell is tested under, or becoming one that allows the
-  // page to be framed, to run inline code or to reach another origin.
-  it('sends a policy with no inline code, no eval, no other origin and no framing', () => {
+  // page to be framed, to run inline script or eval, or to reach another origin. The one relaxation is style-src: it allows inline style
+  // (Product Owner, 5 November 2026; architecture/SECURITY_DESIGN.md, the content-security policy of the browser surfaces), because the UI
+  // library inserts <style> elements at run time. Inline style cannot run code, and script-src stays exactly `'self'`; no other directive
+  // may carry 'unsafe-inline', and none may carry 'unsafe-eval'.
+  it('sends a policy with no inline script, no eval, no other origin and no framing, and inline style alone', () => {
     expect(EDGE_HEADERS['content-security-policy']).toBe(CONTENT_SECURITY_POLICY);
     const directives = CONTENT_SECURITY_POLICY.split('; ');
-    expect(directives).toContain("default-src 'none'");
-    expect(directives).toContain("frame-ancestors 'none'");
-    expect(directives).toContain("script-src 'self'");
-    expect(CONTENT_SECURITY_POLICY).not.toMatch(/unsafe-inline|unsafe-eval|\*|https?:/);
+    expect(directives).toEqual([
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self'",
+      "font-src 'self'",
+      "connect-src 'self'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ]);
+    expect(directives.filter((directive) => directive.includes("'unsafe-inline'"))).toEqual([
+      "style-src 'self' 'unsafe-inline'",
+    ]);
+    expect(CONTENT_SECURITY_POLICY).not.toMatch(/unsafe-eval|\*|https?:/);
     expect(EDGE_HEADERS['x-content-type-options']).toBe('nosniff');
     expect(EDGE_HEADERS['referrer-policy']).toBe('no-referrer');
     expect(EDGE_HEADERS['strict-transport-security']).toMatch(/^max-age=\d+$/);

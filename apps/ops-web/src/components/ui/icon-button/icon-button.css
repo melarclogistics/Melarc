@@ -1,7 +1,7 @@
 /*
  * IconButton (design/COMPONENT_PATTERNS.md section 22): a native button drawn with one icon. At least the small control height square, so
  * the target is above the 24px of WCAG 2.2 and grows with enlarged text. `bare` sits on a light surface, `inverse` on Ink (the
- * authenticated shell), where it uses the inverse focus recipe because the default ring is only 2.64:1 on Ink.
+ * authenticated shell), where it uses the inverse focus recipe because the default ring is only 2.96:1 on Ink.
  */
 .ui-icon-button {
   display: inline-flex;

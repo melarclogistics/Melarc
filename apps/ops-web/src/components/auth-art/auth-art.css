@@ -1,6 +1,6 @@
 /*
  * The imagery half of the split screen (design/COMPONENT_PATTERNS.md section 12.7). The photograph fills what the band leaves and is cropped to
- * it, never stretched; the band is solid Ink, so the name on it is shell.text on Ink (16.27:1) whatever the photograph above it is.
+ * it, never stretched; the band is solid Ink, so the name on it is shell.text on Ink (18.22:1) whatever the photograph above it is.
  */
 .ui-auth-art {
   display: flex;

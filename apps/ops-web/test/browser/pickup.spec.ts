@@ -617,7 +617,8 @@ test.describe('the queue, set in one panel', () => {
       expect(look).toEqual({
         background: 'rgb(255, 255, 255)',
         border: 'solid 1px',
-        radius: '8px',
+        // A panel: `radius.lg`, 12px since redesign step R2 (DESIGN_SYSTEM section 7), 8px before it.
+        radius: '12px',
         filtersHairline: '1px',
         countHairline: '1px',
         nested: ['0px'],

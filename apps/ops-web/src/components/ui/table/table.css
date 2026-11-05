@@ -43,7 +43,8 @@
 
 .ui-table__table th,
 .ui-table__table td {
-  height: var(--control-height-md);
+  /* The compact row of the desk (DESIGN_SYSTEM section 10): a minimum, in rem, so that enlarged text grows it. */
+  height: var(--density-row-compact);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border-subtle);
   text-align: start;

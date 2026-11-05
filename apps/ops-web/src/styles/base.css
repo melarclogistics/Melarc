@@ -17,6 +17,8 @@ body {
   font-size: var(--text-body-md-size);
   font-weight: var(--text-body-md-weight);
   line-height: var(--text-body-md-line-height);
+  /* Numbers are set in tabular figures everywhere (design system section 5.2), so that a column of counts, times and amounts lines up. */
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 

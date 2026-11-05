@@ -7,6 +7,14 @@ import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { packageDirectory } from './support/package-directory';
+import {
+  entryFor,
+  licenceTextOf,
+  ownDirectory,
+  SHADCN_ROOTS,
+  SHADCN_SOURCE,
+  treeOf,
+} from './support/third-party-licences';
 
 const require = createRequire(import.meta.url);
 const APP_ROOT = resolve(import.meta.dirname, '..');
@@ -105,9 +113,9 @@ describe('the production build', () => {
     expect(html).toContain('name="viewport"');
   });
 
-  // Break caught: inline script or style, which a strict Content-Security-Policy refuses unless it
-  // allows 'unsafe-inline'. The policy itself is not specified yet; keeping the page free of inline
-  // code means whichever policy the edge adopts does not have to weaken script-src.
+  // Break caught: inline script in the page, which script-src (never relaxed) refuses, or an inline style or event handler that the shell
+  // itself wrote. style-src allows inline style since 5 November 2026 (architecture/SECURITY_DESIGN.md), because the UI library inserts
+  // <style> elements when it runs; the static page stays free of it by choice, so that the one relaxation is the one the library needs.
   it('loads code and styles only from files it ships, with nothing inline', () => {
     const html = output.get('index.html') ?? '';
     const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
@@ -124,16 +132,34 @@ describe('the production build', () => {
     expect(html).not.toMatch(/https?:\/\//);
   });
 
-  // Break caught: the typeface left out of the build, inlined as a data: URI (which `font-src 'self'` refuses), changed
-  // on its way into the build, or shipped without its licence (DESIGN_SYSTEM section 5.1).
-  it('ships Inter as its own files, unchanged, with its licence, and inlines nothing', async () => {
+  // Break caught: the imports of tailwind.css (packages, which the build reads) left in the stylesheet it ships, where the page would have to
+  // request them; or a stylesheet that reaches another origin, or takes a decision from the cascade with !important. scripts/design-tokens.test.ts lets
+  // the Tailwind entry import packages because the shipped stylesheet has none, and this is where that is proved.
+  it('ships stylesheets that import nothing, name no other origin and use no !important', () => {
+    const sheets = [...output].filter(([name]) => name.endsWith('.css'));
+
+    expect(sheets.length).toBeGreaterThan(0);
+    for (const [name, css] of sheets) {
+      expect(css, name).not.toMatch(/@import\b/i);
+      expect(css, name).not.toMatch(/url\(\s*["']?(?:[a-z][a-z0-9+.-]*:)?\/\//i);
+      expect(css, name).not.toMatch(/!\s*important\b/i);
+    }
+  });
+
+  // Break caught: a typeface left out of the build, inlined as a data: URI (which `font-src 'self'` refuses), changed
+  // on its way into the build, or shipped without its licence (DESIGN_SYSTEM section 5.1). Inter (everything people read) and
+  // JetBrains Mono (operational codes) are held to the same terms.
+  it('ships Inter and JetBrains Mono as their own files, unchanged, with their licences, and inlines nothing', async () => {
     const styles = [...output]
       .filter(([name]) => name.endsWith('.css'))
       .map(([, content]) => content)
       .join('\n');
 
-    for (const subset of ['latin', 'latin-ext']) {
-      const source = `inter-${subset}-wght-normal`;
+    for (const source of [
+      'inter-latin-wght-normal',
+      'inter-latin-ext-wght-normal',
+      'jetbrains-mono-latin-wght-normal',
+    ]) {
       const shipped = [...output.keys()].filter((name) =>
         new RegExp(`^assets/${source}-[\\w-]+\\.woff2$`).test(name),
       );
@@ -145,7 +171,11 @@ describe('the production build', () => {
       expect(styles, name).toContain(`/${name}`);
     }
     expect(styles).not.toMatch(/url\(\s*['"]?data:/i);
-    expect(output.get('licenses/Inter-OFL.txt')).toContain('SIL OPEN FONT LICENSE Version 1.1');
+    for (const licence of ['Inter-OFL.txt', 'JetBrainsMono-OFL.txt']) {
+      const original = await readFile(resolve(APP_ROOT, `public/licenses/${licence}`), 'utf8');
+      expect(output.get(`licenses/${licence}`), licence).toBe(original);
+      expect(original, licence).toContain('SIL OPEN FONT LICENSE Version 1.1');
+    }
   });
 
   // Break caught: the icons shipped without their licence (ISC asks that the notice appear in every copy, and the Feather icons Lucide
@@ -186,6 +216,37 @@ describe('the production build', () => {
     expect(output.get('licenses/clsx-MIT.txt')).toContain('MIT License');
   });
 
+  // Break caught: a library of the shadcn/ui primitives (Radix UI and what it brings, cmdk, sonner, the calendar and its date library, the table,
+  // the class helpers, Tailwind CSS and its animations) shipped without its licence (MIT asks that the notice travel with the work, Apache-2.0 a
+  // copy of the licence), with a text that is not the package's own, or without the licence of the registry's source, which the primitives are.
+  // The list of packages is held to the lockfile by shadcn-licences.test.ts.
+  it('ships the libraries of the shadcn/ui primitives with their licences, byte for byte', () => {
+    const shipped = new Map<string, string>();
+    for (const [name, directories] of treeOf(APP_ROOT, SHADCN_ROOTS)) {
+      const file = entryFor(name);
+      if (typeof file !== 'string') continue;
+      for (const directory of directories) {
+        expect(output.get(`licenses/${file}`), `${file} for ${name}`).toBe(
+          licenceTextOf(directory),
+        );
+      }
+      shipped.set(file, name);
+    }
+    expect(shipped.size).toBeGreaterThan(10);
+
+    expect(output.get(`licenses/${SHADCN_SOURCE.file}`)).toBe(
+      licenceTextOf(ownDirectory(APP_ROOT, SHADCN_SOURCE.package)),
+    );
+    for (const [file, text] of [
+      ['Radix-UI-MIT.txt', 'WorkOS'],
+      ['class-variance-authority-Apache-2.0.txt', 'Version 2.0'],
+      ['Tailwind-CSS-MIT.txt', 'MIT License'],
+      ['shadcn-ui-MIT.txt', 'shadcn'],
+    ] as const) {
+      expect(output.get(`licenses/${file}`), file).toContain(text);
+    }
+  });
+
   // Break caught: the logo inlined as a data: URI (Vite does that to any asset under 4 KiB, and this one is just under;
   // `img-src 'self'` refuses it, so the banner would show a broken image), left out of the build, or changed on its way
   // in (BRAND_FOUNDATION 4.3, 4.6: the artwork is shipped as it was supplied).
@@ -206,6 +267,27 @@ describe('the production build', () => {
     expect(scripts).toContain(`/${name}`);
     expect(scripts).not.toMatch(/data:image\/svg/i);
     expect(scripts).not.toContain('Layer_1-2');
+  });
+
+  // Break caught: the all-white lockup, which the banner draws on a dark ground (BRAND_FOUNDATION 4.7), inlined as a data: URI (it is under
+  // 4 KiB too, and `img-src 'self'` refuses a data: URI, so the banner would show a broken image exactly where the black logo cannot be seen),
+  // left out of the build, or changed on its way in.
+  it('ships the all-white lockup as its own file, unchanged, and inlines nothing', async () => {
+    const original = await readFile(resolve(APP_ROOT, 'src/assets/brand/melarc-logo-dark.svg'));
+    const shipped = [...output.keys()].filter((name) =>
+      /^assets\/melarc-logo-dark-[\w-]+\.svg$/.test(name),
+    );
+    expect(shipped).toHaveLength(1);
+    const [name = ''] = shipped;
+    const built = await readFile(join(outputDirectory, name));
+    expect(built.equals(original)).toBe(true);
+
+    const scripts = [...output]
+      .filter(([file]) => file.endsWith('.js'))
+      .map(([, content]) => content)
+      .join('\n');
+    expect(scripts).toContain(`/${name}`);
+    expect(scripts).not.toMatch(/data:image\/svg/i);
   });
 
   // Break caught: the icon left out of the build (a 404 on every page, in the console), renamed with a hash so that the page's link

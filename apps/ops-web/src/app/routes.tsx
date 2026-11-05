@@ -31,6 +31,14 @@ function showcaseRoutes(): RouteObject[] {
         return { Component: ShowcasePage };
       },
     },
+    {
+      // The shadcn/ui primitives, beside the components (DESIGN_SYSTEM section 29): the same gate, so the production build holds no trace of it.
+      path: '__showcase/primitives',
+      lazy: async () => {
+        const { PrimitivesShowcasePage } = await import('../showcase/PrimitivesShowcase');
+        return { Component: PrimitivesShowcasePage };
+      },
+    },
   ];
 }
 

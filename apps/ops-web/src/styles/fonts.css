@@ -1,11 +1,12 @@
 /*
- * Inter, self-hosted (design/DESIGN_SYSTEM.md section 5.1; approved 6 October 2026). The files and where they came from
- * are recorded in src/assets/fonts/fonts.json, and the licence is shipped with the build under /licenses. Nothing here
- * names another origin: test/fonts.test.ts fails if it does.
+ * The typefaces, self-hosted (design/DESIGN_SYSTEM.md section 5.1). Inter, for everything people read, was approved on 6 October 2026;
+ * JetBrains Mono, for operational codes only, on 5 November 2026. The files and where they came from are recorded in
+ * src/assets/fonts/fonts.json, and each licence is shipped with the build under /licenses. Nothing here names another origin:
+ * test/fonts.test.ts fails if it does, and fails if a component names JetBrains Mono instead of using --font-family-mono.
  *
- * One variable file per subset, declared for the weights the type scale uses (400, 500 and 600). The browser fetches a
- * subset only when the page holds a character of its range, and shows the fallback stack of --font-family-sans while the
- * file loads.
+ * One variable file per subset, declared for the weights the family is set in (Inter 400 to 600, JetBrains Mono 500 to 600). The browser
+ * fetches a subset only when the page holds a character of its range, and shows the fallback stack of --font-family-sans or
+ * --font-family-mono while the file loads.
  */
 @font-face {
   font-family: 'Inter';
@@ -25,6 +26,18 @@
   font-display: swap;
   font-weight: 400 600;
   src: url('../assets/fonts/inter-latin-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* The Latin subset only, as approved: a character outside it shows in the next face of --font-family-mono. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500 600;
+  src: url('../assets/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;

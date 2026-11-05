@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE IMPLEMENTATION BASELINE — approved by the Product Owner on 6 October 2026; document only patterns that exist or are immediately being implemented  
 > **Version:** 1.2  
-> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4, §9, §12, §24, §33, §36, §40, §42)  
+> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4, §9, §12, §24, §33, §36, §40, §42), and on 5 November 2026 for the planned kit of the Ops Portal redesign (§1, §3, §12.6, §21, §22f, §37, §38, §40), and again that day in redesign step R2 for the heights, the side menu's current item, the Toast's actions, the table's rows and the token file's description (§4, §12.6, §21, §22, §42)  
 > **Repository path:** `design/COMPONENT_PATTERNS.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`, `design/DESIGN_SYSTEM.md`  
 > **Owns:** implemented or immediately planned UI component patterns, their anatomy, variants, states, accessibility expectations, density behavior, and usage rules  
@@ -44,7 +44,7 @@ The initial scope is:
 - Application Frame;
 - Error / Not Found presentation.
 
-Future patterns such as drawers, menus, data grids, toasts, tabs, command palettes, charts, and complex navigation should be added only when real product requirements demand them (the dialogs and the date field have been: §20 and §22a).
+Future patterns such as drawers, menus, data grids, toasts, tabs, command palettes, charts, and complex navigation should be added only when real product requirements demand them (the dialogs and the date field have been: §20 and §22a). The Ops Portal redesign of 5 November 2026 is such a requirement for the planned kit of §37, recorded there as PROPOSED.
 
 ---
 
@@ -96,8 +96,11 @@ Every reusable component must:
 8. be tested for behavior, not only appearance;
 9. document any important density or responsive behavior;
 10. avoid product-specific business logic unless the component is explicitly a domain pattern;
-11. take behaviour that no native element gives (a calendar, a menu, a searchable list) from React Aria Components, through a component of
-    `components/ui`, and never from a hand-built widget or a second library (DESIGN_SYSTEM §24a).
+11. take behaviour that no native element gives (a calendar, a menu, a searchable list) from the shadcn/ui primitives (Radix UI), through a
+    component of `components/ui`, and never from a hand-built widget or a second library (DESIGN_SYSTEM §29.2). React Aria Components stays
+    behind the components already built on it until they move (§37), and no new component is built on it (DESIGN_SYSTEM §24a).
+    TanStack Table (the data model of the queue table) sits behind a component of `components/ui` on the terms of DESIGN_SYSTEM §23;
+    Motion (animation) is not adopted.
 
 ---
 
@@ -145,13 +148,13 @@ Default:
 md
 ```
 
-Recommended working heights:
+Working heights ([DESIGN_SYSTEM §11](DESIGN_SYSTEM.md#11-control-sizing), 5 November 2026):
 
 | Size | Height |
 |---|---:|
-| `sm` | 32px |
-| `md` | 40px |
-| `lg` | 48px |
+| `sm` | 36px |
+| `md` | 44px |
+| `lg` | 56px |
 
 `sm` is intended for dense desktop contexts only.
 
@@ -746,7 +749,7 @@ at the top (Product Owner, 25 October 2026):
 
 - an Ink side menu, full height, that collapses to a rail of icons and slides in on a narrow screen;
 - neutral working surface;
-- restrained Crimson active accent, on a value that is visible against Ink (DESIGN_SYSTEM §4.6);
+- the current item a solid crimson fill with white bold text (`shell.active`, DESIGN_SYSTEM §4.3 and §4.6);
 - spacious shell;
 - efficient content area.
 
@@ -786,6 +789,8 @@ Development-only showcase data must be obviously non-production.
 ### 12.6 The authenticated Ops shell as built (S0.42; a side menu since 25 October 2026)
 
 > **Code:** `apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx`, `components/side-menu/`, `components/PrimaryNavigation.tsx`, `components/brand/BrandLockup.tsx`, `app/frame-chrome.ts`
+
+**Shell v2 (PROPOSED, §37).** The approved redesign (Product Owner, 5 November 2026) gives the signed-in shell a top bar and a sidebar of seven groups ([surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)), built in redesign step R4. This section records the shell as built until then.
 
 The Ops Portal is an application and not a website, so its navigation is a menu at the side and not a band at the top (Product
 Owner, 25 October 2026, with a reference screenshot of a dark menu with icons, a red current item and an account card).
@@ -1136,7 +1141,7 @@ Table
 
 - A **native table** with a caption. The caption names the table and the region; `hideCaption` takes it from the eye and not from
   assistive technology, where the page's own heading already says it.
-- Rows are about 40px (`control.height.md`), in rem so that enlarged text grows them.
+- Rows are at least 36px (`density.row.compact`, [DESIGN_SYSTEM §10](DESIGN_SYSTEM.md#10-density-system)), in rem so that enlarged text grows them.
 - A column of numbers is aligned to the end and set in figures of one width.
 - **Sorting is the screen's**: the header button asks for an order (`ascending` first, then it toggles; another column starts
   ascending) and `aria-sort` says the order that is shown, on the sorted column only. The table sorts nothing. A sortable column
@@ -1221,13 +1226,12 @@ there is none teaches people to ignore it.
 
 ## 21. Toast
 
-> **Status:** DEFERRED
+> **Status:** PROPOSED (the planned kit of §37; it was DEFERRED until the redesign of 5 November 2026)
 
-Do not introduce a toast system before a real workflow establishes:
+The Product Owner decided one workflow on 5 November 2026: the success of a task lands as a toast with "Open" and "Do another" ([PRODUCT_DESIGN_DIRECTION §6.3](PRODUCT_DESIGN_DIRECTION.md#63-task-form)). **A toast that carries actions does not time out** (approved the same day, so that a person has the time to use the action, WCAG 2.2.1): it stays until an action is taken or it is dismissed. Before the toast is built (redesign step R5) it still has to establish:
 
-- what messages are transient;
+- what other messages are transient;
 - which messages must remain persistent;
-- whether actions/retries belong in a toast;
 - accessibility/live-region behavior.
 
 Important business outcomes must not exist only in disappearing toast messages.
@@ -1261,7 +1265,8 @@ A native `<button>` named by a required `label` and drawn with one icon of the f
 > **Code:** `apps/ops-web/src/components/ui/date-picker/`
 
 One calendar date, typed by its day, month and year or chosen from a calendar that opens under the control. Its behaviour is React Aria
-Components' (DESIGN_SYSTEM §24a); its properties and its look are the portal's.
+Components' (DESIGN_SYSTEM §24a); its properties and its look are the portal's. It is the one component still built on that library, and
+the plan for it is the phase-out table of §37.
 
 ### 22a.1 Anatomy
 
@@ -1387,6 +1392,8 @@ how many there are and where each one is.
 > **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
 > **Code:** `apps/ops-web/src/components/ui/queue-table/`
 
+The queue workspace template ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace), approved on 5 November 2026) will supersede the presentation below, the pickup queue first (redesign step R7). This section records the queue as built, and `DataTable`, its successor, is PROPOSED in §37.
+
 A page of a queue the server pages by token (surfaces/ops-portal.md §4): the count of the page, the rows in a `Table` (§19) and a pager.
 `QueueFilters` is the named group of the screen's filters above it, in a row that wraps, so nothing is clipped at 320px or at enlarged text.
 
@@ -1413,7 +1420,7 @@ A page of a queue the server pages by token (surfaces/ops-portal.md §4): the co
 
 ### Queue presentation (the pickup queue, 1 November 2026)
 
-The first queue drawn to [PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queues) (focused results, compact filters), from the
+The first queue drawn to [PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace) (focused results, compact filters), from the
 owner's reference of that date (`design/reference/MELARC_PICKUP_QUEUE_REFERENCE_2026-11-01.html`, a design proposal and not code). It changes
 how a request is drawn and nothing the queue reads, asks, orders or allows. Code: `apps/ops-web/src/app/pages/pickup/` (`pickup-queue-view.tsx`).
 
@@ -1664,6 +1671,8 @@ Rules:
 - never use realistic production-looking customer data;
 - do not let the showcase become a second component specification.
 
+What it holds since redesign step R3 (5 November 2026): two pages, and the production build contains neither (`test/build.test.ts`). `/__showcase` draws the components of `components/ui`. `/__showcase/primitives` draws every installed shadcn/ui primitive (DESIGN_SYSTEM §29.2) in the words a Melarc screen would use, with synthetic data, in both themes: a switch of the theme sits in its header and is held in memory, never stored (the stored choice is redesign step R4's, DESIGN_SYSTEM §31). A primitive is added to it in the change that installs it.
+
 ---
 
 ## 28. Component file organization
@@ -1673,6 +1682,7 @@ Exact paths depend on the implemented web app, but an initial structure may rese
 ```text
 apps/ops-web/src/
 ├── components/
+│   ├── primitives/      generated shadcn/ui source, on the tokens; no page imports it
 │   └── ui/
 │       ├── button/
 │       ├── field/
@@ -1682,9 +1692,14 @@ apps/ops-web/src/
 ├── layout/
 │   ├── application-frame/
 │   └── page-header/
+├── lib/
+│   └── utils.ts         cn(), the one way class names are joined
 └── styles/
-    └── tokens/
+    ├── tokens/
+    └── tailwind.css     the names shadcn/ui reads, as references to the tokens
 ```
+
+A page imports a component of `components/ui`; a component of `components/ui` composes a primitive of `components/primitives`; a primitive alone imports the library under it (Radix UI, cmdk, sonner, react-day-picker) (DESIGN_SYSTEM §29.2). The primitives are generated source, restyled through the tokens; a word, a variant or a state that belongs to the product goes in the Melarc component that composes one.
 
 Do not create empty directories for deferred components.
 
@@ -1976,21 +1991,60 @@ Before accepting the initial UI-foundation implementation:
 
 ---
 
-## 37. Deferred pattern register
+## 37. Planned kit and deferred pattern register
+
+### The planned kit (PROPOSED)
+
+**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. Each is **PROPOSED** (§2): none is built. They are built in redesign step R5, composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
+
+| Pattern | What it is for |
+|---|---|
+| AppShell v2 | the signed-in frame: the sidebar of seven groups with counts, and the top bar ([surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)) |
+| CommandPalette and global search | opening any record by its code, a name or a phone number (Ctrl/Cmd K) |
+| NewMenu | every create action, gathered in one menu |
+| AccountMenu | personal settings (profile and hubs, trusted browsers) and sign-out |
+| HubSwitcher | the hub a person browses, and acts in |
+| Tabs with counts | the views of a queue ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)) |
+| FilterBar with chips | a queue's filters, each applied choice a chip that can be removed |
+| DataTable | the queue table, with selection, a bulk-action bar and an inline row action: TanStack Table, which redesign step R3 adopted, over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It builds on Table and QueueTable (§19, §22f) |
+| SidePanel and Sheet | a record beside its list, and a full-screen sheet at 768px |
+| RecordHeader with StageTracker | the record's code, status, stage tracker, primary action and "more actions" menu ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)) |
+| ActionMenu | the overflow menu of a record's acts, destructive acts last |
+| DescriptionList | the facts of a record, grouped and labeled |
+| Panel and Card | the surfaces of the record template |
+| Toast | success after a task, with "Open" and "Do another" |
+| Tooltip, Popover | the name of an icon, and the longer explanation behind an info control |
+| StatTile, CountBadge | a figure the server states, and a count in a menu or a tab |
+| EmptyState v2, Skeleton v2 | the empty and loading treatments, redrawn: a deliberate replacement of §16 and §17, which stay ACTIVE until their screens migrate (§2) |
+
+A count or a figure on these components is the server's: the component draws what it is given and works nothing out (§24, §25).
+
+### The primitives of redesign step R3 (no Melarc component yet)
+
+Step R3 (5 November 2026) installed 24 shadcn/ui primitives in `apps/ops-web/src/components/primitives/` ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toaster), table, tabs, textarea and tooltip. They are **not Melarc components**: no page imports one, and none is a pattern of this file until a component of `components/ui` composes it, a screen uses that component and the Product Owner accepts it (§2). Each is drawn in the showcase (§27), in both themes, with its overlays driven from the keyboard in a real browser. The components of the kit above are composed from them in step R5. The native components that are ACTIVE (Button, Input, Textarea, Checkbox, Select, Table, Dialog, AlertDialog, Skeleton and StatusBadge) are not replaced by their primitives now: an active pattern is not silently replaced (§2), and whether step R5 recomposes any of them is decided there and recorded here.
+
+### Phasing out React Aria Components
+
+**Product Owner, 5 November 2026 (redesign step R3).** React Aria Components was the library for behaviour that no native element gives ([DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)); the shadcn/ui primitives replace it for new components. **Nothing is removed now.** The library, its packages and their licences stay, and so do the `react-aria-pressable-style` meta of `index.html` and the rule of `base.css` that stand in for the style the library inserts, until the last component built on it has moved. The table is derived from the code: apart from tests, the files of `apps/ops-web/src/components/ui/` that import `react-aria-components`, `react-aria`, `react-stately` or `@internationalized/*` are `date-picker/DatePicker.tsx` and `date-picker/date-value.ts`, and no others. The steps are those of [the plan](../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign): R3 adopted the foundation, R5 builds the kit, and R7 moves the screens onto it.
+
+| Melarc component today | React Aria parts it is built on | Replaced by | Step that moves it |
+|---|---|---|---|
+| DatePicker (§22a): the calendar that opens under the field | `Calendar`, `CalendarGrid`, `CalendarCell`, `Heading`, `Popover`, `Dialog` and `Button` (`date-picker/DatePicker.tsx`) | the `calendar` primitive (react-day-picker, which already starts the week on Monday in English as written in the United Kingdom) in a `popover`, with `button` | R5, with the kit (**proposed**: the plan names no step for it) |
+| DatePicker (§22a): the typed day, month and year | `DateInput`, `DateSegment`, `Group` and `I18nProvider` (`date-picker/DatePicker.tsx`); `@internationalized/date` (`date-picker/date-value.ts`) | **none**: the registry has no entry of a date as three typed parts | **open**: R5 puts it to the Product Owner, because it decides whether the library stays for this part |
+
+No other component of `components/ui` is built on the library. What leaves with the last one, and not before: the packages `react-aria-components`, `react-aria`, `react-stately` and `@internationalized/date` and what they bring; their door (the React Aria lines of `eslint.config.mjs` and `test/aria-door.test.ts`); `test/aria-licences.test.ts` and the three licence files only they need (`React-Aria-Apache-2.0.txt`, `swc-helpers-Apache-2.0.txt` and `use-sync-external-store-MIT.txt`; `clsx-MIT.txt` and `aria-hidden-MIT.txt` are the shadcn/ui set's too, and stay); the `react-aria-pressable-style` meta of `index.html`, its rule in `base.css` and `src/components/ui/aria-wiring.test.tsx`.
+
+### The deferred register
 
 This is not a backlog commitment.
 
-It simply records patterns intentionally **not** built during the initial foundation:
+It records patterns intentionally **not** built and not in the planned kit:
 
 | Pattern | Introduce when |
 |---|---|
-| Toast | first justified transient feedback flow |
-| Tabs | first real tabbed workflow |
-| DropdownMenu | first real menu requirement |
-| Drawer | first real side-panel workflow |
 | Time of day, a range of dates | the first requirement for either (a single date is section 22a) |
 | QrCode (one-time credential display) | the rider device-enrolment screen: a small, reviewed, exactly pinned encoder drawing inline SVG under the content-security policy (no data URI), shown from memory only and cleared on navigation, expiry and completion, never rendered as text; proven by decoding the rendered output with an independent test-only decoder (`SECURITY_DESIGN.md` §13.6, `surfaces/ops-portal.md`) |
-| DataGrid | only if a concrete screen's requirements exceed the table pattern, and a specialist grid has been weighed against them first (DESIGN_SYSTEM §23) |
+| Hand-built advanced grid behavior | not planned: `DataTable` above is the grid, built from TanStack Table, which redesign step R3 adopted (DESIGN_SYSTEM §23) |
 
 ---
 
@@ -2011,9 +2065,9 @@ CustodyConfirmation
 
 These should not be added until their domain behavior is implemented and understood.
 
-**Page patterns.** The Product Owner has approved design direction for four page patterns (queues, booking and tasks, records, account and
-security) in [PRODUCT_DESIGN_DIRECTION.md §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-patterns). It awaits screen-specific design and
-implementation: none is a pattern of this file until it is built (DESIGN_SYSTEM §35), and the screens built so far are not claimed to follow it.
+**Page templates.** The Product Owner has approved design direction for four page templates (queue workspace, record, task form, builder) in
+[PRODUCT_DESIGN_DIRECTION.md §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-templates), built in redesign steps R6 and R7. None is a pattern of this
+file until it is built (DESIGN_SYSTEM §35), and the screens built so far are not claimed to follow it.
 
 ---
 
@@ -2058,7 +2112,8 @@ Do not use this file to override a product contract.
 | Button `danger` | ACTIVE | Identity implementation (S0.41) |
 | FormPage, the five pre-sign-in screens | ACTIVE | Identity implementation (S0.43) |
 | ButtonLink, ConfirmationDialog, the six signed-in identity screens | ACTIVE | Identity implementation (S0.44) |
-| Toast | Deferred | No |
+| The shadcn/ui primitives of `components/primitives` (24, §37) | IMPLEMENTING | Redesign step R3 (5 November 2026): installed and restyled, drawn in the showcase and driven from the keyboard in a browser. No Melarc component or screen uses one yet, and the Product Owner has not yet accepted them |
+| The planned kit of §37 (AppShell v2, DataTable, Toast and the rest) | PROPOSED | No: built in redesign step R5 |
 
 ---
 
@@ -2128,7 +2183,7 @@ Paths are under `apps/ops-web/src/`. Tests sit beside each component; the browse
 
 | Pattern | Built as | Notes and differences from the plan above |
 |---|---|---|
-| Tokens | `styles/tokens.css` | The one token source (DESIGN_SYSTEM §29.1), held to the document by `scripts/design-tokens.test.ts`. It adds the primitive `gray.550` (`border.control`, §4.6), the component token `--button-pressed-background` (the bare `#EAECF0` of the Secondary pressed recipe) and a layout width the frame already had |
+| Tokens | `styles/tokens.css` | The one token source (DESIGN_SYSTEM §29.1), held to the document by `scripts/design-tokens.test.ts`. The light theme is `:root` and the dark theme is applied by the system setting and by `data-theme="dark"` (DESIGN_SYSTEM §31, step R2). It adds the component token `--button-pressed-background` (the pressed fill of the Secondary and Danger recipes, a value for each theme), the fallback stacks of the two typefaces, the icon sizes and the layout widths the frame already had |
 | Frame, base styles | `styles/base.css` (replaces `styles/app.css`), `app/AppFrame.tsx` | Landmarks, skip link, focus after a navigation and the generic error copy are unchanged and keep their tests. The global `button` and `a` rules are gone |
 | Button | `components/ui/button/` | `primary` and `secondary` at `md`. `type` is a required prop. `loading` sets `aria-busy` and `aria-disabled`, keeps the label and ignores activation, and does not use the native `disabled` (that would drop the button out of the keyboard order); `disabled` is the native attribute |
 | Link | `components/ui/link/` | Default variant, a thin primitive over the router's `Link`, always underlined |
@@ -2221,7 +2276,7 @@ the shell and the split screen against the production build, the side menu and i
 
 | Pattern | Built as | Notes and differences from the plan above |
 |---|---|---|
-| Icon, the registry | `components/ui/icon/` (`Icon.tsx`, `icons.ts`) | §24 of the design system. Lucide, imported by `icons.ts` alone; every icon is named by its meaning and drawn at one stroke and three sizes; a test fails on an icon nobody uses and on a second door to the library |
+| Icon, the registry | `components/ui/icon/` (`Icon.tsx`, `icons.ts`) | §24 of the design system. Lucide, imported by `icons.ts` alone (the shadcn/ui primitives apart, §37); every icon is named by its meaning and drawn at one stroke and three sizes; a test fails on an icon nobody uses and on a second door to the library |
 | IconButton | `components/ui/icon-button/` | §22. `label` is required; `bare` and `inverse`; `loading`; a `ref` for a caller that moves focus to it |
 | SideMenu | `components/side-menu/` | §12.6. Collapses to a rail, slides in on a narrow screen with the main content inert, scrolls as a whole when the window is too short; the collapse state is in memory only |
 | PrimaryNavigation | `components/PrimaryNavigation.tsx` | A vertical list of an icon and a label; the current entry is a filled item with `aria-current`; a `title` when the menu is collapsed |
@@ -2240,6 +2295,19 @@ build of the showcase is served under the strict content-security policy (`test/
 |---|---|---|
 | DatePicker | `components/ui/date-picker/` (`DatePicker.tsx`, `date-value.ts`, `date-picker.css`) | §22a. The behaviour is the library's, behind the one door of DESIGN_SYSTEM §24a; the value is the text `YYYY-MM-DD`; the language is fixed (day, month, year, Monday first, English); today is Accra's (`platform/time`). Not built: a range of dates, a time of day |
 | The dialog's container | `components/ui/dialog/dialog-container.ts` | The element a modal dialog is, given to what it holds, so that a calendar is drawn into it |
+
+### 42.10 What the Product Owner's decision of 5 November 2026 added (redesign step R3: the shadcn/ui primitives)
+
+Paths are under `apps/ops-web/src/`. The primitives have a scan of the showcase with axe in both themes and every overlay driven from the keyboard in a browser
+(`test/browser/primitives.spec.ts`), and a production build of the showcase is served under the strict content-security policy (`primitives-policy.spec.ts`).
+No Melarc component is built on them yet (§37).
+
+| Pattern | Built as | Notes and differences from the plan above |
+|---|---|---|
+| The primitives | `components/primitives/` (24 files) | §37. Generated source from the official shadcn registry, restyled through the tokens, one door to Radix UI and the libraries beside it (DESIGN_SYSTEM §29.2, §29.6 for where they differ from the registry's source) |
+| `cn`, `useResolvedTheme` | `lib/utils.ts`, `platform/theme/use-resolved-theme.ts` | The one way class names are joined; the theme that applies (the root's `data-theme`, then the system's setting), for what a library must be told in a prop |
+| The showcase of the primitives | `showcase/PrimitivesShowcase.tsx`, `showcase/DataTableDemo.tsx` | §27. Every primitive in both themes, in Melarc's words, and a data table built with TanStack Table (sorting, selection, `aria-sort`) |
+| The banner's logo | `app/AppFrame.tsx` | The primary logo on a light ground and the all-white lockup on a dark one, chosen by `useResolvedTheme`: one image that carries the name once (DESIGN_SYSTEM §31) |
 
 ---
 

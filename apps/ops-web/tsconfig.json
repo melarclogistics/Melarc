@@ -9,7 +9,8 @@
     "types": ["vite/client", "node"],
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "test", "config", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

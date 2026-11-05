@@ -979,3 +979,107 @@ test.describe('the components of the manifest screens', () => {
     await expect(page.getByText('The demo page holds: Demo rider Kofi')).toBeVisible();
   });
 });
+
+/**
+ * The two themes (DESIGN_SYSTEM section 31, decided 5 November 2026) in a real browser. The dark values reach the page by the system setting
+ * unless the root says data-theme="light", and by data-theme="dark" whatever the system says, so that a toggle wins both ways; native
+ * controls follow through color-scheme; and the durations go to zero under reduced motion. And the components have no WCAG 2.2 violation in
+ * the dark with layout, which the pairing test of the tokens cannot show: it reads the token file, not a page. A test names no colour of its
+ * own: it compares what a theme computes to what the other theme computes.
+ */
+test.describe('the components in a browser: themes', () => {
+  type Theme = 'light' | 'dark';
+
+  const setTheme = (page: Page, theme: Theme | null): Promise<void> =>
+    page.evaluate((value) => {
+      if (value === null) delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = value;
+    }, theme);
+
+  const computed = (page: Page): Promise<{ page: string; scheme: string; background: string }> =>
+    page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        page: root.getPropertyValue('--color-surface-page').trim(),
+        scheme: root.colorScheme,
+        background: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+
+  // Break caught: a dark theme that the system setting does not reach, one that ignores a person's choice of light, or a toggle that
+  // cannot make a light system dark. Each of the five states below is a way the page can be asked, and each has one right answer.
+  test('the dark values follow the system setting unless the root says light, and data-theme="dark" wins over a light system', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await openShowcase(page);
+    const light = await computed(page);
+    expect(light.scheme).toBe('light');
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    const dark = await computed(page);
+    expect(dark.scheme, 'a dark system, no choice made').toBe('dark');
+    expect(dark.page).not.toBe(light.page);
+    expect(dark.background).not.toBe(light.background);
+
+    await setTheme(page, 'light');
+    expect(await computed(page), 'a dark system, the person chose light').toEqual(light);
+
+    await setTheme(page, 'dark');
+    expect(await computed(page), 'a dark system, the person chose dark').toEqual(dark);
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    expect(await computed(page), 'a light system, the person chose dark').toEqual(dark);
+
+    await setTheme(page, null);
+    expect(await computed(page), 'a light system, no choice made').toEqual(light);
+  });
+
+  // Break caught: a duration that survives reduced motion, which a person who asked for none would still see move. The easings are not
+  // durations and stay.
+  test('every duration is zero under reduced motion and none is otherwise', async ({ page }) => {
+    const durations = (): Promise<string[]> =>
+      page.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        return ['--motion-fast', '--motion-normal', '--motion-slow', '--motion-highlight'].map(
+          (name) => root.getPropertyValue(name).trim(),
+        );
+      });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await openShowcase(page);
+    expect((await durations()).every((value) => /^[1-9]\d*ms$/.test(value))).toBe(true);
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect(await durations()).toEqual(['0ms', '0ms', '0ms', '0ms']);
+  });
+
+  for (const { width, height } of [
+    { width: 1280, height: 800 },
+    { width: 320, height: 640 },
+  ]) {
+    // Break caught: a contrast, target-size or structure failure that appears only in the dark with layout, in a real browser. A component
+    // that assumed a white surface (a tile, an image, a fixed fill) shows here and in no token test.
+    test(`has no WCAG 2.2 A or AA violation and no sideways scrolling in the dark theme at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await openShowcase(page);
+      expect((await computed(page)).scheme).toBe('dark');
+
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
+  test('has no WCAG 2.2 A or AA violation when the person chose dark on a light system', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await openShowcase(page);
+    await setTheme(page, 'dark');
+    expect((await computed(page)).scheme).toBe('dark');
+
+    expect(await wcagViolations(page)).toEqual([]);
+  });
+});

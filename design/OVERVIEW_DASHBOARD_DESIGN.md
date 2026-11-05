@@ -1,16 +1,16 @@
 # Overview dashboard design and delivery direction
 
-Version: 1.1 · 1 November 2026
+Version: 1.1 · 1 November 2026, revised 5 November 2026
 
-Status: Product Owner accepted the visual direction, the progressive delivery approach, the authorization and scope direction, and the refresh and freshness requirements. Reference only: production implementation, measure definitions, permission assignments and the parameters named under Freshness and updating are not complete.
+Status: Product Owner accepted the progressive delivery approach, the authorization and scope direction, and the refresh and freshness requirements (1 November 2026), and accepted a visual direction that the redesign of 5 November 2026 supersedes: the Overview is drawn in the look of [the product design direction](PRODUCT_DESIGN_DIRECTION.md#6a-the-overview-dashboard) and [the design system](DESIGN_SYSTEM.md), and the visual reference is no longer the visual target. Reference only: production implementation, measure definitions, permission assignments and the parameters named under Freshness and updating are not complete.
 
 ## Purpose and authority
 
 This document preserves the finished-product Overview direction accepted by the Product Owner in the design conversation of 1 November 2026. It gives future feature agents a shared destination without authorizing dashboard implementation as part of unrelated work.
 
-Visual reference: [MELARC_OVERVIEW_REFERENCE_2026-11-01.html](reference/MELARC_OVERVIEW_REFERENCE_2026-11-01.html). Open the downloaded HTML in a browser and explore the hub scope, scenario and analytics selectors. All values, dates, hub examples, names, status distributions and destination previews are illustrative.
+Visual reference: [MELARC_OVERVIEW_REFERENCE_2026-11-01.html](reference/MELARC_OVERVIEW_REFERENCE_2026-11-01.html). Open the downloaded HTML in a browser and explore the hub scope, scenario and analytics selectors. All values, dates, hub examples, names, status distributions and destination previews are illustrative. It is no longer the visual target (5 November 2026).
 
-The reference owns the accepted content hierarchy and visual composition. This document owns the dashboard delivery direction and the obligations a domain must settle before supplying dashboard measures. Neither overrides business rules, security, contracts or the design system.
+The reference owned the accepted content hierarchy and visual composition of 1 November 2026. Since 5 November 2026 its look is superseded: the look is [the design system's](DESIGN_SYSTEM.md) and [the product design direction's](PRODUCT_DESIGN_DIRECTION.md). This document owns the composition as a content hierarchy, the dashboard delivery direction and the obligations a domain must settle before supplying dashboard measures. Neither overrides business rules, security, contracts or the design system.
 
 Read with these repository authorities:
 
@@ -25,7 +25,7 @@ Read with these repository authorities:
 
 Later authoritative feature/contract rules remain controlling under the Master Specification's reconciliation policy. Resolve genuine conflicts explicitly; do not derive product rules from sample UI values.
 
-Who owns what: this brief owns the composition, the visual direction, the refresh requirements and the delivery strategy. The section authorization matrix, the scope presentation and the destinations are the Ops surface's ([surfaces/ops-portal.md](../surfaces/ops-portal.md#the-overview-section-authorization-and-destinations)). Permission keys, grants, scopes, tiers and bundle assignments are the permission catalogue's ([contracts/permissions.md](../contracts/permissions.md)). Each measure's canonical definition is the reporting data dictionary's, and the business rules beneath it stay in the owning domain's feature. Sequencing and final integration are the delivery plan's ([IMPLEMENTATION_PLAN.md](../delivery/IMPLEMENTATION_PLAN.md#3-sequence)).
+Who owns what: this brief owns the composition (as a content hierarchy), the refresh requirements and the delivery strategy; the look is the design system's. The section authorization matrix, the scope presentation and the destinations are the Ops surface's ([surfaces/ops-portal.md](../surfaces/ops-portal.md#the-overview-section-authorization-and-destinations)). Permission keys, grants, scopes, tiers and bundle assignments are the permission catalogue's ([contracts/permissions.md](../contracts/permissions.md)). Each measure's canonical definition is the reporting data dictionary's, and the business rules beneath it stay in the owning domain's feature. Sequencing and final integration are the delivery plan's ([IMPLEMENTATION_PLAN.md](../delivery/IMPLEMENTATION_PLAN.md#3-sequence)).
 
 ## Accepted direction
 
@@ -33,11 +33,13 @@ Design for the finished Version 1 product, including domains that are not implem
 
 The Overview answers: what needs attention; where work is waiting or blocked; how today's operation is progressing; and whether custody, money and execution readiness are controlled.
 
-Keep the existing production sidebar and application shell. The prototype's shell, logo approximation, menu labels, account and destination dialogs provide presentation context. They do not authorize replacing navigation, changing routes or adding permissions. Use the real logo, tokens and existing components when implementing.
+Use the portal's shell as it stands when a section is built: the sidebar and top bar of the redesign, in which the Overview's place is the Today group, as a page of its own when `SLICE-012` builds it, while `/` stays My work ([the Ops surface](../surfaces/ops-portal.md#4-navigation-model)). The prototype's shell, logo approximation, menu labels, account and destination dialogs provide presentation context only. They do not authorize replacing navigation, changing routes or adding permissions. Use the real logo, tokens and components when implementing.
 
-Continue the accepted pickup queue's restrained Crimson + Ink styling, Inter direction, balanced density, white workspaces, fine dividers and precise hierarchy. Responsive composition may reflow; screenshot coordinates, mockup CSS, font sizing and thresholds are not production tokens or acceptance criteria. The prototype does not authorize a dark-theme initiative.
+Draw it in the direction of [the product design direction](PRODUCT_DESIGN_DIRECTION.md) and [the design system](DESIGN_SYSTEM.md) as they stand when a section is built: Ink carrying the work, crimson carrying the brand, Inter, and both themes. The redesign of 5 November 2026 supersedes the reference's look. Responsive composition may reflow; screenshot coordinates, mockup CSS, font sizing and thresholds are not production tokens or acceptance criteria.
 
 ### Composition
+
+The order below is the content hierarchy of the finished Overview. How each section is drawn is the redesign's, not the reference's.
 
 1. Header: Overview, authorized hub scope, business-date context, freshness and refresh entry point, with a small relevant action group.
 2. Four concise summary measures.

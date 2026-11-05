@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE FOUNDATION — approved brand direction; exact interface token values and production logo assets remain subject to the confirmations identified in this document  
 > **Version:** 1.1  
-> **Date:** 5 October 2026; revised 6 October 2026 (§11.1 permission wording, §19 asset layout) after the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md); no approved decision changed  
+> **Date:** 5 October 2026; revised 6 October 2026 (§11.1 permission wording, §19 asset layout) after the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md); no approved decision changed then. Revised 5 November 2026 for the Product Owner's decisions of that date (§2, §4.7, §5.2, §5.4, §5.5, §6.4, §17, §19, §21, §22), and again that day with redesign step R2, which made the values in force (§2.1, §2.2, §4.7, §5.2 to §5.4, §11.1, §22)  
 > **Repository path:** `design/BRAND_FOUNDATION.md`  
 > **Owns:** Melarc brand personality, logo usage principles, brand color direction, typography direction, visual character, imagery/iconography direction, voice, and cross-platform brand consistency  
 > **Does not own:** detailed component specifications, framework/library selection, screen layouts, product workflow rules, API behavior, or domain-state semantics
@@ -38,20 +38,24 @@ The following choices are approved product/design direction:
   - efficient forms, operational tables, and task-focused data views.
 - **Brand/logo principle:** preserve the existing Melarc logo identity rather than redesigning it for the application.
 - **Cross-platform principle:** share brand identity and semantic foundations while allowing platform-appropriate interaction density and native behavior.
+- **Color roles (Product Owner, 5 November 2026):** Ink carries the work, crimson carries the brand. The primary action is Ink; crimson is for the brand mark, the "New" button and the active sidebar item; danger is a separate vermilion; links are Ink. This replaced crimson as the primary-action color (§5.4, §5.5). The values are [DESIGN_SYSTEM §4.3 and §4.4](DESIGN_SYSTEM.md#43-core-semantic-color-tokens), in force since redesign step R2, and the roles are [§4.7](DESIGN_SYSTEM.md#47-colour-roles).
+- **Themes (Product Owner, 5 November 2026):** a light and a dark theme are both in Version 1. Both are implemented as tokens (step R2); the portal follows the system's setting, and the toggle arrives in step R4 ([DESIGN_SYSTEM §31](DESIGN_SYSTEM.md#31-dark-mode)).
+- **The logo on dark grounds and in the Ops Portal (Product Owner, 5 November 2026):** §4.7.
 
 ### 2.2 Provisional implementation values
 
 The following values are working design inputs, not immutable brand law:
 
-- interface primary crimson `#B4232E`;
-- interface ink `#172033`;
+- interface crimson `#BE1E2D` and interface ink `#0E1525` (5 November 2026; they replaced `#B4232E` and `#172033`);
 - supporting neutral and semantic palette values in §5;
 - Inter as the recommended product-interface typeface;
 - exact spacing, radius, elevation, motion, and responsive values.
 
 These values may be refined in the Design System when accessibility and real component usage are verified.
 
-**Settled since.** The Product Owner approved the interface crimson `#B4232E`, the interface ink `#172033` and Inter as the active values on 6 October 2026 ([DESIGN_SYSTEM §36](DESIGN_SYSTEM.md#36-current-design-system-decision-summary)). Read the PROVISIONAL and RECOMMENDED labels of this section and of §22, and the open typeface item of §2.3, accordingly for those three.
+**Settled since.** The Product Owner approved Inter as the active typeface on 6 October 2026 ([DESIGN_SYSTEM §36](DESIGN_SYSTEM.md#36-current-design-system-decision-summary)). Read the RECOMMENDED label of this section and of §22, and the open typeface item of §2.3, accordingly for it.
+
+**Changed since.** The decisions of 5 November 2026 replaced the interface crimson `#B4232E` and the interface ink `#172033` with the logo red `#BE1E2D` and `#0E1525`, and took the primary action from crimson (§5.5). They have been the values in force since redesign step R2 ([DESIGN_SYSTEM §4.3](DESIGN_SYSTEM.md#43-core-semantic-color-tokens)). Inter stays, with a monospaced face for operational codes, JetBrains Mono (§6.4).
 
 ### 2.3 Open asset/design confirmations
 
@@ -60,7 +64,6 @@ The following remain open:
 - original vector logo artwork, preferably SVG;
 - authoritative source color values from the vector artwork;
 - approved symbol-only logo variant for any use beyond the Ops Portal's browser-tab icon (approved for that alone on 25 October 2026; its provisional use as the mark of the side menu and the split screen waits for confirmation);
-- approved logo treatment for dark backgrounds;
 - official minimum logo size based on vector artwork;
 - exact logo clear-space rule based on the source geometry;
 - final product UI typeface approval.
@@ -176,6 +179,15 @@ Do not:
 - use interface `danger` color semantics as a reason to recolor the logo;
 - recreate the wordmark using a substitute font.
 
+### 4.7 The logo in the Ops Portal
+
+**Product Owner, 5 November 2026.** The portal uses the horizontal Melarc Logistics lockup (the symbol, the wordmark and the descriptor of §4.2; the primary horizontal logo of §4.4) in two versions, chosen by the ground it stands on:
+
+- **On the Ink sidebar and on any dark ground:** the all-white version, `design/assets/Transparent White  Logo.svg` (two spaces in the supplied name), filed as `exports/melarc-logo-dark.svg`.
+- **On light grounds:** the full-color version, `design/assets/Transparent Logo.svg`, filed as `master/melarc-logo-primary.svg`.
+
+The vector masters already exist; [the brand README](assets/brand/README.md) records where each came from. The artwork is used as supplied and never redrawn, recolored or traced (§4.3, §4.6). Since redesign step R3 the banner of the portal's frame (the sign-in screens and the neutral pages) draws the all-white version whenever the dark theme applies, and the full-color version otherwise. The Ink sidebar draws the lockup from redesign step R4: until then the side menu is as built, with the symbol as its mark (§22).
+
 ---
 
 ## 5. Color foundation
@@ -192,47 +204,49 @@ This separation is intentional.
 
 ### 5.2 Working interface palette
 
-| Role | Working value | Status | Intended use |
-|---|---:|---|---|
-| Brand/action crimson | `#B4232E` | Provisional exact value | Primary actions, active accents, selected brand moments |
-| Crimson hover | `#971B26` | Provisional | Primary-action hover/pressed hierarchy |
-| Crimson soft | `#FCEBED` | Provisional | Soft selection/accent backgrounds |
-| Ink | `#172033` | Provisional | Primary text, dark navigation, structural emphasis |
-| Page surface | `#F7F8FA` | Provisional | Main application background |
-| Default surface | `#FFFFFF` | Provisional | Cards, panels, tables, forms |
-| Secondary text | `#667085` | Provisional | Supporting copy |
-| Subtle border | `#DDE1E7` | Provisional | Decorative/divider borders |
-| Success | `#157A55` | Provisional | Positive state |
-| Warning | `#B76E00` | **Needs accessible pairing** | Warning semantics |
-| Danger | `#B4232E` | Provisional semantic token | Destructive/error semantics |
-| Info | `#2563A6` | Provisional | Informational semantics |
+The Design System owns the values ([DESIGN_SYSTEM §4.3 and §4.4](DESIGN_SYSTEM.md#43-core-semantic-color-tokens), a light and a dark value for each token); this table is the brand's view of them, by role.
+
+| Role | Light | Dark | Status | Intended use |
+|---|---:|---:|---|---|
+| Brand crimson | `#BE1E2D` | `#F04B59` | Replaces `#B4232E` (5 November 2026); the light value is the logo red | The brand mark, the "New" button, the active sidebar item, the small crimson square |
+| Ink | `#0E1525` | `#EDF0F6` (as text and as the primary action) | Replaces `#172033` (5 November 2026) | Primary text, the primary action, the sidebar |
+| Canvas | `#F3F4F7` | `#090D16` | In force since step R2 | Main application background |
+| Surface | `#FFFFFF` | `#10151F` | In force since step R2 | Cards, panels, tables, forms |
+| Tertiary text | `#626B81` | `#8E98AC` | In force since step R2 | Supporting copy |
+| Subtle border | `#E2E5EB` | `#222A38` | In force since step R2 | Decorative/divider borders |
+| Success | `#0B6B44` | `#5CCB95` | In force since step R2 | Positive state ("Done") |
+| Warning | `#8A4F00` | `#F0B45A` | In force since step R2, with its accessible pairing | Warning semantics ("Waiting") |
+| Danger | `#A8320E` | `#FF8A66` | In force since step R2; a vermilion, never crimson | Destructive/error semantics |
+| Info | `#1F4E96` | `#86B1F4` | In force since step R2 | Informational semantics ("In progress") |
 
 ### 5.3 Accessibility observations
 
-Measured contrast against white for key proposed colors:
+Measured contrast against white for key colors of the light theme (the dark theme's pairings are in [DESIGN_SYSTEM §4.6](DESIGN_SYSTEM.md#46-supported-pairings-and-state-recipes)):
 
 | Color | Contrast vs white | Interpretation |
 |---|---:|---|
-| `#B4232E` | 6.52:1 | Suitable for normal white text |
-| `#971B26` | 8.40:1 | Strong white-text contrast |
-| `#172033` | 16.27:1 | Strong primary-text contrast |
-| `#667085` | 4.97:1 | Suitable for normal text on white |
-| `#157A55` | 5.32:1 | Suitable for white-text treatment |
-| `#B76E00` | 4.00:1 | **Insufficient for normal-size white text under a 4.5:1 target** |
-| `#2563A6` | 6.15:1 | Suitable for normal white text |
-| `#DDE1E7` | 1.31:1 | **Too subtle to be the sole required boundary of an input/control** |
+| `#BE1E2D` | 6.15:1 | Suitable for normal white text |
+| `#0E1525` | 18.22:1 | Strong primary-text contrast |
+| `#626B81` | 5.33:1 | Suitable for normal text on white |
+| `#0B6B44` | 6.56:1 | Suitable for status text |
+| `#8A4F00` | 6.56:1 | Suitable for status text; its own soft background gives 5.99:1 |
+| `#A8320E` | 6.71:1 | Suitable for danger text and white-text treatment |
+| `#2563A6` | 6.15:1 | Suitable for the focus ring |
+| `#7C859A` | 3.70:1 | Meets the 3:1 a control boundary needs |
+| `#C9CED8` | 1.58:1 | **Too subtle to be the sole required boundary of an input/control** |
+| `#E2E5EB` | 1.26:1 | **Too subtle to be the sole required boundary of an input/control** |
 
-The Design System must therefore define:
+The Design System defines, for each theme:
 
-- a stronger interactive-control boundary than `#DDE1E7` where visual boundaries are required;
+- a stronger interactive-control boundary than the structural borders where visual boundaries are required (`color.border.control`);
 - verified warning foreground/background pairs;
 - focus-ring colors and thickness;
-- selected, hover, pressed, disabled, and visited states;
+- selected, hover, pressed and disabled states (visited has no color until a screen needs one);
 - accessible text/background pairs for badges and alerts.
 
 ### 5.4 Brand crimson versus danger
 
-`brand/action crimson` and `status.danger` are **separate semantic concepts**, even if their provisional values are identical.
+`brand crimson` and `status.danger` are **separate semantic concepts**. **Resolved (Product Owner, 5 November 2026): danger is a separate vermilion and never crimson, and a danger act is always placed last** (the last item of its menu or group). Since redesign step R2 they are separate tokens with separate values: danger is the vermilion `#A8320E` (`#FF8A66` in the dark theme) and the brand crimson is `#BE1E2D` (`#F04B59`) ([DESIGN_SYSTEM §4.3 and §4.4](DESIGN_SYSTEM.md#43-core-semantic-color-tokens)).
 
 Do not implement components against a raw red value.
 
@@ -250,20 +264,20 @@ Danger must never rely on red alone. Destructive actions and error states must a
 
 Melarc should not become a "red interface."
 
-Use crimson deliberately for:
+**Ink carries the work, crimson carries the brand** (Product Owner, 5 November 2026). Use crimson deliberately, and only for:
 
-- primary action;
-- active navigation accent;
-- focused brand moments;
-- selected/active emphasis where semantically appropriate.
+- the brand mark;
+- the "New" button;
+- the active sidebar item, a solid crimson fill with white bold text;
+- the small crimson square, taken from the logo, that marks the active hub and the current step.
 
-Use ink, white, and restrained neutrals for most structural surfaces.
+The primary action is Ink, one per view; in the dark theme it is near-white with Ink text. Links are Ink, not crimson. Danger is a separate vermilion (§5.4). Use ink, white, and restrained neutrals, tinted toward Ink, for the structural surfaces.
 
 Recommended visual balance:
 
-- **Ink:** authority and navigation;
+- **Ink:** authority, navigation and the primary action;
 - **White/neutral:** working area;
-- **Crimson:** action and brand emphasis;
+- **Crimson:** the brand;
 - **semantic colors:** operational state meaning.
 
 ---
@@ -322,7 +336,9 @@ Operational numeric values should:
 - align predictably in tables;
 - avoid unnecessarily stylized numerals;
 - remain distinguishable at dense sizes;
-- use tabular numerals where the chosen font and implementation support them appropriately.
+- use tabular numerals everywhere numbers are read (Product Owner, 5 November 2026).
+
+Operational codes (such as `HUB-TT-XXXXXX`) are set in a monospaced face, so that a code read aloud never blurs ([DESIGN_SYSTEM §5.1](DESIGN_SYSTEM.md#51-typeface)).
 
 ---
 
@@ -456,10 +472,11 @@ Prefer:
 - "Delivery could not be completed"
 - "Try again"
 
-These show tone, not approved copy. Permission and approval wording belongs to the feature that owns the rule. It names
-the permission or the deciding capability and never a role: [surfaces/ops-portal.md](../surfaces/ops-portal.md) §7
-requires a refusal to read as an approver holding a named permission decides, "not *you lack access*", and "not a role
-name".
+These show tone, not approved copy. Permission and approval wording belongs to the feature that owns the rule. A refusal
+names the capability in plain words ("An approver decides this") and never a raw permission key or a role; the key may
+appear only in a tooltip or a technical detail for support. The rule is
+[PRODUCT_DESIGN_DIRECTION §6.5](PRODUCT_DESIGN_DIRECTION.md#65-on-screen-language), and
+[surfaces/ops-portal.md](../surfaces/ops-portal.md) §7 applies it row by row.
 
 Avoid:
 
@@ -592,8 +609,7 @@ The intended hierarchy is:
 ```text
 Primitive token
     ↓
-crimson.700
-ink.950
+white
 space.4
 radius.md
 
@@ -660,6 +676,8 @@ Initial foundation scope:
 
 Do not build speculative dialogs, data grids, menus, drawers, toast systems, or large component libraries before actual product requirements need them.
 
+This is the scope of the first gate. The planned kit of the Ops Portal redesign (5 November 2026) is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
+
 `design/COMPONENT_PATTERNS.md` should grow with implemented components.
 
 ---
@@ -719,7 +737,7 @@ files); this list only says what is missing:
 - `melarc-logo-primary.svg`, the approved vector master (`master/`);
 - `melarc-logo-primary.png`, the approved high-resolution transparent export (`exports/`);
 - ~~`melarc-symbol.svg`~~, supplied and approved on 25 October 2026 for the Ops Portal's browser-tab icon alone (`exports/`); its use as the mark of the side menu and the split screen is provisional, owner to confirm;
-- `melarc-logo-dark.svg`, only after a dark-background treatment is approved (`exports/`).
+- ~~`melarc-logo-dark.svg`~~, supplied and approved on 5 November 2026 as the logo for the Ink sidebar and any dark ground (§4.7; `exports/`); the Ops Portal's frame draws it in its banner on a dark ground since redesign step R3, and the Ink sidebar will in step R4.
 
 Do not create placeholder production logos using generated text or traced artwork.
 
@@ -762,7 +780,7 @@ Design-system refinements that do not change the approved brand identity belong 
 
 Component-specific decisions belong in `design/COMPONENT_PATTERNS.md`.
 
-Experience direction (page patterns, inspiration, how a significant proposal is raised) belongs in `design/PRODUCT_DESIGN_DIRECTION.md`.
+Experience direction (page templates, inspiration, how a significant proposal is raised) belongs in `design/PRODUCT_DESIGN_DIRECTION.md`.
 
 Do not duplicate the same rule across all four documents when one document clearly owns it.
 
@@ -778,15 +796,18 @@ Do not duplicate the same rule across all four documents when one document clear
 | Preserve existing Melarc logo identity | **APPROVED** |
 | Existing PNG logo red sampled as `#BE1E2D` | **REFERENCE ONLY** |
 | Existing PNG black sampled as `#000000` | **REFERENCE ONLY** |
-| Interface crimson `#B4232E` | **PROVISIONAL** |
-| Interface ink `#172033` | **PROVISIONAL** |
+| Interface crimson `#B4232E` | **REPLACED** by the logo red `#BE1E2D` as the brand crimson (`#F04B59` in the dark theme), which is no longer the primary-action color (Product Owner, 5 November 2026; [DESIGN_SYSTEM §4.3](DESIGN_SYSTEM.md#43-core-semantic-color-tokens), in force since step R2) |
+| Interface ink `#172033` | **REPLACED** by `#0E1525` (5 November 2026; [DESIGN_SYSTEM §4.3](DESIGN_SYSTEM.md#43-core-semantic-color-tokens), in force since step R2) |
 | Inter product typeface | **RECOMMENDED / NOT YET FINAL** |
-| Dark mode | **DEFERRED** |
+| JetBrains Mono (operational codes only) | **APPROVED** 5 November 2026 and shipped since step R2, Latin subset, weights 500 and 600 ([DESIGN_SYSTEM §5.1](DESIGN_SYSTEM.md#51-typeface)) |
+| Light and dark themes | **APPROVED for Version 1** (Product Owner, 5 November 2026) |
+| Color roles: Ink carries the work, crimson carries the brand | **APPROVED** (Product Owner, 5 November 2026; §5.5) |
+| Operational codes in a monospaced face (JetBrains Mono) | **APPROVED** (Product Owner, 5 November 2026; §6.4) |
 | Tailwind | **NOT DECIDED HERE** |
 | Radix | **NOT DECIDED HERE** |
 | Original SVG/vector logo | **SUPPLIED BY THE PRODUCT OWNER, 23 October 2026** — filed as `design/assets/brand/master/melarc-logo-primary.svg` and used in the Ops frame; the owner confirms it as the approved master ([the brand README](assets/brand/README.md)) |
 | Symbol-only production logo | **APPROVED 25 October 2026 as the Ops Portal's browser-tab icon (favicon) only** — filed as `exports/melarc-symbol.svg` and used as `apps/ops-web/public/favicon.svg`; no other use is approved, though the symbol is in provisional use as the mark of the side menu and the split screen (`BrandLockup`), from the owner's reference screenshot of 25 October 2026, **owner to confirm** ([the brand README](assets/brand/README.md)) |
-| Dark-background logo | **SUPPLIED, NOT YET APPROVED** — filed as `exports/melarc-logo-dark.svg`; no application uses it |
+| Dark-background logo | **APPROVED 5 November 2026** for the Ink sidebar and any dark ground (§4.7) — filed as `exports/melarc-logo-dark.svg`; drawn in the banner of the Ops Portal's frame on a dark ground since redesign step R3, and in the Ink sidebar from step R4 |
 
 ---
 

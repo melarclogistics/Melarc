@@ -588,7 +588,9 @@ test.describe('filtering the list', () => {
   }) => {
     await page.setViewportSize(WIDE);
     const { api, watch } = await open(page, '/manifests', filterWorld());
-    expect(await listedCodes(page)).toEqual(ALL_CODES);
+    // Polled, like every later read of the list: `open` returns at the page's load, and the rows are drawn when the stand-in has answered,
+    // which can be after it (a bare read found no rows in one run in forty).
+    await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
 
     await page.getByRole('combobox', { name: 'State' }).selectOption('DRAFT');
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
@@ -630,7 +632,7 @@ test.describe('filtering the list', () => {
       filterWorld(),
     );
 
-    expect(await listedCodes(page)).toEqual(ALL_CODES);
+    await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
     await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('');
     expect(listRequests(api).map((call) => call.search)).toEqual(['']);
     expect(watch.problems).toEqual([]);
