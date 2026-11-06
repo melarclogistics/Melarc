@@ -10,6 +10,7 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { isCalendarDay } from './calendar-day.js';
 import { exceptionViewOf, exceptionsShownFor } from './one-package-exception-view.js';
 import { loadRequest } from './pickup-request-loader.js';
+import { pickupRequestCriteria } from './pickup-request-criteria.js';
 import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import {
@@ -148,12 +149,14 @@ export class PickupRequestsService {
     if (filter.pageToken !== undefined && after === undefined)
       throw invalid('page_token', 'format');
 
-    const manifested = filter.manifested === undefined ? null : filter.manifested === 'true';
-    // The pool is the confirmed requests that no manifest holds, less the ones awaiting the review of their cutoff (see above).
-    const pool = filter.manifested === 'false' && filter.state === 'CONFIRMED';
-    const state = filter.state ?? null;
-    const exceptionState = filter.exceptionState ?? null;
-    const serviceDate = filter.serviceDate ?? null;
+    // What the list contains is written once, in `pickupRequestCriteria`, which the counts of the queues call as well (task C1): the pool
+    // (the confirmed requests that no manifest holds, less the ones awaiting the review of their cutoff, see above) is a rule of it.
+    const criteria = pickupRequestCriteria({
+      state: filter.state ?? null,
+      exceptionState: filter.exceptionState ?? null,
+      serviceDate: filter.serviceDate ?? null,
+      manifested: filter.manifested === undefined ? null : filter.manifested === 'true',
+    });
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -162,17 +165,7 @@ export class PickupRequestsService {
       async (handle) => {
         const result = await transactionOf(handle).execute(sql`
         select ${REQUEST_COLUMNS} from pickup_request
-         where (${state}::text is null or state = ${state}::text)
-           and (${exceptionState}::text is null or (
-                 select e.state from one_package_exception e
-                  where e.id = pickup_request.one_package_exception_id or e.pickup_request_id = pickup_request.id
-                  order by (e.id = pickup_request.one_package_exception_id) desc, e.requested_at desc, e.id desc
-                  limit 1) = ${exceptionState}::text)
-           and (${serviceDate}::date is null or scheduled_service_date = ${serviceDate}::date)
-           and (${manifested}::boolean is null or exists (
-                 select 1 from pickup_stop s
-                  where s.pickup_request_id = pickup_request.id and s.released_at is null) = ${manifested}::boolean)
-           and (not ${pool}::boolean or cutoff_exception_state is distinct from 'PENDING_OPS_REVIEW')
+         where ${criteria}
            and (${afterMoment}::timestamptz is null or (created_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
          order by created_at, id
          limit ${size + 1}`);

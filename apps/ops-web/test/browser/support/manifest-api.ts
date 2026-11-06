@@ -1,5 +1,7 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the manifest screens (S1.25) put in place of the API: a small, stateful stand-in for the operations the four screens
  * use. A manifest is made from the pool of confirmed requests under a key, with the reason of each overdue request; its stops are ordered whole
@@ -769,6 +771,7 @@ export async function stubManifestApi(
 ): Promise<ManifestApi> {
   const state: ManifestApi = { world: initial, calls: [], unexpected: [] };
   await target.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

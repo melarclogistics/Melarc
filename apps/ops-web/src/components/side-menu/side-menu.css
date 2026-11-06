@@ -154,6 +154,14 @@
     padding-left: 0;
   }
 
+  /* A count stays beside its entry: at the corner of the icon, so that the rail does not grow (task C1). */
+  .ui-side-menu[data-collapsed='true'] .ui-primary-nav__count {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    margin-left: 0;
+  }
+
   .ui-side-menu[data-collapsed='true'] .ui-side-menu__account {
     flex-direction: column;
     gap: var(--space-2);

@@ -76,3 +76,20 @@
     background: Highlight;
   }
 }
+
+/*
+ * The count beside an entry (task C1; ui/count-badge/count-badge.css): after the label, at the end of the row. (On the rail it moves to the corner of
+ * the icon: side-menu.css.)
+ */
+.ui-primary-nav__link {
+  position: relative;
+}
+
+.ui-primary-nav__label {
+  min-width: 0;
+}
+
+.ui-primary-nav__count {
+  display: inline-flex;
+  margin-left: auto;
+}

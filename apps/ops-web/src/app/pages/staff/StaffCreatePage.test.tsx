@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
+import { exceptSummary, installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
@@ -169,7 +169,7 @@ describe('the staff creation form: the roles', () => {
 
     expect(await screen.findByText('permission.assignable_bundle.read')).toBeVisible();
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(api.requests).toHaveLength(1);
+    expect(exceptSummary(api.requests)).toHaveLength(1);
   });
 
   it('names the key and shows no form when the server refuses the read', async () => {

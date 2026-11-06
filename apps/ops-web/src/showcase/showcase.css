@@ -144,3 +144,20 @@
   padding: var(--space-3);
   list-style: none;
 }
+
+/* The side menu's ground, for the things that are drawn on it (a count badge): the same Ink and text as the menu. */
+.showcase-ink {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-inverse);
+  color: var(--shell-text);
+}
+
+.showcase-ink__entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}

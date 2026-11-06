@@ -2014,7 +2014,8 @@ Before accepting the initial UI-foundation implementation:
 | Panel and Card | the surfaces of the record template |
 | Toast | success after a task, with "Open" and "Do another" |
 | Tooltip, Popover | the name of an icon, and the longer explanation behind an info control |
-| StatTile, CountBadge | a figure the server states, and a count in a menu or a tab |
+| StatTile | a figure the server states |
+| CountBadge | a count in a menu or a tab, **built early, by task C1** (5 November 2026), because the queue summary is the first count the server states: `components/ui/count-badge/`, from the Badge primitive and the tokens, drawn beside the menu's entries and on the landing's list. It is **IMPLEMENTING** (§2): the redesign's own screens (R4) take it from here. It draws a whole number it is given, never capped (a capped figure hides the size of a queue), with the words of what it counts for a screen reader, a count of `0` that was read quietly, and **nothing at all for a count that was not given**: a count that is loading, missing or failed is never drawn as `0` (§24, §25). On the side menu it takes the shell's own tokens, white on the pressed ground, turned round on the filled current entry, and at the corner of the icon on the rail |
 | EmptyState v2, Skeleton v2 | the empty and loading treatments, redrawn: a deliberate replacement of §16 and §17, which stay ACTIVE until their screens migrate (§2) |
 
 A count or a figure on these components is the server's: the component draws what it is given and works nothing out (§24, §25).
@@ -2107,6 +2108,7 @@ Do not use this file to override a product contract.
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |
+| CountBadge | IMPLEMENTING | Task C1 (5 November 2026): built, used by the menu and the landing's list, proven in jsdom and in a browser in both themes. ACTIVE once the Product Owner accepts C1 and a redesigned screen (R4) uses it (§2) |
 | ForbiddenState, EmptyState, Skeleton, StatusBadge, Table | ACTIVE | Identity implementation (S0.40) |
 | Select, Dialog, AlertDialog, reason and confirmation | ACTIVE | Identity implementation (S0.41) |
 | Button `danger` | ACTIVE | Identity implementation (S0.41) |
@@ -2224,6 +2226,7 @@ showcase in three engines.
 | EmptyState | `components/ui/empty-state/` | `none` (success tone) or `filtered` (neutral, with an action the type requires) |
 | Skeleton | `components/ui/skeleton/` | Decoration beside a loading indicator, 1 to 20 lines, still under reduced motion |
 | StatusBadge | `components/ui/status-badge/` | A tone and words from a `StatusMap` typed over the whole enum; an unknown value is "Unknown status" |
+| CountBadge | `components/ui/count-badge/` | A whole number the server counted, from the Badge primitive and the tokens (the first Melarc component to import a primitive); `meaning` is said after the number to a screen reader and hides the drawn digits from it; a read `0` is quiet; `surface="shell"` for the dark menu. What it is drawn beside, and its words, are `app/navigation/queue-places.ts` |
 | Table | `components/ui/table/` | A native table in a named, focusable, scrolling region; the screen sorts and the table says the order |
 | ReadState, the problem copy | `components/ui/read-state/`, `platform/problem/` | §33.3 |
 | Select | `components/ui/select/` | §7.9 |

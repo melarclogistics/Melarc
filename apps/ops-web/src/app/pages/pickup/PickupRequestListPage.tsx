@@ -25,6 +25,7 @@ import {
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
 import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
+import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER } from './pickup-presentation';
@@ -92,6 +93,8 @@ export function PickupRequestListPage() {
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
+  // The counts beside the menu are read again with the page, when the person asks for it (task C1, `AC-QSUM-09`).
+  const refreshSummary = useRefreshQueueSummary();
   // What the date field holds while a date is being typed, for the filter it was typed over: the field must keep what the person typed even
   // when it is not yet a date worth asking for.
   const [typed, setTyped] = useState<{ over: string | undefined; value: string | null }>({
@@ -118,6 +121,7 @@ export function PickupRequestListPage() {
   function refreshPage(): void {
     const askedIn = visit.id;
     setRefreshedVisit(undefined);
+    void refreshSummary();
     void list.refetch({ cancelRefetch: false }).then((result) => {
       if (result.isSuccess) setRefreshedVisit(askedIn);
     });

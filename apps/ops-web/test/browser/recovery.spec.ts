@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
+import { answerQueueSummary } from './support/queue-summary';
 import { SIGNED_IN_SESSION } from './support/api';
 import { wcagViolations } from './support/page';
 import { errorAnswer, stubPreSignInApi } from './support/pre-sign-in-api';
@@ -134,6 +135,8 @@ async function signedInWith(
     posted: [] as { line: string; ifMatch: string | undefined; body: unknown }[],
   };
   await page.route('**/api/v1/**', async (route) => {
+    // The shell of every signed-in screen reads the queue summary for the menu (task C1): no queue, and not a request of the test.
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const line = `${request.method()} ${url.pathname}`;

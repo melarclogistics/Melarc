@@ -49,6 +49,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
       { method: 'GET', path: '/api/v1/auth/vendor/devices' },
       { method: 'GET', path: '/api/v1/notifications' },
+      { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
       { method: 'GET', path: '/api/v1/ops/riders/:riderId' },
       { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
@@ -200,6 +201,15 @@ describe('the real application', () => {
         access: 'permission',
         permission: 'notification.read',
         authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // Task C1: the count of the work waiting in each queue the session may read. A `self` operation of the Ops Portal, `background` like the
+      // read of the session: the page asks for it on its own and it never extends the idle lifetime. Each entry is gated by the key of its list.
+      {
+        method: 'GET',
+        path: '/api/v1/ops/queue-summary',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'background' },
         credentialModes: new Set(['COOKIE']),
       },
       // S0.53a: the two reads of the rider roster, `dispatch.read` at the hubs of the grant, on the browser surface alone: the Rider bundle holds
@@ -1022,6 +1032,28 @@ describe('inspectRoutes', () => {
     ]);
     expect(inspection.outsideNest).toEqual([]);
     expect(inspection.missingFromRouter).toEqual([]);
+  });
+
+  // Break caught (task C1): a tier, or a named record, added to a list that a queue count follows. `getQueueSummary` counts in the context
+  // of the list's key and the grant's scope, and applies neither a tier nor a record scope; the count would then differ from the list. Whoever
+  // adds one here must add it to the count (and its test) in the same change, and this test is what tells them.
+  it('declares no tier and no record on the lists that a queue count follows', async () => {
+    const { app } = await start();
+    const followed = [
+      '/api/v1/pickup-requests',
+      '/api/v1/pickup-manifests',
+      '/api/v1/staff-identities',
+    ];
+
+    const lists = inspectRoutes(app).declared.filter(
+      (route) => route.method === 'GET' && followed.includes(route.path),
+    );
+
+    expect(lists.map((route) => route.path).toSorted()).toEqual([...followed].toSorted());
+    for (const route of lists) {
+      expect(route.authenticated?.tier, route.path).toBeUndefined();
+      expect(route.authenticated?.record, route.path).toBeUndefined();
+    }
   });
 
   // Break caught: a controller route with no access declaration going unnoticed until a request is refused.

@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests put in place of the API. The shell tests run against the production build served by a static
  * host, which has no API, so the one call the application makes at the start, `GET /api/v1/auth/session` (who is
@@ -113,6 +115,7 @@ export async function stubApi(
   let reads = 0;
   let signOuts = 0;
   await page.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const { pathname } = new URL(route.request().url());
     const line = `${route.request().method()} ${pathname}`;
     stubbed.requests.push(line);

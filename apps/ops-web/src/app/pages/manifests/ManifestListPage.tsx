@@ -28,6 +28,7 @@ import {
 } from '../../../platform/manifest/manifest-shape';
 import { useManifests } from '../../../platform/manifest/use-manifest-queries';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
+import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
@@ -211,6 +212,7 @@ export function ManifestListPage() {
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
+  const refreshSummary = useRefreshQueueSummary();
   const queue = useRef<HTMLDivElement>(null);
   // What the date field holds while a date is being typed, for the filter it was typed over: the field must keep what the person typed even
   // when it is not yet a date worth asking for.
@@ -362,6 +364,8 @@ export function ManifestListPage() {
                   variant="secondary"
                   loading={list.isFetching}
                   onClick={() => {
+                    // The counts beside the menu are read again with the page (task C1, `AC-QSUM-09`).
+                    void refreshSummary();
                     void list.refetch({ cancelRefetch: false });
                   }}
                 >

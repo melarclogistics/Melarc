@@ -1,5 +1,7 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the pickup screens (S1.19) put in place of the API: a small, stateful stand-in for the operations the five screens
  * use. A booking is created `PENDING` with an estimate; a confirmation needs the version read and moves the request; a cancellation needs a
@@ -446,6 +448,7 @@ export async function stubPickupApi(
 ): Promise<PickupApi> {
   const state: PickupApi = { world: initial, calls: [], unexpected: [] };
   await target.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

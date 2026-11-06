@@ -1,6 +1,8 @@
 import type { components } from '@melarc/api-client';
 import type { Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the message log (S1.12e) put in place of the API: a small stand-in for the three operations the log and the link to
  * it use (the session, `listNotifications`, and the read of one pickup request). The list is filtered and paged as the contract says (by status,
@@ -352,6 +354,7 @@ async function answer(route: Route, state: MessagesApi, call: Call): Promise<voi
 export async function stubMessagesApi(page: Page, initial: World = world()): Promise<MessagesApi> {
   const state: MessagesApi = { world: initial, calls: [], unexpected: [], planted: 0 };
   await page.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const url = new URL(route.request().url());
     const call: Call = { method: route.request().method(), path: url.pathname, search: url.search };
     state.calls.push(call);

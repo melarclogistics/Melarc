@@ -44,7 +44,15 @@ export function errorResponse(status: number, code: string, details?: unknown): 
 }
 
 export function installFakeApi(handlers: Record<string, Handler> = {}): FakeApi {
-  const table = new Map(Object.entries(handlers));
+  // The shell of every signed-in screen reads the queue summary for the menu's counts (`getQueueSummary`, task C1), so the stand-in answers it
+  // without anyone arranging it, **with no queue at all**: a session the server gave none, which draws no count and says nothing of waiting. A
+  // test of the counts, or of the landing's list, gives its own handler. The read is a request like any other: it is in `requests`.
+  const table = new Map<string, Handler>(
+    Object.entries<Handler>({
+      'GET /ops/queue-summary': () => json(200, { queues: [] }),
+      ...handlers,
+    }),
+  );
   const requests: Request[] = [];
   const unhandled: string[] = [];
 
@@ -74,12 +82,31 @@ export function installFakeApi(handlers: Record<string, Handler> = {}): FakeApi 
   };
 }
 
-/** The API of a browser where this session is the signed-in one. */
+/**
+ * The API of a browser where this session is the signed-in one. The shell of every signed-in screen reads the queue summary for the menu's
+ * counts (`getQueueSummary`, task C1), so a signed-in browser answers it, and by default **with no queue at all**: a session the server gave
+ * none, which draws no count and says nothing of waiting. A test of the counts, or of the landing's list, replaces the handler.
+ */
 export function signedInApi(session: SessionView): Record<string, Handler> {
-  return { 'GET /auth/session': () => json(200, session) };
+  return {
+    'GET /auth/session': () => json(200, session),
+    'GET /ops/queue-summary': () => json(200, { queues: [] }),
+  };
 }
 
 /** The API of a browser where nobody is signed in. */
 export function signedOutApi(): Record<string, Handler> {
   return { 'GET /auth/session': () => errorResponse(401, 'SESSION_INVALID') };
+}
+
+/** The requests a test of something else counts: everything but the shell's read of the queue summary (`getQueueSummary`, task C1). */
+export function exceptSummary(requests: readonly Request[]): Request[] {
+  return requests.filter(
+    (request) => !new URL(request.url).pathname.endsWith('/ops/queue-summary'),
+  );
+}
+
+/** The requests to one path of the API (the end of the pathname, so `/auth/session` and not `/auth/sessions`), in the order they were sent. */
+export function requestsTo(api: Pick<FakeApi, 'requests'>, path: string): Request[] {
+  return api.requests.filter((request) => new URL(request.url).pathname === `/api/v1${path}`);
 }

@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the identity screens (S0.44) put in place of the API. It is a small, stateful stand-in for the ten operations the
  * six screens use: an act changes what the next read says (approving a profile makes it active and moves its version), so a test can follow
@@ -507,10 +509,31 @@ async function answer(route: Route, state: StaffApi, call: Call): Promise<void> 
   return route.abort('failed');
 }
 
+/**
+ * The queues the staff stand-in's server would count for its session: the profiles waiting for approval, for a session that holds the key of the
+ * staff list and the decision key (the only queue of the identity screens), counted from the same world the list reads.
+ */
+function summaryOf(w: World): Record<string, unknown>[] {
+  if (!w.permissions.includes('staff.read') || !w.permissions.includes('staff.identity.approve')) {
+    return [];
+  }
+  const waiting = w.identities.filter((identity) => identity.status === 'PENDING_APPROVAL');
+  return [
+    waiting.length === 0
+      ? { queue: 'STAFF_AWAITING_APPROVAL', count: 0 }
+      : {
+          queue: 'STAFF_AWAITING_APPROVAL',
+          count: waiting.length,
+          oldest_at: '2026-10-30T09:00:00.000Z',
+        },
+  ];
+}
+
 /** Answers the identity operations from a small world and records every request to the API. */
 export async function stubStaffApi(page: Page, initial: World = world()): Promise<StaffApi> {
   const state: StaffApi = { world: initial, calls: [], unexpected: [] };
   await page.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route, summaryOf(state.world))) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

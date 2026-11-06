@@ -3,6 +3,7 @@ import {
   bigint,
   check,
   foreignKey,
+  index,
   integer,
   pgTable,
   text,
@@ -124,6 +125,11 @@ export const staffIdentity = pgTable(
     uniqueIndex('staff_identity_work_email_live_key')
       .on(table.workEmailCanonical)
       .where(sql`${table.status} <> 'REJECTED'`),
+    // The profiles waiting for approval, oldest first: the approver's queue and its count (`getQueueSummary`, `STAFF_AWAITING_APPROVAL`;
+    // `listStaffIdentities` with `status=PENDING_APPROVAL`). A handful of rows among every profile there is.
+    index('staff_identity_pending_approval_idx')
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'PENDING_APPROVAL'`),
     check(
       'staff_identity_status_closed',
       sql.raw(`"staff_identity"."status" IN (${quoted(STAFF_STATUSES)})`),

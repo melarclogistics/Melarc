@@ -506,6 +506,7 @@ A text field is identified by its boundary, so the boundary must reach 3:1 again
   secondary text (the application's name, the account's hub) is `shell.textSubtle` (5.97
   on Ink, 6.20 on the dark sidebar, 5.01 on hover);
   dividers are `shell.border`.
+- **A count beside an item of the sidebar** (the `CountBadge` on `surface="shell"`, task C1, 5 November 2026) takes the shell's own tokens and no new colour: the number is `shell.text` on `shell.surfacePressed` (13.09), with `shell.border` for its edge; a count of `0` that was read is quiet, `shell.textSubtle` on Ink with no fill (5.97 on Ink, 6.20 on the dark sidebar). On the **current item** the badge is turned round, `shell.active` on `shell.activeText` (6.15), so that it stays apart from the item's own hovered ground (`shell.activeHover`), and a quiet `0` there is `shell.activeText` on `shell.active` (6.15). The words that say what the number counts are for a screen reader and are not drawn. On the page (the landing's list) it is the neutral status pair of §4.4, and a quiet `0` is `text.secondary` without the fill.
 - **The current item** of the sidebar is a filled item and not a bar: `shell.active`, crimson, with `shell.activeText`, white
   (6.15), and `shell.activeHover` when hovered (7.33).
   It is written in weight 700 with `aria-current`, so the state is carried by the white text on the fill, the weight and the

@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   errorResponse,
+  exceptSummary,
   installFakeApi,
   json,
+  requestsTo,
   type FakeApi,
   type Handler,
 } from '../../../test-support/fake-api';
@@ -86,8 +88,9 @@ describe('the sign-in screen', () => {
 
     await signIn(user, { email: ` ${EMAIL} `, password: ` ${PASSWORD}  ` });
 
-    await screen.findByText('Nothing is waiting.');
-    expect(api.requests).toHaveLength(1);
+    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    // The sign-in is the one request of the person's own; the shell then reads the queue summary for the menu (task C1).
+    expect(exceptSummary(api.requests)).toHaveLength(1);
     const request = api.requests[0];
     expect(request?.method).toBe('POST');
     expect(new URL(request?.url ?? '').pathname).toBe('/api/v1/auth/staff/sign-in');
@@ -107,7 +110,8 @@ describe('the sign-in screen', () => {
       expect(await within(screen.getByRole('main')).findByText('Ama Mensah')).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
       expect(screen.getByRole('navigation', { name: 'Primary' })).toBeVisible();
-      expect(api.requests).toHaveLength(1);
+      expect(exceptSummary(api.requests)).toHaveLength(1);
+      expect(requestsTo(api, '/auth/session')).toHaveLength(0);
     });
 
     // Break caught: a sign-in that leaves a history entry the Back button returns to, with the form that held the password.
@@ -115,7 +119,7 @@ describe('the sign-in screen', () => {
       const { user, router } = open(() => json(200, sessionFixture()));
 
       await signIn(user);
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
 
       expect(router.state.historyAction).toBe('REPLACE');
     });
@@ -159,7 +163,8 @@ describe('the sign-in screen', () => {
 
       expect(await within(screen.getByRole('main')).findByText('Kofi Boateng')).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
-      expect(api.requests).toHaveLength(1);
+      expect(exceptSummary(api.requests)).toHaveLength(1);
+      expect(requestsTo(api, '/auth/session')).toHaveLength(0);
       expect(screen.queryByRole('heading', { name: 'Enter your code' })).toBeNull();
     });
   });
@@ -177,7 +182,7 @@ describe('the sign-in screen', () => {
       expect(router.state.location.pathname).toBe('/sign-in/mfa');
       expect(screen.queryByRole('navigation')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-      expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
       expect(api.requests).toHaveLength(1);
     });
 
@@ -409,7 +414,7 @@ describe('the sign-in screen', () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
     });
 
     // Break caught: a lost answer worded as a refusal of the password, which sends a person to mistrust a password that may be right.
@@ -429,7 +434,9 @@ describe('the sign-in screen', () => {
       expect(screen.getByLabelText('Work email (required)')).toHaveValue(EMAIL);
       await user.type(screen.getByLabelText('Password (required)'), PASSWORD);
       await user.click(screen.getByRole('button', { name: 'Sign in' }));
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
       expect(attempts).toBe(2);
     });
 
@@ -478,13 +485,13 @@ describeInterfaceStates('The sign-in screen', {
       await signIn(user);
 
       expect(screen.getByRole('button', { name: 'Sign in' })).toHaveAttribute('aria-busy', 'true');
-      expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
 
       await act(async () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
     },
   },
   empty: {
@@ -527,7 +534,9 @@ describeInterfaceStates('The sign-in screen', {
       await user.type(screen.getByLabelText('Password (required)'), PASSWORD);
       await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
       expect(attempts).toBe(2);
     },
   },
@@ -541,7 +550,9 @@ describeInterfaceStates('The sign-in screen', {
       const { user, router } = open(() => json(200, sessionFixture()));
       await signIn(user);
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
     },
   },

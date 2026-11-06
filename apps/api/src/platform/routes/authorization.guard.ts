@@ -10,7 +10,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
-import { holdAuthorization, type AuthorizedRequest } from '../authorization/authorized-request.js';
+import {
+  grantOfSession,
+  holdAuthorization,
+  type AuthorizedRequest,
+} from '../authorization/authorized-request.js';
 import { effectiveScope } from '../authorization/effective-scope.js';
 import { OPERATION_CONTEXTS } from '../authorization/authorization-providers.js';
 import type { OperationContexts } from '../authorization/operation-contexts.js';
@@ -89,9 +93,8 @@ export class AuthorizationGuard implements CanActivate {
     // 5. The permission, from the snapshot the session was issued with.
     let grant;
     if (kind === 'permission') {
-      grant = session.authority.snapshot.grants.find(
-        (candidate) => candidate.permission === detail?.permission,
-      );
+      grant =
+        detail?.permission === undefined ? undefined : grantOfSession(session, detail.permission);
       if (grant === undefined)
         throw ApiException.of(ErrorCode.PermissionDenied, 'Permission denied');
     }

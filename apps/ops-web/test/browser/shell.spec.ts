@@ -31,7 +31,9 @@ test.describe('the application shell in a browser', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
     await expect(page.getByRole('main')).toBeVisible();
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
-    await expect(page.getByText('Nothing is waiting.')).toBeVisible();
+    // The stand-in's server gave this session no queue, so the landing says nothing of waiting: not that nothing is, and no heading over nothing.
+    await expect(page.getByText('Nothing is waiting.')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 2, name: 'Waiting for you' })).toHaveCount(0);
     // The landing is a signed-in screen, so the shell's side menu is beside it: one navigation, and the control to leave. There is no
     // banner above the page: on a wide screen the menu carries the product's name, and its slim bar is for a narrow screen alone.
     await expect(page.getByRole('banner')).toHaveCount(0);

@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.90.0-slice-001-review-closeout
- *   SHA-256 80f3283b98682ddf6f111d32ab8a1f98f8243ed678a90bdc4424b0ad83ca6e25 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.91.0-c1-queue-summary
+ *   SHA-256 8e4f4d97c41d9d23d208608e8f11d3e5fc693fb0e1c39bf03d27481ef84b78bc (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2355,6 +2355,57 @@ export interface paths {
          *     Signing out does not remove a trusted browser; this does.
          */
         delete: operations["revokeTrustedBrowser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/queue-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How much work is waiting in each queue the caller may read
+         * @description Task C1 (Product Owner, 5 November 2026; master specification section 17.4): one read that returns, for the calling session, a
+         *     count for each queue it may read, so that the navigation, the landing (*My work*) and the Decisions inbox can say how much is waiting
+         *     without reading a page of each queue. Each measure is defined in the reporting data dictionary (section 5.5), which also holds the
+         *     assessment that lets the existing keys serve it (the surface's P-1).
+         *
+         *     **No permission admits the call; each key admits its entries.** The operation is `self` (`x-permission: self`): any signed-in Ops
+         *     Portal staff session may ask. **An entry exists only for a queue the session may read, and a queue it may not read is absent, never
+         *     `0`.** A queue is the session's when it holds **the key of that queue's own list** and, for an approver's queue, **the decision key**
+         *     as well; the grant of the list's key is the one that scopes the count. No key is added.
+         *
+         *     **A count is what its list returns.** It is the number of records that the queue's own list operation returns for the same session
+         *     and the same filter, taken in the context that list's key gives (the grant's scope: the hubs of the grant, or every hub where the grant
+         *     is of all; row-level security does the rest). It never reaches a record the same grant's list would not, never widens to another key's
+         *     scope, and is exact: not capped, not estimated. **The queues, with the filter each is counted by** (a closed list, `QueueId`):
+         *
+         *     | `queue` | Records | The list and its filter | Keys | `oldest_at` is the least of |
+         *     |---|---|---|---|---|
+         *     | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
+         *     | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED`, the requests whose `cutoff_exception_state` is `PENDING_OPS_REVIEW` (the list has no parameter for it) | `pickup.read` | `confirmed_at` of the request |
+         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+         *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
+         *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
+         *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+         *
+         *     **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
+         *     breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
+         *     the read succeeded and no record matched. The entries are in the order of the table; the client orders them as it needs.
+         *
+         *     **It is a read and only a read.** It writes no audit event (it returns no record and no page of records, so the
+         *     `auth.hub_boundary.crossed` of a list is not written), changes nothing, and is `background` activity: it never extends the idle lifetime
+         *     of a session. One request, one answer: each count is one query, and the counts of one key are one snapshot. The answer is
+         *     `Cache-Control: no-store`.
+         */
+        get: operations["getQueueSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -9465,6 +9516,36 @@ export interface components {
         TrustedBrowsersRevoked: {
             revoked: number;
         };
+        /**
+         * @description A queue of the Ops Portal that has a count (reporting data dictionary, section 5.5). **A closed list: a value is never renamed or
+         *     reused**, and a queue that is built later is added here with its own entry in the dictionary. `getQueueSummary` lists, for each,
+         *     the records it counts and the keys that admit it.
+         * @enum {string}
+         */
+        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL";
+        /** @description One queue's count and the moment its oldest record entered it, and nothing else: no record, code, name, hub, vendor or breakdown. */
+        QueueSummaryEntry: {
+            queue: components["schemas"]["QueueId"];
+            /**
+             * @description How many records the queue holds now, as its own list would return them to this session. Exact. `0` means the read succeeded and
+             *     found none; a queue the session may not read has no entry at all.
+             */
+            count: number;
+            /**
+             * Format: date-time
+             * @description The moment the oldest record entered the queue (the column each queue is counted from is in the description of `getQueueSummary`).
+             *     **Absent when `count` is 0.**
+             */
+            oldest_at?: string;
+        };
+        /** @description The answer of `getQueueSummary`. */
+        QueueSummary: {
+            /**
+             * @description One entry for each queue the session may read, in the order of `QueueId`, and only those. **Empty for a session that may read
+             *     none, which is not the same as every queue being empty.**
+             */
+            queues: components["schemas"]["QueueSummaryEntry"][];
+        };
         SessionRevoke: {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
@@ -15550,6 +15631,28 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getQueueSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueSummary"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listStaffTrustedBrowsers: {

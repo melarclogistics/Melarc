@@ -4,7 +4,7 @@
  * only this intentional scope is compared with the contract (engineering-standards.md section 4).
  *
  * It holds the two reads of the rider roster (S0.53a) and the two registrations of a rider's device (S0.53b, S0.53c), the three credential setup operations (S0.31), the first routes of the product beside the two technical probes, the
- * staff sign-in and its second step (S0.32, S0.33), and the read and the end of the caller's own session (S0.34), the four staff reads (S0.35) and the three operations that make and settle a staff identity (S0.36) and the three that administer another principal (S0.37: the list and the revocation of sessions, the reset of a second factor), the two vendor reads, the re-issue of a vendor's setup grant and the vendor's setup (S0.47), the vendor's sign-in (S0.48), the vendor's four operations on its own browsers (S0.49), the self-service recovery request (S0.50), its completion and the two administrators' recoveries (S0.51), the four operations of the trusted browser, the completion of a rider's device enrolment (S0.57), the revocation of a rider's device (S0.58) and the rider's challenge and sign-in (S0.59). Add an id
+ * staff sign-in and its second step (S0.32, S0.33), and the read and the end of the caller's own session (S0.34), the four staff reads (S0.35) and the three operations that make and settle a staff identity (S0.36) and the three that administer another principal (S0.37: the list and the revocation of sessions, the reset of a second factor), the two vendor reads, the re-issue of a vendor's setup grant and the vendor's setup (S0.47), the vendor's sign-in (S0.48), the vendor's four operations on its own browsers (S0.49), the self-service recovery request (S0.50), its completion and the two administrators' recoveries (S0.51), the four operations of the trusted browser, the completion of a rider's device enrolment (S0.57), the revocation of a rider's device (S0.58), the rider's challenge and sign-in (S0.59) and the count of the work waiting in each queue the session may read (C1). Add an id
  * here in the same change that implements the operation, and remove it only when the operation is removed. The conformance check
  * fails when this list and the router disagree in either direction, so it cannot quietly drift from what is true.
  */
@@ -45,6 +45,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'getPickupManifest',
   'getPickupRequest',
   'getPickupStop',
+  'getQueueSummary',
   'getRider',
   'getRunCustodyHandover',
   'getStaffIdentity',

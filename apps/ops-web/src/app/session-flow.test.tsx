@@ -8,6 +8,7 @@ import {
   errorResponse,
   installFakeApi,
   json,
+  requestsTo,
   signedInApi,
   type FakeApi,
 } from '../test-support/fake-api';
@@ -122,7 +123,7 @@ describe('a visit to the landing with somebody signed in', () => {
         .map((item) => item.textContent),
     ).toEqual(['Accra Central', 'Tema']);
     // `empty` is a success message, not a blank (surfaces/ops-portal.md section 8).
-    expect(screen.getByText('Nothing is waiting.')).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
   });
 
   // Break caught: a landing that implies working functionality, or fabricated figures, in a build that has none.
@@ -179,7 +180,10 @@ describe('a visit to the landing with somebody signed in', () => {
         await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
       });
 
-      expect(api.requests).toHaveLength(1);
+      // One read of the session and one of the queue summary for the menu (task C1): neither is read again by a timer, a focus or a reconnect.
+      expect(requestsTo(api, '/auth/session')).toHaveLength(1);
+      expect(requestsTo(api, '/ops/queue-summary')).toHaveLength(1);
+      expect(api.requests).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }
@@ -217,7 +221,7 @@ describe('a 200 that is not a session (U05 of 23 October 2026)', () => {
         await screen.findByRole('heading', { level: 1, name: 'We could not check your session' }),
       ).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
-      expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
       expect(screen.queryByText('Synthetic Officer')).toBeNull();
 
       await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -226,7 +230,7 @@ describe('a 200 that is not a session (U05 of 23 October 2026)', () => {
         await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
       ).toBeVisible();
       expect(within(screen.getByRole('main')).getByText('Synthetic Officer')).toBeVisible();
-      expect(api.requests).toHaveLength(2);
+      expect(requestsTo(api, '/auth/session')).toHaveLength(2);
     },
   );
 });
@@ -252,7 +256,7 @@ describe('a visit when the session cannot be checked', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
     ).toBeVisible();
-    expect(api.requests).toHaveLength(2);
+    expect(requestsTo(api, '/auth/session')).toHaveLength(2);
   });
 
   it('is the same for a request that never got an answer', async () => {

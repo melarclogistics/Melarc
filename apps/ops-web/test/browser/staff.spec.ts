@@ -66,8 +66,10 @@ test.describe('moving through the screens', () => {
   }) => {
     const { api, watch } = await open(page, '/');
 
-    await expect(page.getByText('1 profile is waiting for your approval.')).toBeVisible();
-    await page.getByRole('link', { name: 'Review the queue' }).click();
+    await expect(
+      page.getByRole('link', { name: 'Staff profiles waiting for approval' }),
+    ).toBeVisible();
+    await page.getByRole('link', { name: 'Staff profiles waiting for approval' }).click();
 
     await expect(page).toHaveURL('/admin/staff?view=waiting');
     await focusedIs(page, 'Staff');
@@ -82,17 +84,20 @@ test.describe('moving through the screens', () => {
     await open(page, '/admin/staff');
 
     const menu = page.getByRole('navigation', { name: 'Primary' });
-    await expect(menu.getByRole('link')).toHaveText([
+    // The names of the entries (what each is called; the count beside one is the server's, and is asserted on the line below).
+    await expect(menu.locator('.ui-primary-nav__label')).toHaveText([
       'Overview',
       'Staff',
       'Add a staff profile',
       'Sessions',
       'Trusted browsers',
     ]);
-    await expect(menu.getByRole('link', { name: 'Staff', exact: true })).toHaveAttribute(
+    await expect(menu.getByRole('link', { name: /^Staff(?: |$)/ })).toHaveAttribute(
       'aria-current',
       'page',
     );
+    // The one profile that waits is counted beside the entry of the queue it is in (task C1).
+    await expect(menu.getByRole('link', { name: 'Staff 1 waiting for approval' })).toBeVisible();
     // "Add a staff profile" lies under "Staff": at its own page it alone is current.
     await page
       .getByRole('navigation', { name: 'Primary' })
@@ -132,7 +137,7 @@ test.describe('moving through the screens', () => {
     await expect(
       page
         .getByRole('navigation', { name: 'Primary' })
-        .getByRole('link', { name: 'Staff', exact: true }),
+        .getByRole('link', { name: /^Staff(?: |$)/ }),
     ).toHaveCount(0);
   });
 
@@ -491,7 +496,9 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the landing',
     reach: async (page) => {
       await open(page, '/');
-      await expect(page.getByText('1 profile is waiting for your approval.')).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'Staff profiles waiting for approval' }),
+      ).toBeVisible();
     },
   },
   {

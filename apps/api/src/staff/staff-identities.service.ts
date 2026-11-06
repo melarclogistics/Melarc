@@ -10,6 +10,7 @@ import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_SEARCH_LENGTH } from './staff-identity-schemas.js';
 import { staffIdentityEtagOf } from './staff-identity-etag.js';
+import { staffIdentityCriteria } from './staff-identity-criteria.js';
 import {
   IDENTITY_COLUMNS as COLUMNS,
   viewOf,
@@ -129,9 +130,13 @@ export class StaffIdentitiesService {
     if (filter.pageToken !== undefined && after === undefined)
       throw invalid('page_token', 'format');
 
-    const status = filter.status ?? null;
-    const hub = filter.hubId ?? null;
-    const pattern = search === '' ? null : `%${literal(search)}%`;
+    // What the list contains is written once, in `staffIdentityCriteria`, which the count of the profiles waiting for approval calls as well
+    // (task C1).
+    const criteria = staffIdentityCriteria({
+      status: filter.status ?? null,
+      hubId: filter.hubId ?? null,
+      pattern: search === '' ? null : `%${literal(search)}%`,
+    });
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -140,9 +145,7 @@ export class StaffIdentitiesService {
       async (handle) => {
         const result = await transactionOf(handle).execute(sql`
         select ${COLUMNS} from staff_identity
-         where (${status}::text is null or status = ${status}::text)
-           and (${hub}::uuid is null or primary_hub_id = ${hub}::uuid)
-           and (${pattern}::text is null or full_name ilike ${pattern}::text escape '\\' or work_email ilike ${pattern}::text escape '\\')
+         where ${criteria}
            and (${afterMoment}::timestamptz is null or (created_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
          order by created_at, id
          limit ${size + 1}`);

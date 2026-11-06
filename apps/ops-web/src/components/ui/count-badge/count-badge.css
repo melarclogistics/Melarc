@@ -1,0 +1,72 @@
+/*
+ * CountBadge (design/COMPONENT_PATTERNS.md, count badge; DESIGN_SYSTEM sections 4.4 and 4.6): a pill with a number, drawn by the Badge primitive and
+ * restyled here through the tokens. The stylesheets of components/ui win over Tailwind's utilities (they are in no layer), so these rules need no
+ * `!important`.
+ *
+ * On the page it is the neutral status pair, with the number in the label size and tabular figures so that a column of them lines up. On the
+ * side menu's Ink it is the shell's own: white on the pressed ground (13.1:1), and on the filled current entry it turns round, the crimson on white
+ * (6.15:1), which keeps it apart from the entry's own hover ground (the darker crimson). A count of 0 that was read is drawn quiet: the border and
+ * the muted text without the fill, so a queue with nothing in it does not shout, and it is still a figure and still announced.
+ */
+.ui-count-badge {
+  position: relative;
+  min-width: var(--space-6);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number is drawn; the words that say what it counts are for whoever hears the page. */
+.ui-count-badge__meaning {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ui-count-badge[data-quiet='true'] {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+/* ---- On the side menu ---- */
+
+.ui-count-badge[data-surface='shell'] {
+  border-color: var(--shell-border);
+  background: var(--shell-surface-pressed);
+  color: var(--shell-text);
+}
+
+.ui-count-badge[data-surface='shell'][data-quiet='true'] {
+  background: transparent;
+  color: var(--shell-text-subtle);
+}
+
+/* The current entry is filled with the brand crimson: the badge on it is white with the crimson figure. */
+.ui-primary-nav__link[aria-current='page'] .ui-count-badge[data-surface='shell'] {
+  border-color: var(--shell-active-text);
+  background: var(--shell-active-text);
+  color: var(--shell-active);
+}
+
+.ui-primary-nav__link[aria-current='page']
+  .ui-count-badge[data-surface='shell'][data-quiet='true'] {
+  background: transparent;
+  color: var(--shell-active-text);
+}
+
+/* Forced colours drop the fills and keep the figure and its border. */
+@media (forced-colors: active) {
+  .ui-count-badge,
+  .ui-count-badge[data-surface='shell'] {
+    border-color: currentColor;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

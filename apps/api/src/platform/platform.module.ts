@@ -69,6 +69,8 @@ import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
+import { QueueSummaryController } from './queue-summary/queue-summary.controller.js';
+import { queueSummaryProviders } from './queue-summary/queue-summary-providers.js';
 import { guardChainProviders } from './routes/guard-chain.js';
 
 export interface PlatformModuleOptions {
@@ -117,7 +119,7 @@ export class PlatformModule {
       module: PlatformModule,
       // The routes of the product contract: the three credential setup operations (S0.31), the rider's enrolment (S0.57), challenge and
       // sign-in (S0.59), the staff sign-in (S0.32), its second step (S0.33), the read and the end of the caller's own session (S0.34), and the list and the removal of the caller's own
-      // trusted browsers (staff-authentication.md section 5.8).
+      // trusted browsers (staff-authentication.md section 5.8), and the count of the work waiting in each queue the session may read (task C1).
       controllers:
         options.productRoutes === false
           ? []
@@ -133,6 +135,7 @@ export class PlatformModule {
               SessionController,
               TrustedBrowserController,
               CredentialRecoveryController,
+              QueueSummaryController,
             ],
       imports: [
         HealthModule,
@@ -184,6 +187,8 @@ export class PlatformModule {
         ...authorizationProviders,
         // The service of the read and the end of the caller's own session (S0.34), built on the runner above.
         ...sessionOperationsProviders,
+        // The service of the count of each queue the session may read (task C1), built on the runner above and the counters the domains own.
+        ...queueSummaryProviders,
         NotFoundFallback,
         LifecycleService,
         ShutdownRegistry,

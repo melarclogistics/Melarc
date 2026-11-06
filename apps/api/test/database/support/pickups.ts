@@ -39,6 +39,8 @@ export interface PickupRequestRow {
   readonly attemptExtensionId?: string;
   /** The moment Ops escalated the request: only a request that was confirmed has one. */
   readonly escalatedAt?: Date;
+  /** The moment a confirmed request was confirmed (a fixed one when left out), for a test of which request has waited the longest. */
+  readonly confirmedAt?: Date;
   readonly onePackageExceptionId?: string;
   /** The request this one replaces (its chain), which must exist. */
   readonly replacesRequestId?: string;
@@ -92,7 +94,7 @@ export async function insertPickupRequest(
       row.packages,
       row.serviceDate,
       row.createdBy,
-      confirmed || cancelled ? new Date('2026-11-02T09:00:00Z') : null,
+      confirmed || cancelled ? (row.confirmedAt ?? new Date('2026-11-02T09:00:00Z')) : null,
       confirmed || cancelled ? row.createdBy : null,
       cancelled ? new Date('2026-11-02T10:00:00Z') : null,
       cancelled ? row.createdBy : null,

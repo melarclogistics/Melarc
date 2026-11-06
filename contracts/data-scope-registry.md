@@ -319,6 +319,14 @@ Every persistent business or technical table requires a scope classification and
 
 Use [security-test-matrix.md](../standards/security-test-matrix.md) for positive and negative controls at their specified enforcement layer. Classifications are requirements, not proof that database policies exist. Implement and test the actual policies for the task's scope. No documentation admission or signature package is required.
 
+### 7.2 A read that counts, and the one that counts several queues (`getQueueSummary`)
+
+A count over a table is a read of it, so **it is scoped by the rows of this registry and by nothing else**: no table is added and no predicate is changed by the queue counts of [the reporting data dictionary](../features/reporting/reporting-data-dictionary.md#55-the-queue-counts-queue-what-they-have-in-common). `getQueueSummary` (`self`: no key admits the call) reads `PickupRequest`, `OnePackageException` and `PickupStop` (the pickup queues), `PickupManifest` (the runs in progress) and `StaffIdentity` (the profiles waiting for approval) **once for each queue, in the context of that queue's own list operation**:
+
+- **The key, the hub mode and the hub set are the grant of the list's key** (§3: resolved per operation, not per Session). The operation finds the session's grant for `pickup.read` or `staff.read` in the snapshot the session was issued with, computes its effective scope the way the authorization step does for that list, and runs the count under them. A key the session does not hold gives no context and no entry; a grant that reaches no hub gives a count of `0`. **It never takes the widest grant the session holds, or the scope of another key.** A decision key (`pickup.exception.approve`, `staff.identity.approve`) only admits the entry of its approver's queue; it scopes nothing.
+- **Row-level security does the scoping**, as for the list: the `pickup_request_read`, `pickup_manifest_read` and `staff_identity_staff_read` policies of the tables above, with the key of the context. The operation holds no predicate of its own on hubs, vendors or ownership, so a count cannot reach a row its list cannot.
+- **What it returns is a count and a moment** (`queue`, `count`, `oldest_at`): no row, so nothing of §4's `Notes` about field masking applies, and a count reveals no record the same grant's list would not.
+
 ## 8. Findings — recorded, not resolved
 
 ### 8.1 `ZonePairRate` outlived the model that needed it

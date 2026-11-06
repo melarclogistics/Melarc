@@ -42,7 +42,7 @@ function expectNeutral() {
   expect(screen.getAllByRole('main')).toHaveLength(1);
   expect(screen.queryAllByRole('navigation')).toHaveLength(0);
   expect(screen.queryByRole('button', { name: /sign out/i })).toBeNull();
-  expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+  expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
   expect(screen.queryByRole('list', { name: 'Your hubs' })).toBeNull();
   expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   // The only things beside the main content are the skip link, the banner and the decorative imagery: nothing there is operable or named.

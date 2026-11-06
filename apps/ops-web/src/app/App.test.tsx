@@ -97,7 +97,7 @@ describe('the application shell', () => {
     expect(await landing()).toBeVisible();
     // The page says who is signed in, and so does the account card of the menu: the page's words are the ones this is about.
     expect(within(screen.getByRole('main')).getByText('Synthetic Officer')).toBeVisible();
-    expect(screen.getByText('Nothing is waiting.')).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
   });
@@ -114,7 +114,7 @@ describe('the application shell', () => {
   // Break caught: the shell calling the API for anything but who is signed in, calling a third party, or keeping
   // anything in the browser. The one request is the session read, to this origin's API; the session itself is an
   // HttpOnly cookie the page cannot see, so nothing about it may be stored in script-readable storage either.
-  it('reads who is signed in once, makes no other request and stores nothing in the browser', async () => {
+  it('reads who is signed in once, then only the queue summary for the menu, and stores nothing in the browser', async () => {
     const open = vi.spyOn(XMLHttpRequest.prototype, 'open');
     const { user } = renderApp();
     await landing();
@@ -124,7 +124,7 @@ describe('the application shell', () => {
 
     expect(
       api.requests.map((request) => `${request.method} ${new URL(request.url).pathname}`),
-    ).toEqual(['GET /api/v1/auth/session']);
+    ).toEqual(['GET /api/v1/auth/session', 'GET /api/v1/ops/queue-summary']);
     expect(open).not.toHaveBeenCalled();
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);

@@ -348,7 +348,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**192 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 76 `NORMAL`.**
+**193 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 77 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -427,6 +427,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `failDeliveryStop`| `CRITICAL_WRITE`| failed-delivery attribution; custody stays with the Rider|
 | `getAccountingExport`| `NORMAL`| — A metadata read. It moves no custody, money or allocation, and it reaches no package: the bytes are behind `createAccountingExportRetrievalAuthorization`|
 | `getCurrentSession`| `NORMAL`| —|
+| `getQueueSummary`| `NORMAL`| — A read: the count of the work waiting in each queue the session may read (task C1). One request, one indexed `count(*)` per queue; it returns no record, writes nothing and is `background` activity|
 | `getRider`| `NORMAL`| — The rider roster's detail read, and the `ETag` source `reregisterRiderDevice` takes. Identity and readiness only; it moves no custody, money or allocation|
 | `getStaffIdentity`| `NORMAL`| — The `ETag` source for the staff-targeted mutations. A read; it moves nothing|
 | `getVendorAccount`| `NORMAL`| — The `ETag` source for the vendor-targeted mutations. Readiness only, never a credential|

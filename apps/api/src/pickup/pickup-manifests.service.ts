@@ -8,6 +8,7 @@ import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { pickupManifestEtagOf } from './pickup-manifest-etag.js';
+import { pickupManifestCriteria } from './pickup-manifest-criteria.js';
 import {
   MANIFEST_COLUMNS,
   STOP_COLUMNS,
@@ -186,8 +187,11 @@ export class PickupManifestsService {
     if (filter.serviceDate !== undefined && !isCalendarDay(filter.serviceDate)) {
       throw invalid('service_date', 'format');
     }
-    const state = filter.state ?? null;
-    const serviceDate = filter.serviceDate ?? null;
+    // What the list contains is written once, in `pickupManifestCriteria`, which the count of the runs in progress calls as well (task C1).
+    const criteria = pickupManifestCriteria({
+      state: filter.state ?? null,
+      serviceDate: filter.serviceDate ?? null,
+    });
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -196,8 +200,7 @@ export class PickupManifestsService {
       async (handle) => {
         const result = await transactionOf(handle).execute(sql`
           select ${MANIFEST_COLUMNS} from pickup_manifest
-           where (${state}::text is null or state = ${state}::text)
-             and (${serviceDate}::date is null or service_date = ${serviceDate}::date)
+           where ${criteria}
              and (${afterMoment}::timestamptz is null or (created_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
            order by created_at, id
            limit ${size + 1}`);

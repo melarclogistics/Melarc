@@ -4,7 +4,7 @@ import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-s
 import { contextOfSession } from '../auth/sessions/session-context.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import type { ActivityPolicy } from '../routes/access-declaration.js';
-import type { EffectiveScope } from './effective-scope.js';
+import { effectiveScope, type EffectiveScope } from './effective-scope.js';
 
 /**
  * What the authorization step decided for one request, kept beside the request (S0.26): the session that acts, the grant that
@@ -32,6 +32,43 @@ export interface AuthorizedRequest {
    * that acts can judge the rule again on the record as it then is (`OperationRunner.requireTargetTier`).
    */
   readonly target?: { readonly entity: string; readonly id: string; readonly tierRule?: string };
+}
+
+/**
+ * The session's snapshot of the grant of one permission key, or `undefined` where the bundle it was issued with held none: step 5 of the
+ * refusal order reads it here, and so does everything that asks "may this session do what that key allows". It is read from the snapshot
+ * taken at issue, never from the live bundle.
+ */
+export function grantOfSession(
+  session: Pick<StoredSession, 'authority'>,
+  permission: string,
+): BundleGrantSnapshot | undefined {
+  return session.authority.snapshot.grants.find((candidate) => candidate.permission === permission);
+}
+
+/**
+ * The decision the authorization step would have taken for **the same request** on an operation that requires `permission`: the same
+ * session, the same credential and judgement, the grant of that key from the session's snapshot, and the scope of that grant
+ * (`effectiveScope`, the one function the guard calls, with the hubs the session reaches). `undefined` where the session holds no grant of
+ * the key, which is the answer "this session may not do that".
+ *
+ * It exists for an operation that answers about **several** keys at once (`getQueueSummary` counts what a queue's own list would return,
+ * and a list is read under the context of its own key): each key's work is then run in the context of that key's grant, and **never in a
+ * wider one**. A grant of all hubs that the session holds for another key does not widen this one (`GBT-GS1`), because the scope is read
+ * from the grant of the key asked for and from nothing else. Nothing is taken from the request; the activity policy stays the route's.
+ */
+export function authorizationForKey(
+  authorized: AuthorizedRequest,
+  permission: string,
+): AuthorizedRequest | undefined {
+  const grant = grantOfSession(authorized.session, permission);
+  if (grant === undefined) return undefined;
+  return {
+    ...authorized,
+    permission,
+    grant,
+    scope: effectiveScope(grant, authorized.session.authority.authorizedHubIds),
+  };
 }
 
 const held = new WeakMap<object, AuthorizedRequest>();

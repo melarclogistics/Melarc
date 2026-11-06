@@ -13,7 +13,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.90.0-slice-001-review-closeout
+  version: 5.91.0-c1-queue-summary
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -126,6 +126,10 @@ tags:
     description: |
       The messages the platform raised about an act and what became of each (sections 31.3 and 31.6; SLICE-001, S1.12): the Ops
       message log and the Ops feed. **A notification holds no destination, no text and no code.**
+  - name: queue-summary
+    description: |
+      How much work is waiting in each queue of the Ops Portal that the caller may read (master specification section 17.4; task C1). One read, a
+      count and a moment for each queue, never a record. Each measure is defined in the reporting data dictionary, section 5.5.
   - name: pickup-requests
   - name: pickup-manifests
   - name: pickup-stops
@@ -3775,6 +3779,58 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /ops/queue-summary:
+    get:
+      operationId: getQueueSummary
+      # SAFE READ. Browser surface only: an Ops Portal staff session; a Vendor or a Rider is refused. No CSRF, a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: self
+      x-error-codes: [PERMISSION_DENIED, SESSION_INVALID]
+      tags: [queue-summary]
+      summary: How much work is waiting in each queue the caller may read
+      description: |
+        Task C1 (Product Owner, 5 November 2026; master specification section 17.4): one read that returns, for the calling session, a
+        count for each queue it may read, so that the navigation, the landing (*My work*) and the Decisions inbox can say how much is waiting
+        without reading a page of each queue. Each measure is defined in the reporting data dictionary (section 5.5), which also holds the
+        assessment that lets the existing keys serve it (the surface's P-1).
+
+        **No permission admits the call; each key admits its entries.** The operation is `self` (`x-permission: self`): any signed-in Ops
+        Portal staff session may ask. **An entry exists only for a queue the session may read, and a queue it may not read is absent, never
+        `0`.** A queue is the session's when it holds **the key of that queue's own list** and, for an approver's queue, **the decision key**
+        as well; the grant of the list's key is the one that scopes the count. No key is added.
+
+        **A count is what its list returns.** It is the number of records that the queue's own list operation returns for the same session
+        and the same filter, taken in the context that list's key gives (the grant's scope: the hubs of the grant, or every hub where the grant
+        is of all; row-level security does the rest). It never reaches a record the same grant's list would not, never widens to another key's
+        scope, and is exact: not capped, not estimated. **The queues, with the filter each is counted by** (a closed list, `QueueId`):
+
+        | `queue` | Records | The list and its filter | Keys | `oldest_at` is the least of |
+        |---|---|---|---|---|
+        | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
+        | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED`, the requests whose `cutoff_exception_state` is `PENDING_OPS_REVIEW` (the list has no parameter for it) | `pickup.read` | `confirmed_at` of the request |
+        | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+        | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
+        | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
+        | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+
+        **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
+        breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
+        the read succeeded and no record matched. The entries are in the order of the table; the client orders them as it needs.
+
+        **It is a read and only a read.** It writes no audit event (it returns no record and no page of records, so the
+        `auth.hub_boundary.crossed` of a list is not written), changes nothing, and is `background` activity: it never extends the idle lifetime
+        of a session. One request, one answer: each count is one query, and the counts of one key are one snapshot. The answer is
+        `Cache-Control: no-store`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueSummary' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /ops/staff/{id}/trusted-browsers:
     parameters: [{ $ref: '#/components/parameters/Id' }]
@@ -14230,6 +14286,54 @@ components:
       additionalProperties: false
       properties:
         revoked: { type: integer, minimum: 0 }
+
+    QueueId:
+      type: string
+      enum:
+        - PICKUP_AWAITING_CONFIRMATION
+        - PICKUP_CUTOFF_REVIEW
+        - PICKUP_EXCEPTION_APPROVAL
+        - PICKUP_UNMANIFESTED_POOL
+        - PICKUP_RUNS_IN_PROGRESS
+        - STAFF_AWAITING_APPROVAL
+      description: |
+        A queue of the Ops Portal that has a count (reporting data dictionary, section 5.5). **A closed list: a value is never renamed or
+        reused**, and a queue that is built later is added here with its own entry in the dictionary. `getQueueSummary` lists, for each,
+        the records it counts and the keys that admit it.
+
+    QueueSummaryEntry:
+      type: object
+      required: [queue, count]
+      additionalProperties: false
+      properties:
+        queue: { $ref: '#/components/schemas/QueueId' }
+        count:
+          type: integer
+          minimum: 0
+          description: |
+            How many records the queue holds now, as its own list would return them to this session. Exact. `0` means the read succeeded and
+            found none; a queue the session may not read has no entry at all.
+        oldest_at:
+          type: string
+          format: date-time
+          description: |
+            The moment the oldest record entered the queue (the column each queue is counted from is in the description of `getQueueSummary`).
+            **Absent when `count` is 0.**
+      description: |
+        One queue's count and the moment its oldest record entered it, and nothing else: no record, code, name, hub, vendor or breakdown.
+
+    QueueSummary:
+      type: object
+      required: [queues]
+      additionalProperties: false
+      properties:
+        queues:
+          type: array
+          items: { $ref: '#/components/schemas/QueueSummaryEntry' }
+          description: |
+            One entry for each queue the session may read, in the order of `QueueId`, and only those. **Empty for a session that may read
+            none, which is not the same as every queue being empty.**
+      description: The answer of `getQueueSummary`.
 
     SessionRevoke:
       type: object

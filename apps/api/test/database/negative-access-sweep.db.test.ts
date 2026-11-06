@@ -97,6 +97,8 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   signOut: ['STAFF', 'VENDOR', 'RIDER'],
   listTrustedBrowsers: ['STAFF'],
   revokeTrustedBrowser: ['STAFF'],
+  // Task C1: the count of the work waiting in each queue the session may read; a session of the Ops Portal and no other.
+  getQueueSummary: ['STAFF'],
   requestAdditionalDeviceGrant: ['VENDOR'],
   listVendorDevices: ['VENDOR'],
   revokeVendorDevice: ['VENDOR'],

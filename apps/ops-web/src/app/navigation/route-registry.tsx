@@ -3,6 +3,7 @@ import type { RouteObject } from 'react-router';
 
 import type { NavigationItem } from '../../components/PrimaryNavigation';
 import type { IconName } from '../../components/ui/icon/icons';
+import type { QueueName } from '../../platform/queue-summary/queue-summary-shape';
 import { RequirePermission } from '../../platform/session/RequirePermission';
 import { isPermissionKey } from '../../platform/session/session-shape';
 import { LandingPage } from '../pages/LandingPage';
@@ -85,6 +86,12 @@ export interface MenuEntry {
   readonly order: number;
   /** One line for the landing's list of where to go: what the screen is for, in the words of the person using it. */
   readonly description?: string;
+  /**
+   * The queue whose count is drawn beside this entry (`getQueueSummary`, task C1), when the screen is the place that queue is worked. At most one
+   * queue to an entry and one entry to a queue; a queue with no entry (the late bookings) is shown on the landing alone. The count is the server's:
+   * the entry draws what the summary holds for its queue and nothing when it holds none (`AC-QSUM-07`).
+   */
+  readonly queue?: QueueName;
 }
 
 export interface SignedInRoute {
@@ -119,6 +126,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       icon: 'pickup-requests',
       area: 'pickup-intake',
       order: 0,
+      queue: 'PICKUP_AWAITING_CONFIRMATION',
       description: 'See the pickups booked at your hubs, and confirm, reschedule or cancel them.',
     },
   },
@@ -158,6 +166,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       icon: 'exception-approvals',
       area: 'pickup-intake',
       order: 2,
+      queue: 'PICKUP_EXCEPTION_APPROVAL',
       description: 'Approve the single-package pickups waiting for a one-package exception.',
     },
   },
@@ -187,6 +196,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       icon: 'manifests',
       area: 'pickup-runs',
       order: 0,
+      queue: 'PICKUP_RUNS_IN_PROGRESS',
       description:
         'See the pickup runs at your hubs, and open one to order, assign and dispatch it.',
     },
@@ -200,6 +210,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       icon: 'build-manifest',
       area: 'pickup-runs',
       order: 1,
+      queue: 'PICKUP_UNMANIFESTED_POOL',
       description: 'Choose confirmed pickups for one run, and the day it is worked.',
     },
   },
@@ -224,6 +235,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       icon: 'staff',
       area: 'administration',
       order: 0,
+      queue: 'STAFF_AWAITING_APPROVAL',
       description: 'Find a staff profile, and approve the ones that are waiting.',
     },
   },
@@ -341,6 +353,7 @@ export function registryProblems(routes: readonly SignedInRoute[]): string[] {
   const problems: string[] = [];
   const paths = new Set<string>();
   const places = new Set<string>();
+  const queues = new Set<QueueName>();
 
   for (const route of routes) {
     const { path, access, menu } = route;
@@ -393,6 +406,12 @@ export function registryProblems(routes: readonly SignedInRoute[]): string[] {
       const place = `${menu.area}/${String(menu.order)}`;
       if (places.has(place)) problems.push(`Two menu entries have the place ${place}.`);
       places.add(place);
+      if (menu.queue !== undefined) {
+        if (queues.has(menu.queue)) {
+          problems.push(`The count of the queue ${menu.queue} is drawn beside two menu entries.`);
+        }
+        queues.add(menu.queue);
+      }
     }
   }
   return problems;
@@ -438,6 +457,21 @@ export function entriesFor(
     label: menu.label,
     icon: menu.icon,
   }));
+}
+
+/**
+ * The queue each menu entry draws a count of, by the path of the entry (task C1): the shell puts the summary's count beside the entry whose
+ * path is here. Only entries the session may use are drawn, so a queue's entry that the session's keys do not give it draws nothing.
+ */
+export function queueOfEntries(
+  routes: readonly SignedInRoute[] = SIGNED_IN_ROUTES,
+): ReadonlyMap<string, QueueName> {
+  assertSound(routes);
+  return new Map(
+    routes.flatMap((route) =>
+      route.menu?.queue === undefined ? [] : [[route.path, route.menu.queue] as const],
+    ),
+  );
 }
 
 /** A place the landing offers: where it goes, what it is called, and what it is for when the screen says. */

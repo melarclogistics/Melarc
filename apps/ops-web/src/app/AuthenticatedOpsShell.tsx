@@ -1,14 +1,26 @@
 import { createPortal } from 'react-dom';
-import { Outlet } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 
 import { SideMenu, type SideMenuAccount } from '../components/side-menu/SideMenu';
 import { Alert } from '../components/ui/alert/Alert';
 import { Button } from '../components/ui/button/Button';
+import type { NavigationItem } from '../components/PrimaryNavigation';
+import type { QueueSummaryView } from '../platform/queue-summary/queue-summary-shape';
+import {
+  useQueueSummary,
+  useRefreshQueueSummaryOnReturn,
+} from '../platform/queue-summary/use-queue-summary';
 import { useSession } from '../platform/session/session-context';
 import type { SessionView } from '../platform/session/session-store';
 import { useSignOut } from '../platform/session/use-sign-out';
 import { useFrameChrome, useFrameControls, useFrameLayout } from './frame-chrome';
-import { entriesFor, SIGNED_IN_ROUTES, type SignedInRoute } from './navigation/route-registry';
+import { QUEUE_WORDS } from './navigation/queue-places';
+import {
+  entriesFor,
+  queueOfEntries,
+  SIGNED_IN_ROUTES,
+  type SignedInRoute,
+} from './navigation/route-registry';
 
 /** Where the person acts, in a few words for the account card: the hub's name, or how many hubs. Nothing when the session lists none. */
 function hubsLine(hubs: SessionView['authorized_hubs']): string | null {
@@ -22,6 +34,28 @@ function accountOf(session: SessionView): SideMenuAccount {
 }
 
 /**
+ * The entries with the count of their queue beside them, where the summary holds one (task C1; `AC-QSUM-07`). An entry whose queue the summary
+ * does not hold, and every entry while the summary is being read or when it could not be, has no count and draws none: **a count that is not
+ * there is never drawn as `0`**. Which entries belong to which queue is the registry's; the words after the number are `QUEUE_WORDS`.
+ */
+function withCounts(
+  items: readonly NavigationItem[],
+  routes: readonly SignedInRoute[],
+  summary: QueueSummaryView | undefined,
+): NavigationItem[] {
+  if (summary === undefined) return [...items];
+  const queues = queueOfEntries(routes);
+  return items.map((item) => {
+    const queue = queues.get(item.to);
+    const counted =
+      queue === undefined ? undefined : summary.queues.find((each) => each.queue === queue);
+    return queue === undefined || counted === undefined
+      ? item
+      : { ...item, badge: { count: counted.count, meaning: QUEUE_WORDS[queue].meaning } };
+  });
+}
+
+/**
  * The layout of every signed-in screen (COMPONENT_PATTERNS section 12; DESIGN_SYSTEM section 13.1). It sits between the session guard and the
  * signed-in routes, so it is drawn only for a session the API has said is there and only around the routes of the registry. It does not
  * go around the frame: the frame's skip link, main landmark and move of focus to the new page's heading stay the frame's, and the
@@ -32,6 +66,9 @@ function accountOf(session: SessionView): SideMenuAccount {
  * The menu holds the navigation, built from the permission keys the session holds and the routes that exist, and the account card with
  * the sign-out control that every signed-in screen carries. Hiding an entry is not enforcement; the guard of each route and the server
  * check again. A sign-out that did not finish is told at the top of the page, where the person is looking.
+ *
+ * It also reads the **queue summary** (`getQueueSummary`, task C1) for the menu's counts, and again whenever the person goes to another page;
+ * a read that fails or has not finished draws no count, and the menu works as it did.
  */
 export function AuthenticatedOpsShell({
   routes = SIGNED_IN_ROUTES,
@@ -44,8 +81,14 @@ export function AuthenticatedOpsShell({
   const { signOut, state: outcome } = useSignOut();
   const signedIn = state.status === 'signed-in';
   useFrameLayout('sidebar', signedIn);
+  const { pathname } = useLocation();
+  const summary = useQueueSummary(signedIn);
+  useRefreshQueueSummaryOnReturn(pathname);
 
-  const items = state.status === 'signed-in' ? entriesFor(state.session.permissions, routes) : [];
+  const items =
+    state.status === 'signed-in'
+      ? withCounts(entriesFor(state.session.permissions, routes), routes, summary.data)
+      : [];
 
   return (
     <>

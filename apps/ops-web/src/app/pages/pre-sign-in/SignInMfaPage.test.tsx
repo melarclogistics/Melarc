@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_HOLD_MS } from '../../../platform/secrets/use-transient-secret';
 import {
   errorResponse,
+  exceptSummary,
   installFakeApi,
   json,
   type FakeApi,
@@ -63,7 +64,7 @@ async function enter(view: View, code = CODE) {
   await view.user.click(screen.getByRole('button', { name: 'Verify and sign in' }));
 }
 
-const lastBody = async (): Promise<unknown> => api.requests.at(-1)?.clone().json();
+const lastBody = async (): Promise<unknown> => exceptSummary(api.requests).at(-1)?.clone().json();
 
 describe('the second step of sign-in', () => {
   it('is a page of its own with a labelled code field, a title and one button', async () => {
@@ -83,7 +84,7 @@ describe('the second step of sign-in', () => {
 
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
     expect(api.requests.filter((request) => request.method === 'GET')).toHaveLength(0);
   });
 
@@ -111,7 +112,7 @@ describe('the second step of sign-in', () => {
       expect(view.router.state.location.pathname).toBe('/');
       expect(view.router.state.historyAction).toBe('REPLACE');
       expect(await lastBody()).toEqual({ challenge_id: CHALLENGE.challenge_id, code: CODE });
-      expect(api.requests).toHaveLength(2);
+      expect(exceptSummary(api.requests)).toHaveLength(2);
     });
 
     // Break caught: signing in clearing the challenge, and the page, finding none, sending the person back to the first step on their way to the
@@ -124,7 +125,7 @@ describe('the second step of sign-in', () => {
       });
 
       await enter(view);
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
       unsubscribe();
 
       expect(visited).not.toContain('/sign-in');
@@ -309,7 +310,9 @@ describe('the second step of sign-in', () => {
       );
       expect(screen.getByLabelText('Authenticator code (required)')).toHaveValue('');
       await enter(view, '654321');
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
       expect(attempts).toBe(2);
     });
 
@@ -332,7 +335,7 @@ describe('the second step of sign-in', () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
     });
   });
 
@@ -389,7 +392,7 @@ describeInterfaceStates('The second step of sign-in', {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
     },
   },
   empty: {
@@ -431,7 +434,9 @@ describeInterfaceStates('The second step of sign-in', {
 
       await enter(view, '654321');
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
@@ -444,7 +449,9 @@ describeInterfaceStates('The second step of sign-in', {
       const view = await atTheSecondStep(() => json(200, sessionFixture()));
       await enter(view);
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
+      ).toBeVisible();
     },
   },
   'permission-restricted': {
@@ -516,7 +523,7 @@ describe('the choice to remember the browser (staff-authentication.md section 5.
     await view.user.click(screen.getByRole('checkbox', { name: /Remember this browser/ }));
     await enter(view);
 
-    await screen.findByText('Nothing is waiting.');
+    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
     expect(document.body.innerHTML).not.toContain('SENTINEL');
   });
 });

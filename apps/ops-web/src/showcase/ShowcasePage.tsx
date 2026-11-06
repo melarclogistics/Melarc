@@ -26,6 +26,7 @@ import { MoneyAmount } from '../components/ui/money/MoneyAmount';
 import { OneTimeSecret } from '../components/ui/one-time-secret/OneTimeSecret';
 import { PasswordInput } from '../components/ui/password-input/PasswordInput';
 import { Picker, type PickerOption } from '../components/ui/picker/Picker';
+import { CountBadge } from '../components/ui/count-badge/CountBadge';
 import { QrCode } from '../components/ui/qr-code/QrCode';
 import { QueueFilters, QueueTable } from '../components/ui/queue-table/QueueTable';
 import { useQueuePaging } from '../components/ui/queue-table/use-queue-paging';
@@ -376,6 +377,34 @@ function StatusBadges() {
           <StatusBadge key={state} status={state} map={DEMO_STATES} />
         ))}
         <StatusBadge status="NOT_IN_THE_MAP" map={DEMO_STATES} />
+      </div>
+    </Section>
+  );
+}
+
+/** The count of a queue, as the menu and the landing draw it (task C1): on the page, and on the dark ground of the side menu. */
+function CountBadges() {
+  return (
+    <Section title="Count badges">
+      <div className="showcase-row">
+        <span>
+          Pickup requests <CountBadge count={5} meaning="waiting for confirmation" />
+        </span>
+        <span>
+          Manifests <CountBadge count={0} meaning="in progress" />
+        </span>
+        <span>
+          Staff <CountBadge count={12480} meaning="waiting for approval" />
+        </span>
+      </div>
+      <div className="showcase-ink">
+        <span className="showcase-ink__entry">
+          Pickup requests{' '}
+          <CountBadge count={5} meaning="waiting for confirmation" surface="shell" />
+        </span>
+        <span className="showcase-ink__entry">
+          Manifests <CountBadge count={0} meaning="in progress" surface="shell" />
+        </span>
       </div>
     </Section>
   );
@@ -1116,6 +1145,7 @@ export function ShowcasePage() {
         <Skeleton lines={4} />
       </Section>
       <StatusBadges />
+      <CountBadges />
       <EmptyStates />
       <ForbiddenStates />
       <DemoTable />

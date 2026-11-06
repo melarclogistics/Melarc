@@ -72,6 +72,7 @@ const PORT_NAMES = [
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'fleet/fleet-run-custody.adapter.ts',
+  'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
   'platform/audit/postgres.audit-writer.adapter.ts',
   'platform/auth/attestation/service.attestation-verifier.adapter.ts',
@@ -98,6 +99,7 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/notifications/hubtel.text-message-sender.adapter.ts',
   'staff/postgres.rider-identity-directory.adapter.ts',
   'staff/postgres.staff-identity-directory.adapter.ts',
+  'staff/staff-queue-counter.adapter.ts',
   'vendor/postgres.vendor-account-directory.adapter.ts',
 ];
 
@@ -135,9 +137,12 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
 const DOMAIN_ADAPTERS: readonly string[] = [
   // S1.24: each domain's side of the port the other uses (`platform/domain-ports/`), which is not one of the platform's seventeen.
   'fleet/fleet-run-custody.adapter.ts',
+  // Task C1: each domain's side of the port that counts the work waiting in a queue (`platform/domain-ports/queue-counter.port.ts`).
+  'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
   'staff/postgres.rider-identity-directory.adapter.ts',
   'staff/postgres.staff-identity-directory.adapter.ts',
+  'staff/staff-queue-counter.adapter.ts',
   'vendor/postgres.vendor-account-directory.adapter.ts',
 ];
 const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
@@ -1593,6 +1598,10 @@ describe('pickup and fleet meet only through ports', () => {
       'fleet/fleet-run-custody.adapter.ts',
       'platform/domain-ports/run-access.port.ts',
       'platform/domain-ports/run-custody.port.ts',
+      // Task C1: the counters of the queues are called with the caller's handle, under the context of the list's key, and open none of their own.
+      'pickup/pickup-queue-counters.adapter.ts',
+      'staff/staff-queue-counter.adapter.ts',
+      'platform/domain-ports/queue-counter.port.ts',
     ];
     const sources = sourceFiles();
     for (const path of files) {
@@ -1608,7 +1617,7 @@ describe('pickup and fleet meet only through ports', () => {
 
   // Break caught: a port that carries code of a domain (a function body, a class) rather than the shape the other side may rely on.
   it('keeps the port files to types and tokens', () => {
-    for (const name of ['run-access', 'run-custody']) {
+    for (const name of ['run-access', 'run-custody', 'queue-counter']) {
       const source = sourceFiles().find(
         (each) => each.path === `platform/domain-ports/${name}.port.ts`,
       );

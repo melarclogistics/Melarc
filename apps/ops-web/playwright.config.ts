@@ -68,6 +68,8 @@ function requestedEngines(value: string | undefined): Engine[] {
  *               the contract and answered by the stand-in).
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
+ *   queue-summary the counts of the queues (task C1), the same two ways: the menu's counts, the landing's list, a failed read and the read again on
+ *               a change of page, with a stand-in for the API that answers the summary the test gives it.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -230,6 +232,18 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice).
       name: `messages-dev-${engine}`,
       testMatch: 'messages.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The counts of the queues (task C1) against the production build, with a stand-in for the API that answers the summary a test gives it.
+      name: `queue-summary-${engine}`,
+      testMatch: 'queue-summary.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the shell reads the summary from an effect).
+      name: `queue-summary-dev-${engine}`,
+      testMatch: 'queue-summary.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),

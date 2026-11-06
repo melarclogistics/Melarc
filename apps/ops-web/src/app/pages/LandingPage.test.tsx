@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -14,8 +14,7 @@ import {
 } from '../../test-support/interface-states';
 import { renderApp } from '../../test-support/render-app';
 import { sessionFixture } from '../../test-support/session-fixture';
-import { KEYS, refusal, sessionWith, staffApi, staffPage } from '../../test-support/staff-api';
-import { staffIdentityFixture } from '../../test-support/staff-fixture';
+import { KEYS, refusal, sessionWith, staffApi } from '../../test-support/staff-api';
 import { wcagViolations } from '../../test-support/wcag';
 
 let api: FakeApi;
@@ -25,106 +24,257 @@ afterEach(() => {
   api.restore();
 });
 
-const LIST = 'GET /staff-identities';
-const waiting = (count: number) =>
-  Array.from({ length: count }, (_, index) =>
-    staffIdentityFixture({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}` }),
-  );
+const SUMMARY = 'GET /ops/queue-summary';
 
-/** The landing as a person who holds `keys` opens it. */
+interface Counted {
+  readonly queue: string;
+  readonly count: number;
+  readonly oldest_at?: string;
+}
+
+/** The summary as the server answers it for a session: the queues it may read, with their counts and the moment each oldest entered it. */
+const summary = (queues: readonly Counted[]) => () => json(200, { queues });
+
+/** An officer's queues: five of the six, at the moments given. */
+const OFFICER: readonly Counted[] = [
+  { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 5, oldest_at: '2026-11-03T08:00:00.000Z' },
+  { queue: 'PICKUP_CUTOFF_REVIEW', count: 1, oldest_at: '2026-10-30T08:00:00.000Z' },
+  { queue: 'PICKUP_EXCEPTION_APPROVAL', count: 3, oldest_at: '2026-11-01T14:30:00.000Z' },
+  { queue: 'PICKUP_UNMANIFESTED_POOL', count: 4, oldest_at: '2026-10-31T09:05:00.000Z' },
+  { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 2, oldest_at: '2026-11-05T07:00:00.000Z' },
+];
+
+/** The landing as a person who holds `keys` opens it, and the server answers the summary as given. */
 function open(
   keys: readonly string[],
+  queues: readonly Counted[] = [],
   handlers: Parameters<typeof staffApi>[1] = {},
   name = 'Ama Mensah',
 ) {
   api = installFakeApi(
     staffApi(sessionWith(keys, { principal_display_name: name }), {
-      [LIST]: () => staffPage([]),
+      [SUMMARY]: summary(queues),
       ...handlers,
     }),
   );
   return renderApp('/');
 }
 
+/** The lines of "Waiting for you", in the order drawn. */
+async function lines() {
+  const list = await screen.findByRole('list', { name: 'Waiting for you' });
+  return within(list).getAllByRole('listitem');
+}
+
 describe('the landing: what is waiting', () => {
-  // Break caught: a queue read for a person who may not decide on it, and a claim about it made without looking.
-  it('looks at the approval queue only for a person who can read staff and approve', async () => {
-    open(KEYS.reader);
+  // Break caught: a landing that lists what its keys suggest and not what the server counted, or that leaves a queue out.
+  it('lists each queue the summary returned, with its count and a link to the queue', async () => {
+    open(KEYS.approver, OFFICER);
 
-    expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
-    expect(api.requests.some((request) => request.url.includes('/staff-identities'))).toBe(false);
+    await screen.findByRole('heading', { level: 2, name: 'Waiting for you' });
+    const links = await screen.findAllByRole('link', {
+      name: /waiting for|not yet on a run|runs in progress/,
+    });
+    const asked = Object.fromEntries(
+      links.map((link) => [link.textContent, link.getAttribute('href')]),
+    );
+
+    expect(asked).toEqual({
+      'Pickup requests waiting for confirmation': '/pickup-requests?state=PENDING',
+      'Late bookings waiting for a cut-off decision': '/pickup-requests?state=CONFIRMED',
+      'One-package exceptions waiting for approval': '/approvals',
+      'Confirmed pickups not yet on a run': '/pickup-requests?state=CONFIRMED',
+      'Pickup runs in progress': '/manifests?state=IN_PROGRESS',
+    });
   });
 
-  it('asks for the profiles that wait for approval, and counts them', async () => {
-    open(KEYS.approver, { [LIST]: () => staffPage(waiting(3)) });
+  // Break caught: the queue that has waited longest drawn below one that has waited a day.
+  it('puts the queue whose oldest record has waited longest first', async () => {
+    open(KEYS.approver, OFFICER);
 
-    expect(await screen.findByText('3 profiles are waiting for your approval.')).toBeVisible();
-    const request = api.requests.find((candidate) => candidate.url.includes('/staff-identities'));
-    expect(new URL(request?.url ?? 'http://x').searchParams.get('status')).toBe('PENDING_APPROVAL');
+    const items = await lines();
+
+    expect(items.map((item) => within(item).getByRole('link').textContent)).toEqual([
+      'Late bookings waiting for a cut-off decision',
+      'Confirmed pickups not yet on a run',
+      'One-package exceptions waiting for approval',
+      'Pickup requests waiting for confirmation',
+      'Pickup runs in progress',
+    ]);
+    expect(items[0]).toHaveTextContent('1');
+    expect(items[0]).toHaveTextContent('Oldest since 30 Oct, 08:00');
+    expect(items[3]).toHaveTextContent('5');
   });
 
-  it('says it in the singular for one', async () => {
-    open(KEYS.approver, { [LIST]: () => staffPage(waiting(1)) });
+  // Break caught: the count of a queue drawn with the wrong queue, or a number that is not the server's.
+  it('draws the count the server gave for each queue', async () => {
+    open(KEYS.approver, OFFICER);
 
-    expect(await screen.findByText('1 profile is waiting for your approval.')).toBeVisible();
+    const items = await lines();
+    const counts = Object.fromEntries(
+      items.map((item) => [
+        within(item).getByRole('link').textContent,
+        item.querySelector('.ui-count-badge')?.textContent,
+      ]),
+    );
+
+    expect(counts).toEqual({
+      'Pickup requests waiting for confirmation': '5',
+      'Late bookings waiting for a cut-off decision': '1',
+      'One-package exceptions waiting for approval': '3',
+      'Confirmed pickups not yet on a run': '4',
+      'Pickup runs in progress': '2',
+    });
   });
 
-  // Break caught: "25 are waiting" for a queue that is longer than a page.
-  it('does not claim to know the total when the queue runs past the page', async () => {
-    open(KEYS.approver, { [LIST]: () => staffPage(waiting(25), 'next-1') });
+  // Break caught: an empty queue hidden (the person cannot tell it was read), or made to look like work.
+  it('lists a queue with nothing in it after the ones that have work, and keeps it', async () => {
+    open(KEYS.approver, [
+      { queue: 'PICKUP_CUTOFF_REVIEW', count: 0 },
+      { queue: 'STAFF_AWAITING_APPROVAL', count: 2, oldest_at: '2026-11-02T10:00:00.000Z' },
+    ]);
+
+    const items = await lines();
+
+    expect(items.map((item) => within(item).getByRole('link').textContent)).toEqual([
+      'Staff profiles waiting for approval',
+      'Late bookings waiting for a cut-off decision',
+    ]);
+    expect(items[1]).toHaveAttribute('data-empty', 'true');
+    expect(items[1]).not.toHaveTextContent('Oldest since');
+    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+  });
+
+  // Break caught: the pool sending a person to a page that refuses them.
+  it('sends the pool to the manifest builder for a session that may build a manifest', async () => {
+    open(
+      ['pickup.read', 'pickup.manifest.create'],
+      [{ queue: 'PICKUP_UNMANIFESTED_POOL', count: 2, oldest_at: '2026-11-02T10:00:00.000Z' }],
+    );
 
     expect(
-      await screen.findByText('25 or more profiles are waiting for your approval.'),
-    ).toBeVisible();
+      await screen.findByRole('link', { name: 'Confirmed pickups not yet on a run' }),
+    ).toHaveAttribute('href', '/manifests/new');
   });
 
-  it('links to the queue itself', async () => {
-    open(KEYS.approver, { [LIST]: () => staffPage(waiting(2)) });
-
-    expect(await screen.findByRole('link', { name: 'Review the queue' })).toHaveAttribute(
-      'href',
-      '/admin/staff?view=waiting',
+  it('sends the pool to the confirmed pickups for a session that may not build a manifest', async () => {
+    open(
+      ['pickup.read'],
+      [{ queue: 'PICKUP_UNMANIFESTED_POOL', count: 2, oldest_at: '2026-11-02T10:00:00.000Z' }],
     );
+
+    expect(
+      await screen.findByRole('link', { name: 'Confirmed pickups not yet on a run' }),
+    ).toHaveAttribute('href', '/pickup-requests?state=CONFIRMED');
   });
 
-  it('says nothing is waiting, as good news, when the queue is empty', async () => {
-    open(KEYS.approver, { [LIST]: () => staffPage([]) });
+  // Break caught: the approver's queue read through the staff list instead of the summary (a second source of truth for the same number).
+  it('reads the summary and nothing else for what is waiting', async () => {
+    open(KEYS.approver, [
+      { queue: 'STAFF_AWAITING_APPROVAL', count: 3, oldest_at: '2026-11-02T10:00:00.000Z' },
+    ]);
+
+    await screen.findByRole('link', { name: 'Staff profiles waiting for approval' });
+
+    expect(api.requests.some((request) => request.url.includes('/staff-identities'))).toBe(false);
+    expect(api.requests.some((request) => request.url.includes('/ops/queue-summary'))).toBe(true);
+  });
+
+  // Break caught: the defect this task fixes: "Nothing is waiting" for a session the page never looked at, because its keys do not suggest a queue.
+  it('says nothing is waiting only when the summary was read and every count it returned is 0', async () => {
+    open(KEYS.reader, [
+      { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0 },
+      { queue: 'PICKUP_CUTOFF_REVIEW', count: 0 },
+    ]);
 
     expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Review the queue' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /waiting for/ })).toBeNull();
   });
 
-  // Break caught: "Nothing is waiting" while the first answer is still on its way, which would send an approver away from the queue.
-  it('says nothing about the queue until it has been read', async () => {
+  // Break caught: "Nothing is waiting" for a session the server gave no queue to, which tells it something the page does not know.
+  it('says nothing of waiting to a session the summary gave no queue', async () => {
+    open(KEYS.reader, []);
+
+    await screen.findByRole('heading', { level: 2, name: 'Your hubs' });
+    // The heading stands while the summary is being read and goes when it was read and held no queue: wait for that, and for nothing less.
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Waiting for you' })).toBeNull();
+    });
+
+    expect(api.requests.some((request) => request.url.includes('/ops/queue-summary'))).toBe(true);
+    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+  });
+
+  // Break caught: a claim made before the answer: "Nothing is waiting" while the first read is still on its way.
+  it('says nothing about what is waiting until the summary has been read', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    open(KEYS.approver, {
-      [LIST]: async () => {
+    open(KEYS.approver, undefined, {
+      [SUMMARY]: async () => {
         await held;
-        return staffPage(waiting(2));
+        return json(200, { queues: OFFICER });
       },
     });
 
     expect(await screen.findByText('Checking what is waiting…')).toBeVisible();
     expect(screen.queryByText('Nothing is waiting.')).toBeNull();
-    expect(screen.queryByText(/profiles? (is|are) waiting/)).toBeNull();
+    expect(screen.queryByRole('link', { name: /waiting for/ })).toBeNull();
     await act(async () => {
       release();
       await held;
     });
-    expect(await screen.findByText('2 profiles are waiting for your approval.')).toBeVisible();
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests waiting for confirmation' }),
+    ).toBeVisible();
   });
 
-  // Break caught: a failed read of the queue taking the whole landing with it, or being read as "nothing is waiting".
-  it('keeps the rest of the landing when the queue cannot be read, and does not say nothing is waiting', async () => {
-    open(KEYS.approver, { [LIST]: () => refusal(500, 'INTERNAL_ERROR') });
+  // Break caught: a failed read taking the landing with it, or being read as "nothing is waiting".
+  it('says the summary could not be read, and offers to try again, keeping the rest of the landing', async () => {
+    let answers = 0;
+    const { user } = open(KEYS.approver, undefined, {
+      [SUMMARY]: () => {
+        answers += 1;
+        return answers === 1 ? refusal(500, 'INTERNAL_ERROR') : json(200, { queues: OFFICER });
+      },
+    });
 
-    expect(await screen.findByText('The staff list could not be loaded.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(
+      await screen.findByText('The summary of what is waiting could not be read.'),
+    ).toBeVisible();
     expect(screen.queryByText('Nothing is waiting.')).toBeNull();
     expect(screen.getByRole('heading', { level: 2, name: 'Your hubs' })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/INTERNAL_ERROR|Diagnostic text/);
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests waiting for confirmation' }),
+    ).toBeVisible();
+    expect(answers).toBe(2);
+    expect(screen.queryByText('The summary of what is waiting could not be read.')).toBeNull();
+  });
+
+  // Break caught: an answer that is not a summary drawn as one (a proxy's `{}`), or taken for "nothing is waiting".
+  it('treats an answer that is not a summary as a failed read', async () => {
+    open(KEYS.approver, undefined, { [SUMMARY]: () => json(200, {}) });
+
+    expect(
+      await screen.findByText('The summary of what is waiting could not be read.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+  });
+
+  // Break caught: a permission key, a queue identifier or a role leaking into the words of the landing.
+  it('uses plain words: no permission key, no identifier of a queue, no role', async () => {
+    open(KEYS.approver, OFFICER);
+    await screen.findAllByRole('link', { name: /waiting for/ });
+
+    const list = screen.getByRole('list', { name: 'Waiting for you' });
+    expect(list.textContent).not.toMatch(
+      /PICKUP_|STAFF_AWAITING|\b[a-z]+\.[a-z_]+(\.[a-z_]+)?\b|Platform Admin|Senior Ops|Ops Staff/,
+    );
   });
 });
 
@@ -213,6 +363,7 @@ describeInterfaceStates('The signed-in landing', {
           await held;
           return json(200, sessionFixture());
         },
+        [SUMMARY]: summary([]),
       });
       renderApp('/');
 
@@ -230,7 +381,10 @@ describeInterfaceStates('The signed-in landing', {
   },
   empty: {
     test: async () => {
-      api = installFakeApi(signedInApi(sessionFixture({ authorized_hubs: [] })));
+      api = installFakeApi({
+        ...signedInApi(sessionFixture({ authorized_hubs: [] })),
+        [SUMMARY]: summary([{ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0 }]),
+      });
       renderApp('/');
 
       // Nothing waiting is a success message, never a blank; no hub is said in words and not by an empty list. A session whose grants
@@ -268,6 +422,7 @@ describeInterfaceStates('The signed-in landing', {
             ? errorResponse(503, 'SETTING_MISSING')
             : json(200, sessionFixture());
         },
+        [SUMMARY]: summary([]),
       });
       const { user } = renderApp('/');
 
@@ -286,23 +441,34 @@ describeInterfaceStates('The signed-in landing', {
   },
   success: {
     test: async () => {
-      open(KEYS.approver, { [LIST]: () => staffPage(waiting(2)) }, 'Ama Mensah');
+      open(KEYS.approver, OFFICER, {}, 'Ama Mensah');
 
       expect(await within(screen.getByRole('main')).findByText('Ama Mensah')).toBeVisible();
       expect(screen.getByRole('list', { name: 'Your hubs' })).toBeVisible();
-      expect(await screen.findByText('2 profiles are waiting for your approval.')).toBeVisible();
+      expect(
+        await screen.findByRole('link', { name: 'Pickup requests waiting for confirmation' }),
+      ).toBeVisible();
     },
   },
   'permission-restricted': {
     inapplicable:
-      'Any signed-in staff session may see the landing, so it needs no permission key; the queue it shows is read only for a session that lists the keys, and the server refuses it again whatever the page shows. The refusal for a missing key is the route guard’s and is tested with it.',
+      'Any signed-in staff session may see the landing, so it needs no permission key; the queues it lists are the ones the server counted for the session, by the key of each queue’s own list, and the server refuses each queue’s page again whatever the landing shows. The refusal for a missing key is the route guard’s and is tested with it.',
   },
 });
 
 describe('the landing: accessibility', () => {
   it('has no WCAG violations that can be checked without a layout engine', async () => {
-    const view = open(KEYS.approver, { [LIST]: () => staffPage(waiting(2)) });
-    await screen.findByText('2 profiles are waiting for your approval.');
+    const view = open(KEYS.approver, OFFICER);
+    await screen.findByRole('link', { name: 'Pickup requests waiting for confirmation' });
+
+    expect(await wcagViolations(view.container)).toEqual([]);
+  });
+
+  it('has no WCAG violations when the summary could not be read', async () => {
+    const view = open(KEYS.approver, undefined, {
+      [SUMMARY]: () => refusal(500, 'INTERNAL_ERROR'),
+    });
+    await screen.findByText('The summary of what is waiting could not be read.');
 
     expect(await wcagViolations(view.container)).toEqual([]);
   });

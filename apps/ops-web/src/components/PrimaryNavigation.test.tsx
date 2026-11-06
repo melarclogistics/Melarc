@@ -179,3 +179,65 @@ describe('PrimaryNavigation', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('PrimaryNavigation: the count beside an entry (task C1)', () => {
+  const COUNTED: NavigationItem[] = [
+    { to: '/', label: 'Home', icon: 'overview' },
+    {
+      to: '/admin',
+      label: 'Administration',
+      icon: 'staff',
+      badge: { count: 12, meaning: 'waiting for approval' },
+    },
+    {
+      to: '/reports',
+      label: 'Reports',
+      icon: 'sessions',
+      badge: { count: 0, meaning: 'in progress' },
+    },
+  ];
+
+  // Break caught: a count drawn beside an entry that has none, or one that is not drawn beside the entry that has one.
+  it('draws a count after the label of the entry that has one, and nothing beside the others', () => {
+    renderNavigation(COUNTED);
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(screen.getByRole('link', { name: /^Home/ })).queryByText('12')).toBeNull();
+    expect(nav.querySelectorAll('.ui-count-badge')).toHaveLength(2);
+    expect(
+      within(screen.getByRole('link', { name: /^Administration/ })).getByText('12', {
+        selector: '[aria-hidden]',
+      }),
+    ).toBeVisible();
+  });
+
+  // Break caught: the number heard without what it counts, or twice.
+  it('says what the number counts in the name of the entry, once', () => {
+    renderNavigation(COUNTED);
+
+    expect(
+      screen.getByRole('link', { name: 'Administration 12 waiting for approval' }),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Reports 0 in progress' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Home' })).toBeVisible();
+  });
+
+  // Break caught: a collapsed menu whose tooltip drops the count, or shows a count where there is none.
+  it('says the count in the tooltip when the menu is collapsed to its icons, and the name alone when there is none', () => {
+    const router = createMemoryRouter([
+      { path: '*', element: <PrimaryNavigation items={COUNTED} collapsed /> },
+    ]);
+    render(<RouterProvider router={router} />);
+
+    expect(screen.getByRole('link', { name: /^Administration/ })).toHaveAttribute(
+      'title',
+      'Administration: 12 waiting for approval',
+    );
+    expect(screen.getByRole('link', { name: /^Home/ })).toHaveAttribute('title', 'Home');
+  });
+
+  it('has no WCAG 2.1 A or AA violations with counts beside the entries', async () => {
+    const { container } = renderNavigation(COUNTED, '/admin');
+    expect(await wcagViolations(container)).toEqual([]);
+  });
+});
