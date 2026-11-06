@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { hubLocal } from '../../src/pickup/cutoff.js';
 import { TestClient, type TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { HUBS } from '../../src/tools/seed/hubs.js';
@@ -8,15 +9,16 @@ import { insertManifest, manifestRow } from './support/manifests.js';
 import { ARRANGER, insertPickupRequest, pickupRequestRow } from './support/pickups.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { insertRider, riderRow } from './support/riders.js';
-import { API, HUB_A, HUB_B, codeOf, type Actor } from './support/staff-routes.js';
+import { API, HUB_A, HUB_B, OPS, codeOf, type Actor } from './support/staff-routes.js';
 import { insertVendor, vendorRow } from './support/vendors.js';
 import { startVendorRoutes, type VendorRoutes } from './support/vendor-routes.js';
 
 /**
- * `lookupRecords` against the real application and a real PostgreSQL (task C2; `features/operations/global-lookup.md`, `AC-LOOKUP-01` to
- * `-11`): a record found by its code, a name or a phone number typed in full, and only a record the same session could open through its own
- * read. Two hubs, each with a vendor, a request, a run, a rider and a staff member whose names share a word ("Zuko") so that one query meets
- * every kind in both hubs.
+ * `lookupRecords` against the real application and a real PostgreSQL (task C2 and C2.1; `features/operations/global-lookup.md`,
+ * `AC-LOOKUP-01` to `-13`): a record found by its code, a name or a phone number typed in full, and only a record the same session could open
+ * through its own read. Two hubs, each with a vendor, a request, a run, a rider and a staff member whose names share a word ("Zuko") so that one
+ * query meets every kind in both hubs. The call is a POST with the body `{ "q": ... }` that changes nothing (the Product Owner's decision of
+ * 6 November 2026): a phone number typed in full is in no URL.
  */
 const LOOKUP = `${API}/ops/lookup`;
 const SHARED_PHONE = '+233241112222';
@@ -28,7 +30,32 @@ const SUFFIX = { a: 'Alpha', b: 'Beta' } as const;
 type Which = 'a' | 'b';
 
 /** Every field a result may carry (`RecordLookupResult`): the facts of a record and nothing else. */
-const RESULT_FIELDS = ['kind', 'id', 'code', 'title', 'state', 'hub', 'service_date', 'phone_hint'];
+const RESULT_FIELDS = [
+  'kind',
+  'id',
+  'code',
+  'title',
+  'state',
+  'hub',
+  'service_date',
+  'sender_name',
+  'phone_hint',
+];
+
+/** The hub's day `offset` days from today, as a `YYYY-MM-DD` date: the hub's clock is `Africa/Accra`, which has no daylight saving. */
+const daysFromToday = (offset: number): string => {
+  const day = new Date(`${hubLocal(new Date()).date}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + offset);
+  return day.toISOString().slice(0, 10);
+};
+
+/** Waits out the last seconds before the hub's midnight, so that a test that arranges dates by "today" and then asks is not split by a new day. */
+const stayInToday = async (): Promise<void> => {
+  const now = new Date();
+  const toMidnight =
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
+  if (toMidnight < 30_000) await new Promise((resolve) => setTimeout(resolve, toMidnight + 1_000));
+};
 
 interface Found {
   readonly id: string;
@@ -126,8 +153,12 @@ afterAll(async () => {
   await routes.stop();
 });
 
+/**
+ * The call: a POST with the text in the body, as the Ops Portal sends it: with the session's synchronizer token (the actor's client sends it) and the
+ * Ops Portal's Origin (this harness serves two browsers' origins, so a staff client names its own).
+ */
 const ask = (actor: Actor | TestClient, q: string): Promise<TestResponse> =>
-  ('client' in actor ? actor.client : actor).get(`${LOOKUP}?q=${encodeURIComponent(q)}`);
+  'client' in actor ? actor.client.post(LOOKUP, { q }, { origin: OPS }) : actor.post(LOOKUP, { q });
 
 interface Item {
   readonly kind: string;
@@ -137,6 +168,7 @@ interface Item {
   readonly state?: string;
   readonly hub?: { readonly id: string; readonly display_name: string };
   readonly service_date?: string;
+  readonly sender_name?: string;
   readonly phone_hint?: string;
 }
 const itemsOf = (response: TestResponse): Item[] => (response.json() as { items: Item[] }).items;
@@ -154,8 +186,11 @@ const OWN_READ: Record<string, (id: string) => string> = {
 
 describe('the text asked (AC-LOOKUP-01)', () => {
   // Break caught: a text the contract refuses being searched, spaces counted as characters, or a refusal that is not a validation failure.
+  const violationsOf = (answer: TestResponse): { in: string; pointer: string }[] =>
+    (answer.json() as { details: { violations: { in: string; pointer: string }[] } }).details
+      .violations;
+
   it.each([
-    ['nothing'],
     ['a'],
     ['  a  '],
     ['x'.repeat(65)],
@@ -163,19 +198,54 @@ describe('the text asked (AC-LOOKUP-01)', () => {
     [`${'x'.repeat(32)}     ${'y'.repeat(32)}`],
     // A NUL character is in no name, and PostgreSQL refuses it in a text: a refused query and never a failed read (a 500).
     ['ab\u0000cd'],
-  ])('is VALIDATION_FAILED for %j', async (q) => {
-    const answer = q === 'nothing' ? await officer.client.get(LOOKUP) : await ask(officer, q);
+  ])('is VALIDATION_FAILED for the text %j', async (q) => {
+    const answer = await ask(officer, q);
 
     expect([answer.status, codeOf(answer)]).toEqual([400, 'VALIDATION_FAILED']);
-    // The violation names the parameter q: the contract's own check spells its place `q` and the handler's `/q` (the platform spells the two differently).
-    const { violations } = (
-      answer.json() as { details: { violations: { in: string; pointer: string }[] } }
-    ).details;
+    // The violation names the field q of the body: the contract's own check spells its place `/q` as the handler's does.
+    const violations = violationsOf(answer);
     expect(violations.length).toBeGreaterThan(0);
     for (const violation of violations) {
-      expect(violation.in).toBe('query');
-      expect(violation.pointer).toMatch(/^\/?q$/);
+      expect(violation.in).toBe('body');
+      expect(violation.pointer).toBe('/q');
     }
+  });
+
+  // Break caught: a body the contract refuses being read as a text (no body, no q, a q that is not a string, another field), or a refusal that is
+  // not a validation failure naming the place at fault: the field q, or the body as a whole where it is absent or carries a field it should not (the
+  // platform spells the body itself with an empty pointer, and does not echo the name of a field it did not expect).
+  it.each([
+    ['no body', undefined, ''],
+    ['an empty object', {}, '/q'],
+    ['a q that is a number', { q: 42 }, '/q'],
+    ['a q that is null', { q: null }, '/q'],
+    ['a field beside q', { q: 'zuko', limit: 5 }, ''],
+  ])('is VALIDATION_FAILED for %s', async (_what, body, pointer) => {
+    const answer = await officer.client.post(LOOKUP, body, { origin: OPS });
+
+    expect([answer.status, codeOf(answer)]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(
+      violationsOf(answer).map((violation) => [violation.in, violation.pointer]),
+    ).toContainEqual(['body', pointer]);
+  });
+
+  // Break caught: the text still read from the address (a phone number in a URL a proxy keeps), or a GET that still answers.
+  it('reads the text from the body alone, and a GET of the path is no route', async () => {
+    const inAddress = await officer.client.post(`${LOOKUP}?q=zuko`, {}, { origin: OPS });
+    expect([inAddress.status, codeOf(inAddress)]).toEqual([400, 'VALIDATION_FAILED']);
+
+    // A text in the address and another in the body: the body is the query.
+    const both = await officer.client.post(
+      `${LOOKUP}?q=nothing-matches-this`,
+      { q: 'quarmby' },
+      { origin: OPS },
+    );
+    expect(both.status).toBe(200);
+    expect(idsOf(both)).toEqual([requests.a.id]);
+
+    const get = await officer.client.get(`${LOOKUP}?q=quarmby`);
+    expect([get.status, codeOf(get)]).toEqual([404, 'NOT_FOUND']);
+    expect(get.text).not.toContain('items');
   });
 
   // Break caught: the 64 counted on the folded text in the handler while the contract counts the text as sent (a text the feature says is
@@ -209,7 +279,7 @@ describe('a code finds at most the record that carries it (AC-LOOKUP-02)', () =>
   ])('finds %s alone, in any case and with spaces around it', async (_name, code, id) => {
     for (const typed of [code(), code().toLowerCase(), `  ${code().toLowerCase()}  `]) {
       const answer = await ask(platformAdmin, typed);
-      expect(answer.status).toBe(200);
+      expect(answer.status, answer.text).toBe(200);
       expect(idsOf(answer)).toEqual([id()]);
     }
   });
@@ -484,7 +554,7 @@ describe('only an Ops staff session may ask (AC-LOOKUP-07)', () => {
       200,
     );
 
-    const asVendor = await browser.get(`${LOOKUP}?q=zuko`);
+    const asVendor = await browser.post(LOOKUP, { q: 'zuko' });
     expect([asVendor.status, codeOf(asVendor)]).toEqual([403, 'PERMISSION_DENIED']);
 
     const bare = await ask(anonymous, 'zuko');
@@ -595,6 +665,7 @@ describe('a result carries the record’s facts, not a route and not wording (AC
       state: 'PENDING',
       hub: hubOf('a'),
       service_date: '2026-11-03',
+      sender_name: 'Zuko Quarmby-Demo Alpha',
     });
     expect(one(requests.b.id)).toMatchObject({ state: 'PENDING', hub: hubOf('b') });
     expect(one(vendors.a.id)).toEqual({
@@ -633,6 +704,24 @@ describe('a result carries the record’s facts, not a route and not wording (AC
     ]);
   });
 
+  // Break caught: the sender's name left out of a request found by a code or a number (it was only in the name search's reach), a name other than the
+  // one the record's own read shows, or the field drawn for a kind that has no sender.
+  it('names the sender of a request however it is found, as the request’s own read does, and of no other kind', async () => {
+    for (const q of ['quarmby', requests.a.code, '024 111 2222']) {
+      const found = itemsOf(await ask(platformAdmin, q)).find((item) => item.id === requests.a.id);
+      expect(found?.sender_name, q).toBe('Zuko Quarmby-Demo Alpha');
+    }
+    const own = await platformAdmin.client.get(`${API}/pickup-requests/${requests.a.id}`);
+    expect((own.json() as { sender_name: string }).sender_name).toBe('Zuko Quarmby-Demo Alpha');
+
+    for (const item of itemsOf(await ask(platformAdmin, 'zuko'))) {
+      if (item.kind !== 'PICKUP_REQUEST') expect(item, item.kind).not.toHaveProperty('sender_name');
+    }
+    expect(itemsOf(await ask(platformAdmin, manifests.a.code))[0]).not.toHaveProperty(
+      'sender_name',
+    );
+  });
+
   // Break caught: a state turned into words, or one kind's value given another kind's name for it.
   it('gives a state as the value of the record’s own enumeration, whatever it is', async () => {
     const vendor = await insertVendor(
@@ -648,6 +737,8 @@ describe('a result carries the record’s facts, not a route and not wording (AC
       pickupRequestRow(vendor.organizationId, HUB_A, {
         senderName: 'Mabel Suspended',
         state: 'CANCELLED',
+        // A cancelled request is found by a name only within the window of AC-LOOKUP-13: dated by today, so that the test holds on any day.
+        serviceDate: daysFromToday(0),
       }),
     );
     const run = await insertManifest(
@@ -745,6 +836,57 @@ describe('a lookup is the person’s act, written down when it crosses a hub, an
     expect(await crossings(own.identity.id)).toEqual([]);
   });
 
+  // Break caught: a lookup that is a POST and skips the guard of a POST (the cookie alone being enough), or one that reads before the guard has
+  // judged (events for hubs crossed by a refused request).
+  it.each([
+    ['no synchronizer token', OPS, 'omit'],
+    ['another token', OPS, 'not-the-token-of-this-session'],
+    ['an Origin that is not the Ops Portal’s', 'https://evil.example', 'own'],
+    ['no Origin', null, 'own'],
+  ] as const)(
+    'is refused with CSRF_VALIDATION_FAILED for %s, reads nothing and writes no event',
+    async (_what, origin, token) => {
+      const admin = await routes.platformAdmin();
+      // The persona's client always echoes the token it was issued, so a refusal is asked of a client that holds the credential by value.
+      const holder = routes.kit.client.fork();
+
+      const refused = await holder.post(
+        LOOKUP,
+        { q: 'zuko' },
+        {
+          origin,
+          csrf: token === 'own' ? (admin.csrf ?? 'omit') : token,
+          headers: { cookie: `melarc_session=${admin.token}` },
+        },
+      );
+
+      expect([refused.status, codeOf(refused)]).toEqual([403, 'CSRF_VALIDATION_FAILED']);
+      expect(refused.text).not.toContain('items');
+      expect(await crossings(admin.identity.id)).toEqual([]);
+      // The same session, asking as the Portal does, is answered and crosses both hubs.
+      expect((await ask(admin, 'zuko')).status).toBe(200);
+      expect((await crossings(admin.identity.id)).length).toBe(2);
+    },
+  );
+
+  // Break caught: an answer kept and served again (a cache of a lookup in the application, or a POST taken for a command whose answer is replayed under
+  // a key), when the same query asked twice reads twice: a record made between the two asks is in the second answer. No key is sent or asked.
+  it('reads again each time it is asked, and is answered without an Idempotency-Key', async () => {
+    const asker = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+
+    const first = await ask(asker, 'repeatson');
+    expect(first.status).toBe(200);
+    expect(itemsOf(first)).toEqual([]);
+
+    const made = await insertPickupRequest(
+      routes.admin,
+      pickupRequestRow(vendors.a.organizationId, HUB_A, { senderName: 'Repeatson Later' }),
+    );
+
+    expect(idsOf(await ask(asker, 'repeatson'))).toEqual([made.id]);
+    expect(idsOf(await ask(asker, 'repeatson'))).toEqual([made.id]);
+  });
+
   it('is no-store, and moves the idle clock of the session that asks, as a read of a list does', async () => {
     const actor = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
     const activityOf = async (): Promise<Date> => {
@@ -774,6 +916,113 @@ describe('a lookup is the person’s act, written down when it crosses a hub, an
     expect(answer.status).toBe(200);
     expect(answer.header('cache-control')).toBe('no-store');
     expect((await activityOf()).getTime()).toBeGreaterThan(before.getTime());
+  });
+});
+
+describe('a name finds a pickup request only while it is current work (AC-LOOKUP-13)', () => {
+  const NAME = 'Windowson';
+  const request: Record<string, Found & { readonly phone: string }> = {};
+  let rider: { id: string };
+  let phones = 0;
+
+  const arrange = async (
+    label: string,
+    which: Which,
+    state: 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CANCELLED',
+    offset: number,
+    createdAt?: Date,
+  ): Promise<void> => {
+    phones += 1;
+    const phone = `+2332455500${String(phones).padStart(2, '0')}`;
+    const row = await insertPickupRequest(
+      routes.admin,
+      pickupRequestRow(vendors[which].organizationId, HUBS_BY[which], {
+        senderName: `${NAME} ${label}`,
+        state,
+        serviceDate: daysFromToday(offset),
+        primaryPhone: phone,
+        ...(createdAt === undefined ? {} : { createdAt }),
+      }),
+    );
+    request[label] = { id: row.id, code: row.code, phone };
+  };
+
+  beforeAll(async () => {
+    // The dates are arranged by the hub's today and asked a moment later: not across the hub's midnight.
+    await stayInToday();
+    // A non-terminal state is current work whatever the date.
+    await arrange('Confirmed200', 'a', 'CONFIRMED', -200);
+    await arrange('Pending200', 'a', 'PENDING', -200);
+    // A terminal one is current work from 30 days before today on: judged on the service date, not on when the request was made (this one was
+    // made 300 days ago and is dated 5 days past; the 31-day one was made just now).
+    await arrange('Cancelled5', 'a', 'CANCELLED', -5, new Date(Date.now() - 300 * 86_400_000));
+    await arrange('Cancelled30', 'a', 'CANCELLED', -30);
+    await arrange('Declined30', 'a', 'DECLINED', -30);
+    await arrange('Cancelled31', 'a', 'CANCELLED', -31);
+    await arrange('Declined31', 'a', 'DECLINED', -31);
+    await arrange('Ahead10', 'a', 'CANCELLED', 10);
+    await arrange('SecondHub5', 'b', 'CANCELLED', -5);
+    await arrange('SecondHub31', 'b', 'CANCELLED', -31);
+    rider = await insertRider(routes.admin, riderRow({ hubId: HUB_A, fullName: `${NAME} Rider` }));
+  }, 120_000);
+
+  const inWindowOfHubA = [
+    'Confirmed200',
+    'Pending200',
+    'Cancelled5',
+    'Cancelled30',
+    'Declined30',
+    'Ahead10',
+  ];
+
+  // Break caught: no window (an old terminal request found), a window on the wrong date (the creation date), a window that is a day too wide or
+  // too narrow, a terminal state treated as current, a non-terminal one windowed, a future date left out, or the window put on another kind.
+  it('gives an officer of the hub the requests that are current work, and the rider, and not the terminal ones dated more than 30 days ago', async () => {
+    const found = await ask(officer, NAME.toLowerCase());
+
+    expect(found.status).toBe(200);
+    expect(sorted(idsOf(found))).toEqual(
+      sorted([...inWindowOfHubA.map((label) => request[label]?.id ?? ''), rider.id]),
+    );
+  });
+
+  // Break caught: a window that is judged for one scope only, or one that hides another hub's recent request from a session that reaches it.
+  it('gives a Platform Admin the same, and the recent request of the second hub, and not its old one', async () => {
+    const found = await ask(platformAdmin, NAME);
+
+    expect(sorted(idsOf(found))).toEqual(
+      sorted([
+        ...inWindowOfHubA.map((label) => request[label]?.id ?? ''),
+        request.SecondHub5?.id ?? '',
+        rider.id,
+      ]),
+    );
+  });
+
+  // Break caught: the window applied to a code or a number, which would make an old request unfindable by the identifier that is meant to find it.
+  it.each([['Cancelled31'], ['Declined31']])(
+    'still finds %s by its code and by its contact phone typed in full, and not by its name',
+    async (label) => {
+      const own = request[label] ?? failure(label);
+
+      expect(idsOf(await ask(officer, own.code))).toEqual([own.id]);
+      expect(idsOf(await ask(officer, own.code.toLowerCase()))).toEqual([own.id]);
+      const byPhone = await ask(officer, `0${own.phone.slice(4)}`);
+      expect(idsOf(byPhone)).toEqual([own.id]);
+      // Whichever word of the sender's name is typed, and in whichever case, a request outside the window is not found by it.
+      for (const typed of [label, label.toLowerCase(), label.toUpperCase(), `${NAME} ${label}`]) {
+        expect(idsOf(await ask(officer, typed)), typed).toEqual([]);
+      }
+    },
+  );
+
+  // Break caught: a window that moves with the request's creation or a day off at the edge, in either direction.
+  it('draws the edge at 30 days: a terminal request dated 30 days ago is found by its name, one dated 31 days ago is not', async () => {
+    expect(idsOf(await ask(officer, 'Cancelled30'))).toEqual([request.Cancelled30?.id]);
+    expect(idsOf(await ask(officer, 'Declined30'))).toEqual([request.Declined30?.id]);
+    expect(idsOf(await ask(officer, 'Cancelled31'))).toEqual([]);
+    expect(idsOf(await ask(officer, 'Declined31'))).toEqual([]);
+    expect(idsOf(await ask(officer, 'Ahead10'))).toEqual([request.Ahead10?.id]);
   });
 });
 

@@ -64,6 +64,11 @@ export interface LookupHit {
   readonly hubId: string | null;
   /** The day a pickup request was promised or a pickup run is to be worked (`YYYY-MM-DD`); none for every other kind. */
   readonly serviceDate?: string;
+  /**
+   * A pickup request's sender name exactly as the request's own read shows it (the Product Owner's decision of 6 November 2026), so that a request
+   * found by a code, a number or a name says whose it is. **A pickup request only**: no other kind has one, and nothing else of a request rides along.
+   */
+  readonly senderName?: string;
   /** The phone (E.164) the person searched by, when it was a phone that found the record: the platform masks it. Never any other number. */
   readonly matchedPhone?: string;
 }

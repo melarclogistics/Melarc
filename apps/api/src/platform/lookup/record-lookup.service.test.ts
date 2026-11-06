@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AuditEventInput } from '../auth/ports/audit-writer.port.js';
 import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-store.port.js';
-import type { TransactionHandle, UnitOfWorkOptions } from '../auth/ports/unit-of-work.port.js';
+import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../authorization/authorized-request.js';
 import type { OperationWork } from '../authorization/operation-runner.js';
 import { ApiException } from '../http/api-exception.js';
@@ -46,29 +46,44 @@ function request(
     grant: undefined,
     scope: { hubScopeMode: 'SET', authorizedHubIds: [] },
     activity: 'qualifying',
-    stateChanging: false,
+    // The lookup is a POST that changes nothing: the runner takes every request of a method that is not safe as one that changes state.
+    stateChanging: true,
   };
 }
 
 interface Reading {
   readonly key: string | undefined;
-  readonly options: UnitOfWorkOptions | undefined;
+  readonly stateChanging: boolean;
   readonly handle: TransactionHandle;
 }
 
-function runner() {
+/**
+ * `runs` is how many times the coordinator runs a work: the locked path runs it again after a rollback (a stronger lock asked for, or a plan that
+ * changed), and only the last run's result is the answer. The fake has no rollback, so what an earlier run wrote (an audit event) stays in its
+ * record, and what an earlier run left in the memory of the caller stays too: which is what a work that is not restart-safe cannot survive.
+ */
+function runner(runs = 1) {
   const readings: Reading[] = [];
   return {
     readings,
-    read: <T>(
+    // The only door the service has: the runner's locked path. The lock-free `read` refuses a request of a method that is not safe, and the
+    // type of the service's runner does not offer it.
+    mutate: async <T>(
       authorized: AuthorizedRequest,
       _correlationId: string,
       work: OperationWork<T>,
-      options?: UnitOfWorkOptions,
     ): Promise<T> => {
-      const handle = { reading: readings.length } as unknown as TransactionHandle;
-      readings.push({ key: authorized.permission, options, handle });
-      return work(handle, authorized);
+      let answer: T | undefined;
+      for (let run = 0; run < runs; run += 1) {
+        const handle = { reading: readings.length } as unknown as TransactionHandle;
+        readings.push({
+          key: authorized.permission,
+          stateChanging: authorized.stateChanging,
+          handle,
+        });
+        answer = await work(handle, authorized);
+      }
+      return answer as T;
     },
   };
 }
@@ -131,8 +146,10 @@ function build(options: {
   readonly primaryHub?: string | null;
   /** The names the `hub` table holds (the two hubs of these tests by default). */
   readonly hubNames?: ReadonlyMap<string, string>;
+  /** How many times the runner runs each work (the coordinator may run it again after a rollback). */
+  readonly runs?: number;
 }) {
-  const reads = runner();
+  const reads = runner(options.runs);
   const events: { event: AuditEventInput; handle: TransactionHandle }[] = [];
   const nameReads: NameRead[] = [];
   const names = options.hubNames ?? HUB_NAMES;
@@ -200,7 +217,10 @@ describe('the text asked', () => {
 
       expect(failure).toBeInstanceOf(ApiException);
       expect((failure as ApiException).code).toBe('VALIDATION_FAILED');
-      expect(JSON.stringify((failure as ApiException).details)).toContain('/q');
+      // The text is the field `q` of the body (`AC-LOOKUP-01`): the violation says so, and never that it was in the address.
+      expect((failure as ApiException).details).toMatchObject({
+        violations: [{ in: 'body', pointer: '/q' }],
+      });
       expect(reads.readings).toEqual([]);
       expect(searches).toEqual([]);
     },
@@ -237,8 +257,8 @@ describe('the kinds a session is searched for', () => {
 
     expect(kindsOf(answer)).toEqual(['PICKUP_REQUEST', 'PICKUP_MANIFEST', 'STAFF_IDENTITY']);
     expect(reads.readings.map((reading) => reading.key)).toEqual(['pickup.read', 'staff.read']);
-    for (const reading of reads.readings)
-      expect(reading.options).toEqual({ isolation: 'REPEATABLE READ' });
+    // Each transaction is the POST's: asked of the locked path with the request as the guard judged it.
+    for (const reading of reads.readings) expect(reading.stateChanging).toBe(true);
     // The two kinds of pickup.read share the transaction of that key; each other kind has its own.
     const byKind = new Map(searches.map((search) => [search.kind, search.handle]));
     expect(byKind.get('PICKUP_REQUEST')).toBe(byKind.get('PICKUP_MANIFEST'));
@@ -384,6 +404,7 @@ describe('the answer', () => {
               title: 'ACC-PR-7KQ2MZ',
               state: 'PENDING',
               serviceDate: '2026-11-07',
+              senderName: 'Ama Boateng-Demo',
             }),
           ],
           searches,
@@ -427,6 +448,7 @@ describe('the answer', () => {
         state: 'PENDING',
         hub: { id: HUB_A, display_name: 'Accra' },
         service_date: '2026-11-07',
+        sender_name: 'Ama Boateng-Demo',
       },
       {
         kind: 'PICKUP_MANIFEST',
@@ -596,6 +618,32 @@ describe('the crossing of a hub', () => {
     await service.lookup(request([held('pickup.read', 'all')], [HUB_A, HUB_B]), 'corr', 'ama');
 
     expect(events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_A, HUB_B]);
+  });
+
+  // Break caught (the review of 6 November 2026): a work that keeps what it took and what it wrote in the read's own memory while it runs, which the
+  // coordinator's second run would find: less room (a short answer), and the hubs of the rolled-back run taken as written (a result without its event).
+  it('is restart-safe: a work the runner runs again gives the same answer, and writes its events again', async () => {
+    const sources = (searches: Search[]) => [
+      source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B), ...many('r', 7, HUB_A)], searches),
+      source('VENDOR_ACCOUNT', 'vendor.read', many('v', 8, HUB_A), searches),
+      source('RIDER', 'dispatch.read', many('d', 8, HUB_A), searches),
+    ];
+    const grants = request(
+      [held('pickup.read'), held('vendor.read'), held('dispatch.read')],
+      [HUB_A, HUB_B],
+    );
+    const once = build({ sources: sources([]), primaryHub: HUB_A, runs: 1 });
+    const again = build({ sources: sources([]), primaryHub: HUB_A, runs: 2 });
+
+    const single = await once.service.lookup(grants, 'corr', 'ama');
+    const restarted = await again.service.lookup(grants, 'corr', 'ama');
+
+    // Twenty in all: eight requests, eight vendors and four riders, however many times each work ran.
+    expect(single.items).toHaveLength(20);
+    expect(restarted).toEqual(single);
+    // The hub of the foreign request is written once by each run of the work that read it: nothing was taken as written by a run that rolled back.
+    expect(once.events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_B]);
+    expect(again.events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_B, HUB_B]);
   });
 
   it('writes nothing for an answer with no result, and nothing for a hub whose result was cut from the twenty', async () => {

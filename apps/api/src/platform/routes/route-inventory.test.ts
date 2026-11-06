@@ -49,7 +49,6 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
       { method: 'GET', path: '/api/v1/auth/vendor/devices' },
       { method: 'GET', path: '/api/v1/notifications' },
-      { method: 'GET', path: '/api/v1/ops/lookup' },
       { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
       { method: 'GET', path: '/api/v1/ops/riders/:riderId' },
@@ -86,6 +85,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
       { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
       { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/revoke' },
@@ -201,15 +201,6 @@ describe('the real application', () => {
         path: '/api/v1/notifications',
         access: 'permission',
         permission: 'notification.read',
-        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
-        credentialModes: new Set(['COOKIE']),
-      },
-      // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
-      // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read.
-      {
-        method: 'GET',
-        path: '/api/v1/ops/lookup',
-        access: 'self',
         authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
@@ -542,6 +533,16 @@ describe('the real application', () => {
         access: 'anonymous',
         bucket: 'rate_limit_vendor_signin',
         client: VENDOR_BROWSER,
+      },
+      // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
+      // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
+      // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
+      {
+        method: 'POST',
+        path: '/api/v1/ops/lookup',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
       },
       // S0.53b, S0.53c: the in-person start of a rider's device binding. The first registration is `staff.device.register` (Senior Ops, or a
       // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the actor's own hub, for both tiers).

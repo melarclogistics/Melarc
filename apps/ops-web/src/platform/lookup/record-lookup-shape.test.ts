@@ -27,7 +27,12 @@ describe('the answer of lookupRecords', () => {
     const view = parseRecordLookup({
       items: [
         // A property the contract does not have (a route, a sentence) is not carried, even if a proxy adds it.
-        result({ extra: 'x', route: '/pickup-requests/x', subtitle: 'Kofi · Confirmed' }),
+        result({
+          extra: 'x',
+          route: '/pickup-requests/x',
+          subtitle: 'Kofi · Confirmed',
+          sender_name: 'Kofi Mensah-Demo',
+        }),
         result({
           kind: 'RIDER',
           code: undefined,
@@ -56,6 +61,7 @@ describe('the answer of lookupRecords', () => {
         state: 'PENDING',
         hub: { id: HUB, name: 'Accra' },
         serviceDate: '2026-11-07',
+        senderName: 'Kofi Mensah-Demo',
         phoneHint: null,
       },
       {
@@ -66,6 +72,7 @@ describe('the answer of lookupRecords', () => {
         state: 'ACTIVE',
         hub: { id: HUB, name: 'Accra' },
         serviceDate: null,
+        senderName: null,
         phoneHint: '+233******222',
       },
       {
@@ -76,6 +83,7 @@ describe('the answer of lookupRecords', () => {
         state: 'ACTIVE',
         hub: null,
         serviceDate: null,
+        senderName: null,
         phoneHint: null,
       },
     ]);
@@ -121,6 +129,8 @@ describe('the answer of lookupRecords', () => {
     ['a service date that is not a date', { service_date: 'tomorrow' }],
     ['a service date that does not exist', { service_date: '2026-02-30' }],
     ['a phone hint that is not a string', { phone_hint: 7 }],
+    ['a sender name that is not a string', { sender_name: 7 }],
+    ['a sender name that is far too long', { sender_name: 'x'.repeat(501) }],
   ])('refuses an answer with %s', (_why, over) => {
     expect(parseRecordLookup({ items: [result(over)] })).toBeUndefined();
   });

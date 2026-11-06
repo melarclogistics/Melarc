@@ -18,12 +18,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const LOOKUP = 'GET /ops/lookup';
+const LOOKUP = 'POST /ops/lookup';
 const ID = '6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d';
-const asked = (): string[] =>
-  api.requests
-    .filter((request) => request.url.includes('/ops/lookup'))
-    .map((request) => new URL(request.url).searchParams.get('q') ?? '');
+/** The text a request asked about: the field `q` of its body (read from a clone, so that the body stays readable for whoever reads it next). */
+const qOf = async (request: Request): Promise<string> =>
+  ((await request.clone().json()) as { q?: string }).q ?? '';
+const asked = (): Promise<string[]> =>
+  Promise.all(
+    api.requests
+      .filter((request) => request.url.includes('/ops/lookup'))
+      .map((request) => qOf(request)),
+  );
 
 /** The (fake) moment each request left, so that a debounce is judged by the clock the hook reads. */
 const leftAt: number[] = [];
@@ -80,14 +85,48 @@ const type = (text: string) => {
 };
 
 describe('the lookup hook', () => {
+  // Break caught (AC-LOOKUP-01, -11): the text sent in the address (a phone number typed in full that a proxy or a monitoring tool keeps), a GET,
+  // a POST without the session's synchronizer token, or an Idempotency-Key asked of a read.
+  it('sends the text in the body of a POST with the synchronizer token, and nothing in the address', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    document.cookie = 'melarc_csrf=csrf-token-of-this-session; path=/';
+    try {
+      api = installFakeApi({ [LOOKUP]: async (request) => answerFor(await qOf(request)) });
+      renderWithProviders(<Box />, { signedIn: true });
+
+      type('024 111 2222');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS + 20);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('success');
+      });
+
+      const sent = api.requests.filter((request) => request.url.includes('/ops/lookup'));
+      expect(sent).toHaveLength(1);
+      const [request] = sent;
+      expect(request?.method).toBe('POST');
+      // Nothing of the text is in the address, in any form.
+      expect(new URL(request?.url ?? '').search).toBe('');
+      expect(request?.url).not.toMatch(/111|2222|024/);
+      expect(request?.headers.get('X-CSRF-Token')).toBe('csrf-token-of-this-session');
+      expect(request?.headers.get('Content-Type')).toMatch(/^application\/json/);
+      expect(await request?.clone().json()).toEqual({ q: '024 111 2222' });
+      // No convention asks an Idempotency-Key of a read.
+      expect(request?.headers.has('Idempotency-Key')).toBe(false);
+    } finally {
+      document.cookie = 'melarc_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    }
+  });
+
   // Break caught: a request for a text too short to search, or one made before the person stopped typing.
   it('asks nothing for fewer than two characters once trimmed, and nothing before the text has stood still', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     leftAt.length = 0;
     api = installFakeApi({
-      [LOOKUP]: (request) => {
+      [LOOKUP]: async (request) => {
         leftAt.push(Date.now());
-        return answerFor(new URL(request.url).searchParams.get('q') ?? '');
+        return answerFor(await qOf(request));
       },
     });
     renderWithProviders(<Box />, { signedIn: true });
@@ -97,7 +136,7 @@ describe('the lookup hook', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS * 3);
     });
-    expect(asked()).toEqual([]);
+    expect(await asked()).toEqual([]);
     expect(screen.getByTestId('status')).toHaveTextContent('idle');
 
     type('am');
@@ -108,7 +147,7 @@ describe('the lookup hook', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS / 4);
     });
-    expect(asked()).toEqual([]);
+    expect(await asked()).toEqual([]);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS);
@@ -117,7 +156,7 @@ describe('the lookup hook', () => {
       expect(screen.getByTestId('status')).toHaveTextContent('success');
     });
     // One request, for the text that stood still, trimmed, and it left no sooner than the debounce after the last keystroke.
-    expect(asked()).toEqual(['ama b']);
+    expect(await asked()).toEqual(['ama b']);
     expect(leftAt).toHaveLength(1);
     expect((leftAt[0] ?? 0) - lastKeystroke).toBeGreaterThanOrEqual(LOOKUP_DEBOUNCE_MS);
     expect(screen.getByText('Found for ama b')).toBeVisible();
@@ -128,8 +167,8 @@ describe('the lookup hook', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let release: (response: Response) => void = () => undefined;
     api = installFakeApi({
-      [LOOKUP]: (request) => {
-        const q = new URL(request.url).searchParams.get('q') ?? '';
+      [LOOKUP]: async (request) => {
+        const q = await qOf(request);
         if (q === 'kofi') return new Promise<Response>((resolve) => (release = resolve));
         return answerFor(q);
       },
@@ -162,7 +201,7 @@ describe('the lookup hook', () => {
   it('waits again for a text it had settled when the person leaves it and comes back to it', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     api = installFakeApi({
-      [LOOKUP]: (request) => answerFor(new URL(request.url).searchParams.get('q') ?? ''),
+      [LOOKUP]: async (request) => answerFor(await qOf(request)),
     });
     renderWithProviders(<Box />, { signedIn: true });
     type('kofi');
@@ -172,7 +211,7 @@ describe('the lookup hook', () => {
     await waitFor(() => {
       expect(screen.getByTestId('status')).toHaveTextContent('success');
     });
-    expect(asked()).toEqual(['kofi']);
+    expect(await asked()).toEqual(['kofi']);
 
     type('kof');
     type('kofi');
@@ -181,7 +220,7 @@ describe('the lookup hook', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS / 2);
     });
-    expect(asked()).toEqual(['kofi']);
+    expect(await asked()).toEqual(['kofi']);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS);
@@ -189,7 +228,7 @@ describe('the lookup hook', () => {
     await waitFor(() => {
       expect(screen.getByTestId('status')).toHaveTextContent('success');
     });
-    expect(asked()).toEqual(['kofi', 'kofi']);
+    expect(await asked()).toEqual(['kofi', 'kofi']);
   });
 
   // Break caught: a request for a text the person has already typed past, left running on the server (a scan each, at scale).
@@ -197,8 +236,8 @@ describe('the lookup hook', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let aborted = false;
     api = installFakeApi({
-      [LOOKUP]: (request) => {
-        const q = new URL(request.url).searchParams.get('q') ?? '';
+      [LOOKUP]: async (request) => {
+        const q = await qOf(request);
         if (q !== 'kofi') return answerFor(q);
         return new Promise<Response>((_resolve, reject) => {
           request.signal.addEventListener('abort', () => {
@@ -271,7 +310,7 @@ describe('the lookup hook', () => {
   it('sends nothing when it is asked to try again while there is nothing to ask or the text has not stood still', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     api = installFakeApi({
-      [LOOKUP]: (request) => answerFor(new URL(request.url).searchParams.get('q') ?? ''),
+      [LOOKUP]: async (request) => answerFor(await qOf(request)),
     });
     renderWithProviders(<Box />, { signedIn: true });
 
@@ -286,7 +325,7 @@ describe('the lookup hook', () => {
       screen.getByRole('button', { name: 'Retry' }).click();
       await Promise.resolve();
     });
-    expect(asked()).toEqual([]);
+    expect(await asked()).toEqual([]);
   });
 
   // Break caught: a request before the Ops session is known, which a signed-out screen would send.
@@ -297,6 +336,6 @@ describe('the lookup hook', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_DEBOUNCE_MS * 3);
     });
-    expect(asked()).toEqual([]);
+    expect(await asked()).toEqual([]);
   });
 });

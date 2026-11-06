@@ -30,6 +30,7 @@ interface Schema {
   readonly items?: Schema;
   readonly additionalProperties?: boolean;
   readonly maxItems?: number;
+  readonly minLength?: number;
   readonly maxLength?: number;
   readonly $ref?: string;
 }
@@ -38,16 +39,19 @@ interface Operation {
   readonly operationId?: string;
   readonly 'x-permission'?: string;
   readonly security?: readonly Record<string, unknown>[];
+  readonly 'x-error-codes'?: readonly string[];
   readonly parameters?: readonly {
     readonly name: string;
     readonly in: string;
-    readonly required?: boolean;
-    readonly schema?: {
-      readonly type?: string;
-      readonly minLength?: number;
-      readonly maxLength?: number;
-    };
   }[];
+  readonly requestBody?: {
+    readonly required?: boolean;
+    readonly content?: Record<string, { readonly schema?: Schema }>;
+  };
+  readonly responses?: Record<
+    string,
+    { readonly headers?: Record<string, { readonly $ref?: string }> }
+  >;
 }
 
 const document = parse(readFileSync(CONTRACT, 'utf8')) as {
@@ -137,15 +141,30 @@ describe('the guard of RecordLookupPage and the contract', () => {
 });
 
 describe('the operation lookupRecords in the contract', () => {
-  const operation = document.paths['/ops/lookup']?.get;
+  const path = document.paths['/ops/lookup'];
+  const operation = path?.post;
 
-  // Break caught: the lookup taking a permission of its own, or served to a Vendor session.
-  it('is a self operation of the browser session, asked with one query parameter of 2 to 64 characters', () => {
+  // Break caught: the lookup taking a permission of its own, served to a Vendor session, or sent without the synchronizer token of a POST.
+  it('is a self operation of the browser session, with the synchronizer token, and a POST that changes nothing', () => {
     expect(operation?.operationId).toBe('lookupRecords');
     expect(operation?.['x-permission']).toBe('self');
-    expect(operation?.security).toEqual([{ browserSession: [] }]);
-    const q = operation?.parameters?.find((each) => each.name === 'q');
-    expect(q).toMatchObject({ in: 'query', required: true });
-    expect(q?.schema).toMatchObject({ type: 'string', minLength: 2, maxLength: 64 });
+    expect(operation?.security).toEqual([{ browserSession: [], csrfToken: [] }]);
+    expect(operation?.['x-error-codes']).toContain('CSRF_VALIDATION_FAILED');
+  });
+
+  // Break caught (the Product Owner's decision of 6 November 2026): a text in the address again, or a GET that serves it, which would put a phone
+  // number typed in full into a URL that a proxy or a monitoring tool keeps.
+  it('asks one field q of 2 to 64 characters in the body, with nothing in the address and no GET', () => {
+    expect(path?.get).toBeUndefined();
+    // No query parameter, and no Idempotency-Key header: no convention asks one of a read.
+    expect(operation?.parameters ?? []).toEqual([]);
+    expect(operation?.requestBody?.required).toBe(true);
+    expect(operation?.requestBody?.content?.['application/json']?.schema).toEqual({
+      $ref: '#/components/schemas/RecordLookupRequest',
+    });
+    const body = document.components.schemas.RecordLookupRequest;
+    expect(body).toMatchObject({ type: 'object', required: ['q'], additionalProperties: false });
+    expect(Object.keys(body?.properties ?? {})).toEqual(['q']);
+    expect(body?.properties?.q).toMatchObject({ type: 'string', minLength: 2, maxLength: 64 });
   });
 });

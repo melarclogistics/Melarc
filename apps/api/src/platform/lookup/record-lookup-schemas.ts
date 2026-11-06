@@ -35,7 +35,21 @@ export const RECORD_LOOKUP_RESULT_SCHEMA = described({
     state: { type: 'string' },
     hub: RECORD_LOOKUP_HUB_SCHEMA,
     service_date: { type: 'string', format: 'date' },
+    sender_name: { type: 'string' },
     phone_hint: { type: 'string', maxLength: 24 },
+  },
+});
+
+/**
+ * The body of `lookupRecords` (`RecordLookupRequest` of the contract): the one field `q`, closed against any other. The text is in the body and
+ * never in the address, because a phone number typed in full must not travel in a URL (the Product Owner's decision of 6 November 2026).
+ */
+export const RECORD_LOOKUP_REQUEST_SCHEMA = described({
+  type: 'object',
+  required: ['q'],
+  additionalProperties: false,
+  properties: {
+    q: { type: 'string', minLength: 2, maxLength: 64 },
   },
 });
 

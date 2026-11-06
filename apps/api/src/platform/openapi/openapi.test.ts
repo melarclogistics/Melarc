@@ -174,8 +174,8 @@ describe('the generated description of the real application', () => {
       ['/auth/recovery/complete', ['post'], ['completeCredentialRecovery']],
       // Task C1: the count of the work waiting in each queue the session may read.
       ['/ops/queue-summary', ['get'], ['getQueueSummary']],
-      // Task C2: the lookup of a record by its code, a name or a phone number typed in full.
-      ['/ops/lookup', ['get'], ['lookupRecords']],
+      // Task C2: the lookup of a record by its code, a name or a phone number typed in full (a POST that changes nothing, since 6 November 2026).
+      ['/ops/lookup', ['post'], ['lookupRecords']],
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],

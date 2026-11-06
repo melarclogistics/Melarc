@@ -41,8 +41,9 @@ function searchableText(text: string): string | undefined {
 }
 
 /**
- * `lookupRecords`: finds a record by its code, a name or a phone number typed in full (task C2; features/operations/global-lookup.md). The top
- * bar's search and the palette of step R4 draw it; this reads, judges (`record-lookup-shape.ts`) and hands the state on.
+ * `lookupRecords` (`POST /ops/lookup`, a POST that changes nothing): finds a record by its code, a name or a phone number typed in full (task C2;
+ * features/operations/global-lookup.md). The top bar's search and the palette of step R4 draw it; this reads, judges (`record-lookup-shape.ts`)
+ * and hands the state on.
  *
  * **It asks late and asks little** (`AC-LOOKUP-12`): nothing for a text that is too short once trimmed or when nobody is signed in; for a longer
  * one, a single request once the text has stood still for {@link LOOKUP_DEBOUNCE_MS}, whatever was typed on the way. **It never offers an earlier
@@ -85,9 +86,11 @@ export function useRecordLookup(text: string): RecordLookupState {
     refetchOnReconnect: false,
     gcTime: 0,
     // The signal ends the request of a text the person has typed past: a name search is a scan on the server, and a superseded one is no work worth finishing.
+    // The text is sent in the body of a POST that changes nothing, never in the address: a phone number typed in full must not be in a URL (the
+    // Product Owner's decision of 6 November 2026). The client adds the session's synchronizer token to any method that is not safe.
     queryFn: async ({ signal }) => {
       const answer = answerOf(
-        await client.GET('/ops/lookup', { params: { query: { q: wanted ?? '' } }, signal }),
+        await client.POST('/ops/lookup', { body: { q: wanted ?? '' }, signal }),
       );
       const page = parseRecordLookup(answer.data);
       if (page === undefined) throw unexpectedResponse(answer.status);

@@ -13,7 +13,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.92.0
+  version: 5.93.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -3855,21 +3855,32 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /ops/lookup:
-    get:
+    post:
       operationId: lookupRecords
-      # SAFE READ. Browser surface only: an Ops Portal staff session; a Vendor or a Rider is refused. No CSRF, a read changes nothing.
+      # A POST THAT CHANGES NOTHING (Product Owner, 6 November 2026). It is a POST so that a phone number typed in full is in the body and never in a
+      # URL, which proxies and monitoring tools may keep. Browser surface only: an Ops Portal staff session; a Vendor or a Rider is refused. It carries
+      # the synchronizer token as every staff POST does, and it takes no Idempotency-Key, because repeating it repeats a read.
       security:
         - browserSession: []
+          csrfToken: []
       x-permission: self
-      x-error-codes: [PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [lookup]
       summary: Find a record by its code, a name or a phone number typed in full
       description: |
         Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
-        palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-12`), is
+        palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-13`), is
         features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
 
-        **The query `q` is one string of 2 to 64 characters as sent**; anything else is `VALIDATION_FAILED` naming the parameter `q`. The server then
+        **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
+        address, because a phone number typed in full must not travel in a URL, which proxies and monitoring tools may keep. It is protected as
+        every staff POST is (the session cookie, the synchronizer token and the `Origin` of the Ops Portal: `CSRF_VALIDATION_FAILED`
+        otherwise), its answer is `Cache-Control: no-store`, and it takes no `Idempotency-Key` (no convention asks one of a read). There is no
+        `GET` of this path.
+
+        **The query `q` is one string of 2 to 64 characters as sent**; anything else (no body, no `q`, a `q` that is not a string, any other
+        field) is `VALIDATION_FAILED`, naming the field `q` (or the body itself, where there is none or it carries a field it should not: the
+        platform spells the body with an empty pointer). The server then
         trims it and makes each run of white space inside it one space, and refuses a text of fewer than 2 characters after that, and a
         text with a NUL character, the same way. **The server decides what it is, in this order, and asks only the question that kind of
         query means.** (1) Text of the shape of an operational code (`HUB-TT-XXXXXX`, case does not matter) returns **at most the record that
@@ -3877,7 +3888,10 @@ paths:
         never `403` or `404`. (2) A phone number **typed in full**, normalised as `findAdHocSender` normalises one, returns the pickup
         requests whose own contact phone is that number and the riders whose phone it is; a partial or invalid number matches no phone and
         is read as a name; the phone of an ad-hoc sender is never searched. (3) Anything else is a **case-insensitive word-prefix search**
-        of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). (4) A vendor's
+        of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). **A pickup
+        request is searched by name only while it is current work** (Product Owner, 6 November 2026): its `state` is not terminal
+        (`DECLINED` and `CANCELLED` are) or its `scheduled_service_date` is on or after the hub's today minus 30 days; a code and a phone
+        number typed in full find a request whatever its age. (4) A vendor's
         account identifier (eight characters) is matched exactly in addition to the name.
 
         **No permission admits the call; each kind is admitted by the key of its own read**: `pickup.read` (requests and runs),
@@ -3889,6 +3903,7 @@ paths:
         **The answer is at most 8 results per kind and 20 in all**, in the fixed order of `RecordLookupKind` (a pickup request newest first,
         the others by name then id). A result is `kind`, `id` (the account's for a vendor), `code` where the record has one, `title`, and
         the facts that say where the record stands: its own `state`, its `hub` and, for a pickup request and a pickup run, its `service_date`,
+        and, **for a pickup request only, its `sender_name`** exactly as the request's own read shows it (Product Owner, 6 November 2026),
         **and nothing else**. **A result names no page and carries no wording** (Product Owner, 6 November 2026): the Ops Portal maps the
         `kind` and the `id` to its own route and writes its own line from the facts. **A phone number appears in a result only when the person
         searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
@@ -3896,14 +3911,11 @@ paths:
         **It is a read and only a read.** It writes one `auth.hub_boundary.crossed` for each hub other than the actor's own that the
         returned results represent, as the lists do (audit.md section 5.4), and nothing else. It is `qualifying` activity: a typed search
         is the person's own act. The answer is `Cache-Control: no-store`.
-      parameters:
-        - name: q
-          in: query
-          required: true
-          schema: { type: string, minLength: 2, maxLength: 64 }
-          description: |
-            What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
-            of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordLookupRequest' }
       responses:
         '200':
           description: OK
@@ -14436,6 +14448,22 @@ components:
         The kinds of record a lookup can return, **in the order an answer lists them**: a closed list. A value is never renamed or reused, and a
         kind built later is added here, in the feature and in the registry together.
 
+    RecordLookupRequest:
+      type: object
+      required: [q]
+      additionalProperties: false
+      properties:
+        q:
+          type: string
+          minLength: 2
+          maxLength: 64
+          description: |
+            What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
+            of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
+      description: |
+        The body of `lookupRecords`. The text is here and never in the address: a phone number typed in full must not travel in a URL
+        (Product Owner, 6 November 2026).
+
     RecordLookupResult:
       type: object
       required: [kind, id, title]
@@ -14479,6 +14507,12 @@ components:
           description: |
             The day a pickup request was promised (`scheduled_service_date`) or a pickup run is to be worked (`service_date`). **Absent for
             every other kind.**
+        sender_name:
+          type: string
+          description: |
+            **A pickup request only**: the sender's name exactly as `PickupRequest.sender_name` shows it on the request's own read (the registered
+            vendor's trading name, its legal name when it has none, or the ad-hoc sender's name), so that a request found by a name or a number
+            says whose it is. A label, never an identifier and never an authority. **Absent for every other kind.**
         phone_hint:
           type: string
           maxLength: 24
@@ -14488,7 +14522,8 @@ components:
             number and never in clear.
       description: |
         A pointer to one record found and the facts that say where it stands, and nothing else: no route and no wording (the Ops Portal gives a
-        kind and an id its own page and writes its own line), no email, address or credential, and no number in clear.
+        kind and an id its own page and writes its own line), no email, address or credential, and no number in clear (but for what the sender's
+        name says, as the request's own read shows it).
 
     RecordLookupPage:
       type: object

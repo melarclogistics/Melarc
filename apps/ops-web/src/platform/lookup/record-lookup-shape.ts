@@ -30,7 +30,7 @@ export const RECORD_LOOKUP_FIELDS = {
   RecordLookupPage: { required: ['items'], optional: [], enums: {} },
   RecordLookupResult: {
     required: ['kind', 'id', 'title'],
-    optional: ['code', 'state', 'hub', 'service_date', 'phone_hint'],
+    optional: ['code', 'state', 'hub', 'service_date', 'sender_name', 'phone_hint'],
     enums: { kind: RECORD_LOOKUP_KINDS },
   },
   /** The hub of a result: its id and display name, as `authorized_hubs` of the session names one. */
@@ -58,6 +58,8 @@ export interface RecordLookupResultView {
   readonly hub: RecordLookupHubView | null;
   /** A pickup request's or a run's service date (`YYYY-MM-DD`); none for every other kind. */
   readonly serviceDate: string | null;
+  /** A pickup request's sender as the request's own read shows it (a label, never an identifier); none for every other kind. */
+  readonly senderName: string | null;
   /** The number the person searched by, masked (`+233******222`), on a record that number found; never a number in clear. */
   readonly phoneHint: string | null;
 }
@@ -90,7 +92,15 @@ function hubOf(value: unknown): RecordLookupHubView | undefined {
 
 function resultOf(body: unknown): RecordLookupResultView | 'unknown-kind' | undefined {
   if (!isRecord(body)) return undefined;
-  const { kind, code, state, hub, service_date: serviceDate, phone_hint: phoneHint } = body;
+  const {
+    kind,
+    code,
+    state,
+    hub,
+    service_date: serviceDate,
+    sender_name: senderName,
+    phone_hint: phoneHint,
+  } = body;
   if (typeof kind !== 'string') return undefined;
   const id = uuidOf(body.id);
   const title = lineOf(body.title);
@@ -102,6 +112,8 @@ function resultOf(body: unknown): RecordLookupResultView | 'unknown-kind' | unde
   if (hubView === undefined) return undefined;
   const date = serviceDate === undefined ? null : calendarDateOf(serviceDate);
   if (date === undefined) return undefined;
+  const sender = senderName === undefined ? null : lineOf(senderName);
+  if (sender === undefined) return undefined;
   const maskedPhone = phoneHint === undefined ? null : hintOf(phoneHint);
   if (maskedPhone === undefined) return undefined;
   // A kind of a newer server is no result here (see above); anything that is not a word at all is not a result of the API's.
@@ -114,6 +126,7 @@ function resultOf(body: unknown): RecordLookupResultView | 'unknown-kind' | unde
     state: state ?? null,
     hub: hubView,
     serviceDate: date,
+    senderName: sender,
     phoneHint: maskedPhone,
   };
 }

@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.92.0
- *   SHA-256 e0447d5b250021054efc4492b0a15346983b1e2a83d609d2022149da1d4c1de3 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.93.0
+ *   SHA-256 a07223c51642052506dd96f2879a57f21be7922895a59f59ab6aad89b543f709 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2427,13 +2427,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * Find a record by its code, a name or a phone number typed in full
          * @description Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
-         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-12`), is
+         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-13`), is
          *     features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
          *
-         *     **The query `q` is one string of 2 to 64 characters as sent**; anything else is `VALIDATION_FAILED` naming the parameter `q`. The server then
+         *     **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
+         *     address, because a phone number typed in full must not travel in a URL, which proxies and monitoring tools may keep. It is protected as
+         *     every staff POST is (the session cookie, the synchronizer token and the `Origin` of the Ops Portal: `CSRF_VALIDATION_FAILED`
+         *     otherwise), its answer is `Cache-Control: no-store`, and it takes no `Idempotency-Key` (no convention asks one of a read). There is no
+         *     `GET` of this path.
+         *
+         *     **The query `q` is one string of 2 to 64 characters as sent**; anything else (no body, no `q`, a `q` that is not a string, any other
+         *     field) is `VALIDATION_FAILED`, naming the field `q` (or the body itself, where there is none or it carries a field it should not: the
+         *     platform spells the body with an empty pointer). The server then
          *     trims it and makes each run of white space inside it one space, and refuses a text of fewer than 2 characters after that, and a
          *     text with a NUL character, the same way. **The server decides what it is, in this order, and asks only the question that kind of
          *     query means.** (1) Text of the shape of an operational code (`HUB-TT-XXXXXX`, case does not matter) returns **at most the record that
@@ -2441,7 +2451,10 @@ export interface paths {
          *     never `403` or `404`. (2) A phone number **typed in full**, normalised as `findAdHocSender` normalises one, returns the pickup
          *     requests whose own contact phone is that number and the riders whose phone it is; a partial or invalid number matches no phone and
          *     is read as a name; the phone of an ad-hoc sender is never searched. (3) Anything else is a **case-insensitive word-prefix search**
-         *     of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). (4) A vendor's
+         *     of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). **A pickup
+         *     request is searched by name only while it is current work** (Product Owner, 6 November 2026): its `state` is not terminal
+         *     (`DECLINED` and `CANCELLED` are) or its `scheduled_service_date` is on or after the hub's today minus 30 days; a code and a phone
+         *     number typed in full find a request whatever its age. (4) A vendor's
          *     account identifier (eight characters) is matched exactly in addition to the name.
          *
          *     **No permission admits the call; each kind is admitted by the key of its own read**: `pickup.read` (requests and runs),
@@ -2453,6 +2466,7 @@ export interface paths {
          *     **The answer is at most 8 results per kind and 20 in all**, in the fixed order of `RecordLookupKind` (a pickup request newest first,
          *     the others by name then id). A result is `kind`, `id` (the account's for a vendor), `code` where the record has one, `title`, and
          *     the facts that say where the record stands: its own `state`, its `hub` and, for a pickup request and a pickup run, its `service_date`,
+         *     and, **for a pickup request only, its `sender_name`** exactly as the request's own read shows it (Product Owner, 6 November 2026),
          *     **and nothing else**. **A result names no page and carries no wording** (Product Owner, 6 November 2026): the Ops Portal maps the
          *     `kind` and the `id` to its own route and writes its own line from the facts. **A phone number appears in a result only when the person
          *     searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
@@ -2461,9 +2475,7 @@ export interface paths {
          *     returned results represent, as the lists do (audit.md section 5.4), and nothing else. It is `qualifying` activity: a typed search
          *     is the person's own act. The answer is `Cache-Control: no-store`.
          */
-        get: operations["lookupRecords"];
-        put?: never;
-        post?: never;
+        post: operations["lookupRecords"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9617,8 +9629,20 @@ export interface components {
          */
         RecordLookupKind: "PICKUP_REQUEST" | "PICKUP_MANIFEST" | "VENDOR_ACCOUNT" | "RIDER" | "STAFF_IDENTITY";
         /**
+         * @description The body of `lookupRecords`. The text is here and never in the address: a phone number typed in full must not travel in a URL
+         *     (Product Owner, 6 November 2026).
+         */
+        RecordLookupRequest: {
+            /**
+             * @description What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
+             *     of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
+             */
+            q: string;
+        };
+        /**
          * @description A pointer to one record found and the facts that say where it stands, and nothing else: no route and no wording (the Ops Portal gives a
-         *     kind and an id its own page and writes its own line), no email, address or credential, and no number in clear.
+         *     kind and an id its own page and writes its own line), no email, address or credential, and no number in clear (but for what the sender's
+         *     name says, as the request's own read shows it).
          */
         RecordLookupResult: {
             kind: components["schemas"]["RecordLookupKind"];
@@ -9657,6 +9681,12 @@ export interface components {
              *     every other kind.**
              */
             service_date?: string;
+            /**
+             * @description **A pickup request only**: the sender's name exactly as `PickupRequest.sender_name` shows it on the request's own read (the registered
+             *     vendor's trading name, its legal name when it has none, or the ad-hoc sender's name), so that a request found by a name or a number
+             *     says whose it is. A label, never an identifier and never an authority. **Absent for every other kind.**
+             */
+            sender_name?: string;
             /**
              * @description The phone number the person searched by, masked as the platform masks a destination it shows (`destination_hint`:
              *     `+233******567`, the country part and the last three digits). **Present only on a record that the number found**, never any other
@@ -15785,18 +15815,16 @@ export interface operations {
     };
     lookupRecords: {
         parameters: {
-            query: {
-                /**
-                 * @description What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
-                 *     of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
-                 */
-                q: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordLookupRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

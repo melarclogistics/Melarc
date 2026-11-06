@@ -28,6 +28,8 @@ export interface RecordLookupResultView {
   readonly state?: string;
   readonly hub?: { readonly id: string; readonly display_name: string };
   readonly service_date?: string;
+  /** A pickup request's sender name as its own read shows it; no other kind has one. */
+  readonly sender_name?: string;
   readonly phone_hint?: string;
 }
 
@@ -36,7 +38,7 @@ export interface RecordLookupView {
 }
 
 export interface RecordLookupServiceOptions {
-  readonly runner: Pick<OperationRunner, 'read'>;
+  readonly runner: Pick<OperationRunner, 'mutate'>;
   /** The source of every kind that has one, from the domains that own the records. */
   readonly sources: readonly RecordLookupSource[];
   readonly audit: Pick<AuditWriter, 'write'>;
@@ -52,9 +54,6 @@ export interface RecordLookupServiceOptions {
 /** The most of one kind in an answer, and of all kinds together. */
 export const LOOKUP_PER_KIND = 8;
 export const LOOKUP_IN_ALL = 20;
-
-/** The records of one key are searched in one `REPEATABLE READ` transaction: they are one picture of the data. */
-const ONE_SNAPSHOT = { isolation: 'REPEATABLE READ' } as const;
 
 interface Taken {
   readonly kind: RecordLookupKind;
@@ -76,8 +75,24 @@ interface Taken {
  *   and a kind for which none is left is not read for.
  * - **The hub crossings of the results are written as the lists write them** (audit.md section 5.4): one `auth.hub_boundary.crossed` for each hub
  *   other than the actor's own that the returned results represent, in the transaction that read the first of them, and none for a result the
- *   twenty left out (the room is counted before the transaction ends).
+ *   twenty left out (the work counts the room it has left before it audits).
  * - **A source that fails fails the read** (`500`): the answer never says "nothing found" for a kind it could not read.
+ * - **It is a POST that changes nothing** (the Product Owner's decision of 6 November 2026), **so each key's transaction runs through
+ *   `OperationRunner.mutate`**: the runner treats every request of a method that is not safe as one that changes state, and the lock-free `read`
+ *   refuses it (`stateChanging`). The platform has no other convention for a POST, so the lookup keeps it and adds no concept to the authorization step: the
+ *   transaction takes the shared policy lock of the session's bundle and judges the session's standing under it (more than a read's authority
+ *   check). The database's default isolation applies, because the locked path requires it: a key's transaction asks one source at most for any
+ *   query (`answers` is exclusive for the two kinds of `pickup.read`: a code is a request's or a run's, and a number and a name are a request's),
+ *   so no second statement has a snapshot to agree with.
+ * - **The locked path has a cost, and the feature owns its figures** (features/operations/global-lookup.md section 14; review of 6 November
+ *   2026). The shared lock is held until the transaction commits, and the search runs inside it, so a name search holds the lock for as long as it
+ *   takes. A reduction of that bundle takes the lock exclusively and waits for the holders, and the requests of the bundle that arrive meanwhile
+ *   queue behind the waiting reduction and are refused with the generic operational failure if the lock is not theirs within
+ *   `DATABASE_LOCK_TIMEOUT_MS`. Each key also costs two transactions (the coordinator's discovery and the locked one). A door for a POST that
+ *   changes nothing and takes no policy lock would remove it; that is a change to the authorization step, which this task does not make.
+ * - **The work given to the runner is restart-safe.** The coordinator runs a work again after a rollback if it asked for a stronger lock or the
+ *   plan changed (neither can come from this work today). So the work reads `room` and `audited` and changes neither; what it used and what it
+ *   audited are returned and taken into them after the transaction has committed, and a second run starts from the same state as the first.
  */
 export class RecordLookupService {
   readonly #options: RecordLookupServiceOptions;
@@ -118,8 +133,9 @@ export class RecordLookupService {
     const query = lookupQueryOf(raw);
     if (query === undefined) {
       throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+        // The text is the field `q` of the body: a POST that changes nothing, so that a number typed in full is in no URL (`AC-LOOKUP-01`).
         violations: [
-          { in: 'query', pointer: '/q', rule: typeof raw === 'string' ? 'pattern' : 'required' },
+          { in: 'body', pointer: '/q', rule: typeof raw === 'string' ? 'pattern' : 'required' },
         ],
       });
     }
@@ -138,26 +154,29 @@ export class RecordLookupService {
       // A session whose bundle holds no grant of the key is not searched for these kinds, and the answer does not say so.
       const forKey = authorizationForKey(authorized, key);
       if (forKey === undefined) continue;
-      const taken = await this.#options.runner.read(
-        forKey,
-        correlationId,
-        async (handle) => {
-          const mine: Taken[] = [];
-          for (const source of sources) {
-            if (room <= 0) break;
-            const limit = Math.min(LOOKUP_PER_KIND, room);
-            const hits = (await source.search(handle, query, limit)).slice(0, limit);
-            room -= hits.length;
-            for (const hit of hits) mine.push({ kind: source.kind, hit });
-          }
-          await this.#writeCrossings(handle, authorized, mine, audited);
-          // The names of the hubs are read in the transaction that read the records they belong to, and for the results kept alone.
-          const names = await this.#namesOfHubs(handle, mine);
-          return mine.map(({ kind, hit }) => ({ kind, result: resultOf(kind, hit, names) }));
-        },
-        ONE_SNAPSHOT,
-      );
-      found.push(...taken);
+      const outcome = await this.#options.runner.mutate(forKey, correlationId, async (handle) => {
+        const mine: Taken[] = [];
+        let left = room;
+        for (const source of sources) {
+          if (left <= 0) break;
+          const limit = Math.min(LOOKUP_PER_KIND, left);
+          const hits = (await source.search(handle, query, limit)).slice(0, limit);
+          left -= hits.length;
+          for (const hit of hits) mine.push({ kind: source.kind, hit });
+        }
+        const crossed = await this.#writeCrossings(handle, authorized, mine, audited);
+        // The names of the hubs are read in the transaction that read the records they belong to, and for the results kept alone.
+        const names = await this.#namesOfHubs(handle, mine);
+        return {
+          used: room - left,
+          crossed,
+          results: mine.map(({ kind, hit }) => ({ kind, result: resultOf(kind, hit, names) })),
+        };
+      });
+      // Only now, with the transaction committed, does this read remember what it took and what it wrote.
+      room -= outcome.used;
+      for (const hubId of outcome.crossed) audited.add(hubId);
+      found.push(...outcome.results);
     }
 
     const order = new Map(RECORD_LOOKUP_KINDS.map((kind, index) => [kind, index] as const));
@@ -181,23 +200,26 @@ export class RecordLookupService {
 
   /**
    * One event for each hub other than the actor's own that these results represent and that no earlier transaction of this read wrote: the
-   * baseline is the actor's primary hub, and a staff member with none crosses every hub it reads. A result with no hub crosses none.
+   * baseline is the actor's primary hub, and a staff member with none crosses every hub it reads. A result with no hub crosses none. It returns
+   * the hubs it wrote for and remembers none: the caller does, once the transaction has committed (a work that is run again must not find that
+   * the hubs of a rolled-back run were written).
    */
   async #writeCrossings(
     handle: TransactionHandle,
     authorized: AuthorizedRequest,
     taken: readonly Taken[],
-    audited: Set<string>,
-  ): Promise<void> {
+    audited: ReadonlySet<string>,
+  ): Promise<readonly string[]> {
     const hubs = new Set<string>();
     for (const { hit } of taken) {
       if (hit.hubId !== null && !audited.has(hit.hubId)) hubs.add(hit.hubId);
     }
-    if (hubs.size === 0) return;
+    if (hubs.size === 0) return [];
     const baseline = await this.#options.primaryHubOf(handle, authorized.session.principalId);
+    const written: string[] = [];
     for (const hubId of [...hubs].toSorted()) {
       if (hubId === baseline) continue;
-      audited.add(hubId);
+      written.push(hubId);
       await this.#options.audit.write(handle, {
         code: 'auth.hub_boundary.crossed',
         enhanced: true,
@@ -207,6 +229,7 @@ export class RecordLookupService {
         relatedIds: { operation_id: 'lookupRecords' },
       });
     }
+    return written;
   }
 }
 
@@ -233,6 +256,7 @@ function resultOf(
       ? {}
       : { hub: { id: hit.hubId, display_name: hubName } }),
     ...(hit.serviceDate === undefined ? {} : { service_date: hit.serviceDate }),
+    ...(hit.senderName === undefined ? {} : { sender_name: hit.senderName }),
     ...(hit.matchedPhone === undefined ? {} : { phone_hint: maskedPhone(hit.matchedPhone) }),
   };
 }

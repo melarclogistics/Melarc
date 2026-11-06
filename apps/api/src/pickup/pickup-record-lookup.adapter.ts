@@ -9,6 +9,8 @@ import type {
 } from '../platform/domain-ports/record-lookup.port.js';
 import { strategyOf } from '../platform/lookup/lookup-query.js';
 import { nameMatches } from '../platform/lookup/name-match.js';
+import { hubToday } from './pickup-hub-day.js';
+import { PICKUP_REQUEST_STATES } from './pickup-request.schema.js';
 
 /**
  * The pickup domain's side of `RecordLookupSource` (task C2; features/operations/global-lookup.md): the pickup requests and the pickup runs a
@@ -18,20 +20,60 @@ import { nameMatches } from '../platform/lookup/name-match.js';
  *
  * - **A request** is found by its operational code (`PR`), by a contact phone typed in full (the request's own `primary_phone` or `secondary_phone`:
  *   never through the ad-hoc sender, whose policy is global to staff and would tell which hub a sender is booked in) and by the word-prefix of its
- *   sender's name. Newest first, then the id.
+ *   sender's name. Newest first, then the id. **A code and a phone number find a request whatever its age; a name finds it only while it is current
+ *   work** (the Product Owner's decision D3, option (c), 6 November 2026; {@link currentWork}).
  * - **A run** is found by its operational code (`MF`) alone.
  *
- * A hit states **facts** and no wording: the record's own `state` as the value of its enumeration, its hub, and the service date (the request's
- * `scheduled_service_date`, the run's `service_date`).
+ * A hit states **facts** and no wording: the record's own `state` as the value of its enumeration, its hub, the service date (the request's
+ * `scheduled_service_date`, the run's `service_date`) and, for a request, its sender's name exactly as the request's own read shows it.
  */
-const requestPredicate = (query: LookupQuery): SQL | undefined => {
+
+/** The terminal states of a request (state-machines.md section 3: `DECLINED` and `CANCELLED`; no state is reversible). */
+export const TERMINAL_REQUEST_STATES: readonly string[] = ['DECLINED', 'CANCELLED'];
+
+/**
+ * How far back the service date of a **terminal** request may be for a name to still find it (the Product Owner's decision D3, option (c),
+ * 6 November 2026). A constant of the code and not a setting: `contracts/settings.md` has no such setting and none is invented.
+ */
+export const NAME_SEARCH_WINDOW_DAYS = 30;
+
+/**
+ * The first service date, as a `YYYY-MM-DD` day, that still counts as recent for the hub's `today`: today minus {@link NAME_SEARCH_WINDOW_DAYS}
+ * (a request with that date is in; one a day older is out). Plain calendar arithmetic on the day, with no zone and no daylight saving in it: the
+ * hub's clock decided what `today` is.
+ */
+export function nameSearchWindowStart(today: string): string {
+  const day = new Date(`${today}T00:00:00Z`);
+  if (Number.isNaN(day.getTime())) throw new Error(`${today} is not a calendar day`);
+  day.setUTCDate(day.getUTCDate() - NAME_SEARCH_WINDOW_DAYS);
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * The condition that says a request is **current work** (`features/operations/global-lookup.md` section 5): its state is not terminal, or its
+ * service date is on or after `windowStart`. It is written with the comparisons the planner may run before the row-level security policy (an
+ * equality on the state, a comparison of two dates), and the non-terminal states are those of the closed list that are not terminal, so that a
+ * state added later is current work until it is declared terminal.
+ */
+export function currentWork(windowStart: string): SQL {
+  const open = PICKUP_REQUEST_STATES.filter((state) => !TERMINAL_REQUEST_STATES.includes(state));
+  const states = sql.join(
+    open.map((state) => sql`${state}::text`),
+    sql`, `,
+  );
+  return sql`(state in (${states}) or scheduled_service_date >= ${windowStart}::date)`;
+}
+
+const requestPredicate = (query: LookupQuery, windowStart: string | undefined): SQL | undefined => {
   switch (strategyOf(query)) {
     case 'code':
       return query.codeType === 'PR' ? sql`code = ${query.code}::text` : undefined;
     case 'phone':
       return sql`(primary_phone = ${query.phone}::text or secondary_phone = ${query.phone}::text)`;
     case 'name':
-      return nameMatches('sender_name', query.text);
+      return windowStart === undefined
+        ? undefined
+        : sql`${nameMatches('sender_name', query.text)} and ${currentWork(windowStart)}`;
   }
 };
 
@@ -41,6 +83,7 @@ interface RequestRow {
   readonly state: string;
   readonly responsible_hub_id: string;
   readonly service_date: string;
+  readonly sender_name: string;
 }
 
 async function searchRequests(
@@ -48,10 +91,13 @@ async function searchRequests(
   query: LookupQuery,
   limit: number,
 ): Promise<readonly LookupHit[]> {
-  const predicate = requestPredicate(query);
+  // Only a name is windowed, and only a name needs the hub's today: a code and a number are index probes that no age bounds.
+  const windowStart =
+    strategyOf(query) === 'name' ? nameSearchWindowStart(await hubToday(handle)) : undefined;
+  const predicate = requestPredicate(query, windowStart);
   if (predicate === undefined) return [];
   const result = await transactionOf(handle).execute(sql`
-    select id, code, state, responsible_hub_id, scheduled_service_date::text as service_date
+    select id, code, state, responsible_hub_id, scheduled_service_date::text as service_date, sender_name
       from pickup_request
      where ${predicate}
      order by created_at desc, id
@@ -64,6 +110,7 @@ async function searchRequests(
     state: row.state,
     hubId: row.responsible_hub_id,
     serviceDate: row.service_date,
+    senderName: row.sender_name,
     ...(phone === undefined ? {} : { matchedPhone: phone }),
   }));
 }
