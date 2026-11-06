@@ -11,11 +11,12 @@ import { instantOf, isOneOf, isRecord } from '../staff/staff-shape';
  * **What each parser returns is what it judged and nothing else.** An entry is the queue, its count and, when the server gave one, the
  * moment its oldest record entered it; a property the contract adds and this does not read is not carried into a screen.
  *
- * **A queue this build does not know is dropped, and the rest is kept.** The contract's list of queues is closed, and a server newer than
- * the page may name one the page has no words, no icon and no link for. Refusing the whole answer would take the counts of every queue it
- * does know away from the menu; drawing it would put an identifier on a screen. It is left out, which is also what the page did before the
- * queue existed. (Every other disagreement with the contract refuses the whole answer, as everywhere else: a count that is not a whole
- * number, a queue twice, an age on an empty queue.)
+ * **A queue this build does not know is dropped, and the rest is kept, and the view says that something was dropped.** The contract's list of
+ * queues is closed, and a server newer than the page may name one the page has no words, no icon and no link for. Refusing the whole answer
+ * would take the counts of every queue it does know away from the menu; drawing it would put an identifier on a screen. It is left out, and
+ * `incomplete` says so (the review of task C1): a screen that sees only zeros among what it kept must not say that nothing is waiting while a
+ * queue it cannot show holds seven. (Every other disagreement with the contract refuses the whole answer, as everywhere else: a count that
+ * is not a whole number, a queue twice, an age on an empty queue.)
  */
 export const QUEUE_IDS = [
   'PICKUP_AWAITING_CONFIRMATION',
@@ -47,6 +48,11 @@ export interface QueueCountView {
 export interface QueueSummaryView {
   /** The queues the session may read, in the order the server gave them. A queue the session may not read is not here, and is not `0`. */
   readonly queues: readonly QueueCountView[];
+  /**
+   * The answer named a queue this build has no words for (a server newer than the page). What is in `queues` is true and is not all that is
+   * waiting: no screen says that nothing is waiting from an incomplete summary.
+   */
+  readonly incomplete: boolean;
 }
 
 /** There are six queues; an answer with many more entries than the contract has queues is not the API's. */
@@ -74,14 +80,18 @@ export function parseQueueSummary(body: unknown): QueueSummaryView | undefined {
   if (!Array.isArray(queues) || queues.length > MAX_ENTRIES) return undefined;
   const seen = new Set<QueueName>();
   const kept: QueueCountView[] = [];
+  let incomplete = false;
   for (const each of queues as unknown[]) {
     const entry = entryOf(each);
     if (entry === undefined) return undefined;
-    if (entry === 'unknown-queue') continue;
+    if (entry === 'unknown-queue') {
+      incomplete = true;
+      continue;
+    }
     // The same queue twice cannot both be right, and the later would silently win in any map made from them.
     if (seen.has(entry.queue)) return undefined;
     seen.add(entry.queue);
     kept.push(entry);
   }
-  return { queues: kept };
+  return { queues: kept, incomplete };
 }

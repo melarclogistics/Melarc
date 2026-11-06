@@ -160,8 +160,8 @@ describe('the queue: what it shows', () => {
     expect(queryOf().get('one_package_exception_state')).toBe('REQUESTED');
   });
 
-  // An exception of a request that was cancelled meanwhile still waits in the server's queue; approving it would make a fee due for a pickup
-  // that will not happen, so the page shows it with its state and offers no approval.
+  // A page read before a request was cancelled still shows its exception (the server's queue leaves a cancelled request out, AC-QSUM-12);
+  // approving it would make a fee due for a pickup that will not happen, so the page shows it with its state and offers no approval.
   it('offers no approval for a request that is no longer waiting for confirmation', async () => {
     open(() =>
       page([

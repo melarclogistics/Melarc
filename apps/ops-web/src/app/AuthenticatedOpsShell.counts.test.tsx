@@ -218,6 +218,39 @@ describe('the counts beside the entries of the menu', () => {
     expect(document.body.textContent).not.toMatch(/INTERNAL_ERROR|Diagnostic text/);
   });
 
+  // Break caught (the review of C1): a read that fails after one that worked leaving the counts of the first on every page, which then say what
+  // was true before the failure (TanStack Query keeps the last answer beside the error). A count that failed is not drawn.
+  it('draws nothing once a later read fails, and the counts come back with the next read that works', async () => {
+    let reads = 0;
+    const { user } = open(() => {
+      reads += 1;
+      if (reads === 2) return errorResponse(500, 'INTERNAL_ERROR');
+      return json(200, {
+        queues: [{ queue: 'PICKUP_AWAITING_CONFIRMATION', count: reads * 10, oldest_at: WHEN }],
+      });
+    });
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 10 waiting for confirmation' }),
+    ).toBeVisible();
+
+    await user.click(link(/^Manifests/));
+
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    await waitFor(() => {
+      expect(badges()).toHaveLength(0);
+    });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Manifests' })).toBeVisible();
+    expect(link(/^Pickup requests/).textContent).toBe('Pickup requests');
+
+    await user.click(link(/^Staff/));
+
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 30 waiting for confirmation' }),
+    ).toBeVisible();
+  });
+
   // Break caught: an answer that is not a summary drawn as counts.
   it('draws nothing for an answer that is not a summary', async () => {
     open(() => json(200, { queues: [{ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 'many' }] }));

@@ -369,7 +369,7 @@ Ops Staff
            + settings.reason.manage
 ```
 
-**`pickup.exception.approve` left the Platform Admin tier at Gate C** and now sits with Senior Ops, or with an Ops Staff member explicitly granted it. It is the clearest case of §11.6's own rule that **scope attaches to the grant**: the key says one-package approval, and who may do it where is a grant.
+**`pickup.exception.approve` left the Platform Admin tier at Gate C** and sits with every Ops Staff member, Senior Ops and Platform Admin (the Product Owner's decision of 29 October 2026, which the catalogue row above states): the approver is never the requester (a Platform Admin excepted, §6), and a vendor never holds it. It is the clearest case of §11.6's own rule that **scope attaches to the grant**: the key says one-package approval, and who may do it where is a grant.
 
 **This nesting is illustrative, not exhaustive** — §11.6 says so explicitly. Platform Admin additionally holds company-wide authorities with **no Senior Ops equivalent**: global settings and allowance approval, sole retention authority, direct vendor-suspension override, and pricing-structure approval. Treating Platform Admin as "Senior Ops plus one permission" would silently drop those.
 

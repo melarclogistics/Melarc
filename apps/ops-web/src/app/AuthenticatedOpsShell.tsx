@@ -85,9 +85,12 @@ export function AuthenticatedOpsShell({
   const summary = useQueueSummary(signedIn);
   useRefreshQueueSummaryOnReturn(pathname);
 
+  // The counts of the last read, and none when that read failed: TanStack Query keeps the last answer beside the error, and a count that
+  // failed is not drawn (`AC-QSUM-07`; the review of task C1 found the old counts left on every page after a failed re-read).
+  const counted = summary.isError ? undefined : summary.data;
   const items =
     state.status === 'signed-in'
-      ? withCounts(entriesFor(state.session.permissions, routes), routes, summary.data)
+      ? withCounts(entriesFor(state.session.permissions, routes), routes, counted)
       : [];
 
   return (

@@ -6,7 +6,7 @@ import { readCount } from '../platform/queue-summary/read-count.js';
 import { pickupManifestCriteria } from './pickup-manifest-criteria.js';
 import {
   ANY_PICKUP_REQUEST,
-  CUTOFF_REVIEW_CRITERIA,
+  CUTOFF_REVIEW,
   pickupRequestCriteria,
   shownException,
 } from './pickup-request-criteria.js';
@@ -21,8 +21,8 @@ import {
  * | Queue | List and filter | Oldest |
  * |---|---|---|
  * | `PICKUP_AWAITING_CONFIRMATION` | `listPickupRequests` `state=PENDING` | `created_at` |
- * | `PICKUP_CUTOFF_REVIEW` | `listPickupRequests` `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` (no parameter of the list) | `confirmed_at` |
- * | `PICKUP_EXCEPTION_APPROVAL` | `listPickupRequests` `one_package_exception_state=REQUESTED` (decision key `pickup.exception.approve`) | `requested_at` of the exception shown |
+ * | `PICKUP_CUTOFF_REVIEW` | `listPickupRequests` `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` (task C1.1) | `confirmed_at` |
+ * | `PICKUP_EXCEPTION_APPROVAL` | `listPickupRequests` `one_package_exception_state=REQUESTED`, less the cancelled requests (decision key `pickup.exception.approve`; task C1.1) | `requested_at` of the exception shown |
  * | `PICKUP_UNMANIFESTED_POOL` | `listPickupRequests` `state=CONFIRMED` and `manifested=false` | `confirmed_at` |
  * | `PICKUP_RUNS_IN_PROGRESS` | `listPickupManifests` `state=IN_PROGRESS` | `started_at` |
  */
@@ -35,7 +35,7 @@ export const PICKUP_QUEUE_STATEMENTS = {
   PICKUP_CUTOFF_REVIEW: (): SQL => sql`
     select count(*)::int as count, min(confirmed_at) as oldest
       from pickup_request
-     where ${CUTOFF_REVIEW_CRITERIA}`,
+     where ${pickupRequestCriteria(CUTOFF_REVIEW)}`,
 
   PICKUP_EXCEPTION_APPROVAL: (): SQL => sql`
     select count(*)::int as count, min(${shownException('requested_at')}) as oldest

@@ -132,6 +132,43 @@ test.describe('the counts of the queues in a browser', () => {
     await expect(page.getByText('Nothing is waiting.')).toHaveCount(0);
   });
 
+  // Task C1.1 (AC-QSUM-11). Break caught: the link of the late bookings opening the plain list of confirmed requests (the officer hunts for
+  // the late ones among the rest), or the page applying a filter it does not say, or a filter it says and does not send.
+  test('the late bookings open the pickup list with the cut-off filter, asked of the server and said in words', async ({
+    page,
+  }) => {
+    await open(page);
+    const asked: URL[] = [];
+    await page.route('**/api/v1/pickup-requests?**', (route) => {
+      asked.push(new URL(route.request().url()));
+      return route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+        json: { items: [], next_page_token: null },
+      });
+    });
+
+    await page
+      .getByRole('list', { name: 'Waiting for you' })
+      .getByRole('link', { name: 'Late bookings waiting for a cut-off decision' })
+      .click();
+
+    await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW$/);
+    await expect(
+      page.getByText('Only late bookings waiting for a cut-off decision.'),
+    ).toBeVisible();
+    expect(asked.at(-1)?.searchParams.get('state')).toBe('CONFIRMED');
+    expect(asked.at(-1)?.searchParams.get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+
+    await page.getByRole('button', { name: 'Every cut-off decision' }).click();
+
+    await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED$/);
+    await expect(page.getByText('Only late bookings waiting for a cut-off decision.')).toHaveCount(
+      0,
+    );
+    await expect.poll(() => asked.at(-1)?.searchParams.has('cutoff_exception_state')).toBe(false);
+  });
+
   // Break caught: the defect this task fixes: "nothing is waiting" for a session the page never looked at.
   test('says nothing is waiting only when every count the server gave is 0', async ({ page }) => {
     await open(page, [

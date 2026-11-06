@@ -506,6 +506,8 @@ describe('the queue: filtering', () => {
     'date=2026-02-30',
     'date=tomorrow',
     'date=2026-11-03T00:00:00Z',
+    'cutoff=everything',
+    'cutoff=pending_ops_review',
   ])('takes %s for no filter', async (query) => {
     open(undefined, READER, `/pickup-requests?${query}`);
 
@@ -513,6 +515,55 @@ describe('the queue: filtering', () => {
 
     expect(queryOf(0).has('state')).toBe(false);
     expect(queryOf(0).has('service_date')).toBe(false);
+    expect(queryOf(0).has('cutoff_exception_state')).toBe(false);
+  });
+
+  // Task C1.1, AC-QSUM-11: the landing's link for the late bookings opens this page with the cut-off decision as a filter. Break caught: the
+  // address read and not sent (the officer sees every confirmed request under a link that said "late bookings"), or sent and not said (a
+  // filter the page applies without telling).
+  it('reads the late bookings out of the address, asks for them, says so in words, and takes them off with their own button', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    expect(queryOf(0).get('state')).toBe('CONFIRMED');
+    expect(queryOf(0).get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+    expect(screen.getByText('Only late bookings waiting for a cut-off decision.')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Every cut-off decision' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=CONFIRMED');
+    });
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
+    expect(queryOf().get('state')).toBe('CONFIRMED');
+    expect(
+      screen.queryByText('Only late bookings waiting for a cut-off decision.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Every cut-off decision' }),
+    ).not.toBeInTheDocument();
+  });
+
+  // Break caught: a change of the state dropping the late bookings without being asked.
+  it('keeps the late bookings when the state changes', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), '');
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?cutoff=PENDING_OPS_REVIEW');
+    });
+    expect(queryOf().has('state')).toBe(false);
+    expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
   });
 
   it('asks for the date that is typed, once it is a whole date, and keeps the state', async () => {
@@ -615,6 +666,25 @@ describe('the queue: nothing to show', () => {
       expect(router.state.location.search).toBe('');
     });
     expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('');
+  });
+
+  // Task C1.1: when the late bookings are the only filter and none waits, the page says the filter hid them, and "Show every request" takes
+  // that filter off too. Break caught: "every request" leaving the cut-off decision set, so that the button shows the same empty page again.
+  it('tells the late bookings that hide everything, in words that fit, and takes them off with every other filter', async () => {
+    const { user, router } = open(
+      () => page([]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    expect(await screen.findByRole('heading', { name: 'No pickup requests match' })).toBeVisible();
+    expect(screen.getByText(/Nothing fits these filters/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Show every request' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('');
+    });
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
   });
 });
 

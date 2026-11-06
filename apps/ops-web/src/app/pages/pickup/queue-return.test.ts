@@ -71,13 +71,20 @@ describe('requestOfClick: which click leaves a place', () => {
 });
 
 describe('searchOf: the filters as the address carries them', () => {
-  it('is the filters that are set, state then date, and nothing when none is', () => {
+  it('is the filters that are set, state then cut-off decision then date, and nothing when none is', () => {
     expect(searchOf({ state: 'PENDING', date: '2026-11-03' })).toBe(
       '?state=PENDING&date=2026-11-03',
     );
     expect(searchOf({ state: 'PENDING' })).toBe('?state=PENDING');
     expect(searchOf({ date: '2026-11-03' })).toBe('?date=2026-11-03');
     expect(searchOf({})).toBe('');
+    // Task C1.1 (AC-QSUM-11): the late bookings' filter comes back with the officer to the list they left.
+    expect(searchOf({ state: 'CONFIRMED', cutoff: 'PENDING_OPS_REVIEW' })).toBe(
+      '?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    expect(searchOf({ state: 'CONFIRMED', cutoff: 'PENDING_OPS_REVIEW', date: '2026-11-03' })).toBe(
+      '?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW&date=2026-11-03',
+    );
   });
 });
 

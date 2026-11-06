@@ -26,11 +26,19 @@ export type { PickupRequestView };
 
 export const EXCEPTION_STATES = ['REQUESTED', 'APPROVED', 'REJECTED'] as const;
 
+/** The states of a request's cut-off decision (domain-model.md section 6.2, `cutoff_exception_state`): what the filter of the same name takes. */
+export const CUTOFF_EXCEPTION_STATES = [
+  'PENDING_OPS_REVIEW',
+  'SAME_DAY_APPROVED',
+  'RESCHEDULED',
+] as const;
+
 export interface PickupListFilter {
   readonly state?: string;
   readonly serviceDate?: string;
   readonly manifested?: string;
   readonly exceptionState?: string;
+  readonly cutoffExceptionState?: string;
   readonly pageSize?: number;
   readonly pageToken?: string;
 }
@@ -71,7 +79,10 @@ function invalid(name: string, rule: string): ApiException {
  *   `PERMISSION_DENIED` ("authorization-checked like every filter") and never given what a caller who cannot see stops would get.
  * - **A request shows its exception** (S1.16): the one it carries (an approval travels with the booking into its clones) or the latest
  *   raised for it, in the representation of `getPickupRequest` and so in its ETag. The approver's queue is the list filtered by the state
- *   of that exception (`one_package_exception_state=REQUESTED`).
+ *   of that exception (`one_package_exception_state=REQUESTED`), **less the cancelled requests** (task C1.1, `AC-QSUM-12`): their exception can
+ *   no longer be decided.
+ * - **The late bookings are the list filtered by the cut-off state** (`cutoff_exception_state`, task C1.1, `AC-QSUM-10`): with
+ *   `state=CONFIRMED` and `PENDING_OPS_REVIEW`, the requests waiting for Ops's cut-off decision, which `getQueueSummary` counts.
  */
 export class PickupRequestsService {
   readonly #options: PickupRequestsServiceOptions;
@@ -142,6 +153,12 @@ export class PickupRequestsService {
     ) {
       throw invalid('one_package_exception_state', 'enum');
     }
+    if (
+      filter.cutoffExceptionState !== undefined &&
+      !(CUTOFF_EXCEPTION_STATES as readonly string[]).includes(filter.cutoffExceptionState)
+    ) {
+      throw invalid('cutoff_exception_state', 'enum');
+    }
     if (filter.state !== undefined && (filter.state === '' || filter.state.length > 32)) {
       throw invalid('state', 'format');
     }
@@ -154,6 +171,7 @@ export class PickupRequestsService {
     const criteria = pickupRequestCriteria({
       state: filter.state ?? null,
       exceptionState: filter.exceptionState ?? null,
+      cutoffExceptionState: filter.cutoffExceptionState ?? null,
       serviceDate: filter.serviceDate ?? null,
       manifested: filter.manifested === undefined ? null : filter.manifested === 'true',
     });

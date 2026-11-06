@@ -32,7 +32,7 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 |---|---|---|---|
 | Melarc Ops| Ops Staff| Create for any vendor or ad-hoc sender; confirm; decline; cancel; request a one-package exception; resolve a cutoff exception; reschedule| `pickup.request.create`, `pickup.request.confirm`, `pickup.request.cancel`, `pickup.exception.request`|
 | Melarc Ops| Senior Ops| All Ops actions, plus force-extension past the attempt cap| `pickup.attempt.extend`|
-| Melarc Ops| **Any holder of `pickup.exception.approve`** — Senior Ops, Ops Staff explicitly granted it, or Platform Admin| All the above, plus approving a one-package exception. **The permission is authoritative, not the role**| `pickup.exception.approve`|
+| Melarc Ops| **Any holder of `pickup.exception.approve`** — every Ops Staff member, Senior Ops and Platform Admin (Product Owner, 29 October 2026); never a vendor, and never the requester of that exception (a Platform Admin excepted)| All the above, plus approving a one-package exception. **The permission is authoritative, not the role**| `pickup.exception.approve`|
 | Melarc Vendor| Vendor account| Create for itself; cancel **its own `PENDING`** request| `pickup.request.create`, `pickup.request.cancel` — own record only|
 | Melarc Rider| Rider| **N/A** — §21.1: riders and recipients have no request-creation role| —|
 | Recipient channel| —| **N/A** at this stage. The recipient is not yet known for a standard request| —|
@@ -190,7 +190,7 @@ Fields whose behaviour here is non-obvious: `attempt_number` (capped at 3), `rep
 | `pickup.request.confirm`| Ops, Senior Ops, Platform Admin| own hub — **Ops only in V1**||
 | `pickup.request.cancel`| Ops, Senior Ops, Platform Admin, Vendor| Vendor: own `PENDING` only||
 | `pickup.exception.request`| Ops| own hub||
-| `pickup.exception.approve`| **S P, and Ops Staff explicitly granted it**| own hub · P: all hubs| Widened off `P only` at Gate C. **The permission is authoritative, not the role**|
+| `pickup.exception.approve`| **A S P** (every Ops Staff member, Product Owner, 29 October 2026)| own hub · P: all hubs| Widened off `P only` at Gate C, and to every Ops Staff member on 29 October 2026. **The permission is authoritative, not the role**. Approver ≠ requester, and never available to a vendor|
 | `pickup.request.cancel_chargeable`| Ops, Senior Ops, Platform Admin| own hub. **Never a vendor**||
 | `pickup.cancellation_charge.waive`| **Senior Ops, Platform Admin**| own hub. **Above the charge in authority — Ops applies, Senior Ops relieves**||
 | `pickup.attempt.extend`| Senior Ops, Platform Admin| own hub, reason mandatory||

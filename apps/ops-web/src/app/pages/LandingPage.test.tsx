@@ -81,7 +81,8 @@ describe('the landing: what is waiting', () => {
 
     expect(asked).toEqual({
       'Pickup requests waiting for confirmation': '/pickup-requests?state=PENDING',
-      'Late bookings waiting for a cut-off decision': '/pickup-requests?state=CONFIRMED',
+      'Late bookings waiting for a cut-off decision':
+        '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
       'One-package exceptions waiting for approval': '/approvals',
       'Confirmed pickups not yet on a run': '/pickup-requests?state=CONFIRMED',
       'Pickup runs in progress': '/manifests?state=IN_PROGRESS',
@@ -189,6 +190,31 @@ describe('the landing: what is waiting', () => {
 
     expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
     expect(screen.queryByRole('link', { name: /waiting for/ })).toBeNull();
+  });
+
+  // Break caught (the review of C1): "Nothing is waiting" said from zeros when the server also named a queue this page has no words for,
+  // which holds seven.
+  it('does not say nothing is waiting when the server named a queue the page cannot show', async () => {
+    open(KEYS.reader, [
+      { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0 },
+      { queue: 'A_QUEUE_FROM_THE_FUTURE', count: 7, oldest_at: '2026-11-03T08:00:00.000Z' },
+    ]);
+
+    expect(await screen.findByText('Some queues cannot be shown on this page.')).toBeVisible();
+    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests waiting for confirmation' }),
+    ).toBeVisible();
+  });
+
+  // Break caught: the same, when every queue named is one the page cannot show: the page then says nothing of waiting at all.
+  it('says that queues are not shown when every queue the server named is one it cannot show', async () => {
+    open(KEYS.reader, [
+      { queue: 'A_QUEUE_FROM_THE_FUTURE', count: 7, oldest_at: '2026-11-03T08:00:00.000Z' },
+    ]);
+
+    expect(await screen.findByText('Some queues cannot be shown on this page.')).toBeVisible();
+    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
   });
 
   // Break caught: "Nothing is waiting" for a session the server gave no queue to, which tells it something the page does not know.

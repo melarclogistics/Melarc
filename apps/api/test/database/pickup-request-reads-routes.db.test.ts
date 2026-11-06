@@ -214,6 +214,9 @@ describe('listPickupRequests: what each reader sees', () => {
     ['a position that is not one', 'page_token=not-a-position'],
     ['a manifested filter that is not a boolean', 'manifested=maybe'],
     ['an exception state that is not one', 'one_package_exception_state=PENDING'],
+    // Task C1.1 (AC-QSUM-10): the late bookings' filter takes the three cut-off states and nothing else.
+    ['a cut-off state that is not one', 'cutoff_exception_state=LATE'],
+    ['an empty cut-off state', 'cutoff_exception_state='],
     ['an empty state', 'state='],
   ])('refuses %s as a validation failure', async (_label, query) => {
     const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);

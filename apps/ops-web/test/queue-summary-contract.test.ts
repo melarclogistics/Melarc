@@ -138,6 +138,7 @@ describe('every queue of the contract is known to the guard', () => {
   it.each((queueId.enum ?? []).map((queue) => [queue] as const))('takes the queue %s', (queue) => {
     expect(parseQueueSummary({ queues: [{ queue, count: 0 }] })).toEqual({
       queues: [{ queue, count: 0, oldestAt: null }],
+      incomplete: false,
     });
   });
 });

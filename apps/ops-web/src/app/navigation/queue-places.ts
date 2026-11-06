@@ -48,8 +48,8 @@ export const QUEUE_WORDS: Readonly<Record<QueueName, QueueWords>> = {
  * and a link is never the enforcement): the pool leads to the manifest builder for a session that may build a manifest and to the confirmed
  * pickups for one that may not, so that no one is sent to a page that refuses them.
  *
- * - The pickup queue takes `state` (`PENDING` is the requests waiting for confirmation; `CONFIRMED` shows each late booking with its cut-off
- *   state, because the list has no filter for it).
+ * - The pickup queue takes `state` (`PENDING` is the requests waiting for confirmation) and the cut-off decision, `cutoff` (`CONFIRMED` with
+ *   `PENDING_OPS_REVIEW` is the late bookings, which the list has its own filter for since task C1.1, `AC-QSUM-11`).
  * - The approvals page and the staff page's *waiting* view are the approver's queues.
  * - The manifest list takes `state` (`IN_PROGRESS`).
  */
@@ -58,7 +58,7 @@ export function queueLink(queue: QueueName, holds: (permission: string) => boole
     case 'PICKUP_AWAITING_CONFIRMATION':
       return '/pickup-requests?state=PENDING';
     case 'PICKUP_CUTOFF_REVIEW':
-      return '/pickup-requests?state=CONFIRMED';
+      return '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW';
     case 'PICKUP_EXCEPTION_APPROVAL':
       return '/approvals';
     case 'PICKUP_UNMANIFESTED_POOL':

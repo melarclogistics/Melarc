@@ -30,14 +30,19 @@ import { insertVendor, vendorRow } from './support/vendors.js';
  * several refused, an approval another request carries, and one the caller cannot see.
  */
 const ORACLE = (criteria: PickupRequestCriteria): SQL => {
-  const { state, exceptionState, serviceDate, manifested } = criteria;
+  const { state, exceptionState, cutoffExceptionState, serviceDate, manifested } = criteria;
   const pool = manifested === false && state === 'CONFIRMED';
+  // Task C1.1 changed the definition in two deliberate places, and the definition is written out here in its new form: a filter by the
+  // cut-off state (`cutoff_exception_state`, AC-QSUM-10), and the approver's queue (`REQUESTED`) without the cancelled requests, whose
+  // exception can no longer be decided (AC-QSUM-12).
   return sql`(${state}::text is null or state = ${state}::text)
     and (${exceptionState}::text is null or (
           select e.state from one_package_exception e
            where e.id = pickup_request.one_package_exception_id or e.pickup_request_id = pickup_request.id
            order by (e.id = pickup_request.one_package_exception_id) desc, e.requested_at desc, e.id desc
            limit 1) = ${exceptionState}::text)
+    and (${exceptionState}::text is distinct from 'REQUESTED' or state <> 'CANCELLED')
+    and (${cutoffExceptionState}::text is null or cutoff_exception_state = ${cutoffExceptionState}::text)
     and (${serviceDate}::date is null or scheduled_service_date = ${serviceDate}::date)
     and (${manifested}::boolean is null or exists (
           select 1 from pickup_stop s
@@ -86,6 +91,25 @@ beforeAll(async () => {
 
   const next = generator(20261105);
   const pick = <T>(choices: readonly T[]): T => choices[Math.floor(next() * choices.length)] as T;
+  /**
+   * The cut-off state a request is arranged with, so that the filter by it has every state of the field to tell apart: a confirmed request is
+   * late and waiting for its decision (a quarter), or the decision was taken at the same day (a fifth); a cancelled one was rescheduled, or was
+   * cancelled while its decision was waiting. The others have none.
+   */
+  const cutoffOf = (
+    state: string,
+  ): { cutoffState?: 'PENDING_OPS_REVIEW' | 'SAME_DAY_APPROVED' | 'RESCHEDULED' } => {
+    if (state !== 'CONFIRMED' && state !== 'CANCELLED') return {};
+    const roll = next();
+    if (state === 'CONFIRMED') {
+      if (roll < 0.25) return { cutoffState: 'PENDING_OPS_REVIEW' };
+      if (roll < 0.45) return { cutoffState: 'SAME_DAY_APPROVED' };
+      return {};
+    }
+    if (roll < 0.3) return { cutoffState: 'RESCHEDULED' };
+    if (roll < 0.45) return { cutoffState: 'PENDING_OPS_REVIEW' };
+    return {};
+  };
   const made: { id: string; hub: string }[] = [];
   // A request that carries the approval of another is a clone: it can only be arranged with the triggers out of the way, as the data is.
   await admin.query(`set session_replication_role = replica`);
@@ -99,7 +123,7 @@ beforeAll(async () => {
         // Only a pending request may be of one package (a confirmed one needs two, or an approved exception).
         packages: state === 'PENDING' ? 1 : 3,
         serviceDate: pick(['2026-11-03', '2026-11-04']),
-        ...(state === 'CONFIRMED' && next() < 0.25 ? { cutoffState: 'PENDING_OPS_REVIEW' } : {}),
+        ...cutoffOf(state),
       }),
     );
     made.push({ id: row.id, hub });
@@ -210,8 +234,9 @@ async function idsUnder(scope: (typeof SCOPES)[number], where: SQL): Promise<str
   }
 }
 
-const STATES = [null, 'PENDING', 'CONFIRMED'] as const;
+const STATES = [null, 'PENDING', 'CONFIRMED', 'CANCELLED'] as const;
 const EXCEPTION_STATES = [null, 'REQUESTED', 'APPROVED', 'REJECTED'] as const;
+const CUTOFF_STATES = [null, 'PENDING_OPS_REVIEW', 'SAME_DAY_APPROVED', 'RESCHEDULED'] as const;
 const DAYS = [null, '2026-11-03'] as const;
 const MANIFESTED = [null, true, false] as const;
 
@@ -219,29 +244,53 @@ describe('the conditions of the list of pickup requests', () => {
   // Break caught: the data arranged for the comparison having nothing to compare, so that every combination agrees by returning nothing.
   it('are compared over requests that every way of showing an exception reaches', async () => {
     expect(arranged).toBeGreaterThan(150);
-    const requested = await idsUnder(
+    const any = {
+      state: null,
+      exceptionState: null,
+      cutoffExceptionState: null,
+      serviceDate: null,
+      manifested: null,
+    } as const;
+    const requested = await idsUnder(SCOPES[3], ORACLE({ ...any, exceptionState: 'REQUESTED' }));
+    const approved = await idsUnder(SCOPES[3], ORACLE({ ...any, exceptionState: 'APPROVED' }));
+    const rejected = await idsUnder(SCOPES[3], ORACLE({ ...any, exceptionState: 'REJECTED' }));
+    const claimed = await idsUnder(SCOPES[3], ORACLE({ ...any, manifested: true }));
+    const unclaimed = await idsUnder(SCOPES[3], ORACLE({ ...any, manifested: false }));
+    const waiting = await idsUnder(
       SCOPES[3],
-      ORACLE({ state: null, exceptionState: 'REQUESTED', serviceDate: null, manifested: null }),
+      ORACLE({ ...any, cutoffExceptionState: 'PENDING_OPS_REVIEW' }),
     );
-    const approved = await idsUnder(
+    const sameDay = await idsUnder(
       SCOPES[3],
-      ORACLE({ state: null, exceptionState: 'APPROVED', serviceDate: null, manifested: null }),
+      ORACLE({ ...any, cutoffExceptionState: 'SAME_DAY_APPROVED' }),
     );
-    const rejected = await idsUnder(
+    const rescheduled = await idsUnder(
       SCOPES[3],
-      ORACLE({ state: null, exceptionState: 'REJECTED', serviceDate: null, manifested: null }),
+      ORACLE({ ...any, cutoffExceptionState: 'RESCHEDULED' }),
     );
-    const claimed = await idsUnder(
-      SCOPES[3],
-      ORACLE({ state: null, exceptionState: null, serviceDate: null, manifested: true }),
-    );
-    const unclaimed = await idsUnder(
-      SCOPES[3],
-      ORACLE({ state: null, exceptionState: null, serviceDate: null, manifested: false }),
-    );
-    for (const found of [requested, approved, rejected, claimed, unclaimed]) {
+    for (const found of [
+      requested,
+      approved,
+      rejected,
+      claimed,
+      unclaimed,
+      waiting,
+      sameDay,
+      rescheduled,
+    ]) {
       expect(found.length).toBeGreaterThan(5);
     }
+    // ... and the two rules task C1.1 made have something to act on: a cancelled request whose exception is still asked for (it must leave the
+    // approver's queue), and a late booking that is not confirmed (the filter by the cut-off state alone keeps it, the queue does not).
+    const cancelledAsked = await admin.query<{ n: number }>(
+      `select count(*)::int as n from pickup_request r where r.state = 'CANCELLED'
+          and (select e.state from one_package_exception e where e.pickup_request_id = r.id order by e.requested_at desc, e.id desc limit 1) = 'REQUESTED'`,
+    );
+    expect(cancelledAsked.rows[0]?.n).toBeGreaterThan(0);
+    const lateNotConfirmed = await admin.query<{ n: number }>(
+      `select count(*)::int as n from pickup_request where state <> 'CONFIRMED' and cutoff_exception_state = 'PENDING_OPS_REVIEW'`,
+    );
+    expect(lateNotConfirmed.rows[0]?.n).toBeGreaterThan(0);
     // ... and a request that carries the approval of another shows it (an approval travels with the booking).
     const carriedElsewhere = await admin.query(
       `select 1 from pickup_request r join one_package_exception e on e.id = r.one_package_exception_id where e.pickup_request_id <> r.id limit 1`,
@@ -256,21 +305,33 @@ describe('the conditions of the list of pickup requests', () => {
       let compared = 0;
       for (const state of STATES) {
         for (const exceptionState of EXCEPTION_STATES) {
-          for (const serviceDate of DAYS) {
-            for (const manifested of MANIFESTED) {
-              const criteria = { state, exceptionState, serviceDate, manifested };
-              const expected = await idsUnder(scope, ORACLE(criteria));
-              const actual = await idsUnder(scope, pickupRequestCriteria(criteria));
-              expect(actual, JSON.stringify(criteria)).toEqual(expected);
-              compared += 1;
+          for (const cutoffExceptionState of CUTOFF_STATES) {
+            for (const serviceDate of DAYS) {
+              for (const manifested of MANIFESTED) {
+                const criteria = {
+                  state,
+                  exceptionState,
+                  cutoffExceptionState,
+                  serviceDate,
+                  manifested,
+                };
+                const expected = await idsUnder(scope, ORACLE(criteria));
+                const actual = await idsUnder(scope, pickupRequestCriteria(criteria));
+                expect(actual, JSON.stringify(criteria)).toEqual(expected);
+                compared += 1;
+              }
             }
           }
         }
       }
       expect(compared).toBe(
-        STATES.length * EXCEPTION_STATES.length * DAYS.length * MANIFESTED.length,
+        STATES.length *
+          EXCEPTION_STATES.length *
+          CUTOFF_STATES.length *
+          DAYS.length *
+          MANIFESTED.length,
       );
     },
-    120_000,
+    180_000,
   );
 });

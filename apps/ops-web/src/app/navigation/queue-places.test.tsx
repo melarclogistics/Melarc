@@ -92,9 +92,12 @@ describe('where each queue leads', () => {
     );
   });
 
-  // Break caught: the late bookings leading to the plain queue, which shows pending requests first and hides the ones they are looking for.
-  it('opens the confirmed pickups for the late bookings, which the list has no filter for', () => {
-    expect(queueLink('PICKUP_CUTOFF_REVIEW', () => true)).toBe('/pickup-requests?state=CONFIRMED');
+  // Break caught: the late bookings leading to the plain list of confirmed requests, which hides the ones they are looking for among the
+  // others (task C1.1, AC-QSUM-11: the list has a filter for them now, and the link opens the set that was counted).
+  it('opens the late bookings with the list’s own filter for them', () => {
+    expect(queueLink('PICKUP_CUTOFF_REVIEW', () => true)).toBe(
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
     expect(queueLink('PICKUP_AWAITING_CONFIRMATION', () => true)).toBe(
       '/pickup-requests?state=PENDING',
     );

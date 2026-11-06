@@ -5,8 +5,8 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
  * reporting-data-dictionary.md section 5.5; SOLUTION_ARCHITECTURE.md section 5: `platform/` defines narrow ports, a domain implements the
  * ones it owns, and the composition root wires them).
  *
- * - **Owner:** the domain that owns the queue implements one counter for each queue it owns (`pickup/pickup-queue-counters.ts`,
- *   `staff/staff-queue-counter.ts`); `platform/queue-summary/` is the caller. The composition root binds them (`domain-ports.module.ts`).
+ * - **Owner:** the domain that owns the queue implements one counter for each queue it owns (`pickup/pickup-queue-counters.adapter.ts`,
+ *   `staff/staff-queue-counter.adapter.ts`); `platform/queue-summary/` is the caller. The composition root binds them (`domain-ports.module.ts`).
  * - **A counter counts what its queue's own list returns, by the same predicate.** The list and the counter call one function for the
  *   filter (`pickup/pickup-request-criteria.ts`, ...), so that the two cannot drift; the scope is not the counter's to write: it is
  *   the row-level security of the transaction the caller opens, under the context of `listKey`.

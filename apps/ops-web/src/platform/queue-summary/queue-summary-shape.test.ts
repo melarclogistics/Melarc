@@ -25,12 +25,13 @@ describe('parseQueueSummary: what is accepted', () => {
         { queue: 'PICKUP_CUTOFF_REVIEW', count: 0, oldestAt: null },
         { queue: 'STAFF_AWAITING_APPROVAL', count: 12, oldestAt: '2026-11-02T09:15:30.123Z' },
       ],
+      incomplete: false,
     });
   });
 
   // Break caught: a session that may read no queue refused as though the answer were broken, which would break the menu for it.
   it('accepts a summary with no queue: a session that may read none', () => {
-    expect(parseQueueSummary({ queues: [] })).toEqual({ queues: [] });
+    expect(parseQueueSummary({ queues: [] })).toEqual({ queues: [], incomplete: false });
   });
 
   // Break caught: a queue that holds records with no moment refused, which would take the whole summary away for one missing age.
@@ -38,6 +39,7 @@ describe('parseQueueSummary: what is accepted', () => {
     expect(parseQueueSummary({ queues: [{ queue: 'PICKUP_RUNS_IN_PROGRESS', count: 2 }] })).toEqual(
       {
         queues: [{ queue: 'PICKUP_RUNS_IN_PROGRESS', count: 2, oldestAt: null }],
+        incomplete: false,
       },
     );
   });
@@ -62,6 +64,33 @@ describe('parseQueueSummary: a queue of a newer server', () => {
       }),
     ).toEqual({
       queues: [{ queue: 'PICKUP_CUTOFF_REVIEW', count: 3, oldestAt: '2026-11-02T09:15:30.123Z' }],
+      incomplete: true,
+    });
+  });
+
+  // Break caught (the review of C1): a queue left out without a trace, so that the screens, seeing only zeros, say nothing is waiting while
+  // the queue they have no words for holds seven.
+  it('says that the answer holds more than it shows, when a queue was left out', () => {
+    expect(
+      parseQueueSummary({
+        queues: [entry({ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0, oldest_at: undefined })],
+      })?.incomplete,
+    ).toBe(false);
+    expect(
+      parseQueueSummary({
+        queues: [
+          entry({ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0, oldest_at: undefined }),
+          entry({ queue: 'A_QUEUE_FROM_THE_FUTURE', count: 7 }),
+        ],
+      }),
+    ).toEqual({
+      queues: [{ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0, oldestAt: null }],
+      incomplete: true,
+    });
+    // An answer of nothing but queues this build cannot show is not an empty answer.
+    expect(parseQueueSummary({ queues: [entry({ queue: 'A_QUEUE_FROM_THE_FUTURE' })] })).toEqual({
+      queues: [],
+      incomplete: true,
     });
   });
 

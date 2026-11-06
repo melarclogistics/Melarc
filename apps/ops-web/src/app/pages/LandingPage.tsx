@@ -33,37 +33,46 @@ function QueueList({
   readonly holds: (permission: string) => boolean;
 }) {
   return (
-    <ul className="landing-queues" aria-labelledby="landing-waiting">
-      {inOrderOfUrgency(summary.queues).map((queue) => {
-        const since = queue.oldestAt === null ? undefined : formatInstant(queue.oldestAt);
-        return (
-          <li
-            key={queue.queue}
-            className="landing-queues__item"
-            {...(queue.count === 0 ? { 'data-empty': 'true' } : {})}
-          >
-            <Link to={queueLink(queue.queue, holds)}>{QUEUE_WORDS[queue.queue].title}</Link>
-            <CountBadge count={queue.count} />
-            {since === undefined ? null : (
-              <span className="landing-queues__since">Oldest since {since}</span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      {summary.queues.length === 0 ? null : (
+        <ul className="landing-queues" aria-labelledby="landing-waiting">
+          {inOrderOfUrgency(summary.queues).map((queue) => {
+            const since = queue.oldestAt === null ? undefined : formatInstant(queue.oldestAt);
+            return (
+              <li
+                key={queue.queue}
+                className="landing-queues__item"
+                {...(queue.count === 0 ? { 'data-empty': 'true' } : {})}
+              >
+                <Link to={queueLink(queue.queue, holds)}>{QUEUE_WORDS[queue.queue].title}</Link>
+                <CountBadge count={queue.count} />
+                {since === undefined ? null : (
+                  <span className="landing-queues__since">Oldest since {since}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {/* A queue this page has no words for (a server newer than the page): what is listed is true and not all that waits. */}
+      {summary.incomplete ? <p>Some queues cannot be shown on this page.</p> : null}
+    </>
   );
 }
 
 function WaitingForYou({ holds }: { readonly holds: (permission: string) => boolean }) {
   const summary = useQueueSummary();
   // A session the summary gave no queue to has nothing to be told about waiting: not that nothing is, and not a heading with nothing under it.
-  if (summary.isSuccess && summary.data.queues.length === 0) return null;
+  // (A summary that named only queues this page cannot show is not that: it says so.)
+  if (summary.isSuccess && summary.data.queues.length === 0 && !summary.data.incomplete) {
+    return null;
+  }
   return (
     <>
       <h2 id="landing-waiting">Waiting for you</h2>
       <ReadState<QueueSummaryView>
         query={summary}
-        isEmpty={(data) => data.queues.every((queue) => queue.count === 0)}
+        isEmpty={(data) => !data.incomplete && data.queues.every((queue) => queue.count === 0)}
         empty={<Alert variant="success">Nothing is waiting.</Alert>}
         loadingLabel="Checking what is waiting…"
         operation="getQueueSummary"

@@ -41,10 +41,18 @@ export function requestOfClick(
   return link.dataset[links.key];
 }
 
-/** The filters that are set, as the address carries them (`?state=PENDING&date=2026-11-03`), or nothing when none is. */
-export function searchOf(filters: { readonly state?: string; readonly date?: string }): string {
+/**
+ * The filters that are set, as the address carries them (`?state=PENDING&date=2026-11-03`, and `cutoff=PENDING_OPS_REVIEW` between the two for
+ * the late bookings), or nothing when none is.
+ */
+export function searchOf(filters: {
+  readonly state?: string;
+  readonly cutoff?: string;
+  readonly date?: string;
+}): string {
   const out = new URLSearchParams();
   if (filters.state !== undefined) out.set('state', filters.state);
+  if (filters.cutoff !== undefined) out.set('cutoff', filters.cutoff);
   if (filters.date !== undefined) out.set('date', filters.date);
   const text = out.toString();
   return text === '' ? '' : `?${text}`;

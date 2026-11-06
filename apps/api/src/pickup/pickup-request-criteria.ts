@@ -18,8 +18,17 @@ import { sql, type SQL } from 'drizzle-orm';
 export interface PickupRequestCriteria {
   /** Only the requests in this state, or all of them. */
   readonly state: string | null;
-  /** Only the requests whose exception (the one they carry, else the latest raised for them) is in this state. */
+  /**
+   * Only the requests whose exception (the one they carry, else the latest raised for them) is in this state. **`REQUESTED` is the approver's
+   * queue, and leaves out the cancelled requests** (task C1.1, `AC-QSUM-12`): the exception of a request that is not `PENDING` can no longer
+   * be decided (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work.
+   */
   readonly exceptionState: string | null;
+  /**
+   * Only the requests whose cut-off decision is in this state (task C1.1, `AC-QSUM-10`): with `state: 'CONFIRMED'`, `PENDING_OPS_REVIEW` is
+   * the late bookings waiting for Ops, which `PICKUP_CUTOFF_REVIEW` counts.
+   */
+  readonly cutoffExceptionState: string | null;
   /** Only the requests scheduled for this day (`YYYY-MM-DD`). */
   readonly serviceDate: string | null;
   /** `true`: only the requests that have a stop no one has released; `false`: only those that have none. */
@@ -63,7 +72,7 @@ function requestsThatCanShowAnExceptionIn(state: string): SQL {
  * `state=CONFIRMED` with `manifested=false` and to nothing else, so that an operational queue does not lose a request to the pool's rule.
  */
 export function pickupRequestCriteria(criteria: PickupRequestCriteria): SQL {
-  const { state, exceptionState, serviceDate, manifested } = criteria;
+  const { state, exceptionState, cutoffExceptionState, serviceDate, manifested } = criteria;
   const pool = manifested === false && state === 'CONFIRMED';
   const conditions: SQL[] = [sql`true`];
   if (state !== null) conditions.push(sql`state = ${state}::text`);
@@ -72,6 +81,10 @@ export function pickupRequestCriteria(criteria: PickupRequestCriteria): SQL {
       requestsThatCanShowAnExceptionIn(exceptionState),
       sql`${shownException('state')} = ${exceptionState}::text`,
     );
+    if (exceptionState === 'REQUESTED') conditions.push(sql`state is distinct from 'CANCELLED'`);
+  }
+  if (cutoffExceptionState !== null) {
+    conditions.push(sql`cutoff_exception_state = ${cutoffExceptionState}::text`);
   }
   if (serviceDate !== null) conditions.push(sql`scheduled_service_date = ${serviceDate}::date`);
   if (manifested !== null) {
@@ -89,13 +102,18 @@ export function pickupRequestCriteria(criteria: PickupRequestCriteria): SQL {
 export const ANY_PICKUP_REQUEST: PickupRequestCriteria = Object.freeze({
   state: null,
   exceptionState: null,
+  cutoffExceptionState: null,
   serviceDate: null,
   manifested: null,
 });
 
 /**
  * The confirmed requests whose booking passed the hub's cutoff and which Ops has yet to resolve (`AC-SLICE-001-04`: "a late booking
- * queues, it does not fail"). **The list has no parameter for it**: the plain list of confirmed requests shows each of these with
- * `cutoff_exception_state` `PENDING_OPS_REVIEW`, and the count is held to that list through that field.
+ * queues, it does not fail"): the list with `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` (task C1.1, `AC-QSUM-10`),
+ * which `PICKUP_CUTOFF_REVIEW` counts by calling this very function. It is the plain list of confirmed requests less those whose decision has been taken.
  */
-export const CUTOFF_REVIEW_CRITERIA: SQL = sql`state = 'CONFIRMED' and cutoff_exception_state = 'PENDING_OPS_REVIEW'`;
+export const CUTOFF_REVIEW: PickupRequestCriteria = Object.freeze({
+  ...ANY_PICKUP_REQUEST,
+  state: 'CONFIRMED',
+  cutoffExceptionState: 'PENDING_OPS_REVIEW',
+});

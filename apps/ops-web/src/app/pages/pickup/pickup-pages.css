@@ -147,6 +147,18 @@
   margin-top: calc(var(--text-label-md-line-height) + var(--space-1));
 }
 
+/* The late bookings' filter (task C1.1): the words that say it is set, over the button that takes it off, like the date's pair. */
+.pickup-cutoff-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.pickup-cutoff-filter__text {
+  margin: 0;
+}
+
 /*
  * The refresh and the time of the page's last check, beside the filters (QueueFilters `aside`). It is built like a field, the line of text over
  * the button, so that the button sits on the line of the controls beside it when the aside stands at the end of their row, and is simply the

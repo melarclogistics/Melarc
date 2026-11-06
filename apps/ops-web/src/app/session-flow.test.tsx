@@ -122,7 +122,7 @@ describe('a visit to the landing with somebody signed in', () => {
         .getAllByRole('listitem')
         .map((item) => item.textContent),
     ).toEqual(['Accra Central', 'Tema']);
-    // `empty` is a success message, not a blank (surfaces/ops-portal.md section 8).
+    // What is waiting, and the success message of a summary with nothing in it (surfaces/ops-portal.md section 8), are `LandingPage.test.tsx`'s.
     expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
   });
 

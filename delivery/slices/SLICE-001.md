@@ -78,7 +78,7 @@ A step or row marked *(Vendor PWA)* or *(Rider app)* is performed in that client
 | Outside-Accra order, hub margin unset| **Refused, not priced at cost** (`MARGIN_NOT_CONFIGURED`)|
 | Itemization with no size class chosen| Refused (`SIZE_CLASS_REQUIRED`). There is no default|
 | Address corrected within the same service area| **No repricing workflow fires.** Nothing changed|
-| One-package exception| **Any holder of `pickup.exception.approve`** approves — Senior Ops, Platform Admin, or Ops Staff explicitly granted it. Recipient details become mandatory. **The GH₵20 pickup fee applies anyway** — approval does not waive it|
+| One-package exception| **Any holder of `pickup.exception.approve`** approves — every Ops Staff member, Senior Ops and Platform Admin (Product Owner, 29 October 2026); never a vendor, and never the requester (a Platform Admin excepted). Recipient details become mandatory. **The GH₵20 pickup fee applies anyway** — approval does not waive it|
 | Booking past the hub cutoff| **Confirms** and queues for Ops review. **No error**|
 | Short collection *(Rider app)*| `PARTIALLY_COLLECTED` with a reason, and **office flagged at that moment**|
 | Zero collection *(Rider app)*| Routed to failure. **No completed stop, no handover**|

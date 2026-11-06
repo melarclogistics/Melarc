@@ -20,6 +20,7 @@ import { OperationFailure } from '../../../platform/api/api-response';
 import {
   calendarDateOf,
   PICKUP_STATES,
+  type CutoffExceptionState,
   type PickupRequestPageView,
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
@@ -36,6 +37,13 @@ import './pickup-pages.css';
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
 const stateOf = (text: string | null): PickupState | undefined =>
   PICKUP_STATES.find((state) => state === text);
+
+/**
+ * The cut-off decision from the address (`?cutoff=PENDING_OPS_REVIEW`), or nothing. The landing sends the late bookings here with it (task C1.1,
+ * `AC-QSUM-11`); the one value the page offers is the one that is somebody's work, and any other is no filter, like any value the person edits in.
+ */
+const cutoffOf = (text: string | null): CutoffExceptionState | undefined =>
+  text === 'PENDING_OPS_REVIEW' ? text : undefined;
 
 /**
  * Whether a date the date field gave is one a person has finished typing. The field gives each whole date on the way to the one meant (the year
@@ -81,14 +89,16 @@ export function PickupRequestListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const state = stateOf(params.get('state'));
+  const cutoff = cutoffOf(params.get('cutoff'));
   const serviceDate = calendarDateOf(params.get('date'));
-  const signature = `${state ?? ''}|${serviceDate ?? ''}`;
+  const signature = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
   const continuity = useQueueContinuity();
   const [arrival] = useState(() => continuity.returningTo(signature));
   const paging = useQueuePaging(signature, arrival?.tokens);
   const list = usePickupRequests({
     ...(state === undefined ? {} : { state }),
+    ...(cutoff === undefined ? {} : { cutoffExceptionState: cutoff }),
     ...(serviceDate === undefined ? {} : { serviceDate }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
@@ -113,7 +123,7 @@ export function PickupRequestListPage() {
   // filter they were on is a visit of its own and not the old one again. A visit's number is never used twice, so what was said of one visit
   // can be said of no other, and an answer that arrives in another visit (late, after the officer has been elsewhere and come back) is said
   // of nothing.
-  const pageKey = `${state ?? ''}|${serviceDate ?? ''}|${paging.pageToken ?? ''}`;
+  const pageKey = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}|${paging.pageToken ?? ''}`;
   const [visit, setVisit] = useState({ key: pageKey, id: 0 });
   const [refreshedVisit, setRefreshedVisit] = useState<number | undefined>();
   if (visit.key !== pageKey) setVisit({ key: pageKey, id: visit.id + 1 });
@@ -172,6 +182,7 @@ export function PickupRequestListPage() {
       signature,
       search: searchOf({
         ...(state === undefined ? {} : { state }),
+        ...(cutoff === undefined ? {} : { cutoff }),
         ...(serviceDate === undefined ? {} : { date: serviceDate }),
       }),
       tokens: paging.tokens,
@@ -200,24 +211,27 @@ export function PickupRequestListPage() {
   if (me === undefined) return null;
 
   /** A change of filter, where `''` takes one off. */
-  function change(next: { state?: PickupState | ''; date?: string }): void {
+  function change(next: { state?: PickupState | ''; cutoff?: ''; date?: string }): void {
     continuity.discard();
     setInteracted(true);
     const nextState = next.state === undefined ? state : next.state === '' ? undefined : next.state;
+    // The late bookings are asked for by the link of the landing and taken off by their own button: nothing else changes them.
+    const nextCutoff = next.cutoff === undefined ? cutoff : undefined;
     const nextDate =
       next.date === undefined ? serviceDate : next.date === '' ? undefined : next.date;
     const out = new URLSearchParams();
     if (nextState !== undefined) out.set('state', nextState);
+    if (nextCutoff !== undefined) out.set('cutoff', nextCutoff);
     if (nextDate !== undefined) out.set('date', nextDate);
     setParams(out, { replace: true });
   }
 
   function clearEverything(): void {
     setTyped({ over: undefined, value: null });
-    change({ state: '', date: '' });
+    change({ state: '', cutoff: '', date: '' });
   }
 
-  const filtering = state !== undefined || serviceDate !== undefined;
+  const filtering = state !== undefined || cutoff !== undefined || serviceDate !== undefined;
   // A page after the first can hold nothing without the queue being empty (requests move between reads): it says so, and does not go looking
   // through the earlier pages on its own.
   const empty =
@@ -245,7 +259,9 @@ export function PickupRequestListPage() {
           </Button>
         }
       >
-        Nothing fits this state and service date. Show every request to start again.
+        {cutoff === undefined
+          ? 'Nothing fits this state and service date. Show every request to start again.'
+          : 'Nothing fits these filters. Show every request to start again.'}
       </EmptyState>
     ) : (
       <EmptyState kind="none" heading="No pickup requests yet" announce={interacted}>
@@ -329,6 +345,22 @@ export function PickupRequestListPage() {
                 </div>
               )}
             </div>
+            {cutoff === undefined ? null : (
+              <div className="pickup-cutoff-filter">
+                <p className="pickup-cutoff-filter__text">
+                  Only late bookings waiting for a cut-off decision.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    change({ cutoff: '' });
+                  }}
+                >
+                  Every cut-off decision
+                </Button>
+              </div>
+            )}
           </QueueFilters>
 
           <ReadState<PickupRequestPageView>

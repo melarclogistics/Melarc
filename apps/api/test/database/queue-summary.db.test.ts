@@ -17,6 +17,7 @@ import {
   API,
   HUB_A,
   HUB_B,
+  OPS,
   startStaffRoutes,
   type Actor,
   type StaffRoutes,
@@ -170,16 +171,17 @@ async function fromTheList(
       };
     }
     case 'PICKUP_CUTOFF_REVIEW': {
-      // The list has no parameter for it: the confirmed list shows each such request with the cutoff state, and the count is held to that.
-      const list = await requestsOf(actor, '/pickup-requests?state=CONFIRMED');
-      const late = list.items.filter(
-        (item) => item.cutoff_exception_state === 'PENDING_OPS_REVIEW',
+      // The list's own filter for it (task C1.1, AC-QSUM-10). That this filter returns what the plain confirmed list shows with the cut-off
+      // state is held, independently, by "the late bookings have a filter of their own" below.
+      const list = await requestsOf(
+        actor,
+        '/pickup-requests?state=CONFIRMED&cutoff_exception_state=PENDING_OPS_REVIEW',
       );
       return {
         status: list.status,
         entry: entry(
-          late.map((item) => item.confirmed_at ?? ''),
-          late.length,
+          list.items.map((item) => item.confirmed_at ?? ''),
+          list.items.length,
         ),
       };
     }
@@ -331,7 +333,8 @@ beforeAll(async () => {
     `update pickup_request set one_package_exception_id = $1 where id = $2`,
     [approvedException.id, approved],
   );
-  // A request cancelled while its exception was still asked for: it stays in the approver's queue, as the list shows it.
+  // A request cancelled while its exception was still asked for: the exception stays asked for and can no longer be decided, so the request
+  // is not in the approver's queue (task C1.1, AC-QSUM-12).
   const cancelled = await make('a.cancelledException', HUB_A, { packages: 1 });
   await insertOnePackageException(routes.admin, exceptionRow(cancelled));
   await routes.admin.query(
@@ -339,6 +342,9 @@ beforeAll(async () => {
     [cancelled, new Date('2026-11-02T09:00:00Z'), new Date('2026-11-02T10:00:00Z')],
   );
   await make('a.cancelled', HUB_A, { state: 'CANCELLED' });
+  // A request cancelled while its cut-off decision was waiting: it is in no queue, and shows what the filter by the cut-off state alone returns
+  // (the late bookings are the confirmed ones among them).
+  await make('a.lateCancelled', HUB_A, { state: 'CANCELLED', cutoffState: 'PENDING_OPS_REVIEW' });
 
   await make('a.late', HUB_A, {
     state: 'CONFIRMED',
@@ -488,7 +494,7 @@ describe('a count is what its list returns', () => {
   // Break caught: the comparison above passing because both sides are empty, or the arranged data never reaching a queue.
   it('is not a comparison of empty things: the arranged data reaches every queue of the first hub’s officer and the second hub’s', async () => {
     const officerA = await summaryOf(await routes.opsStaff(HUB_A));
-    expect(officerA.queues.map((entry) => entry.count)).toEqual([5, 1, 3, 4, 2]);
+    expect(officerA.queues.map((entry) => entry.count)).toEqual([5, 1, 2, 4, 2]);
     const officerB = await summaryOf(await routes.opsStaff(HUB_B));
     expect(officerB.queues.map((entry) => entry.count)).toEqual([2, 1, 1, 1, 1]);
   });
@@ -509,10 +515,11 @@ describe('the figures a reader can check by eye', () => {
       },
       // Late: the one confirmed after the cutoff and not decided; the one whose review was resolved is not in it.
       { queue: 'PICKUP_CUTOFF_REVIEW', count: 1, oldest_at: T.lateA.toISOString() },
-      // Asked for and not decided: the asked one, the one asked for again after a refusal (once) and the one cancelled while asked for.
+      // Asked for and not decided: the asked one and the one asked for again after a refusal (once). The one cancelled while asked for is not
+      // in it: its exception can no longer be decided (AC-QSUM-12).
       {
         queue: 'PICKUP_EXCEPTION_APPROVAL',
-        count: 3,
+        count: 2,
         oldest_at: await exceptionRequestedAt(requests['a.pendingException']),
       },
       // The pool: confirmed, no claim held, not awaiting the cutoff decision: the returned one, the two plain ones and the resolved one.
@@ -549,7 +556,7 @@ describe('the figures a reader can check by eye', () => {
     expect(queues.map((entry) => [entry.queue, entry.count])).toEqual([
       ['PICKUP_AWAITING_CONFIRMATION', 5],
       ['PICKUP_CUTOFF_REVIEW', 1],
-      ['PICKUP_EXCEPTION_APPROVAL', 3],
+      ['PICKUP_EXCEPTION_APPROVAL', 2],
       ['PICKUP_UNMANIFESTED_POOL', 4],
       ['PICKUP_RUNS_IN_PROGRESS', 2],
       ['STAFF_AWAITING_APPROVAL', 2],
@@ -590,7 +597,7 @@ describe('the figures a reader can check by eye', () => {
     expect(queues.map((entry) => [entry.queue, entry.count])).toEqual([
       ['PICKUP_AWAITING_CONFIRMATION', 7],
       ['PICKUP_CUTOFF_REVIEW', 2],
-      ['PICKUP_EXCEPTION_APPROVAL', 4],
+      ['PICKUP_EXCEPTION_APPROVAL', 3],
       ['PICKUP_UNMANIFESTED_POOL', 5],
       ['PICKUP_RUNS_IN_PROGRESS', 3],
       ['STAFF_AWAITING_APPROVAL', 4],
@@ -598,6 +605,112 @@ describe('the figures a reader can check by eye', () => {
     expect(entryFor(queues, 'PICKUP_CUTOFF_REVIEW')?.oldest_at).toBe(T.lateB.toISOString());
     expect(entryFor(queues, 'PICKUP_UNMANIFESTED_POOL')?.oldest_at).toBe(T.poolB.toISOString());
     expect(entryFor(queues, 'PICKUP_RUNS_IN_PROGRESS')?.oldest_at).toBe(T.startedB.toISOString());
+  });
+});
+
+describe('the late bookings have a filter of their own (AC-QSUM-10)', () => {
+  const people: readonly [string, () => Promise<Actor>][] = [
+    ['an Ops Staff officer of the first hub', () => routes.opsStaff(HUB_A)],
+    ['an Ops Staff officer of the second hub', () => routes.opsStaff(HUB_B)],
+    ['a Senior Ops user of the first hub', () => routes.seniorOps(HUB_A)],
+    ['a Platform Admin with a primary hub', () => routes.actor(BUNDLE_IDS.platformAdmin, HUB_A)],
+    [
+      'a bundle that reads the pickups at every hub',
+      async () => routes.actor(await newBundle(routes.admin, [grant('pickup.read', 'all')]), HUB_A),
+    ],
+  ];
+
+  // Break caught: the filter ignored (the whole confirmed list comes back), applied to another field, or the queue counting the field
+  // differently from the list. The expectation is read from the plain confirmed list, which shows the field, and not from the filter.
+  it.each(people)(
+    'for %s, returns the confirmed requests that the plain list shows as waiting for the decision, and as many as the queue counts',
+    async (_name, becomes) => {
+      const actor = await becomes();
+      const confirmed = await requestsOf(actor, '/pickup-requests?state=CONFIRMED');
+      const expected = confirmed.items
+        .filter((item) => item.cutoff_exception_state === 'PENDING_OPS_REVIEW')
+        .map((item) => item.id)
+        .toSorted();
+      const filtered = await requestsOf(
+        actor,
+        '/pickup-requests?state=CONFIRMED&cutoff_exception_state=PENDING_OPS_REVIEW',
+      );
+
+      expect(filtered.status).toBe(200);
+      expect(filtered.items.map((item) => item.id).toSorted()).toEqual(expected);
+      // The confirmed list holds requests that are not late bookings, and the late bookings are some of them: the filter removes something
+      // and leaves something.
+      expect(expected.length).toBeGreaterThan(0);
+      expect(confirmed.items.length).toBeGreaterThan(expected.length);
+      const counted = entryFor((await summaryOf(actor)).queues, 'PICKUP_CUTOFF_REVIEW');
+      expect(counted?.count).toBe(expected.length);
+    },
+  );
+
+  // Break caught: the filter narrowed by the queue's own state when none is asked for (it is a filter on the field), or the other two
+  // states of the field ignored.
+  it('is a filter on the cut-off state alone when no state is given, of which the queue is the confirmed requests', async () => {
+    const reader = await routes.actor(
+      await newBundle(routes.admin, [grant('pickup.read', 'all')]),
+      HUB_A,
+    );
+    const ids = (items: readonly RequestItem[]) => items.map((item) => item.id).toSorted();
+
+    const waiting = await requestsOf(
+      reader,
+      '/pickup-requests?cutoff_exception_state=PENDING_OPS_REVIEW',
+    );
+    expect(ids(waiting.items)).toEqual(
+      [requests['a.late'], requests['a.lateCancelled'], requests['b.late']].toSorted(),
+    );
+    const confirmedWaiting = await requestsOf(
+      reader,
+      '/pickup-requests?state=CONFIRMED&cutoff_exception_state=PENDING_OPS_REVIEW',
+    );
+    expect(ids(confirmedWaiting.items)).toEqual(
+      [requests['a.late'], requests['b.late']].toSorted(),
+    );
+
+    const approved = await requestsOf(
+      reader,
+      '/pickup-requests?cutoff_exception_state=SAME_DAY_APPROVED',
+    );
+    expect(ids(approved.items)).toEqual([requests['a.resolved']]);
+    const rescheduled = await requestsOf(
+      reader,
+      '/pickup-requests?cutoff_exception_state=RESCHEDULED',
+    );
+    expect(rescheduled).toEqual({ status: 200, items: [] });
+  });
+});
+
+describe('a cancelled request is not in the approver’s queue (AC-QSUM-12)', () => {
+  // Break caught: a request cancelled while its exception was asked for still listed and counted, so that an approver is sent to a decision
+  // the server refuses (`STATE_CONFLICT`, held by pickup-one-package-exception-routes.db.test.ts); or the rule dropping a request that is
+  // not cancelled.
+  it('leaves it out of the list and of the count, and keeps every other request whose exception is asked for', async () => {
+    const officer = await routes.opsStaff(HUB_A);
+    const queue = await requestsOf(
+      officer,
+      '/pickup-requests?one_package_exception_state=REQUESTED',
+    );
+
+    expect(queue.status).toBe(200);
+    expect(queue.items.map((item) => item.id).toSorted()).toEqual(
+      [requests['a.pendingException'], requests['a.refusedThenAsked']].toSorted(),
+    );
+    expect(entryFor((await summaryOf(officer)).queues, 'PICKUP_EXCEPTION_APPROVAL')?.count).toBe(2);
+
+    // Nothing was decided about the cancelled request: it is out of the queue and not out of the record, and its exception is still asked for.
+    const cancelledId = requests['a.cancelledException'];
+    if (cancelledId === undefined) throw new Error('the cancelled request was not arranged');
+    const one = await officer.client.get(`${API}/pickup-requests/${cancelledId}`);
+    expect(one.status).toBe(200);
+    const body = one.json() as {
+      state: string;
+      one_package_exception: { state: string } | null;
+    };
+    expect([body.state, body.one_package_exception?.state]).toEqual(['CANCELLED', 'REQUESTED']);
   });
 });
 
@@ -661,8 +774,8 @@ describe('what a session is given depends on its keys, entry by entry', () => {
     ]);
     const { queues } = await summaryOf(await routes.actor(bundle, HUB_A));
 
-    // The exceptions of the first hub only (3), not the four of both; the profiles of the first hub only (2), not the four.
-    expect(entryFor(queues, 'PICKUP_EXCEPTION_APPROVAL')?.count).toBe(3);
+    // The exceptions of the first hub only (2), not the three of both; the profiles of the first hub only (2), not the four.
+    expect(entryFor(queues, 'PICKUP_EXCEPTION_APPROVAL')?.count).toBe(2);
     expect(entryFor(queues, 'STAFF_AWAITING_APPROVAL')?.count).toBe(2);
   });
 
@@ -726,6 +839,55 @@ describe('the shape of the answer', () => {
     );
 
     expect(after?.events).toBe(before?.events);
+  });
+});
+
+describe('the clock of the session and a session that has ended (AC-QSUM-06)', () => {
+  const activityOf = async (sessionId: string): Promise<Date> => {
+    const [row] = await routes.rows<{ at: Date }>(
+      `select last_activity_at as at from session where id = $1`,
+      [sessionId],
+    );
+    if (row === undefined) throw new Error('no such session');
+    return row.at;
+  };
+
+  // Break caught (the review of C1): the summary, read by the portal on its own at every page, counted as the person acting, which keeps an
+  // unattended session alive for as long as a tab is open. The comparison could not fail if nothing ever moved the clock, so a read of a list,
+  // which is the person's act, is made as the control.
+  it('does not move the idle clock of the session that asks, as a read of a list does', async () => {
+    const actor = await routes.opsStaff(HUB_A);
+    // Lets five minutes pass for the session, by changing the data: the guard trigger forbids it to the application, and rightly.
+    await routes.admin.query('alter table session disable trigger session_guard');
+    try {
+      await routes.admin.query(
+        `update session set issued_at = issued_at - interval '5 minutes',
+                            last_activity_at = last_activity_at - interval '5 minutes',
+                            expires_at = expires_at - interval '5 minutes' where id = $1`,
+        [actor.sessionId],
+      );
+    } finally {
+      await routes.admin.query('alter table session enable trigger session_guard');
+    }
+    const before = await activityOf(actor.sessionId);
+
+    expect((await summaryOf(actor)).status).toBe(200);
+    expect(await activityOf(actor.sessionId)).toEqual(before);
+
+    expect((await actor.client.get(`${API}/pickup-requests`)).status).toBe(200);
+    expect((await activityOf(actor.sessionId)).getTime()).toBeGreaterThan(before.getTime());
+  });
+
+  // Break caught: a session that has ended still served the counts of the work.
+  it('is SESSION_INVALID for a session that has ended', async () => {
+    const actor = await routes.opsStaff(HUB_A);
+    expect((await summaryOf(actor)).status).toBe(200);
+    expect((await actor.client.delete(`${API}/auth/session`, { origin: OPS })).status).toBe(204);
+
+    const answer = await actor.client.get(SUMMARY);
+
+    expect(answer.status).toBe(401);
+    expect((answer.json() as { code?: string }).code).toBe('SESSION_INVALID');
   });
 });
 

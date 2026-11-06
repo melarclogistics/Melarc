@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.91.0-c1-queue-summary
- *   SHA-256 8e4f4d97c41d9d23d208608e8f11d3e5fc693fb0e1c39bf03d27481ef84b78bc (of the contract, line endings normalized to LF)
+ *   SHA-256 6a5d9ac65a7393a2d2b2885b2f2cbcc8293b9ac419c3197db953c7f90d3005d6 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2387,8 +2387,8 @@ export interface paths {
          *     | `queue` | Records | The list and its filter | Keys | `oldest_at` is the least of |
          *     |---|---|---|---|---|
          *     | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
-         *     | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED`, the requests whose `cutoff_exception_state` is `PENDING_OPS_REVIEW` (the list has no parameter for it) | `pickup.read` | `confirmed_at` of the request |
-         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+         *     | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` | `pickup.read` | `confirmed_at` of the request |
+         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` (a cancelled request is not in it) | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
          *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
          *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
          *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
@@ -12760,8 +12760,10 @@ export interface operations {
                 service_date?: string;
                 /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop, a Rider no request) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
                 manifested?: boolean;
-                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). Authorization-checked like every filter. */
+                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **A cancelled request is not in it**: its exception can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT` for a request that is not `PENDING`), so it is not the approver's work. Authorization-checked like every filter. */
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
+                /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
+                cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };

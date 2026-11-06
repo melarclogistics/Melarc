@@ -286,10 +286,12 @@ function answer(route: Route, state: PickupApi, call: Call): Promise<void> {
     const stateFilter = url.searchParams.get('state');
     const date = url.searchParams.get('service_date');
     const exceptionState = url.searchParams.get('one_package_exception_state');
+    const cutoffState = url.searchParams.get('cutoff_exception_state');
     const matching = w.requests
       .filter((row) => stateFilter === null || row.state === stateFilter)
       .filter((row) => date === null || row.scheduled_service_date === date)
       .filter((row) => exceptionState === null || row.exception?.state === exceptionState)
+      .filter((row) => cutoffState === null || row.cutoff_exception_state === cutoffState)
       .map((row) => wire(row));
     const start = Number(url.searchParams.get('page_token') ?? '0');
     const size = w.pageSize ?? matching.length;

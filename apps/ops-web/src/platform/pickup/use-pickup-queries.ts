@@ -11,6 +11,7 @@ import {
   parseVendorPickupLocations,
   type AdHocSenderView,
   type AttributedReason,
+  type CutoffExceptionState,
   type ExceptionState,
   type PickupReasonDomain,
   type PickupRequestPageView,
@@ -38,6 +39,11 @@ export interface PickupListParams {
   /** Only the requests whose one-package exception is in this state: `REQUESTED` is the approver's queue. */
   readonly exceptionState?: ExceptionState;
   /**
+   * Only the requests whose booking-cutoff decision is in this state: with `state: 'CONFIRMED'`, `PENDING_OPS_REVIEW` is the late bookings
+   * waiting for Ops (task C1.1; the set the queue summary counts).
+   */
+  readonly cutoffExceptionState?: CutoffExceptionState;
+  /**
    * `false` with `state: 'CONFIRMED'` is the manifest pool: the confirmed requests no manifest holds, less any whose booking cutoff is still to be
    * reviewed (the server's reading, S1.20). It is staff's alone; a page that sends it is a staff page.
    */
@@ -52,7 +58,15 @@ export interface PickupListParams {
  */
 export function usePickupRequests(params: PickupListParams): UseQueryResult<PickupRequestPageView> {
   const client = useApiClient();
-  const { state, serviceDate, exceptionState, manifested, pageToken, enabled = true } = params;
+  const {
+    state,
+    serviceDate,
+    exceptionState,
+    cutoffExceptionState,
+    manifested,
+    pageToken,
+    enabled = true,
+  } = params;
   return useQuery({
     queryKey: [
       'pickup-requests',
@@ -60,6 +74,7 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
       state ?? null,
       serviceDate ?? null,
       exceptionState ?? null,
+      cutoffExceptionState ?? null,
       manifested ?? null,
       pageToken ?? null,
     ],
@@ -75,6 +90,9 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
               ...(exceptionState === undefined
                 ? {}
                 : { one_package_exception_state: exceptionState }),
+              ...(cutoffExceptionState === undefined
+                ? {}
+                : { cutoff_exception_state: cutoffExceptionState }),
               ...(manifested === undefined ? {} : { manifested }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },
@@ -83,10 +101,13 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
       );
       const page = parsePickupRequestPage(answer.data);
       // Filtered by the state of the exception, every request carries an exception in that state: a page that does not is not this query's.
+      // The same for the cut-off decision: every request of the page carries the state that was asked for.
       if (
         page === undefined ||
         (exceptionState !== undefined &&
-          page.items.some((request) => request.one_package_exception?.state !== exceptionState))
+          page.items.some((request) => request.one_package_exception?.state !== exceptionState)) ||
+        (cutoffExceptionState !== undefined &&
+          page.items.some((request) => request.cutoff_exception_state !== cutoffExceptionState))
       ) {
         throw unexpectedResponse(answer.status);
       }

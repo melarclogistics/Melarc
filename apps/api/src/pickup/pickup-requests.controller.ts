@@ -17,7 +17,7 @@ import { RequiresPermission } from '../platform/routes/access-declaration.js';
 import { PICKUP_REQUEST_PAGE_SCHEMA, PICKUP_REQUEST_SCHEMA } from './pickup-request-schemas.js';
 import { ETAG_HEADERS } from '../platform/http/contract-headers.js';
 import { MAX_PAGE_SIZE } from '../platform/http/pagination.js';
-import { EXCEPTION_STATES } from './pickup-requests.service.js';
+import { CUTOFF_EXCEPTION_STATES, EXCEPTION_STATES } from './pickup-requests.service.js';
 import { PICKUP_REQUESTS_SERVICE } from './pickup-requests-providers.js';
 import type {
   PickupListFilter,
@@ -43,6 +43,7 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
   const serviceDate = take('service_date');
   const manifested = take('manifested');
   const exceptionState = take('one_package_exception_state');
+  const cutoffExceptionState = take('cutoff_exception_state');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
@@ -50,6 +51,7 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
     ...(serviceDate === undefined ? {} : { serviceDate }),
     ...(manifested === undefined ? {} : { manifested }),
     ...(exceptionState === undefined ? {} : { exceptionState }),
+    ...(cutoffExceptionState === undefined ? {} : { cutoffExceptionState }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
   };
@@ -83,6 +85,11 @@ export class PickupRequestsController {
     name: 'one_package_exception_state',
     required: false,
     schema: { type: 'string', enum: [...EXCEPTION_STATES] },
+  })
+  @ApiQuery({
+    name: 'cutoff_exception_state',
+    required: false,
+    schema: { type: 'string', enum: [...CUTOFF_EXCEPTION_STATES] },
   })
   @ApiQuery({
     name: 'page_size',

@@ -409,7 +409,16 @@ paths:
           schema: { type: string, enum: [REQUESTED, APPROVED, REJECTED] }
           description: >-
             Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the
-            requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). Authorization-checked
+            requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **A cancelled request is not
+            in it**: its exception can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT` for a
+            request that is not `PENDING`), so it is not the approver's work. Authorization-checked like every filter.
+        - name: cutoff_exception_state
+          in: query
+          schema: { type: string, enum: [PENDING_OPS_REVIEW, SAME_DAY_APPROVED, RESCHEDULED] }
+          description: >-
+            Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With
+            `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision
+            (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked
             like every filter.
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/PageToken'
@@ -3809,8 +3818,8 @@ paths:
         | `queue` | Records | The list and its filter | Keys | `oldest_at` is the least of |
         |---|---|---|---|---|
         | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
-        | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED`, the requests whose `cutoff_exception_state` is `PENDING_OPS_REVIEW` (the list has no parameter for it) | `pickup.read` | `confirmed_at` of the request |
-        | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+        | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` | `pickup.read` | `confirmed_at` of the request |
+        | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` (a cancelled request is not in it) | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
         | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
         | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
         | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
