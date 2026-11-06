@@ -52,11 +52,19 @@ afterEach(() => {
 const booked = (estimate = estimateFixture()): Response =>
   json(201, pickupRequestFixture({ indicative_estimate: estimate }), etag('v1'));
 
-function open(keys: readonly string[] = CREATOR, handlers: Record<string, Handler> = {}) {
+const ACCRA = { id: PICKUP_HUB_ID, display_name: 'Accra Central' };
+const TEMA_HUB_ID = '7c3e1f2a-9b4d-4c6e-8a5f-1d2e3f4a5b6c';
+const TEMA = { id: TEMA_HUB_ID, display_name: 'Tema' };
+
+function open(
+  keys: readonly string[] = CREATOR,
+  handlers: Record<string, Handler> = {},
+  hubs: readonly { readonly id: string; readonly display_name: string }[] = [ACCRA],
+) {
   api = installFakeApi(
     staffApi(
       sessionWith(keys, {
-        authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+        authorized_hubs: [...hubs],
       }),
       {
         [VENDORS]: () => json(200, { items: [vendorAccountFixture()], next_page_token: null }),
@@ -112,6 +120,26 @@ async function fillCommon(user: User): Promise<void> {
 }
 
 const send = (user: User) => user.click(screen.getByRole('button', { name: 'Book the pickup' }));
+
+/** A first-time walk-in sender and everything else of the booking, but for the hub: the person has still to say which hub, where one is asked. */
+async function fillNewWalkIn(user: User): Promise<void> {
+  await chooseIntent(user, 'A walk-in sender');
+  await user.click(screen.getByRole('radio', { name: 'No: this is their first time' }));
+  await user.type(screen.getByRole('textbox', { name: /Sender’s name/ }), 'Kojo Demo');
+  await user.type(screen.getByRole('textbox', { name: /Sender’s phone/ }), '+233245556666');
+  await user.type(
+    screen.getByRole('textbox', { name: /Address the parcel is collected from/ }),
+    '1 Demo Avenue',
+  );
+  await user.type(screen.getByRole('textbox', { name: /What is being sent today/ }), 'Books');
+  await user.type(
+    screen.getByRole('textbox', { name: /Contact phone for this pickup/ }),
+    '+233245556666',
+  );
+  await fillCommon(user);
+}
+
+const hubField = () => screen.getByRole('combobox', { name: /^Hub/ });
 
 describe('booking: the intent comes first', () => {
   // MSC-DEC-335: there is no universal form; the intent is chosen before anything else is asked, and nothing chooses it for the person.
@@ -357,6 +385,9 @@ describe('booking a walk-in sender', () => {
     await screen.findByRole('heading', { name: 'Pickup booked' });
     expect(await bodyOf(creates()[0])).toEqual({
       pickup_intent: 'ADHOC_SENDER',
+      // The one hub the session lists is the hub of the booking (task P1): the server asks the person to name it when its grant reaches more
+      // than one, and a form that always names it works for both.
+      hub_id: PICKUP_HUB_ID,
       new_ad_hoc_sender: {
         name: 'Kojo Demo',
         phone: '+233245556666',
@@ -430,6 +461,125 @@ describe('booking a walk-in sender', () => {
 
     expect(await screen.findByText('Say what is being sent today.')).toBeVisible();
     expect(creates()).toHaveLength(0);
+  });
+});
+
+describe('booking a walk-in sender: the hub', () => {
+  // AC-SLICE-001-82 (task P1): a grant that reaches more than one hub (a Platform Admin's reaches them all) makes the person name the hub the
+  // walk-in is booked into; the server never picks one for them, so the page asks, and sends what was chosen.
+  it('asks a session of several hubs to choose the hub, and books nothing until it has', async () => {
+    const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+    await fillNewWalkIn(user);
+    const hub = hubField();
+    expect(hub).toHaveValue('');
+    expect(within(hub).getAllByRole('option', { name: /Accra Central|Tema/ })).toHaveLength(2);
+
+    await send(user);
+
+    await waitFor(() => {
+      expect(hub).toHaveFocus();
+    });
+    expect(hub).toHaveAttribute('aria-invalid', 'true');
+    expect(hub).toHaveAccessibleDescription(
+      expect.stringContaining('Choose the hub this booking is made in.'),
+    );
+    expect(creates()).toHaveLength(0);
+  });
+
+  it('sends the hub the person chose, and only that', async () => {
+    const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+    await fillNewWalkIn(user);
+    await user.selectOptions(hubField(), 'Tema');
+
+    await send(user);
+
+    await screen.findByRole('heading', { name: 'Pickup booked' });
+    expect(creates()).toHaveLength(1);
+    expect(await bodyOf(creates()[0])).toMatchObject({
+      pickup_intent: 'ADHOC_SENDER',
+      hub_id: TEMA_HUB_ID,
+    });
+  });
+
+  // A session that lists one hub books into it without being asked; a form that always names it works whether the grant reaches one hub or
+  // more, so a second hub opened tomorrow does not stop it.
+  it('has the one hub of a session of one chosen already', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    expect(hubField()).toHaveValue(PICKUP_HUB_ID);
+    expect(screen.getByRole('option', { name: 'Accra Central' })).toBeInTheDocument();
+  });
+
+  it('offers no hub to choose when the session lists none, and sends none', async () => {
+    const { user } = open(CREATOR, {}, []);
+    await fillNewWalkIn(user);
+
+    expect(hubField()).toBeDisabled();
+    expect(hubField()).toHaveAccessibleDescription(
+      expect.stringContaining('Your session lists no hub to choose from.'),
+    );
+    await send(user);
+
+    await screen.findByRole('heading', { name: 'Pickup booked' });
+    expect(await bodyOf(creates()[0])).not.toHaveProperty('hub_id');
+  });
+
+  // A registered vendor's booking is in its organisation's hub, whoever makes it: the page neither asks for a hub nor names one, even one the
+  // person chose a moment ago for a walk-in and then left (the server refuses another hub than the organisation's).
+  it.each([['A vendor’s own packages'], ['A collection for a vendor']])(
+    'asks for no hub for %s, and sends none, whatever hub was chosen before',
+    async (intent) => {
+      const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+      await chooseIntent(user, 'A walk-in sender');
+      await user.selectOptions(hubField(), 'Tema');
+      await chooseIntent(user, intent);
+      await chooseVendor(user);
+
+      expect(screen.queryByRole('combobox', { name: /^Hub/ })).toBeNull();
+      await fillCommon(user);
+      if (intent === 'A collection for a vendor') {
+        await user.type(screen.getByRole('textbox', { name: /Person or business holding/ }), 'Ama');
+        await user.type(screen.getByRole('textbox', { name: /Their phone/ }), '+233245550000');
+        await user.type(screen.getByRole('textbox', { name: /Their address/ }), '5 Demo Lane');
+        await user.type(
+          screen.getByRole('textbox', { name: /Name the seller holds it under/ }),
+          'Ama',
+        );
+        await user.type(screen.getByRole('textbox', { name: /^Item/ }), 'Shoes');
+        await user.type(screen.getByRole('textbox', { name: /How many items/ }), '1');
+        await user.selectOptions(screen.getByRole('combobox', { name: /Destination/ }), 'DEFAULT');
+        await user.type(
+          screen.getByRole('textbox', { name: /Contact phone for this pickup/ }),
+          '+233245556666',
+        );
+      }
+      await send(user);
+
+      await screen.findByRole('heading', { name: 'Pickup booked' });
+      expect(await bodyOf(creates()[0])).not.toHaveProperty('hub_id');
+    },
+  );
+
+  it('puts the server’s words on the hub field when it refuses the hub', async () => {
+    const { user } = open(CREATOR, {
+      [CREATE]: () =>
+        refusal(400, 'VALIDATION_FAILED', {
+          violations: [{ in: 'body', pointer: '/hub_id', rule: 'enum' }],
+        }),
+    });
+    await fillNewWalkIn(user);
+
+    await send(user);
+
+    const hub = hubField();
+    await waitFor(() => {
+      expect(hub).toHaveFocus();
+    });
+    expect(hub).toHaveAccessibleDescription(
+      expect.stringContaining('Choose the hub this booking is made in.'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 

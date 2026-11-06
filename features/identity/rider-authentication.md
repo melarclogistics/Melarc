@@ -34,7 +34,7 @@ The device binding is the part that matters. A rider's session is not merely an 
 |---|---|---|---|
 | Melarc Rider| Rider| Sign in with phone, PIN and registered device| —|
 | Melarc Ops| Senior Ops| **Verify a rider's identity and re-register a device** (§37.2)| `staff.device.reregister`, own hub|
-| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| **Revoke** a lost or stolen device; read the rider roster| `staff.device.revoke`, `dispatch.read`, own hub|
+| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| **Revoke** a lost or stolen device; read the rider roster| `staff.device.revoke`, `dispatch.read`, own hub (Platform Admin: all hubs)|
 | Melarc Ops| Ops Staff| **Cannot** re-register. Rider recovery is Senior Ops| —|
 | Melarc Vendor| —| **N/A**| —|
 

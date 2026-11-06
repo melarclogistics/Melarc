@@ -31,7 +31,11 @@ const NO_NOTE = 'No additional note';
  * does not add urgency, a blocker or a claim that a request may be confirmed.
  */
 function attentionOf(request: PickupRequestView): string {
-  if (request.cutoff_exception_state === 'PENDING_OPS_REVIEW') return 'Late booking to decide';
+  // Only a confirmed request has a decision to make: one cancelled since keeps the decision it had, with nothing left to decide on it (as the
+  // request's own page and the landing's count have it).
+  if (request.state === 'CONFIRMED' && request.cutoff_exception_state === 'PENDING_OPS_REVIEW') {
+    return 'Late booking to decide';
+  }
   if (request.state === 'PENDING' && isSinglePackage(request) && !hasApprovedException(request)) {
     return hasRequestedException(request)
       ? 'One-package exception waiting for approval'

@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.91.0-c1-queue-summary
- *   SHA-256 6a5d9ac65a7393a2d2b2885b2f2cbcc8293b9ac419c3197db953c7f90d3005d6 (of the contract, line endings normalized to LF)
+ *   SHA-256 3f251a3bd3558a9ca8779d9377e19fef3dcbbf16adddccb1e73cf7f6d855f9bf (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -92,6 +92,12 @@ export interface paths {
          *
          *     **Every intent resolves `resolved_pickup_location`**, which is what dispatch and the
          *     rider read. All three are creatable by Ops from WhatsApp intake.
+         *
+         *     **The hub of the booking** is the vendor organisation's for `OWN_PACKAGES` and
+         *     `COLLECT_FOR_VENDOR`, and the Ops member's for `ADHOC_SENDER`: their own hub when their grant
+         *     of `pickup.request.create` reaches exactly that one, and **the hub they name in `hub_id` when it
+         *     reaches more than one** (a grant of all hubs, as the Platform Admin's is, or of several hubs of
+         *     its own; `AC-SLICE-001-82`). The server never takes a hub the grant does not reach.
          */
         post: operations["createPickupRequest"];
         delete?: never;
@@ -374,7 +380,7 @@ export interface paths {
         put?: never;
         /**
          * Escalate a failed request out of the Ops decision context
-         * @description `pickup.failure.resolve` - Ops, Senior Ops, Platform Admin at own hub.
+         * @description `pickup.failure.resolve` - Ops and Senior Ops at own hub, Platform Admin at all hubs.
          *
          *     21.6 gives Ops three resolutions for a failed stop: reschedule, cancel, or **escalate**.
          *     The first two are `cancelPickupRequest` with and without `create_replacement`. This is
@@ -428,7 +434,7 @@ export interface paths {
         put?: never;
         /**
          * Force-extend the pickup attempt cap
-         * @description `pickup.attempt.extend` - **hub Senior Ops and Platform Admin only**, own hub
+         * @description `pickup.attempt.extend` - **hub Senior Ops and Platform Admin only**, Senior Ops at own hub and Platform Admin at all hubs
          *     (21.6, MSC-DEC-116). Not Ops Staff.
          *
          *     Raises the ceiling for **this request alone** past `MELARC_MAX_PICKUP_ATTEMPTS`. It does
@@ -568,7 +574,10 @@ export interface paths {
          *     VendorOperationalEligibility.requires_prepayment.
          *
          *     The approval links the exception to the request, which is what makes it confirmable. An exception
-         *     that is not waiting (none was asked for, or it is already decided) is `STATE_CONFLICT`. The
+         *     that is not waiting (none was asked for, or it is already decided) is `STATE_CONFLICT`; so is the
+         *     exception of a request that is no longer waiting for confirmation (a request that is not `PENDING`,
+         *     a cancelled one for example, whose exception stays `REQUESTED`): such a request is out of the
+         *     approver's queue, in the list and in the count alike (`AC-QSUM-12`). The
          *     maker-checker refusal is last, after the permission, the hub and the state. The fee is recorded
          *     on the exception as due, snapshotted with the setting key and version it was read from, and a fee
          *     that cannot be read never blocks the approval (the exception then shows no fee). Posting the fee
@@ -855,7 +864,7 @@ export interface paths {
         put?: never;
         /**
          * Ops authorises a skip, and the run can close
-         * @description `pickup.stop.skip` - **Ops Staff, Senior Ops or Platform Admin at own hub**.
+         * @description `pickup.stop.skip` - **Ops Staff and Senior Ops at own hub, Platform Admin at all hubs**.
          *     **Not the rider**: no rider bundle holds this key, and a rider who could skip a stop could
          *     choose which customers to serve.
          *
@@ -1649,7 +1658,7 @@ export interface paths {
         put?: never;
         /**
          * Open a custody handover on a started run
-         * @description `fleet.custody.initiate` - Ops, Senior Ops, Platform Admin at own hub.
+         * @description `fleet.custody.initiate` - Ops and Senior Ops at own hub, Platform Admin at all hubs.
          *
          *     **Ops-held because the rider who needs it cannot use it.** The scenario is a rider stranded
          *     mid-run with collected parcels aboard: broken down, injured, or holding a destroyed handset.
@@ -1770,7 +1779,7 @@ export interface paths {
         /**
          * List the custody handovers this actor is a party to
          * @description `fleet.custody.read` - **a rider sees the handovers they are a party to**, as originating or
-         *     as named receiver; Ops, Senior Ops and Platform Admin see their own hub's.
+         *     as named receiver; Ops and Senior Ops see their own hub's, Platform Admin every hub's.
          *
          *     **Scoped server-side, never by filter** (37.6, 42.4). A rider does not pass their own id and
          *     cannot pass another's: the scope is `from_rider_id` or `to_rider_id` equal to the acting
@@ -2825,7 +2834,7 @@ export interface paths {
         put?: never;
         /**
          * Revoke a rider's device binding on report of loss or theft
-         * @description Held by `staff.device.revoke` - **Ops Staff, Senior Ops and Platform Admin at own hub**.
+         * @description Held by `staff.device.revoke` - **Ops Staff and Senior Ops at own hub, Platform Admin at all hubs**.
          *
          *
          *     An existing rider outside the actor's hubs is `HUB_SCOPE_VIOLATION`; one that does not exist is `NOT_FOUND`. Revocation stays unverified and unconditional inside the actor's hubs.
@@ -2963,7 +2972,7 @@ export interface paths {
         put?: never;
         /**
          * Ops escalates an order as contact-exhausted, by judgement and never by count
-         * @description `dispatch.recipient_confirmation.work` - **Ops, Senior Ops or Platform Admin at own hub**.
+         * @description `dispatch.recipient_confirmation.work` - **Ops and Senior Ops at own hub, Platform Admin at all hubs**.
          *     The key is also held by the assigned Rider on assigned parcels, and **a Rider
          *     is refused here with INSUFFICIENT_AUTHORITY**: escalation is an Ops judgement,
          *     and a rider may make the call, record it, and ask for help - never decide that the avenues
@@ -3262,7 +3271,7 @@ export interface paths {
         put?: never;
         /**
          * Create a staff profile, awaiting approval
-         * @description `staff.identity.create` - Ops Staff, Senior Ops, Platform Admin at own hub (30.8, MSC-DEC-247).
+         * @description `staff.identity.create` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs (30.8, MSC-DEC-247).
          *
          *     A `primary_hub_id` outside the actor's hubs is `HUB_SCOPE_VIOLATION`; the maker cannot place a profile in a hub they do not act in.
          *
@@ -3949,7 +3958,7 @@ export interface paths {
         put?: never;
         /**
          * Ops records a covered-mode handoff's outcome
-         * @description `delivery.handoff.outcome` - Ops Staff, Senior Ops and Platform Admin at own hub
+         * @description `delivery.handoff.outcome` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs
          *     (MSC-DEC-417, closing OQ-135). **Covered mode only**: a Station Drop is complete at handoff,
          *     and TERMINAL_FOR_STATION_DROP refuses it.
          *
@@ -3988,7 +3997,7 @@ export interface paths {
         put?: never;
         /**
          * Ops clears a paid outbound order for dispatch, first time or after a failed or returned handoff
-         * @description `dispatch.outbound.clear` - Ops Staff, Senior Ops and Platform Admin at own hub.
+         * @description `dispatch.outbound.clear` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs.
          *     **The operation state-machines.md 9's third-party `-> READY_FOR_DISPATCH` row
          *     never had**: it names Ops, and nothing performed it, so no outbound order could be
          *     dispatched at all.
@@ -4109,7 +4118,7 @@ export interface paths {
         put?: never;
         /**
          * Hub Senior Ops approves an informal driver or agent
-         * @description `courier.agent.approve` - **hub Senior Ops and Platform Admin, own hub** (MSC-DEC-417,
+         * @description `courier.agent.approve` - **hub Senior Ops at own hub and Platform Admin at all hubs** (MSC-DEC-417,
          *     closing OQ-133's second half). In advance, or **on the spot while the rider waits** - agents
          *     *"cannot all be pre-registered"*.
          *
@@ -4272,7 +4281,7 @@ export interface paths {
         put?: never;
         /**
          * Hub records its own confirmed total
-         * @description `payment.cash.confirm` - Ops, Senior Ops or Platform Admin at own hub. **Held by no rider
+         * @description `payment.cash.confirm` - Ops and Senior Ops at own hub, Platform Admin at all hubs. **Held by no rider
          *     bundle**: 26.3 names rider-declared and hub-confirmed as two figures, and one actor supplying
          *     both is not a comparison.
          *
@@ -4310,7 +4319,7 @@ export interface paths {
         put?: never;
         /**
          * Senior Ops dispositions a cash shortage or overage
-         * @description `payment.variance.resolve` - **Senior Ops or Platform Admin**, own hub. Ops Staff cannot:
+         * @description `payment.variance.resolve` - **Senior Ops (own hub) or Platform Admin (all hubs)**. Ops Staff cannot:
          *     this is the act that releases a financial hold on the run.
          *
          *     **A shortage and an overage are one state, deliberately.** 26.5 requires both to be
@@ -4545,7 +4554,7 @@ export interface paths {
         };
         /**
          * List riders, so an officer can find the rider a device operation targets
-         * @description `dispatch.read` at the actor's hub scope (Ops Staff, Senior Ops and Platform Admin). The roster
+         * @description `dispatch.read` at the actor's hub scope (Ops Staff and Senior Ops at their own hub, Platform Admin at all hubs). The roster
          *     returns **identity and readiness only** (RiderSummary): name, phone, status, hub, whether a PIN is set
          *     and whether an `ACTIVE` device exists. It is the read `registerRiderDevice`, `reregisterRiderDevice` and
          *     `revokeRiderDevice` need to find their target, and it is the same rider list dispatch already
@@ -5149,7 +5158,7 @@ export interface paths {
         put?: never;
         /**
          * Re-issue an expired or lost initial VENDOR_CREDENTIAL_SETUP grant
-         * @description `vendor.organization.approve` - Senior Ops or Platform Admin, own hub (35.12.2). **MED-10
+         * @description `vendor.organization.approve` - Senior Ops at own hub or Platform Admin at all hubs (35.12.2). **MED-10
          *     audit remediation.**
          *
          *     An existing record outside the actor's hubs is `HUB_SCOPE_VIOLATION`; one that does not exist is `NOT_FOUND`.
@@ -6460,7 +6469,7 @@ export interface paths {
         put?: never;
         /**
          * Create a vendor record and its shared portal account, awaiting approval
-         * @description `vendor.organization.create` - Ops Staff, Senior Ops, Platform Admin at own hub
+         * @description `vendor.organization.create` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs
          *     (18.2, 29.2.1, 35.12.1).
          *
          *     **A business cannot self-register.** There is no anonymous creation path and every
@@ -6503,7 +6512,7 @@ export interface paths {
         put?: never;
         /**
          * Approve or reject operational activation
-         * @description `vendor.organization.approve` - hub Senior Ops or Platform Admin, **own hub** (18.2,
+         * @description `vendor.organization.approve` - hub Senior Ops at **own hub** or Platform Admin at **all hubs** (18.2,
          *     29.2.2). **One key carries both halves**, because 18.2 words the act as "approves or
          *     rejects" - the same shape `approveStaffIdentity` uses, and the reason no
          *     `vendor.organization.reject` key exists.
@@ -7208,7 +7217,7 @@ export interface paths {
         };
         /**
          * One parcel custody return, with its lines
-         * @description `fleet.custody.read` - **Hub Ops, Senior Ops and Platform Admin at their own hub**, and **the
+         * @description `fleet.custody.read` - **Hub Ops and Senior Ops at their own hub and Platform Admin at all hubs**, and **the
          *     rider on their own return**. Scoped server-side (37.6), never by a filter the caller
          *     supplies (42.4).
          *
@@ -8316,6 +8325,11 @@ export interface components {
              * @enum {string}
              */
             pickup_intent: "OWN_PACKAGES" | "COLLECT_FOR_VENDOR" | "ADHOC_SENDER";
+            /**
+             * Format: uuid
+             * @description The hub a walk-in booking (`ADHOC_SENDER`) is made in. Optional while the session's grant of `pickup.request.create` reaches exactly one hub (the booking is then in that hub), and **required when it reaches more than one**: a grant of all hubs, or of several hubs of its own. A hub the grant does not reach is `HUB_SCOPE_VIOLATION`, judged before the hub is read: an id that names no hub is `HUB_SCOPE_VIOLATION` for a grant of fewer than all hubs, and `VALIDATION_FAILED` for a grant of all hubs. For a registered vendor's booking (`OWN_PACKAGES`, `COLLECT_FOR_VENDOR`) the hub is the vendor organisation's: naming another hub is `VALIDATION_FAILED`, and a vendor session names none that is not its organisation's.
+             */
+            hub_id?: string;
             /** Format: uuid */
             vendor_organization_id?: string;
             /**

@@ -118,8 +118,8 @@ Not every stop succeeds. This feature records **why**, preserves the evidence, a
 | Key| Holders| Scope| Home|
 |---|---|---|---|
 | `pickup.failure.report`| **Rider only**| owned dispatched stop| [permissions.md](../../contracts/permissions.md) §7|
-| `pickup.failure.resolve`| Ops, Senior Ops, Platform Admin| own hub||
-| `pickup.attempt.extend`| Senior Ops, Platform Admin| own hub, reason mandatory||
+| `pickup.failure.resolve`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)||
+| `pickup.attempt.extend`| Senior Ops, Platform Admin| own hub (Platform Admin: all hubs), reason mandatory||
 
 ## 9. Settings — *pointer*
 

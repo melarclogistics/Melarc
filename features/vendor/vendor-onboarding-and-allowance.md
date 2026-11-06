@@ -63,8 +63,8 @@ projection that answers *may this vendor book today* without disclosing why not)
 
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
-| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Create the vendor record and its shared portal account| `vendor.organization.create` — own hub|
-| Melarc Ops| **Hub Senior Ops**, Platform Admin| Approve **or reject** operational activation| `vendor.organization.approve` — own hub, **creator ≠ approver, a Platform Admin excepted**|
+| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Create the vendor record and its shared portal account| `vendor.organization.create` — own hub (Platform Admin: all hubs)|
+| Melarc Ops| **Hub Senior Ops**, Platform Admin| Approve **or reject** operational activation| `vendor.organization.approve` — own hub (Platform Admin: all hubs), **creator ≠ approver, a Platform Admin excepted**|
 | Melarc Ops| **Platform Admin only**| Enable or disable the account allowance| `vendor.allowance.enable` / `.disable` — **all hubs**|
 | Melarc Vendor| Vendor account| Nothing in this feature. **No self-registration and no tenant administration** (§29.1, §35.12.1)| —|
 | Melarc Rider| Rider| **N/A.** Not a party to vendor administration| —|

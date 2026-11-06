@@ -11,6 +11,7 @@ import { isCalendarDay } from './calendar-day.js';
 import { exceptionViewOf, exceptionsShownFor } from './one-package-exception-view.js';
 import { loadRequest } from './pickup-request-loader.js';
 import { pickupRequestCriteria } from './pickup-request-criteria.js';
+import { CUTOFF_EXCEPTION_STATES } from './pickup-request.schema.js';
 import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import {
@@ -25,13 +26,6 @@ import {
 export type { PickupRequestView };
 
 export const EXCEPTION_STATES = ['REQUESTED', 'APPROVED', 'REJECTED'] as const;
-
-/** The states of a request's cut-off decision (domain-model.md section 6.2, `cutoff_exception_state`): what the filter of the same name takes. */
-export const CUTOFF_EXCEPTION_STATES = [
-  'PENDING_OPS_REVIEW',
-  'SAME_DAY_APPROVED',
-  'RESCHEDULED',
-] as const;
 
 export interface PickupListFilter {
   readonly state?: string;

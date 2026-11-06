@@ -369,8 +369,12 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/pickup/',
   ],
   // The counts of the queues: the landing and the menu are the shell's (a change there reruns every spec); the page it goes to for a change of
-  // page is the trusted browsers', in the account folder.
-  'queue-summary.spec.ts': ['apps/ops-web/src/app/pages/account/'],
+  // page is the trusted browsers', in the account folder; and the late bookings' link opens the pickup requests list, so a change to the pickup
+  // screens reruns it too (`AC-QSUM-11`).
+  'queue-summary.spec.ts': [
+    'apps/ops-web/src/app/pages/account/',
+    'apps/ops-web/src/app/pages/pickup/',
+  ],
 };
 export const OPS_ENTRY = 'apps/ops-web/src/main.tsx';
 const OPS_PAGES = 'apps/ops-web/src/app/pages/';

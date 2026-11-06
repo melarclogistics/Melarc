@@ -79,6 +79,8 @@ const DEFAULT_DESTINATION = 'DEFAULT';
 /** Everything the form holds, as typed. What is sent is built from it at submit time, for the intent chosen. */
 interface Values {
   readonly intent: PickupIntent | null;
+  /** The hub a walk-in is booked into (`hub_id`, task P1). Held for every intent and sent for a walk-in only. */
+  readonly hubId: string;
   readonly vendor: PickerOption | null;
   readonly locationId: string;
   readonly override: boolean;
@@ -117,6 +119,7 @@ interface Values {
 
 const EMPTY: Values = {
   intent: null,
+  hubId: '',
   vendor: null,
   locationId: '',
   override: false,
@@ -155,6 +158,7 @@ const EMPTY: Values = {
 
 type FieldKey =
   | 'intent'
+  | 'hub'
   | 'vendor'
   | 'overrideAddress'
   | 'goods'
@@ -217,6 +221,7 @@ type OptionalTextKey =
 /** The places the API names when it refuses a booking, and the field each is. */
 const POINTERS: Readonly<Record<string, FieldKey>> = {
   '/pickup_intent': 'intent',
+  '/hub_id': 'hub',
   '/vendor_organization_id': 'vendor',
   '/location_overrides': 'overrideAddress',
   '/location_overrides/address': 'overrideAddress',
@@ -252,6 +257,7 @@ const POINTERS: Readonly<Record<string, FieldKey>> = {
 
 const WORDS: Readonly<Record<FieldKey, string>> = {
   intent: 'Choose what is being booked.',
+  hub: 'Choose the hub this booking is made in.',
   vendor: 'Choose the vendor.',
   overrideAddress: 'Enter the address to collect from this time.',
   goods: 'Say what is being sent today.',
@@ -302,8 +308,10 @@ function countOf(text: string): number | undefined {
  * What is wrong with the booking before anything is sent: only what the server would refuse for certain, in the words of each field. The
  * service date's days are the product's calendar (Monday to Saturday, MSC-DEC-149), checked here for quicker news and decided by the server;
  * whether a value needs the liability-cap acknowledgement is the server's alone, because the threshold is a hub setting the page is not given.
+ * `hubsListed` is how many hubs the session lists: a walk-in names one of them whenever there is one to name (the server asks for it when the
+ * grant reaches more than one hub, `AC-SLICE-001-82`), and a session that lists none names none.
  */
-function problemsWith(values: Values): FieldErrors {
+function problemsWith(values: Values, hubsListed: number): FieldErrors {
   const found: FieldErrors = {};
   const need = (key: FieldKey, text: string): void => {
     if (blank(text)) found[key] = WORDS[key];
@@ -325,6 +333,7 @@ function problemsWith(values: Values): FieldErrors {
     need('primaryPhone', values.primaryPhone);
   }
   if (values.intent === 'ADHOC_SENDER') {
+    if (hubsListed > 0 && values.hubId === '') found.hub = WORDS.hub;
     if (values.senderSource === null) found.senderSource = WORDS.senderSource;
     if (values.senderSource === 'RETURNING' && values.sender === null) found.sender = WORDS.sender;
     if (values.senderSource === 'NEW') {
@@ -468,6 +477,8 @@ function bookingOf(values: Values): NewPickupRequest | undefined {
       const contact = values.newContact.trim();
       return {
         ...common,
+        // The hub of a walk-in is named; a registered vendor's booking is in its organisation's hub and names none (`hub_id` is refused there).
+        ...(values.hubId === '' ? {} : { hub_id: values.hubId }),
         ...(values.senderSource === 'RETURNING'
           ? { ad_hoc_sender_id: values.sender?.value ?? '' }
           : {
@@ -704,7 +715,13 @@ function SenderPicker({
 
 function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestView) => void }) {
   const client = useApiClient();
-  const [values, setValues] = useState<Values>(EMPTY);
+  const me = useSignedInSession();
+  // The hubs the session lists are the hubs its grant reaches: a person who acts in one hub books into it without choosing, anyone else chooses.
+  const hubs = me?.session.authorized_hubs ?? [];
+  const [values, setValues] = useState<Values>(() => ({
+    ...EMPTY,
+    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : '',
+  }));
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);
   const form = useRef<HTMLFormElement>(null);
@@ -749,7 +766,7 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
   function send(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (locked) return;
-    const found = problemsWith(values);
+    const found = problemsWith(values, hubs.length);
     setInvalid(found);
     const booking = bookingOf(values);
     if (Object.keys(found).length > 0 || booking === undefined) {
@@ -981,6 +998,38 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
             })}
           </section>
         </>
+      ) : null}
+
+      {intent === 'ADHOC_SENDER' ? (
+        <section className="pickup-form-section" aria-labelledby="booking-hub">
+          <h2 id="booking-hub">Where it is booked</h2>
+          <Field
+            label="Hub"
+            required={hubs.length > 0}
+            help={
+              hubs.length === 0
+                ? 'Your session lists no hub to choose from. The booking is made in your own hub, if you have one.'
+                : 'The hub this walk-in is booked into.'
+            }
+            {...errorOf('hub')}
+          >
+            <Select
+              name="hub"
+              value={values.hubId}
+              disabled={locked || hubs.length === 0}
+              onChange={(event) => {
+                change({ hubId: event.target.value }, 'hub');
+              }}
+            >
+              <option value="">{hubs.length === 0 ? 'No hub to choose' : 'Choose the hub'}</option>
+              {hubs.map((hub) => (
+                <option key={hub.id} value={hub.id}>
+                  {hub.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </section>
       ) : null}
 
       {intent === 'ADHOC_SENDER' ? (

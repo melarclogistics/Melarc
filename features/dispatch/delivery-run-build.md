@@ -115,9 +115,9 @@ Assignment, dispatch and run start are **distinct**, and collapsing any two lose
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `dispatch.run.create`| A S P| own hub| [permissions.md](../../contracts/permissions.md) §7|
-| `dispatch.run.sequence`| A S P| own hub| §7 — **confirmed `MSC-DEC-232`**|
-| `dispatch.run.assign`| A S P| own hub| §7 — **confirmed `MSC-DEC-232`**|
+| `dispatch.run.create`| A S P| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7|
+| `dispatch.run.sequence`| A S P| own hub (Platform Admin: all hubs)| §7 — **confirmed `MSC-DEC-232`**|
+| `dispatch.run.assign`| A S P| own hub (Platform Admin: all hubs)| §7 — **confirmed `MSC-DEC-232`**|
 
 ## 9. Settings — *pointer*
 

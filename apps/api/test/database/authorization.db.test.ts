@@ -26,6 +26,7 @@ import { HUBS } from '../../src/tools/seed/hubs.js';
 import { insertSessionRow, sessionRow } from './support/identities.js';
 import { observe, type Observer } from './support/observe.js';
 import { assemble, staffPersona, type Machinery, type StaffPersona } from './support/personas.js';
+import { grant, newBundle } from './support/policy-fixtures.js';
 import { applyContextFixture, applyFixture, VENDOR_1, VENDOR_2 } from './support/rls-fixture.js';
 import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
@@ -483,9 +484,17 @@ describe('the scope of the grant that authorizes this operation (SECURITY_DESIGN
   });
 
   // Break caught (GBT-GS1, GBT-GS3): the all-hub authority of one grant widening another, or lost for the grant that carries it.
-  // A Platform Admin holds dispatch.read at own and staff.read and vendor.read at all hubs: each operation runs under its own grant's scope.
+  // A session that holds dispatch.read at own and staff.read and vendor.read at all hubs: each operation runs under its own grant's scope. The
+  // Platform Admin held exactly these when this was first proven; since the decision of 5 November 2026 (task P1) it holds all three at all hubs
+  // and no seeded bundle mixes the two, so the session is of a bundle made for the test, with those grants.
   it('runs two operations of one session under two scopes: own for the grant scoped own, ALL for the grant scoped all', async () => {
-    const platformAdmin = await staffAs(BUNDLE_IDS.platformAdmin);
+    const platformAdmin = await staffAs(
+      await newBundle(admin, [
+        grant('dispatch.read', 'own', 'any', 'P'),
+        grant('staff.read', 'all', 'any', 'P'),
+        grant('vendor.read', 'all', 'any', 'P'),
+      ]),
+    );
 
     const own = await get('dispatch-read', { cookie: platformAdmin.cookie });
     const all = await get('staff-read', { cookie: platformAdmin.cookie });
@@ -497,6 +506,15 @@ describe('the scope of the grant that authorizes this operation (SECURITY_DESIGN
     expect(hubs(all.body as unknown as Observed)).toEqual([]);
     expect(vendor.body).toMatchObject({ authorization_key: 'vendor.read', hub_scope_mode: 'ALL' });
     expect(hubs(vendor.body as unknown as Observed)).toEqual([]);
+
+    // The seeded Platform Admin runs dispatch.read under ALL as well (task P1, AC-SLICE-001-83): its grant says so, and nothing else does.
+    const seeded = await staffAs(BUNDLE_IDS.platformAdmin);
+    const widened = await get('dispatch-read', { cookie: seeded.cookie });
+    expect(widened.body).toMatchObject({
+      authorization_key: 'dispatch.read',
+      hub_scope_mode: 'ALL',
+    });
+    expect(hubs(widened.body as unknown as Observed)).toEqual([]);
   });
 
   // Break caught (GBT-B4): a hub scope mode taken from the request.
@@ -562,29 +580,43 @@ describe('the scope of the grant that authorizes this operation (SECURITY_DESIGN
 describe('a record named by the path: found, outside the hubs, or not there (AC-SLICE-000-30; section 14.4b)', () => {
   // Break caught (GBT-GS1, GBT-GS2): an operation that rests on a hub-limited grant reaching a record in another hub because an
   // all-hub grant is held beside it.
-  it('tells a staff member that a record in another hub is outside their hubs, and a Platform Admin that holds a key scoped all hubs', async () => {
+  it('tells a staff member that a record in another hub is outside their hubs, and a session that holds a key scoped all hubs that it is not', async () => {
     const platformAdmin = await staffAs(BUNDLE_IDS.platformAdmin);
     const senior = await staffAs(BUNDLE_IDS.seniorOps);
+    // The session that proves the property is of a bundle made for the test: dispatch.read at its own hub, staff.read and vendor.read at all hubs,
+    // which the Platform Admin held when it was first proven (Product decision, 22 October 2026). Since task P1 (5 November 2026) it holds all
+    // three at all hubs, so no seeded bundle mixes them.
+    const mixed = await staffAs(
+      await newBundle(admin, [
+        grant('dispatch.read', 'own', 'any', 'P'),
+        grant('staff.read', 'all', 'any', 'P'),
+        grant('vendor.read', 'all', 'any', 'P'),
+      ]),
+    );
 
     const outside = await get(`staff-records/${RECORD_ELSEWHERE}`, { cookie: senior.cookie });
-    // A Platform Admin holds dispatch.read at its own hub, and staff.read and vendor.read at all hubs (Product decision, 22 October 2026).
-    const ownGrantOfAdmin = await get(`dispatch-records/${RECORD_ELSEWHERE}`, {
-      cookie: platformAdmin.cookie,
+    const ownGrantOfMixed = await get(`dispatch-records/${RECORD_ELSEWHERE}`, {
+      cookie: mixed.cookie,
     });
-    const allGrantOfAdmin = await get(`vendor-records/${RECORD_ELSEWHERE}`, {
-      cookie: platformAdmin.cookie,
+    const allGrantOfMixed = await get(`vendor-records/${RECORD_ELSEWHERE}`, {
+      cookie: mixed.cookie,
     });
-    const staffGrantOfAdmin = await get(`staff-records/${RECORD_ELSEWHERE}`, {
+    const staffGrantOfMixed = await get(`staff-records/${RECORD_ELSEWHERE}`, {
+      cookie: mixed.cookie,
+    });
+    const dispatchOfAdmin = await get(`dispatch-records/${RECORD_ELSEWHERE}`, {
       cookie: platformAdmin.cookie,
     });
     const inside = await get(`staff-records/${RECORD_IN_ACCRA}`, { cookie: senior.cookie });
 
     expect(outside.status).toBe(403);
     expect(outside.body.code).toBe('HUB_SCOPE_VIOLATION');
-    expect(ownGrantOfAdmin.status).toBe(403);
-    expect(ownGrantOfAdmin.body.code).toBe('HUB_SCOPE_VIOLATION');
-    expect(allGrantOfAdmin.status).toBe(200);
-    expect(staffGrantOfAdmin.status).toBe(200);
+    expect(ownGrantOfMixed.status).toBe(403);
+    expect(ownGrantOfMixed.body.code).toBe('HUB_SCOPE_VIOLATION');
+    expect(allGrantOfMixed.status).toBe(200);
+    expect(staffGrantOfMixed.status).toBe(200);
+    // The Platform Admin's dispatch.read is a grant of all hubs (task P1): the record of another hub is not outside it.
+    expect(dispatchOfAdmin.status).toBe(200);
     expect(inside.status).toBe(200);
   });
 

@@ -144,7 +144,9 @@ const LONG_SENDER = 'Demo Fabrics and Household Linen Wholesale Trading Company 
 /** Two requests with long words where they are likely to be: an address, a sender, and the two notes a queue says in words. */
 const longWorld = (): Partial<World> => ({
   requests: [
+    // A late booking waiting for its decision is a confirmed request (task C1.1: a request cancelled since is not asked to be decided).
     pickup({
+      state: 'CONFIRMED',
       declared_package_count: 1,
       sender: LONG_SENDER,
       address: LONG_ADDRESS,

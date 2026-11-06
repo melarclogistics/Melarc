@@ -38,20 +38,36 @@ import { clientFor, createTestDatabase, type TestDatabase } from './support/test
  * Migration 0057 (S1.12e) adds the one key of the Ops message log, `notification.read`, to the three staff bundles the catalogue gives it
  * to, by the same rule and under the same claims; it is tested after 0043, as the owner's database meets them.
  *
+ * Migration 0075 (task P1; the Product Owner's decision of 5 November 2026) widens the Platform Admin's operational grants from their own
+ * hub to all hubs, `staff.device.reregister` excepted, as an addition that ends no session (`AC-SLICE-001-84`); it is tested after 0057.
+ * The three lists the earlier migrations carry (`SLICE_000_GRANTS`, `SLICE_001_GRANTS`, `NOTIFICATION_READ_GRANTS`) are the content as first
+ * written, and `GRANTS` is what a new seed writes with the decision applied.
+ *
  * The migration is applied here as the migrator applies it: the file's statements, as the migration login, in one transaction.
  */
 const MIGRATION = '0043_slice_001_grants.sql';
 const NOTIFICATION_MIGRATION = '0057_notification_read_grant.sql';
+const PLATFORM_ADMIN_MIGRATION = '0075_platform_admin_every_hub.sql';
+
+/** The grants as the first two migrations leave them: what the owner's database held before the decision of 5 November 2026. */
+const HISTORY: readonly GrantSeed[] = [
+  ...SLICE_000_GRANTS,
+  ...SLICE_001_GRANTS,
+  ...NOTIFICATION_READ_GRANTS,
+];
 
 const bundleIds = Object.values(BUNDLE_IDS);
 const NEW_PERMISSION = SLICE_001_PERMISSION;
 const applyMigrationFile = (client: pg.Client): Promise<void> => applyMigration(client, MIGRATION);
 const applyNotificationFile = (client: pg.Client): Promise<void> =>
   applyMigration(client, NOTIFICATION_MIGRATION);
-/** Both migrations of the slice's grants, in the order the migrator runs them. */
+const applyPlatformAdminFile = (client: pg.Client): Promise<void> =>
+  applyMigration(client, PLATFORM_ADMIN_MIGRATION);
+/** Every migration that carries grants, in the order the migrator runs them. */
 const applyBoth = async (client: pg.Client): Promise<void> => {
   await applyMigrationFile(client);
   await applyNotificationFile(client);
+  await applyPlatformAdminFile(client);
 };
 
 const labelOf = (grant: GrantSeed): string =>
@@ -315,9 +331,9 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
 
     // Break caught: the key left out of a bundle the catalogue gives it to, given to one it does not (Finance reads no log), or a scope or
     // a tier that differs from the seed's, which the two ways to a database would then hand to different people.
-    it('holds exactly the grants a new seed writes: the key at the own hub of Ops Staff, Senior Ops and Platform Admin, and of no one else', async () => {
+    it('holds exactly the grants a new seed wrote up to it: the key at the own hub of Ops Staff, Senior Ops and Platform Admin, and of no one else', async () => {
       const held = await grantsHeld(w.observer);
-      expect(held).toEqual(GRANTS.map(labelOf).toSorted());
+      expect(held).toEqual(HISTORY.map(labelOf).toSorted());
       const holders = held.filter((label) => label.split('|')[1] === 'notification.read');
       expect(holders).toEqual(NOTIFICATION_READ_GRANTS.map(labelOf).toSorted());
       expect(holders).toEqual([
@@ -392,6 +408,139 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
       const grantsBefore = await grantsHeld(w.observer);
 
       await applyNotificationFile(w.migration);
+
+      expect(await bundles(w.observer)).toEqual(bundlesBefore);
+      expect(await grantsHeld(w.observer)).toEqual(grantsBefore);
+    });
+  });
+
+  describe('once migration 0075 is applied (the Platform Admin at every hub, AC-SLICE-001-84)', () => {
+    let liveBefore: string[];
+    let adminBefore: { readonly sessionId: string; readonly snapshotBefore: unknown };
+    beforeAll(async () => {
+      // A session of the Platform Admin, issued by the real protocol before the migration (OB-S1-03): its snapshot holds the grants of its own hub.
+      const persona = await staffPersona(machinery, admin, {
+        roleBundleId: BUNDLE_IDS.platformAdmin,
+      });
+      const row = await w.observer.one<{ id: string; bundle_snapshot: unknown }>(
+        `select id, bundle_snapshot from session where principal_id = $1`,
+        [persona.identity.id],
+      );
+      if (row === undefined) throw new Error('the session was not issued');
+      adminBefore = { sessionId: row.id, snapshotBefore: row.bundle_snapshot };
+      liveBefore = (
+        await w.observer.rows<{ id: string }>(
+          `select id from session where terminated_at is null order by id`,
+        )
+      ).map((each) => each.id);
+      await applyPlatformAdminFile(w.migration);
+    });
+
+    // Break caught: a grant widened that the decision does not name, one left at its own hub, a tier or an ownership changed (the
+    // maker-checker exception reads the tier), a key added or lost, or another bundle's grant touched; and a database seeded earlier and then
+    // migrated that holds other grants than a new seed writes, which the two ways to a database would then hand to different people.
+    it('holds exactly the grants a new seed writes: the Platform Admin at all hubs but for the one the decision of 8 October keeps at its own hub, and no one else changed', async () => {
+      const held = await grantsHeld(w.observer);
+      expect(held).toEqual(GRANTS.map(labelOf).toSorted());
+      const platformAdmin = BUNDLE_IDS.platformAdmin;
+      const ofAdmin = held.filter((label) => label.startsWith(`${platformAdmin}|`));
+      expect(ofAdmin.filter((label) => label.split('|')[2] === 'own')).toEqual([
+        `${platformAdmin}|staff.device.reregister|own|any|P`,
+      ]);
+      expect(ofAdmin.filter((label) => label.split('|')[2] === 'none')).toEqual([
+        `${platformAdmin}|permission.assignable_bundle.read|none|any|P`,
+      ]);
+      for (const label of ofAdmin) {
+        expect(label.split('|')[3], label).toBe('any');
+        expect(label.split('|')[4], label).toBe('P');
+      }
+      // The same keys the Platform Admin held before, none added and none lost; every other bundle's grants exactly as they were.
+      expect(ofAdmin.map((label) => label.split('|')[1]).toSorted()).toEqual(
+        HISTORY.filter((grant) => grant.bundleId === platformAdmin)
+          .map((grant) => grant.permissionKey)
+          .toSorted(),
+      );
+      expect(held.filter((label) => !label.startsWith(`${platformAdmin}|`))).toEqual(
+        HISTORY.filter((grant) => grant.bundleId !== platformAdmin)
+          .map(labelOf)
+          .toSorted(),
+      );
+    });
+
+    // Break caught: a widening declared a reduction (the floor rises and every session of the bundle is ended), a bundle that gained scope
+    // without a new revision (a session cannot tell its snapshot is behind), or a bundle raised that did not change.
+    it('raises the Platform Admin bundle by one revision, no other bundle, and moves no floor', async () => {
+      const gained = new Set<string>([
+        BUNDLE_IDS.opsStaff,
+        BUNDLE_IDS.seniorOps,
+        BUNDLE_IDS.platformAdmin,
+      ]);
+      expect(await bundles(w.observer)).toEqual(
+        bundleIds.toSorted().map((id) => ({
+          id,
+          revision: id === BUNDLE_IDS.platformAdmin ? 4 : gained.has(id) ? 3 : 2,
+          reduction_floor: 1,
+        })),
+      );
+    });
+
+    // Break caught: the fixed Vendor and Rider policy declared released again by a change that did not touch it.
+    it('does not touch the fixed Vendor and Rider policy', async () => {
+      expect(await policies(w.observer)).toEqual([
+        { principal_type: 'RIDER', revision: BUILD_FIXED_POLICY.RIDER, minimum_revision: 1 },
+        { principal_type: 'VENDOR', revision: BUILD_FIXED_POLICY.VENDOR, minimum_revision: 1 },
+      ]);
+    });
+
+    // OB-S1-03. Break caught: a widening that ends a session of someone who lost nothing, a held session rewritten to carry a scope it was not
+    // issued with, or a sign-in after it that does not read the bundle as it now is.
+    it('ends no session, leaves the session issued before as issued, and gives a sign-in after it the new scope', async () => {
+      expect(
+        (
+          await w.observer.rows<{ id: string }>(
+            `select id from session where terminated_at is null order by id`,
+          )
+        ).map((each) => each.id),
+      ).toEqual(liveBefore);
+      expect(
+        await w.observer.count('audit_event', { event_code: 'auth.session.authority_revoked' }),
+      ).toBe(0);
+
+      const after = await w.observer.one<{
+        terminated_at: Date | null;
+        bundle_snapshot: unknown;
+        bundle_revision: number;
+      }>(`select terminated_at, bundle_snapshot, bundle_revision from session where id = $1`, [
+        adminBefore.sessionId,
+      ]);
+      expect(after?.terminated_at).toBeNull();
+      expect(after?.bundle_revision).toBe(3);
+      expect(after?.bundle_snapshot).toEqual(adminBefore.snapshotBefore);
+
+      const fresh = await staffPersona(machinery, admin, {
+        roleBundleId: BUNDLE_IDS.platformAdmin,
+      });
+      const signedIn = await w.observer.one<{ bundle_revision: number; bundle_snapshot: unknown }>(
+        `select bundle_revision, bundle_snapshot from session where principal_id = $1`,
+        [fresh.identity.id],
+      );
+      expect(signedIn?.bundle_revision).toBe(4);
+      const scopeOf = (snapshot: unknown, key: string): string | undefined =>
+        (snapshot as { grants: { permission: string; hubScope: string }[] }).grants.find(
+          (grant) => grant.permission === key,
+        )?.hubScope;
+      expect(scopeOf(adminBefore.snapshotBefore, 'dispatch.read')).toBe('own');
+      expect(scopeOf(signedIn?.bundle_snapshot, 'dispatch.read')).toBe('all');
+      expect(scopeOf(signedIn?.bundle_snapshot, 'pickup.read')).toBe('all');
+      expect(scopeOf(signedIn?.bundle_snapshot, 'staff.device.reregister')).toBe('own');
+    });
+
+    // Break caught: a migration that cannot run twice, or that raises the revision again for a change it already made.
+    it('may run again: the second run changes nothing', async () => {
+      const bundlesBefore = await bundles(w.observer);
+      const grantsBefore = await grantsHeld(w.observer);
+
+      await applyPlatformAdminFile(w.migration);
 
       expect(await bundles(w.observer)).toEqual(bundlesBefore);
       expect(await grantsHeld(w.observer)).toEqual(grantsBefore);

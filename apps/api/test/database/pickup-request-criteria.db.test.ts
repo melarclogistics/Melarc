@@ -24,8 +24,10 @@ import { insertVendor, vendorRow } from './support/vendors.js';
  * The conditions of the list of pickup requests (`pickupRequestCriteria`, task C1) against the definition they were written from. The
  * criteria were rewritten for the planner (a filter that is not asked for adds no condition; the filter on an exception's state starts from
  * the exceptions in that state), and measured at 400,000 requests the old form of the exception filter took 246 seconds for one call and the
- * new one two milliseconds. **A rewrite that is faster is worth nothing if it returns another set**, so the old form is kept here as the
- * specification and the two are compared, for every combination of the four filters and in every scope, over requests arranged to meet every
+ * new one two milliseconds. **A rewrite that is faster is worth nothing if it returns another set**, so the definition is kept here, written
+ * out by hand as a plain condition for each filter (the form the criteria were rewritten from, with the two rules of task C1.1: the cancelled
+ * requests are not in the approver's queue, and the cut-off decision is a filter of its own), and the two are compared, for every combination
+ * of the filters and in every scope, over requests arranged to meet every
  * way an exception can be shown: none, requested, approved and carried, approved and not carried, refused, refused and asked for again,
  * several refused, an approval another request carries, and one the caller cannot see.
  */

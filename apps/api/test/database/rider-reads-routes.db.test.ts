@@ -189,13 +189,13 @@ describe('listRiders (AC-SLICE-000-113)', () => {
     expect(await listed(await routes.seniorOps(HUB_B))).toEqual(ids(inB));
   });
 
-  // Break caught: Platform Admin status read as a bypass. The seeded grant of the key is `own` (the catalogue: "own hub"), so a Platform
-  // Admin with no primary hub sees no rider and one with a hub sees that hub's. A finding for the Product Owner (plan section 7.47).
-  it('gives a Platform Admin the riders of their own hub, none when they have none', async () => {
-    expect(await listed(await routes.platformAdmin())).toEqual([]);
-    expect(await listed(await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A))).toEqual(
-      ids(inA, readyA, revokedA, suspendedA),
-    );
+  // Break caught (OB-S1-75, task P1, AC-SLICE-001-83): the roster empty for a Platform Admin. Its grant of the key was `own` and the seeded
+  // administrator has no primary hub, so it saw no rider (the plan's finding 7.47); since the Product Owner's decision of 5 November 2026 the
+  // grant is of all hubs: the riders of every hub, with a hub of its own or none. The scope is the grant's: Platform Admin status is no bypass.
+  it('gives a Platform Admin the riders of every hub, with a hub of its own or none', async () => {
+    const everyRider = ids(inA, readyA, revokedA, suspendedA, inB);
+    expect(await listed(await routes.platformAdmin())).toEqual(everyRider);
+    expect(await listed(await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A))).toEqual(everyRider);
   });
 
   // Break caught: `hub_id` widening what the caller may read, or a hub outside the grant answered other than with an empty page.
@@ -353,9 +353,10 @@ describe('getRider (AC-SLICE-000-113)', () => {
     expect([outside.status, codeOf(outside)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
     const absent = await senior.client.get(ONE(uuid()));
     expect([absent.status, codeOf(absent)]).toEqual([404, 'NOT_FOUND']);
-    // A Platform Admin with no primary hub reaches no hub through `dispatch.read`: the rider exists and is outside their grant.
-    const bare = await (await routes.platformAdmin()).client.get(ONE(readyA.id));
-    expect([bare.status, codeOf(bare)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
+    // A Platform Admin with no primary hub reaches every hub through `dispatch.read` (a grant of all hubs, task P1): a rider of either hub is read.
+    const bare = await routes.platformAdmin();
+    expect((await bare.client.get(ONE(readyA.id))).status).toBe(200);
+    expect((await bare.client.get(ONE(inB.id))).status).toBe(200);
   });
 
   // Break caught: a device hidden because it ended (an officer verifying a stolen handset needs to see what was revoked and replaced), or a

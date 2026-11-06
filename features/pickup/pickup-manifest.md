@@ -143,8 +143,8 @@ Non-obvious: `assigned_rider_id` is **nullable** while `DRAFT`; `assigned_at` re
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `pickup.manifest.create`| Ops, Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7|
-| `pickup.manifest.dispatch`| Ops, Senior Ops, Platform Admin| own hub||
+| `pickup.manifest.create`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7|
+| `pickup.manifest.dispatch`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)||
 | `pickup.run.execute`| **Rider only**| assigned run||
 
 ## 9. Settings — *pointer*

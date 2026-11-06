@@ -55,7 +55,7 @@ function filterOf(query: Record<string, unknown>): RiderListFilter {
 
 /**
  * `GET /ops/riders` and `GET /ops/riders/{riderId}` (S0.53a): the reads an officer finds the target of a device operation with, and the
- * ETag that `reregisterRiderDevice` takes. Both require `dispatch.read` (Ops Staff, Senior Ops and Platform Admin at their hubs), serve the
+ * ETag that `reregisterRiderDevice` takes. Both require `dispatch.read` (Ops Staff and Senior Ops at their hubs, Platform Admin at every hub), serve the
  * Ops Portal alone and take a browser session with no synchronizer token (a safe read): **the Rider bundle holds `dispatch.read` as well,
  * and a rider's bearer credential is refused all the same**, so the roster is never reachable from a handset: an operation that serves the
  * browser takes no bearer credential, and answers one as a request with no usable session (`401 SESSION_INVALID`, S0.25), as every Ops-only

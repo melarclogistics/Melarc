@@ -430,6 +430,12 @@ export const PICKUP_REQUEST_CREATE_BODY = described({
       description:
         'MSC-DEC-335. OWN_PACKAGES reuses an established Vendor and asks only what\nchanges today. COLLECT_FOR_VENDOR collects from a THIRD PARTY for a\nregistered Vendor - it is not merchandise COD, and no rider is authorised to\npay the seller. ADHOC_SENDER creates or REUSES the canonical AdHocSender\nand never auto-promotes it to a registered Vendor.\n',
     },
+    hub_id: {
+      type: 'string',
+      format: 'uuid',
+      description:
+        "The hub a walk-in booking (`ADHOC_SENDER`) is made in. Optional while the session's grant of `pickup.request.create` reaches exactly one hub (the booking is then in that hub), and **required when it reaches more than one**: a grant of all hubs, or of several hubs of its own. A hub the grant does not reach is `HUB_SCOPE_VIOLATION`, judged before the hub is read: an id that names no hub is `HUB_SCOPE_VIOLATION` for a grant of fewer than all hubs, and `VALIDATION_FAILED` for a grant of all hubs. For a registered vendor's booking (`OWN_PACKAGES`, `COLLECT_FOR_VENDOR`) the hub is the vendor organisation's: naming another hub is `VALIDATION_FAILED`, and a vendor session names none that is not its organisation's.",
+    },
     vendor_organization_id: { type: 'string', format: 'uuid' },
     ad_hoc_sender_id: {
       type: 'string',

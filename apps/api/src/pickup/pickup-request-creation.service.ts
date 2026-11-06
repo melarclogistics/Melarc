@@ -16,6 +16,7 @@ import { declarationOf, payerOf, requireMinimum, requireServiceDay } from './boo
 import { hubCodeOf, operationalCode } from './operational-code.js';
 import { estimateOf } from './estimate-view.js';
 import { normalisePhone } from './phone.js';
+import { walkInHubChoice } from './walk-in-hub.js';
 import { pickupRequestEtagOf } from './pickup-request-etag.js';
 import {
   REQUEST_COLUMNS,
@@ -31,6 +32,8 @@ const CODE_ATTEMPTS = 8;
 /** The body of `createPickupRequest` as the contract's schema has validated it (the interceptor ran before this). */
 export interface CreatePickupBody {
   readonly pickup_intent: 'OWN_PACKAGES' | 'COLLECT_FOR_VENDOR' | 'ADHOC_SENDER';
+  /** The hub a walk-in is made in; required when the grant reaches more than one (`walk-in-hub.ts`, `AC-SLICE-001-82`). */
+  readonly hub_id?: string;
   readonly vendor_organization_id?: string;
   readonly ad_hoc_sender_id?: string;
   readonly new_ad_hoc_sender?: {
@@ -116,8 +119,8 @@ const json = (value: unknown): string | null =>
  *   its exception), the payer arrangement. Then the transaction: **the idempotency of the command**, the sender (a vendor sees only its
  *   own organisation, and another's is answered as no sender; a suspended one is `SENDER_SUSPENDED`), the places, the declaration, the
  *   estimate, the insert.
- * - **The server derives everything that is not the client's to say**: the code, the hub (the vendor's, or the Ops actor's own), the
- *   state (`PENDING`), the place the rider is sent (`resolved_pickup_location`, from the intent, never supplied), the sender's name, the
+ * - **The server derives everything that is not the client's to say**: the code, the hub (the vendor organisation's; or, for a walk-in, the
+ *   hub the Ops member names when their grant reaches more than one, else their own: `hub_id`, task P1), the state (`PENDING`), the place the rider is sent (`resolved_pickup_location`, from the intent, never supplied), the sender's name, the
  *   estimate, the snapshot of the liability cap. The client sends an address and never a price.
  * - **A saved location is an input, never the origin.** The request keeps the place it resolved to; the override of a booking (`AC-09`)
  *   is kept on the request and rewrites no saved default. A location of another vendor is answered as one that does not exist.
@@ -324,6 +327,17 @@ export class PickupRequestCreation {
       );
       return (found.rows[0] as { responsible_hub_id: string } | undefined)?.responsible_hub_id;
     }
+    // A walk-in's hub is the one the member names, when it exists and the grant reaches it; else their own, when the grant reaches one hub. A
+    // grant of more than one hub with none named, an unknown hub and a hub outside the grant find nothing here: the transaction that books
+    // refuses each in its own words (`VALIDATION_FAILED`, `VALIDATION_FAILED`, `HUB_SCOPE_VIOLATION`), and no configuration is read for a hub
+    // that was never going to be booked.
+    const choice = walkInHubChoice(authorized.scope, body.hub_id);
+    if (choice.kind === 'must-name') return undefined;
+    if (choice.kind === 'named') {
+      if (!this.#hubInScope(authorized, choice.hubId)) return undefined;
+      const named = await tx.execute(sql`select id from hub where id = ${choice.hubId}::uuid`);
+      return named.rows.length === 1 ? choice.hubId : undefined;
+    }
     const own = await tx.execute(
       sql`select primary_hub_id from staff_identity where id = ${authorized.session.principalId}::uuid`,
     );
@@ -340,12 +354,17 @@ export class PickupRequestCreation {
     return normal;
   }
 
-  /** A staff caller books only in a hub of its grant; a vendor's hub is its organisation's and is not a scope it holds. */
-  #requireHubInScope(authorized: AuthorizedRequest, hubId: string): void {
-    if (authorized.session.principalType !== 'STAFF') return;
+  /** Whether a staff caller's grant reaches the hub; a vendor's hub is its organisation's and is not a scope it holds. */
+  #hubInScope(authorized: AuthorizedRequest, hubId: string): boolean {
+    if (authorized.session.principalType !== 'STAFF') return true;
     const { hubScopeMode, authorizedHubIds } = authorized.scope;
-    if (hubScopeMode === 'ALL') return;
-    if (!authorizedHubIds.some((each) => each.toLowerCase() === hubId.toLowerCase())) {
+    if (hubScopeMode === 'ALL') return true;
+    return authorizedHubIds.some((each) => each.toLowerCase() === hubId.toLowerCase());
+  }
+
+  /** A staff caller books only in a hub of its grant. */
+  #requireHubInScope(authorized: AuthorizedRequest, hubId: string): void {
+    if (!this.#hubInScope(authorized, hubId)) {
       throw ApiException.of(ErrorCode.HubScopeViolation, 'The booking is outside your hubs');
     }
   }
@@ -389,6 +408,13 @@ export class PickupRequestCreation {
         throw ApiException.of(ErrorCode.SenderSuspended, 'The sender is suspended');
       }
       if (org.operational_status !== 'ACTIVE') throw violation('/vendor_organization_id', 'enum');
+      // A registered vendor's booking is in its organisation's hub, whoever makes it: a hub named for another is not a booking the server can make.
+      if (
+        body.hub_id !== undefined &&
+        body.hub_id.toLowerCase() !== org.responsible_hub_id.toLowerCase()
+      ) {
+        throw violation('/hub_id', 'enum');
+      }
       return {
         organisationId: org.id,
         adHocSenderId: null,
@@ -400,11 +426,24 @@ export class PickupRequestCreation {
       };
     }
 
-    // A walk-in sender: the office's booking, in the hub of the Ops member who makes it.
-    const own = await tx.execute(
-      sql`select primary_hub_id from staff_identity where id = ${authorized.session.principalId}::uuid`,
-    );
-    const hubId = (own.rows[0] as { primary_hub_id: string | null } | undefined)?.primary_hub_id;
+    // A walk-in sender: the office's booking, in the hub the Ops member names (a grant that reaches more than one hub must) or, when the grant
+    // reaches one, their own. **The scope is judged before anything of the hub or of the sender is read**, as `createStaffIdentity` judges it
+    // (the review of P1): a hub outside the grant is HUB_SCOPE_VIOLATION whether or not it exists, so that a caller learns nothing of the hubs
+    // they cannot reach, and nothing is written.
+    const choice = walkInHubChoice(authorized.scope, body.hub_id);
+    if (choice.kind === 'must-name') throw violation('/hub_id', 'required');
+    let hubId: string | null | undefined;
+    if (choice.kind === 'named') {
+      this.#requireHubInScope(authorized, choice.hubId);
+      const named = await tx.execute(sql`select id from hub where id = ${choice.hubId}::uuid`);
+      if (named.rows.length !== 1) throw violation('/hub_id', 'enum');
+      hubId = choice.hubId;
+    } else {
+      const own = await tx.execute(
+        sql`select primary_hub_id from staff_identity where id = ${authorized.session.principalId}::uuid`,
+      );
+      hubId = (own.rows[0] as { primary_hub_id: string | null } | undefined)?.primary_hub_id;
+    }
     if (hubId === null || hubId === undefined) {
       throw ApiException.of(
         ErrorCode.HubScopeViolation,

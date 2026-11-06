@@ -526,6 +526,13 @@
       "when": 1793906342549,
       "tag": "0074_queue_count_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793933269661,
+      "tag": "0075_platform_admin_every_hub",
+      "breakpoints": true
     }
   ]
 }

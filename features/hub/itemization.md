@@ -133,11 +133,11 @@ Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resol
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `hub.intake.itemize`| Ops, Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7|
-| `hub.intake.close`| Ops, Senior Ops, Platform Admin| own hub||
-| `hub.intake.close_exception`| **Senior Ops, Platform Admin**| own hub||
+| `hub.intake.itemize`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7|
+| `hub.intake.close`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)||
+| `hub.intake.close_exception`| **Senior Ops, Platform Admin**| own hub (Platform Admin: all hubs)||
 | `pricing.correction.create`| Ops| own hub||
-| `pricing.correction.approve`| **Senior Ops**| own hub, approver ≠ creator, a Platform Admin excepted||
+| `pricing.correction.approve`| **Senior Ops**| own hub (Platform Admin: all hubs), approver ≠ creator, a Platform Admin excepted||
 | `pricing.reprice.request`| Ops| own hub||
 | `pricing.reprice.approve`| **Senior Ops**| own hub||
 

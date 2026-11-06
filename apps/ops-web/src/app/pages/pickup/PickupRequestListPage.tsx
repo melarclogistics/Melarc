@@ -41,9 +41,15 @@ const stateOf = (text: string | null): PickupState | undefined =>
 /**
  * The cut-off decision from the address (`?cutoff=PENDING_OPS_REVIEW`), or nothing. The landing sends the late bookings here with it (task C1.1,
  * `AC-QSUM-11`); the one value the page offers is the one that is somebody's work, and any other is no filter, like any value the person edits in.
+ * **The late bookings are the confirmed requests whose decision is pending** (what the landing counts): the filter is a refinement of the
+ * Confirmed state and is no filter under another, because a request cancelled after it was raised keeps the decision it had and nothing is left
+ * to decide on it (the review of C1.1).
  */
-const cutoffOf = (text: string | null): CutoffExceptionState | undefined =>
-  text === 'PENDING_OPS_REVIEW' ? text : undefined;
+const cutoffOf = (
+  text: string | null,
+  state: PickupState | undefined,
+): CutoffExceptionState | undefined =>
+  state === 'CONFIRMED' && text === 'PENDING_OPS_REVIEW' ? text : undefined;
 
 /**
  * Whether a date the date field gave is one a person has finished typing. The field gives each whole date on the way to the one meant (the year
@@ -89,7 +95,7 @@ export function PickupRequestListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const state = stateOf(params.get('state'));
-  const cutoff = cutoffOf(params.get('cutoff'));
+  const cutoff = cutoffOf(params.get('cutoff'), state);
   const serviceDate = calendarDateOf(params.get('date'));
   const signature = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
@@ -215,8 +221,9 @@ export function PickupRequestListPage() {
     continuity.discard();
     setInteracted(true);
     const nextState = next.state === undefined ? state : next.state === '' ? undefined : next.state;
-    // The late bookings are asked for by the link of the landing and taken off by their own button: nothing else changes them.
-    const nextCutoff = next.cutoff === undefined ? cutoff : undefined;
+    // The late bookings are asked for by the link of the landing and taken off by their own button, or by any state but Confirmed, which they
+    // are a refinement of: nothing else changes them.
+    const nextCutoff = next.cutoff === undefined && nextState === 'CONFIRMED' ? cutoff : undefined;
     const nextDate =
       next.date === undefined ? serviceDate : next.date === '' ? undefined : next.date;
     const out = new URLSearchParams();
@@ -224,6 +231,14 @@ export function PickupRequestListPage() {
     if (nextCutoff !== undefined) out.set('cutoff', nextCutoff);
     if (nextDate !== undefined) out.set('date', nextDate);
     setParams(out, { replace: true });
+  }
+
+  /**
+   * Where a button that takes a filter off hands focus on: the button is gone once it has, and focus would fall to the page. The filter row's
+   * own control is the nearest place that is still there.
+   */
+  function focusFilter(selector: string): void {
+    queue.current?.querySelector<HTMLElement>(selector)?.focus();
   }
 
   function clearEverything(): void {
@@ -303,6 +318,7 @@ export function PickupRequestListPage() {
           >
             <Field label="State">
               <Select
+                name="state"
                 value={state ?? ''}
                 onChange={(event) => {
                   change({ state: stateOf(event.target.value) ?? '' });
@@ -338,6 +354,7 @@ export function PickupRequestListPage() {
                     onClick={() => {
                       setTyped({ over: undefined, value: null });
                       change({ date: '' });
+                      focusFilter('.pickup-date-filter [role="spinbutton"]');
                     }}
                   >
                     Every service date
@@ -355,6 +372,7 @@ export function PickupRequestListPage() {
                   variant="secondary"
                   onClick={() => {
                     change({ cutoff: '' });
+                    focusFilter('select[name="state"]');
                   }}
                 >
                   Every cut-off decision

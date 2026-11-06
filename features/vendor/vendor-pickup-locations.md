@@ -50,7 +50,7 @@ that makes a saved address globally readable to Ops), and §8's deactivation rul
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
 | Melarc Vendor| Vendor account| Add, edit, set default and deactivate **its own** saved locations| `vendor.pickup_location.manage` — **V: own vendor only**|
-| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| The same, on behalf of a vendor at their own hub (§29.1)| `vendor.pickup_location.manage` — **A S P: own hub**|
+| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| The same, on behalf of a vendor at their own hub (§29.1)| `vendor.pickup_location.manage` — **A S: own hub · P: all hubs**|
 | Melarc Rider| Rider| **N/A.** A rider is sent to a `resolved_pickup_location` on a request, never to this list| —|
 
 ## 4. Preconditions
@@ -91,7 +91,7 @@ elsewhere.*
 | Deactivating the **default** while another active location exists| Refused — `STATE_CONFLICT`. Set a new default first; the alternative is a vendor with locations and no default, which §29.4 does not allow|
 | Deactivating the **last** active location| **Permitted.** A vendor may legitimately have none saved, and `COLLECT_FOR_VENDOR` and per-request origins do not depend on the list|
 | A vendor acts on another vendor's location| Refused — `PERMISSION_DENIED`. Scope is **own vendor only**|
-| Ops acts for a vendor at another hub| Refused — `PERMISSION_DENIED`. **A S P: own hub**|
+| Ops Staff or Senior Ops acts for a vendor at another hub| Refused — `PERMISSION_DENIED`. **A S: own hub**; a Platform Admin acts at every hub (**P: all hubs**)|
 | Setting a deactivated location as default| Refused — `STATE_CONFLICT`|
 | Any act while the organisation is `SUSPENDED`| The vendor cannot reach it (login blocked, §29.6); **Ops may**, because §29.1's administration capability is not what suspension stops|
 

@@ -26,9 +26,13 @@ import type {
  * beyond "additive to Senior Ops"). The tier of a grant is the holder's letter (`A`, `S`, `P`); the catalogue gives Finance, Rider
  * and Vendor no tier, so theirs is null, which no tier-compared rule is satisfied by.
  *
- * Findings for the Product Owner (S0.9 handoff, restated at S1.8): the Platform Admin grants whose catalogue scope reads "own hub"
- * are seeded `own`, not `all` (so a Platform Admin without a primary hub reaches no hub by them); and the bundles are limited to the
- * keys the slices built so far need. The Vendor's six keys and the Rider's seven for SLICE-001 are inert until an operation checks them.
+ * **The Platform Admin holds every key it holds at all hubs** (Product Owner, 5 November 2026; permissions.md section 5; task P1). The
+ * three lists of grants below (`SLICE_000_GRANTS`, `SLICE_001_GRANTS`, `NOTIFICATION_READ_GRANTS`) stay as they were written, because
+ * they are the content that migrations 0043 and 0057 carry to a database seeded before them (the Platform Admin's operational grants at
+ * `own`); `GRANTS`, what a new database is seeded with, is those lists with the Platform Admin's `own` grants made `all`
+ * (`platformAdminAtEveryHub`), `staff.device.reregister` excepted, and migration 0075 brings a database seeded before the decision to
+ * the same. `slice-001-grants.db.test.ts` holds the three stages to one result. The bundles are limited to the keys the slices built so
+ * far need. The Vendor's six keys and the Rider's seven for SLICE-001 are inert until an operation checks them.
  */
 
 /** Stable identifiers of the seeded bundles: what `StaffIdentity.role_bundle_id` and a session's lineage refer to. Never reused. */
@@ -107,11 +111,11 @@ export const SLICE_000_GRANTS: readonly GrantSeed[] = [
     ['vendor.organization.approve', 'own'],
     ['vendor.read', 'own'],
   ]),
-  // Platform Admin (holder P): all hubs where the catalogue says P's reach is all hubs; own hub where it says own hub. **The three keys
-  // of the staff identity's lifecycle that the catalogue gives `S: own hub · P: all hubs` (staff.read, staff.identity.create,
-  // staff.identity.approve) are all-hub for Platform Admin** (Product decision, 22 October 2026): a seeded Platform Admin has no primary
-  // hub, so its own hub is none, and it would read, create and approve no identity at all. The scope is the grant's; being a Platform
-  // Admin is no bypass.
+  // Platform Admin (holder P), **as first written**: all hubs where the catalogue said P's reach is all hubs; own hub where it said own
+  // hub. **The three keys of the staff identity's lifecycle that the catalogue gives `S: own hub · P: all hubs` (staff.read,
+  // staff.identity.create, staff.identity.approve) were all-hub for Platform Admin** (Product decision, 22 October 2026): a seeded
+  // Platform Admin has no primary hub, so its own hub is none, and it would read, create and approve no identity at all. The scope is
+  // the grant's; being a Platform Admin is no bypass. The remaining `own` grants below became `all` on 5 November 2026 (GRANTS, below).
   ...staff(BUNDLE_IDS.platformAdmin, 'P', [
     ['dispatch.read', 'own'],
     ['permission.assignable_bundle.read', 'none'],
@@ -239,9 +243,10 @@ const RIDER_KEYS_001 = [
 /**
  * The grants SLICE-001 adds (S1.8). Reach is the catalogue's: `own` for every staff grant whose row says own hub, and `all` only for
  * the Platform Admin's `pickup.exception.approve` ("own hub · P: all hubs") and Finance's `pricing.read` (section 8: Finance reads at
- * all hubs). **A Platform Admin created by the bootstrap has no primary hub, so its own-hub grants reach no hub** (the same as
- * `dispatch.read` today); widening them is an addition that ends no session, and is the Product Owner's decision, not made here.
- * Exported for the migration test: migration 0043 carries these rows for a database seeded before them.
+ * all hubs). **The Platform Admin's other grants were `own` here, and are `all` in `GRANTS`** (Product Owner, 5 November 2026): a Platform
+ * Admin created by the bootstrap has no primary hub, so as first written these reached no hub; the widening is an addition that ends no
+ * session (migration 0075). Exported for the migration test: migration 0043 carries these rows, as written, for a database seeded
+ * before them.
  */
 export const SLICE_001_GRANTS: readonly GrantSeed[] = [
   ...staff(BUNDLE_IDS.opsStaff, 'A', own(OPS_STAFF_KEYS_001)),
@@ -266,9 +271,9 @@ export const SLICE_001_GRANTS: readonly GrantSeed[] = [
 
 /**
  * The one grant SLICE-001 adds after migration 0043 (S1.12e): `notification.read`, the key of the Ops message log (permissions.md section
- * 7: "A S P · own hub"). Reach is the catalogue's: `own` at the holder's hub, so a Platform Admin without a primary hub reads no hub's log
- * until it has one (the same finding as `SLICE_001_GRANTS`). Exported for the migration test: migration 0057 carries these rows for a
- * database seeded before them.
+ * 7: "A S P · own hub"). Reach is `own` at the holder's hub as first written, and the Platform Admin's is `all` in `GRANTS` (the same
+ * decision as `SLICE_001_GRANTS`). Exported for the migration test: migration 0057 carries these rows, as written, for a database
+ * seeded before them.
  */
 export const NOTIFICATION_READ_GRANTS: readonly GrantSeed[] = [
   ...staff(BUNDLE_IDS.opsStaff, 'A', [['notification.read', 'own']]),
@@ -276,11 +281,36 @@ export const NOTIFICATION_READ_GRANTS: readonly GrantSeed[] = [
   ...staff(BUNDLE_IDS.platformAdmin, 'P', [['notification.read', 'own']]),
 ];
 
-export const GRANTS: readonly GrantSeed[] = [
+/**
+ * The keys whose Platform Admin grant stays at the actor's own hub when the Platform Admin is widened to every hub. `staff.device.reregister`:
+ * the Product Owner's decision of 8 October 2026 is explicit that replacing a rider's device is done in person at a hub, for Senior Ops and
+ * Platform Admin alike, and holds it with a negative test (`AC-SLICE-000-23`, `GBT-GS13`); the decision of 5 November 2026 does not name it,
+ * so the narrower reading stands until the Product Owner says otherwise (permissions.md section 5; a finding for the Product Owner).
+ */
+export const PLATFORM_ADMIN_OWN_HUB_KEYS: readonly string[] = ['staff.device.reregister'];
+
+/**
+ * The Platform Admin holds every key it holds at all hubs (Product Owner, 5 November 2026; permissions.md section 5). **It is the scope of the
+ * grants of the Platform Admin bundle** and not a bypass in code: the authorization step reads each grant's scope as it always did. Only a
+ * grant of the Platform Admin bundle whose scope is `own` changes, and only its scope: the key, the ownership scope and the tier (which the
+ * maker-checker exception reads) are carried over, a grant of no hub (global configuration) stays so, and no other bundle is touched.
+ */
+export function platformAdminAtEveryHub(grants: readonly GrantSeed[]): GrantSeed[] {
+  return grants.map((grant) =>
+    grant.bundleId === BUNDLE_IDS.platformAdmin &&
+    grant.hubScope === 'own' &&
+    !PLATFORM_ADMIN_OWN_HUB_KEYS.includes(grant.permissionKey)
+      ? { ...grant, hubScope: 'all' as const }
+      : grant,
+  );
+}
+
+/** What a new database is seeded with. */
+export const GRANTS: readonly GrantSeed[] = platformAdminAtEveryHub([
   ...SLICE_000_GRANTS,
   ...SLICE_001_GRANTS,
   ...NOTIFICATION_READ_GRANTS,
-];
+]);
 
 export interface FixedPolicySeed {
   readonly principalType: (typeof FIXED_POLICY_PRINCIPALS)[number];

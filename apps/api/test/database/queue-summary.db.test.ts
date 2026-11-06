@@ -566,22 +566,26 @@ describe('the figures a reader can check by eye', () => {
     );
   });
 
-  // Break caught: the all-hub grant of the staff list not reaching the profiles of every hub, and the hub grant reaching more than its hubs.
-  it('are, for a seeded Platform Admin with no hub: the pickups of no hub (the key is held, so the entries are 0), and every profile waiting', async () => {
+  // Break caught: the all-hub grant of a list not reaching every hub. The seeded Platform Admin has no hub, and since the decision of 5 November
+  // 2026 (task P1, AC-SLICE-001-83) holds every key at all hubs: the pickup queues are the work of both hubs (they were `0` while its grants
+  // were of an own hub it does not have), and the profiles waiting are every hub's, as before.
+  it('are, for a seeded Platform Admin with no hub: the work of every hub, as for any session that reads every hub', async () => {
     const { queues } = await summaryOf(await routes.platformAdmin());
 
-    expect(queues).toEqual([
-      { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 0 },
-      { queue: 'PICKUP_CUTOFF_REVIEW', count: 0 },
-      { queue: 'PICKUP_EXCEPTION_APPROVAL', count: 0 },
-      { queue: 'PICKUP_UNMANIFESTED_POOL', count: 0 },
-      { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 0 },
-      {
-        queue: 'STAFF_AWAITING_APPROVAL',
-        count: 4,
-        oldest_at: await staffCreatedAt(staff['a.first']),
-      },
+    expect(queues.map((entry) => [entry.queue, entry.count])).toEqual([
+      ['PICKUP_AWAITING_CONFIRMATION', 7],
+      ['PICKUP_CUTOFF_REVIEW', 2],
+      ['PICKUP_EXCEPTION_APPROVAL', 3],
+      ['PICKUP_UNMANIFESTED_POOL', 5],
+      ['PICKUP_RUNS_IN_PROGRESS', 3],
+      ['STAFF_AWAITING_APPROVAL', 4],
     ]);
+    expect(entryFor(queues, 'PICKUP_CUTOFF_REVIEW')?.oldest_at).toBe(T.lateB.toISOString());
+    expect(entryFor(queues, 'PICKUP_UNMANIFESTED_POOL')?.oldest_at).toBe(T.poolB.toISOString());
+    expect(entryFor(queues, 'PICKUP_RUNS_IN_PROGRESS')?.oldest_at).toBe(T.startedB.toISOString());
+    expect(entryFor(queues, 'STAFF_AWAITING_APPROVAL')?.oldest_at).toBe(
+      await staffCreatedAt(staff['a.first']),
+    );
   });
 
   // Break caught: the scope of the all-hub grant of a list not reaching every hub, or a moment that is not the least of them all.

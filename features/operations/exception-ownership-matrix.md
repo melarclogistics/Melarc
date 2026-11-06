@@ -43,7 +43,7 @@
 | **Ultimate delivery failure**| Ops Staff| `delivery.stop.close`| Record the third failure. **This does not start the return**| Senior Ops| Recipient, vendor| `delivery.stop.failed`|
 | **Return initiation**| Senior Ops| `returns.*`| Review, then commit the `ReturnRecord`| Platform Admin| Vendor| `returns.*`|
 | **Return Fee waiver**| Ops requests → **Senior Ops approves**| `returns.waiver.request` → `returns.waiver.approve`| Waive against a seeded category; **free text supplements, never replaces**| Platform Admin| Vendor| **owed** — no return-fee waiver event exists in `audit.md`; `SLICE-006` owes one, enhanced on `pickup.cancellation_charge.waived`'s precedent|
-| **Single-package approval**| Ops requests → **Senior Ops approves**| `pickup.exception.request` → **`pickup.exception.approve`**| Approve the exception. **The fee becomes due on acceptance**| Platform Admin| Vendor| `pickup.request.single_package_approved` **enhanced**|
+| **Single-package approval**| Ops requests → **any holder of the approval key approves** (every Ops Staff member, Senior Ops and Platform Admin; never the requester, a Platform Admin excepted; Product Owner, 29 October 2026)| `pickup.exception.request` → **`pickup.exception.approve`**| Approve the exception. **The fee becomes due on acceptance**| Platform Admin| Vendor| `pickup.request.single_package_approved` **enhanced**|
 | **Reason-catalogue administration**| Senior Ops; **for the six system-managed identity reason domains, Platform Admin only** (label and active, never the code, domain or permitted operations)| `settings.reason.manage`| Create, edit, activate, deactivate and configure behaviour| Platform Admin| —| `settings.reason.catalog_changed` **enhanced**|
 | **Hub-local sender block**| Senior Ops| `vendor.sender_block.create`| `HUB_LOCAL`, own authorised hub only| Platform Admin| —| `vendor.sender_block.created`|
 | **Platform-wide sender block**| **Platform Admin**| `vendor.sender_block.create`| `PLATFORM_WIDE`, all hubs, **enhanced audit**| —| —| `vendor.sender_block.created` **enhanced**|
@@ -73,7 +73,7 @@ Gate C §52 asked for these by name, and **all three already existed**:
 
 | Authority| Key| Why it is not the rider|
 |---|---|---|
-| **Rider cash handover receiver**| `payment.cash.confirm`| A S P, own hub. Already **never held by a rider**: one actor supplying both compared figures is not a comparison|
+| **Rider cash handover receiver**| `payment.cash.confirm`| A S P, own hub (Platform Admin: all hubs). Already **never held by a rider**: one actor supplying both compared figures is not a comparison|
 | **Hub cash reconciliation**| `payment.cash.reconcile_hub`| **New at Gate C.** `payment.cash.confirm` accepts *one rider's* handover; this closes the *hub's* position|
 | **Cash variance resolution**| `payment.variance.resolve`| S P with a mandatory reason. **A rider may never resolve their own shortage**, and ordinary Ops Staff may not close a financial discrepancy|
 

@@ -299,7 +299,9 @@ describe('revokeRiderDevice: who may revoke, and where (AC-SLICE-000-112)', () =
     ]);
   });
 
-  it('lets Senior Ops and a Platform Admin of the rider’s hub revoke, and not a Platform Admin whose grant reaches no hub', async () => {
+  // Task P1 (AC-SLICE-001-83): `staff.device.revoke` is a grant of all hubs for the Platform Admin, as the decision of 5 November 2026 says,
+  // so one with no primary hub revokes the device of a rider of any hub; Senior Ops revokes in their own hub only.
+  it('lets Senior Ops revoke in the rider’s hub, and a Platform Admin in any hub, with a hub of its own or none', async () => {
     const seniorsRider = await onTheRoad();
     const adminsRider = await onTheRoad();
     const hubless = await routes.platformAdmin();
@@ -310,11 +312,10 @@ describe('revokeRiderDevice: who may revoke, and where (AC-SLICE-000-112)', () =
       adminsRider.rider.id,
     );
     const none = await onTheRoad();
-    const blind = await revoke(hubless, none.rider.id);
+    const withoutAHub = await revoke(hubless, none.rider.id);
 
-    expect([senior.status, ofTheHub.status]).toEqual([204, 204]);
-    expect([blind.status, codeOf(blind)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
-    expect((await devicesOf(none.rider.id)).map((each) => each.status)).toEqual(['ACTIVE']);
+    expect([senior.status, ofTheHub.status, withoutAHub.status]).toEqual([204, 204, 204]);
+    expect((await devicesOf(none.rider.id)).map((each) => each.status)).toEqual(['REVOKED']);
   });
 
   // Break caught: a Rider bearer, which holds dispatch.read and which a default-security POST authenticates, allowed to call a staff operation.

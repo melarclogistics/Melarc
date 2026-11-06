@@ -114,7 +114,7 @@ function deliveryOf(
 }
 
 /**
- * `reissueVendorCredentialSetup` (S0.47b; `vendor.organization.approve`, Senior Ops or Platform Admin at the vendor's own hub;
+ * `reissueVendorCredentialSetup` (S0.47b; `vendor.organization.approve`, Senior Ops at the vendor's own hub or a Platform Admin at every hub;
  * `AC-SLICE-000-101`; vendor-authentication.md section 12): **establishment repeated, not recovery**. An approved account whose one setup
  * grant lapsed before anyone at the vendor acted on it holds no secret, and recovery repairs a secret that exists; the approval authority
  * is exercised again, and a fresh `VENDOR_CREDENTIAL_SETUP` grant goes to the credential's delivery channel.

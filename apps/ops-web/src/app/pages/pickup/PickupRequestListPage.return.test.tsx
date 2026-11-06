@@ -24,10 +24,19 @@ import { QUEUE_PERMISSION } from './WithPickupRequest';
 const LIST = 'GET /pickup-requests';
 const RECORD = `GET /pickup-requests/${EARLIER_REQUEST_ID}`;
 const QUEUE = '/pickup-requests?state=PENDING';
+/** The late bookings, as the landing links to them (`AC-QSUM-11`). */
+const LATE_QUEUE = '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW';
 const RECORD_PATH = `/pickup-requests/${EARLIER_REQUEST_ID}`;
 
 const pending = pickupRequestFixture();
 const late = pickupRequestFixture({ id: EARLIER_REQUEST_ID, code: 'ACC-PR-9WXH4T' });
+/** The same request as the queue of the late bookings lists it: confirmed, with its cut-off decision waiting. */
+const lateBooking = pickupRequestFixture({
+  id: EARLIER_REQUEST_ID,
+  code: 'ACC-PR-9WXH4T',
+  state: 'CONFIRMED',
+  cutoff_exception_state: 'PENDING_OPS_REVIEW',
+});
 
 const page = (items: unknown[], next: string | null = null): Response =>
   json(200, { items, next_page_token: next });
@@ -186,6 +195,44 @@ describe('the queue, coming back from a request: the link back', () => {
     await toTheRecord();
 
     expect(await backLink()).toHaveAttribute('href', QUEUE);
+  });
+
+  // Task C1.1, AC-QSUM-11: the late bookings come back with the officer. The review of 5 November 2026 found no test of it. Break caught: the
+  // late-bookings filter left out of the place that is left (the link back then names the whole confirmed list, and the place held no longer
+  // matches the address, so nothing of it is restored).
+  it('names the late bookings in the link back, and brings the officer to them, in their words, with focus on the request', async () => {
+    const view = open(() => page([lateBooking]), LATE_QUEUE);
+    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+
+    expect(await backLink()).toHaveAttribute('href', LATE_QUEUE);
+    await view.user.click(await backLink());
+
+    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    expect(queryOf().get('state')).toBe('CONFIRMED');
+    expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+    expect(screen.getByText('Only late bookings waiting for a cut-off decision.')).toBeVisible();
+    expect(view.router.state.location.pathname + view.router.state.location.search).toBe(
+      LATE_QUEUE,
+    );
+    await waitFor(() => {
+      expect(link).toHaveFocus();
+    });
+  });
+
+  it('brings the late bookings back by the browser’s Back too, read again, with focus on the request', async () => {
+    const view = open(() => page([lateBooking]), LATE_QUEUE);
+    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await backLink();
+
+    await goBack(view);
+
+    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    expect(listRequests()).toHaveLength(2);
+    expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+    expect(screen.getByText('Only late bookings waiting for a cut-off decision.')).toBeVisible();
+    await waitFor(() => {
+      expect(link).toHaveFocus();
+    });
   });
 });
 

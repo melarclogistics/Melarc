@@ -58,7 +58,7 @@ function filterOf(query: Record<string, unknown>): NotificationLogFilter {
 
 /**
  * `GET /notifications` (S1.12e): the Ops message log, and with `channel=FEED&audience=OPS_FEED` the Ops feed. It requires
- * `notification.read` (Ops Staff, Senior Ops and Platform Admin at their own hub), serves the Ops Portal only, and takes a browser
+ * `notification.read` (Ops Staff and Senior Ops at their own hub, Platform Admin at every hub), serves the Ops Portal only, and takes a browser
  * session with no synchronizer token (a safe read). A vendor and a rider hold no such key and are refused by the guard.
  */
 @Controller('notifications')

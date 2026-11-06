@@ -54,7 +54,7 @@ CRIT-07 return refund this now gives a path to execute).
 
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
-| Melarc Ops| Senior Ops, Platform Admin| Propose a resolution for an adjustment at their own hub| `payment.adjustment.resolve`|
+| Melarc Ops| Senior Ops, Platform Admin| Propose a resolution for an adjustment at their own hub (Platform Admin: all hubs)| `payment.adjustment.resolve`|
 | Melarc Ops| Finance, Platform Admin| Approve or reject a proposed resolution, at any hub| `payment.adjustment.approve`, decider ≠ proposer (a Platform Admin excepted)|
 | Melarc Vendor| Vendor account| **N/A.** A vendor reads their balance and statement, never this record| —|
 | Recipient channel| —| **N/A.** A recipient has no account and no portal (§49)| —|
@@ -165,7 +165,7 @@ because writing money off is still money moving.
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `payment.adjustment.resolve`| Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
+| `payment.adjustment.resolve`| Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
 | `payment.adjustment.approve`| Finance, Platform Admin| all hubs, decider ≠ proposer (a Platform Admin excepted)| permissions.md §7 — new this pass|
 
 **`OQ-005` named these `payment.refund.*`.** They are `payment.adjustment.*` because the

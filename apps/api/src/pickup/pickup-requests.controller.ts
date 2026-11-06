@@ -17,7 +17,8 @@ import { RequiresPermission } from '../platform/routes/access-declaration.js';
 import { PICKUP_REQUEST_PAGE_SCHEMA, PICKUP_REQUEST_SCHEMA } from './pickup-request-schemas.js';
 import { ETAG_HEADERS } from '../platform/http/contract-headers.js';
 import { MAX_PAGE_SIZE } from '../platform/http/pagination.js';
-import { CUTOFF_EXCEPTION_STATES, EXCEPTION_STATES } from './pickup-requests.service.js';
+import { CUTOFF_EXCEPTION_STATES } from './pickup-request.schema.js';
+import { EXCEPTION_STATES } from './pickup-requests.service.js';
 import { PICKUP_REQUESTS_SERVICE } from './pickup-requests-providers.js';
 import type {
   PickupListFilter,

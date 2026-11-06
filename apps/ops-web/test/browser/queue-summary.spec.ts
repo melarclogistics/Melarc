@@ -5,9 +5,10 @@ import { watchPage, wcagViolations } from './support/page';
 import { SUMMARY_PATH } from './support/queue-summary';
 
 /**
- * The queue summary in a browser (task C1; `AC-QSUM-07`, `AC-QSUM-08`, `AC-QSUM-09`): the menu draws a count beside the entry of each queue the
- * server counted, the landing lists those queues, oldest first, with a link to each, a failed read says so and offers *Try again*, and the
- * page goes back to the server for the counts when the person goes to another page. The production build, in a real engine; only the
+ * The queue summary in a browser (task C1; `AC-QSUM-07`, `AC-QSUM-08`, `AC-QSUM-09`; and `AC-QSUM-11`, task C1.1): the menu draws a count beside
+ * the entry of each queue the server counted, the landing lists those queues, oldest first, with a link to each, a failed read says so and
+ * offers *Try again*, the page goes back to the server for the counts when the person goes to another page, and the late bookings open the
+ * pickup list under their own filter. The production build, in a real engine; only the
  * network is stood in (the sessions and the summary are the stand-in's, the counts are synthetic).
  */
 const OFFICER = {
@@ -157,12 +158,17 @@ test.describe('the counts of the queues in a browser', () => {
     await expect(
       page.getByText('Only late bookings waiting for a cut-off decision.'),
     ).toBeVisible();
-    expect(asked.at(-1)?.searchParams.get('state')).toBe('CONFIRMED');
-    expect(asked.at(-1)?.searchParams.get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+    // The list's read may not have reached the route when the banner shows: poll, as the last assertion of the test does.
+    await expect.poll(() => asked.at(-1)?.searchParams.get('state')).toBe('CONFIRMED');
+    await expect
+      .poll(() => asked.at(-1)?.searchParams.get('cutoff_exception_state'))
+      .toBe('PENDING_OPS_REVIEW');
 
     await page.getByRole('button', { name: 'Every cut-off decision' }).click();
 
     await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED$/);
+    // The button that took the filter off is gone: focus is on the State filter, and not lost to the page.
+    await expect(page.getByRole('combobox', { name: 'State' })).toBeFocused();
     await expect(page.getByText('Only late bookings waiting for a cut-off decision.')).toHaveCount(
       0,
     );

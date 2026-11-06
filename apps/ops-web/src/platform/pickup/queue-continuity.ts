@@ -23,7 +23,7 @@ export interface QueuePlace {
 
 /**
  * The most a place can hold, far beyond anything a person does: an officer pages through tens of pages, a server's position token is a few
- * hundred characters and the address holds two filters. A place over any of these is not one this screen made, and is not kept.
+ * hundred characters and the address holds three filters. A place over any of these is not one this screen made, and is not kept.
  */
 const MOST_TOKENS = 200;
 const LONGEST_TOKEN = 2048;

@@ -548,8 +548,11 @@ describe('the queue: filtering', () => {
     ).not.toBeInTheDocument();
   });
 
-  // Break caught: a change of the state dropping the late bookings without being asked.
-  it('keeps the late bookings when the state changes', async () => {
+  // The review of C1.1 (5 November 2026): the late bookings are the confirmed requests waiting for a cut-off decision, which is what the landing
+  // counted. A request cancelled after it was raised keeps the decision it had, so the filter alone would list it under "Every state", beneath
+  // words that do not fit it. The filter is therefore a refinement of the Confirmed state: another state takes it off. Break caught: the
+  // filter kept under another state, with its banner.
+  it('takes the late bookings off when the state is changed, which they are a refinement of', async () => {
     const { user, router } = open(
       () => page([late]),
       READER,
@@ -557,13 +560,98 @@ describe('the queue: filtering', () => {
     );
     await screen.findByRole('table', { name: 'Pickup requests' });
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), '');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'PENDING');
 
     await waitFor(() => {
-      expect(router.state.location.search).toBe('?cutoff=PENDING_OPS_REVIEW');
+      expect(router.state.location.search).toBe('?state=PENDING');
     });
-    expect(queryOf().has('state')).toBe(false);
+    expect(queryOf().get('state')).toBe('PENDING');
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
+    expect(
+      screen.queryByText('Only late bookings waiting for a cut-off decision.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the late bookings when only the service date changes', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW&date=2026-11-07',
+    );
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    await user.click(screen.getByRole('button', { name: 'Every service date' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW');
+    });
     expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+  });
+
+  // An address is the person's to edit: a late-bookings filter without the Confirmed state is not one the page offers, and is no filter, as a
+  // value that is no cut-off decision is none. Break caught: the filter sent for a state it does not fit.
+  it.each([
+    ['names no state', '/pickup-requests?cutoff=PENDING_OPS_REVIEW'],
+    ['names another state', '/pickup-requests?state=CANCELLED&cutoff=PENDING_OPS_REVIEW'],
+  ])('applies no late-bookings filter to an address that %s', async (_why, path) => {
+    open(() => page([pending]), READER, path);
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    expect(queryOf(0).has('cutoff_exception_state')).toBe(false);
+    expect(
+      screen.queryByText('Only late bookings waiting for a cut-off decision.'),
+    ).not.toBeInTheDocument();
+  });
+
+  // A button that takes a filter off is gone once it has: focus goes to the filter row, and not to the top of the page where it would fall.
+  it('puts focus on the State filter once the late bookings are taken off', async () => {
+    const { user } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    await user.click(screen.getByRole('button', { name: 'Every cut-off decision' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'State' })).toHaveFocus();
+    });
+  });
+
+  it('puts focus on the service date once the date is taken off', async () => {
+    const { user } = open(() => page([pending]), READER, '/pickup-requests?date=2026-11-03');
+    await screen.findByRole('table', { name: 'Pickup requests' });
+
+    await user.click(screen.getByRole('button', { name: 'Every service date' }));
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('group', { name: 'Service date' })).getAllByRole('spinbutton')[0],
+      ).toHaveFocus();
+    });
+  });
+
+  // The review of C1.1: a request cancelled after its late booking was raised keeps the cut-off decision it had, and nothing is left to decide
+  // on it. Break caught: the row of a cancelled request asking the officer to decide.
+  it('does not ask for a decision on a late booking that was cancelled since', async () => {
+    open(() =>
+      page([
+        pickupRequestFixture({
+          id: EARLIER_REQUEST_ID,
+          code: 'ACC-PR-9WXH4T',
+          state: 'CANCELLED',
+          cutoff_exception_state: 'PENDING_OPS_REVIEW',
+        }),
+      ]),
+    );
+
+    const row = await rowOf('ACC-PR-9WXH4T');
+    const card = await cardOf('ACC-PR-9WXH4T');
+
+    expect(within(row).getByText('Cancelled')).toBeVisible();
+    expect(within(row).queryByText('Late booking to decide')).toBeNull();
+    expect(within(card).queryByText('Late booking to decide')).toBeNull();
   });
 
   it('asks for the date that is typed, once it is a whole date, and keeps the state', async () => {
@@ -689,6 +777,21 @@ describe('the queue: nothing to show', () => {
 });
 
 describe('the queue: when it cannot be had', () => {
+  // Filtered by the cut-off decision, every request of the page carries it: a page that does not is not this query's answer (the server ignored
+  // the filter, or answered another). Break caught: a page drawn under "late bookings" that holds requests which are not, which would ask the
+  // officer to decide what is not theirs to decide. The filters stay on the page, so the officer can take them off.
+  it('refuses a page whose requests are not all the late bookings that were asked for', async () => {
+    open(
+      () => page([late, pending]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+
+    expect(await screen.findByText('The pickup requests could not be loaded.')).toBeVisible();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Every cut-off decision' })).toBeVisible();
+  });
+
   it('says so in approved words with a retry, and never the server’s text', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'));
 

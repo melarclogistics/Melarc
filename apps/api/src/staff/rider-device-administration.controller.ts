@@ -55,7 +55,7 @@ const correlation = (): string => currentRequestContext()?.requestId ?? randomUU
  * - **`reregisterRiderDevice`** (`staff.device.reregister`: Senior Ops or a Platform Admin at the rider's own hub, deliberately narrower)
  *   takes the `If-Match` of the rider's read and a reason with a mandatory verification note.
  *
- * - **`revokeRiderDevice`** (S0.58, `staff.device.revoke`: Ops Staff, Senior Ops or a Platform Admin at the rider's own hub) takes a reason and
+ * - **`revokeRiderDevice`** (S0.58, `staff.device.revoke`: Ops Staff and Senior Ops at the rider's own hub, a Platform Admin at every hub) takes a reason and
  *   nothing else, answers `204` and ends the rider's `ACTIVE` device and the live session on it in one act.
  *
  * Where the application is composed without what the service needs, all three fail closed (`503`).
