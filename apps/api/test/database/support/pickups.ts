@@ -309,6 +309,8 @@ export interface ExceptionRow {
     readonly setting_key: string;
     readonly effective_version: string;
   } | null;
+  /** The moment it was asked for (the database's clock when left out): a test of the age of a queue arranges an old one. */
+  readonly requestedAt?: Date;
 }
 
 /** A requested one-package exception for the request, with a recipient (section 21.1) and the note the approver reads. */
@@ -342,8 +344,8 @@ export async function insertOnePackageException(
   const decided = row.state !== 'REQUESTED';
   await client.query(
     `insert into one_package_exception (id, pickup_request_id, state, requested_by, approved_by, decided_at, note, recipient_name,
-                                        recipient_phone, recipient_location, single_package_fee_snapshot)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)`,
+                                        recipient_phone, recipient_location, single_package_fee_snapshot, requested_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, coalesce($12::timestamptz, now()))`,
     [
       row.id,
       row.pickupRequestId,
@@ -356,6 +358,7 @@ export async function insertOnePackageException(
       row.recipientPhone,
       JSON.stringify(row.recipientLocation),
       row.feeSnapshot === null ? null : JSON.stringify(row.feeSnapshot),
+      row.requestedAt ?? null,
     ],
   );
   return row;

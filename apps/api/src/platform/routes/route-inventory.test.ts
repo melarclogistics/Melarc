@@ -545,7 +545,7 @@ describe('the real application', () => {
         credentialModes: new Set(['COOKIE']),
       },
       // S0.53b, S0.53c: the in-person start of a rider's device binding. The first registration is `staff.device.register` (Senior Ops, or a
-      // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the actor's own hub, for both tiers).
+      // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the same: Senior Ops at their own hub, a Platform Admin at every hub).
       {
         method: 'POST',
         path: '/api/v1/ops/riders/:riderId/device/register',

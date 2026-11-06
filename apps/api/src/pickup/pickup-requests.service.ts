@@ -73,8 +73,9 @@ function invalid(name: string, rule: string): ApiException {
  *   `PERMISSION_DENIED` ("authorization-checked like every filter") and never given what a caller who cannot see stops would get.
  * - **A request shows its exception** (S1.16): the one it carries (an approval travels with the booking into its clones) or the latest
  *   raised for it, in the representation of `getPickupRequest` and so in its ETag. The approver's queue is the list filtered by the state
- *   of that exception (`one_package_exception_state=REQUESTED`), **less the cancelled requests** (task C1.1, `AC-QSUM-12`): their exception can
- *   no longer be decided.
+ *   of that exception (`one_package_exception_state=REQUESTED`), **of the pending requests alone** (`AC-QSUM-12`: task C1.1 left out the
+ *   cancelled ones and the decision of 6 November 2026 made it exactly the approval guard): the exception of any other request can no longer
+ *   be decided.
  * - **The late bookings are the list filtered by the cut-off state** (`cutoff_exception_state`, task C1.1, `AC-QSUM-10`): with
  *   `state=CONFIRMED` and `PENDING_OPS_REVIEW`, the requests waiting for Ops's cut-off decision, which `getQueueSummary` counts.
  */

@@ -11,13 +11,19 @@ import {
   type QueueCounter,
   type QueueId,
 } from '../domain-ports/queue-counter.port.js';
-import { QueueSummaryService } from './queue-summary.service.js';
+import {
+  QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS,
+  QueueSummaryService,
+} from './queue-summary.service.js';
 
 /**
  * `getQueueSummary` on fakes (task C1): which queues a session is given, in which context each is counted, how the answer is shaped and
  * ordered, and what a failure does. The counts against the lists they must equal, with the real database and the real policies, are
  * `queue-summary.db.test.ts`.
  */
+/** A limit that sets nothing, for the tests that are not about it (the bound on a count is tested below). */
+const noLimit = (): Promise<void> => Promise.resolve();
+
 const HUB = '11111111-1111-4111-8111-111111111111';
 const OTHER_HUB = '22222222-2222-4222-8222-222222222222';
 
@@ -121,7 +127,11 @@ describe('the queues a session is given', () => {
   // Break caught: an entry for a queue the session may not read, or a queue the session may read left out.
   it('has an entry for each queue whose list key the session holds, and for no other', async () => {
     const { made } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: runner(), counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
 
     const officer = await service.read(
       request([held('pickup.read'), held('pickup.exception.approve')]),
@@ -150,7 +160,11 @@ describe('the queues a session is given', () => {
   // Break caught: an approver's queue shown to a session that holds only the list's key, or only the decision key; or its absence drawn as 0.
   it('shows an approver’s queue only to a session that holds the list’s key and the decision key', async () => {
     const { made } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: runner(), counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
 
     const listOnly = await service.read(request([held('pickup.read'), held('staff.read')]), 'c1');
     expect(queueIdsOf(listOnly)).toEqual([
@@ -172,7 +186,11 @@ describe('the queues a session is given', () => {
   it('answers a session that may read none with no entries, and opens no transaction', async () => {
     const reader = runner();
     const { made, calls } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: reader, counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
 
     expect(await service.read(request([held('dispatch.read')]), 'c1')).toEqual({ queues: [] });
     expect(await service.read(request([]), 'c1')).toEqual({ queues: [] });
@@ -183,7 +201,11 @@ describe('the queues a session is given', () => {
   // Break caught: the order of the answer following the order the counters were composed in, so that it moves when a module is reordered.
   it('answers in the order of the contract’s queue identifiers, whatever the order of the counters', async () => {
     const { made } = counters([...EVERY_QUEUE].reverse());
-    const service = new QueueSummaryService({ runner: runner(), counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
 
     const answer = await service.read(
       request([
@@ -200,9 +222,9 @@ describe('the queues a session is given', () => {
   // Break caught: two counters for one queue, one of which would be dropped without a word.
   it('refuses a composition with two counters for one queue', () => {
     const { made } = counters([EVERY_QUEUE[0], EVERY_QUEUE[0]]);
-    expect(() => new QueueSummaryService({ runner: runner(), counters: made })).toThrow(
-      'PICKUP_AWAITING_CONFIRMATION',
-    );
+    expect(
+      () => new QueueSummaryService({ limitStatements: noLimit, runner: runner(), counters: made }),
+    ).toThrow('PICKUP_AWAITING_CONFIRMATION');
   });
 });
 
@@ -211,7 +233,11 @@ describe('the context each count is taken in', () => {
   it('counts each key in the scope of its own grant and never a wider one', async () => {
     const reader = runner();
     const { made } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: reader, counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
 
     // Pickup at its own hubs; the decision key of the exceptions at all hubs; the staff list at all hubs, its decision key at its own.
     await service.read(
@@ -245,7 +271,11 @@ describe('the context each count is taken in', () => {
   it('gives a grant of no hub scope, and a session with no hub, the empty set and never all of them', async () => {
     const reader = runner();
     const { made } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: reader, counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
 
     await service.read(request([held('pickup.read', 'own')], []), 'c1');
     await service.read(request([held('pickup.read', 'none')], [HUB]), 'c1');
@@ -260,7 +290,11 @@ describe('the context each count is taken in', () => {
   it('counts the queues of one key in one repeatable-read transaction, and one transaction for each key', async () => {
     const reader = runner();
     const { made, calls } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: reader, counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
 
     await service.read(
       request([
@@ -292,7 +326,11 @@ describe('the context each count is taken in', () => {
   it('reads through the runner’s read path, for a request that changes nothing', async () => {
     const reader = runner();
     const { made } = counters(EVERY_QUEUE);
-    const service = new QueueSummaryService({ runner: reader, counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
 
     await service.read(request([held('pickup.read')]), 'c1');
 
@@ -315,7 +353,11 @@ describe('the shape of an entry', () => {
         result: { count: 0, oldestAt: null },
       },
     ]);
-    const service = new QueueSummaryService({ runner: runner(), counters: made });
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
 
     const answer = await service.read(request([held('pickup.read')]), 'c1');
 
@@ -340,6 +382,7 @@ describe('a counter that cannot answer', () => {
     const { made } = counters(EVERY_QUEUE);
     // The second queue's counter fails; the others answer.
     const service = new QueueSummaryService({
+      limitStatements: noLimit,
       runner: runner(),
       counters: made.map((counter) =>
         counter.queue === 'PICKUP_CUTOFF_REVIEW'
@@ -351,5 +394,72 @@ describe('a counter that cannot answer', () => {
     await expect(service.read(request([held('pickup.read')]), 'c1')).rejects.toThrow(
       'the count failed',
     );
+  });
+});
+
+describe('the bound on a count (AC-QSUM-13; the decision of 6 November 2026)', () => {
+  // Break caught: a count with no statement timeout of its own (a scan that runs as long as the pool allows), a limit set after the counts it
+  // is meant to bound, one set on another transaction than the counts run in, or one that is not three seconds.
+  it('limits the statements of each transaction to three seconds, before any count of it, on the handle the counts use', async () => {
+    const { made, calls } = counters(EVERY_QUEUE);
+    const limits: { handle: TransactionHandle; milliseconds: number; countsBefore: number }[] = [];
+    const service = new QueueSummaryService({
+      runner: runner(),
+      counters: made,
+      limitStatements: (handle, milliseconds) => {
+        limits.push({ handle, milliseconds, countsBefore: calls.length });
+        return Promise.resolve();
+      },
+    });
+
+    await service.read(
+      request([
+        held('pickup.read'),
+        held('pickup.exception.approve'),
+        held('staff.read'),
+        held('staff.identity.approve'),
+      ]),
+      'c1',
+    );
+
+    // One transaction for each key (pickup.read for five queues, staff.read for one), each bounded at three seconds before its first count.
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([3000, 3000]);
+    expect(limits.map((limit) => limit.countsBefore)).toEqual([0, 5]);
+    const handleOf = (queue: QueueId) => calls.find((call) => call.queue === queue)?.handle;
+    expect(limits[0]?.handle).toBe(handleOf('PICKUP_AWAITING_CONFIRMATION'));
+    expect(limits[1]?.handle).toBe(handleOf('STAFF_AWAITING_APPROVAL'));
+    expect(QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS).toBe(3000);
+  });
+
+  // Break caught: a read that goes on without its bound because setting it failed (the count would then run unbounded).
+  it('fails the read, and counts nothing, when the limit cannot be set', async () => {
+    const { made, calls } = counters(EVERY_QUEUE);
+    const service = new QueueSummaryService({
+      runner: runner(),
+      counters: made,
+      limitStatements: () => Promise.reject(new Error('the limit was not set')),
+    });
+
+    await expect(service.read(request([held('pickup.read')]), 'c1')).rejects.toThrow(
+      'the limit was not set',
+    );
+    expect(calls).toEqual([]);
+  });
+
+  // Break caught: a transaction opened (and bounded) for a session that reads no queue.
+  it('sets no limit for a session that reads no queue', async () => {
+    const { made } = counters(EVERY_QUEUE);
+    let limited = 0;
+    const service = new QueueSummaryService({
+      runner: runner(),
+      counters: made,
+      limitStatements: () => {
+        limited += 1;
+        return Promise.resolve();
+      },
+    });
+
+    expect((await service.read(request([held('notification.read')]), 'c1')).queues).toEqual([]);
+    expect(limited).toBe(0);
   });
 });

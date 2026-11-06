@@ -263,9 +263,9 @@ And when a user WITHOUT pickup.exception.approve attempts to approve the excepti
 And when any holder of pickup.exception.approve approves it - Ops Staff, Senior Ops or
   Platform Admin - the request can then be confirmed and the approving actor is audited,
 And a drafting user who is not a Platform Admin may not approve their own request,
-And an exception whose request is no longer waiting for confirmation (a request cancelled since;
-  its exception stays REQUESTED) cannot be approved: the backend answers STATE_CONFLICT, and the
-  request is not in the approver's queue (AC-QSUM-12),
+And an exception whose request is no longer waiting for confirmation (a request cancelled since,
+  or any request that is not PENDING; its exception stays REQUESTED) cannot be approved: the
+  backend answers STATE_CONFLICT, and the request is not in the approver's queue (AC-QSUM-12),
 And the approved GH₵20 single-package fee becomes due on acceptance.
 ```
 
@@ -517,7 +517,7 @@ Then the Platform Admin is given the records of both hubs, reads a record of hub
 And the officer and the Senior Ops user are given hub A's records alone, exactly as before this decision,
 And under a hub set of hub A the runtime role reads no row of hub B, and under no hub scope reads none (row-level security is unchanged),
 And every grant of the Platform Admin bundle keeps its tier P and its ownership scope, the maker-checker exception still being the tier of the acting grant (a Senior Ops maker approving their own record is SELF_APPROVAL_FORBIDDEN as before),
-And the Platform Admin's grant of staff.device.reregister is of its own hub still (the Product Owner's decision of 8 October 2026, AC-SLICE-000-23) and a Platform Admin with no hub who tries it is HUB_SCOPE_VIOLATION,
+And the Platform Admin's grant of staff.device.reregister is of all hubs too (the Product Owner's decision of 6 November 2026, replacing that of 8 October 2026 for the Platform Admin; AC-SLICE-000-23), while Senior Ops keep it at their own hub,
 And a grant whose hub scope is none (global configuration) is still none.
 ```
 
@@ -527,11 +527,11 @@ And a grant whose hub scope is none (global configuration) is still none.
 
 ```text
 Given a database seeded with the Platform Admin's operational grants of its own hub, and a live session of that bundle,
-When migration 0075 is applied,
-Then every grant of the bundle that was of its own hub is of all hubs, except staff.device.reregister, with the ownership scope and the tier of every grant unchanged and no key added or removed,
-And the bundle-change primitive reads the change as an ADDITION: the bundle's revision rises by one, its floor does not, no session is ended and no revocation is written,
-And the session issued before keeps the snapshot it was issued with, and a sign-in after the migration carries the new scope,
-And the grants of the database equal those a new seed writes, no other bundle's revision moves, and a second run changes nothing.
+When migration 0075 is applied, and then migration 0077 (the Product Owner's decision of 6 November 2026, task P1.1: it widens the one grant 0075 left at the Platform Admin's own hub, staff.device.reregister),
+Then every grant of the bundle that was of its own hub is of all hubs (0075 all but staff.device.reregister, 0077 that one), with the ownership scope and the tier of every grant unchanged and no key added or removed,
+And the bundle-change primitive reads each change as an ADDITION: the bundle's revision rises by one for each migration, its floor does not, no session is ended and no revocation is written,
+And the session issued before keeps the snapshot it was issued with, and a sign-in after each migration carries the new scope,
+And the grants of the database, once both are applied, equal those a new seed writes, no other bundle's revision moves, and a second run of either changes nothing.
 ```
 
 **Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §4 and §5, [permissions.md](../../contracts/permissions.md) §5 · **Surface:** backend · **Test level:** integration · **Code:** none

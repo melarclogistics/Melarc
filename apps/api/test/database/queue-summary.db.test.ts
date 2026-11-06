@@ -895,6 +895,86 @@ describe('the clock of the session and a session that has ended (AC-QSUM-06)', (
   });
 });
 
+describe('only a pending request is in the approver’s queue (AC-QSUM-12; the decision of 6 November 2026)', () => {
+  /** A request of hub A in a state, whose exception is asked for: the shape the approval guard answers by the state of the request alone. */
+  async function askedFor(
+    name: string,
+    state: 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CANCELLED',
+    requestedAt?: Date,
+  ) {
+    // Inserted in its state (the transitions of the table allow no way to a declined request, which no operation makes yet).
+    const id = await make(name, HUB_A, { state });
+    await insertOnePackageException(
+      routes.admin,
+      exceptionRow(id, requestedAt === undefined ? {} : { requestedAt }),
+    );
+    return id;
+  }
+
+  // Break caught: the approver's queue left wider than the approval guard (the exclusion of a cancelled request alone): a request that is neither
+  // pending nor cancelled whose exception is still asked for would be listed and counted, and an approver sent to a decision the server refuses.
+  it('leaves out a confirmed, a declined and a cancelled request whose exception is asked for, in the list and in the count, for every role', async () => {
+    const pending = await askedFor('z.pendingAsked', 'PENDING');
+    const confirmed = await askedFor('z.confirmedAsked', 'CONFIRMED');
+    const declined = await askedFor('z.declinedAsked', 'DECLINED');
+    const cancelled = await askedFor('z.cancelledAsked', 'CANCELLED');
+
+    for (const [who, actor] of [
+      ['Ops Staff', await routes.opsStaff(HUB_A)],
+      ['Senior Ops', await routes.seniorOps(HUB_A)],
+      ['a Platform Admin with no hub', await routes.platformAdmin()],
+      ['a Platform Admin with a hub', await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A)],
+    ] as const) {
+      const queue = await requestsOf(
+        actor,
+        '/pickup-requests?one_package_exception_state=REQUESTED',
+      );
+      const ids = queue.items.map((item) => item.id);
+
+      expect(queue.status, who).toBe(200);
+      expect(ids, who).toContain(pending);
+      expect(ids, who).not.toContain(confirmed);
+      expect(ids, who).not.toContain(declined);
+      expect(ids, who).not.toContain(cancelled);
+      // Every request in the queue is a pending one, and the count is the list.
+      const states = await routes.rows<{ state: string }>(
+        `select distinct state from pickup_request where id = any($1::uuid[])`,
+        [ids],
+      );
+      expect(
+        states.map((row) => row.state),
+        who,
+      ).toEqual(['PENDING']);
+      expect(
+        entryFor((await summaryOf(actor)).queues, 'PICKUP_EXCEPTION_APPROVAL')?.count,
+        who,
+      ).toBe(ids.length);
+    }
+  });
+
+  // Break caught: the age of the queue (`oldest_at`) taken from another set than its count and its list: the exception of a request that is not
+  // pending, asked for long before every pending one, would be the age of work that nobody can do.
+  it('does not take the age of the queue from the exception of a request that is not pending', async () => {
+    const actor = await routes.opsStaff(HUB_A);
+    await askedFor('z.pendingForAge', 'PENDING');
+    const before = entryFor((await summaryOf(actor)).queues, 'PICKUP_EXCEPTION_APPROVAL');
+    expect(before?.oldest_at).toBeDefined();
+
+    const longAgo = new Date('2020-01-01T08:00:00Z');
+    const old = [
+      await askedFor('z.oldConfirmed', 'CONFIRMED', longAgo),
+      await askedFor('z.oldDeclined', 'DECLINED', longAgo),
+      await askedFor('z.oldCancelled', 'CANCELLED', longAgo),
+    ];
+    // The arrangement is what the test says it is: those exceptions really are older than every other.
+    for (const id of old) expect(await exceptionRequestedAt(id)).toBe(longAgo.toISOString());
+
+    const after = entryFor((await summaryOf(actor)).queues, 'PICKUP_EXCEPTION_APPROVAL');
+    expect(after).toEqual(before);
+    expect(new Date(after?.oldest_at ?? 0).getFullYear()).toBeGreaterThan(2020);
+  });
+});
+
 /** The moment a request was created, as the table has it, to the millisecond. */
 async function createdAtOf(id: string | undefined): Promise<string> {
   const [row] = await routes.rows<{ created_at: Date }>(

@@ -427,7 +427,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `failDeliveryStop`| `CRITICAL_WRITE`| failed-delivery attribution; custody stays with the Rider|
 | `getAccountingExport`| `NORMAL`| — A metadata read. It moves no custody, money or allocation, and it reaches no package: the bytes are behind `createAccountingExportRetrievalAuthorization`|
 | `getCurrentSession`| `NORMAL`| —|
-| `getQueueSummary`| `NORMAL`| — A read: the count of the work waiting in each queue the session may read (task C1). One request, one `count(*)` per queue (five of them an index lookup; the pool of confirmed pickups reads every confirmed request, which the marker of the plan's performance task will end); it returns no record, writes nothing and is `background` activity|
+| `getQueueSummary`| `NORMAL`| — A read: the count of the work waiting in each queue the session may read (task C1). One request, one `count(*)` per queue (five of them an index lookup; the pool of confirmed pickups reads every confirmed request, which the marker of the plan's performance task will end); **each count is bounded at 3 seconds, and a longer count ends the read as a failed read (`AC-QSUM-13`)**; it returns no record, writes nothing and is `background` activity|
 | `getRider`| `NORMAL`| — The rider roster's detail read, and the `ETag` source `reregisterRiderDevice` takes. Identity and readiness only; it moves no custody, money or allocation|
 | `getStaffIdentity`| `NORMAL`| — The `ETag` source for the staff-targeted mutations. A read; it moves nothing|
 | `getVendorAccount`| `NORMAL`| — The `ETag` source for the vendor-targeted mutations. Readiness only, never a credential|

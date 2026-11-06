@@ -4,6 +4,7 @@ import { OPERATION_RUNNER } from '../authorization/authorization-providers.js';
 import type { OperationRunner } from '../authorization/operation-runner.js';
 import { QUEUE_COUNTERS, type QueueCounter } from '../domain-ports/queue-counter.port.js';
 import { QueueSummaryService } from './queue-summary.service.js';
+import { limitStatements } from './statement-limit.js';
 
 /** The injection token of the service of `getQueueSummary`, which its controller asks for. */
 export const QUEUE_SUMMARY_SERVICE = Symbol('QUEUE_SUMMARY_SERVICE');
@@ -25,7 +26,7 @@ export const queueSummaryProviders: readonly FactoryProvider[] = [
     ): QueueSummaryService | undefined =>
       runner === undefined || counters === undefined
         ? undefined
-        : new QueueSummaryService({ runner, counters }),
+        : new QueueSummaryService({ runner, counters, limitStatements }),
     inject: [optional(OPERATION_RUNNER), optional(QUEUE_COUNTERS)],
   },
 ];

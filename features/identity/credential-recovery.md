@@ -265,7 +265,7 @@ And a Senior Ops user at the rider's hub succeeds,
 And a Senior Ops user attempting exceptional vendor recovery is refused with PERMISSION_DENIED, because vendor.credential.recover is Platform Admin's,
 And a Platform Admin succeeds at that,
 And a Platform Admin whose bundle carries staff.device.register with a scope reaching the rider's hub can register a first device, one whose grant does not reach that hub is refused HUB_SCOPE_VIOLATION, and one whose bundle lacks the grant is refused PERMISSION_DENIED because Platform Admin status alone is no bypass,
-And the scope of replacement is deliberately narrower than that of first registration: reregisterRiderDevice is held at the actor's own hub for both Senior Ops and Platform Admin, so a Platform Admin with an all-hub registration grant who replaces the device of a rider outside their own hub is refused HUB_SCOPE_VIOLATION,
+And the scope of replacement is the grant's (the Product Owner's decision of 6 November 2026, replacing for the Platform Admin that of 8 October 2026): reregisterRiderDevice is held at their own hub for Senior Ops, so a Senior Ops user who replaces the device of a rider outside their own hub is refused HUB_SCOPE_VIOLATION, while a Platform Admin whose grant of staff.device.reregister is of all hubs (whether or not they have a primary hub) replaces it at any hub, the rider attending in person and the verification note, the reason and the audit all still mandatory,
 And a Senior Ops user outside the rider's hub is refused HUB_SCOPE_VIOLATION on both registerRiderDevice and reregisterRiderDevice,
 And the privileged roles that succeed hold sessions that could only have been issued after a proven second factor.
 ```

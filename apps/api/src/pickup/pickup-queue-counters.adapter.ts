@@ -22,7 +22,7 @@ import {
  * |---|---|---|
  * | `PICKUP_AWAITING_CONFIRMATION` | `listPickupRequests` `state=PENDING` | `created_at` |
  * | `PICKUP_CUTOFF_REVIEW` | `listPickupRequests` `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` (task C1.1) | `confirmed_at` |
- * | `PICKUP_EXCEPTION_APPROVAL` | `listPickupRequests` `one_package_exception_state=REQUESTED`, less the cancelled requests (decision key `pickup.exception.approve`; task C1.1) | `requested_at` of the exception shown |
+ * | `PICKUP_EXCEPTION_APPROVAL` | `listPickupRequests` `one_package_exception_state=REQUESTED`, of the pending requests alone (decision key `pickup.exception.approve`; task C1.1 and the decision of 6 November 2026) | `requested_at` of the exception shown |
  * | `PICKUP_UNMANIFESTED_POOL` | `listPickupRequests` `state=CONFIRMED` and `manifested=false` | `confirmed_at` |
  * | `PICKUP_RUNS_IN_PROGRESS` | `listPickupManifests` `state=IN_PROGRESS` | `started_at` |
  */

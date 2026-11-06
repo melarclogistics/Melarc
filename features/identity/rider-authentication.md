@@ -33,7 +33,7 @@ The device binding is the part that matters. A rider's session is not merely an 
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
 | Melarc Rider| Rider| Sign in with phone, PIN and registered device| —|
-| Melarc Ops| Senior Ops| **Verify a rider's identity and re-register a device** (§37.2)| `staff.device.reregister`, own hub|
+| Melarc Ops| Senior Ops; Platform Admin| **Verify a rider's identity and re-register a device** (§37.2)| `staff.device.reregister`, own hub for Senior Ops, every hub for the Platform Admin|
 | Melarc Ops| Ops Staff, Senior Ops, Platform Admin| **Revoke** a lost or stolen device; read the rider roster| `staff.device.revoke`, `dispatch.read`, own hub (Platform Admin: all hubs)|
 | Melarc Ops| Ops Staff| **Cannot** re-register. Rider recovery is Senior Ops| —|
 | Melarc Vendor| —| **N/A**| —|
@@ -66,7 +66,7 @@ The device binding is the part that matters. A rider's session is not merely an 
 
 The contract defined **re-registration and no first registration**, so a rider could become authentication-capable only by an administrator writing rows.
 
-1. Senior Ops — or a Platform Admin whose grant of the key reaches the rider's hub (Product decision, 8 October 2026) — initiates in person: `registerRiderDevice`, `staff.device.register`, within the grant's scope. **That wider scope is for initial registration alone**: replacement (`reregisterRiderDevice`, `staff.device.reregister`) stays at the actor's own hub for both tiers, deliberately, and a negative test holds the difference (`AC-SLICE-000-23`, `GBT-GS13`). The grant, and the **single-use attestation challenge** that lives and dies with it, reach the handset in the QR. **In person, Senior Ops also verifies the operating rule: this handset is the rider's own and is not shared with another rider** (`MSC-DEC-429`, section 4.4).
+1. Senior Ops — or a Platform Admin whose grant of the key reaches the rider's hub (Product decision, 8 October 2026) — initiates in person: `registerRiderDevice`, `staff.device.register`, within the grant's scope. **Replacement** (`reregisterRiderDevice`, `staff.device.reregister`) has the same shape of scope since the Product Owner's decision of 6 November 2026: Senior Ops at their own hub, the Platform Admin at every hub, the rider in person with their identity verified either way; a negative test holds Senior Ops to their own hub (`AC-SLICE-000-23`, `GBT-GS13`). The grant, and the **single-use attestation challenge** that lives and dies with it, reach the handset in the QR. **In person, Senior Ops also verifies the operating rule: this handset is the rider's own and is not shared with another rider** (`MSC-DEC-429`, section 4.4).
 2. The handset generates a **hardware-backed signing key** in the Android Keystore with that challenge, and submits the **public half** and its **Key Attestation chain** (`key_attestation`).
 3. **The server verifies the attestation before it registers anything** — [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §15.2.1. A handset that cannot hold a hardware-backed key is refused with `DEVICE_SECURITY_UNSUPPORTED`, and evidence that fails policy with `DEVICE_INTEGRITY_FAILED`; **either way nothing is created.**
 4. **The rider establishes their own PIN**, privately, on their own device.

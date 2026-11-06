@@ -289,9 +289,9 @@ describe('the bundles', () => {
       // staff.device.register: "S: own hub · P: all hubs, each by the scope of its own grant".
       expect(scopeOf('seniorOps', 'staff.device.register')).toBe('own');
       expect(scopeOf('platformAdmin', 'staff.device.register')).toBe('all');
-      // staff.device.reregister: "own hub" for S and P alike.
+      // staff.device.reregister: "S: own hub · P: all hubs" (Product Owner, 6 November 2026, replacing the 8 October decision for P).
       expect(scopeOf('seniorOps', 'staff.device.reregister')).toBe('own');
-      expect(scopeOf('platformAdmin', 'staff.device.reregister')).toBe('own');
+      expect(scopeOf('platformAdmin', 'staff.device.reregister')).toBe('all');
       // vendor.read: "own hub · all hubs": Platform Admin and Finance at all hubs, the other staff holders at their own.
       expect(scopeOf('opsStaff', 'vendor.read')).toBe('own');
       expect(scopeOf('seniorOps', 'vendor.read')).toBe('own');
@@ -308,7 +308,7 @@ describe('the bundles', () => {
       expect(scopeOf('finance', 'pricing.read')).toBe('all');
       expect(scopeOf('vendor', 'pricing.read')).toBe('none');
       // Every other key of the slice is the own-hub reach of Ops Staff and Senior Ops, and the Platform Admin's is all hubs (Product Owner,
-      // 5 November 2026: the Platform Admin holds every domain at every hub), `staff.device.reregister` excepted (above).
+      // 5 November 2026: the Platform Admin holds every domain at every hub).
       for (const bundle of ['opsStaff', 'seniorOps', 'platformAdmin'] as const) {
         for (const key of SLICE_001_KEYS) {
           const scope = scopeOf(bundle, key);
@@ -318,15 +318,16 @@ describe('the bundles', () => {
       }
     });
 
-    // Break caught (task P1, AC-SLICE-001-83): the Platform Admin left at its own hub on any key, the exception widened with the rest, a
-    // grant of no hub given one, the tier or the ownership of a grant changed by the widening, or another bundle touched by it.
-    it('give the Platform Admin every key at all hubs but the one the decision of 8 October 2026 keeps at its own hub, and change nothing else', () => {
+    // Break caught (task P1, P1.1, AC-SLICE-001-83): the Platform Admin left at its own hub on any key (the device replacement among them since
+    // the decision of 6 November 2026), a grant of no hub given one, the tier or the ownership of a grant changed by the widening, or another
+    // bundle touched by it.
+    it('give the Platform Admin every key at all hubs but the one of no hub, and change nothing else', () => {
       const ofAdmin = GRANTS.filter((grant) => grant.bundleId === BUNDLE_IDS.platformAdmin);
       const keysAt = (scope: string) =>
         ofAdmin.filter((grant) => grant.hubScope === scope).map((grant) => grant.permissionKey);
-      expect(keysAt('own')).toEqual(['staff.device.reregister']);
+      expect(keysAt('own')).toEqual([]);
       expect(keysAt('none')).toEqual(['permission.assignable_bundle.read']);
-      expect(keysAt('all')).toHaveLength(ofAdmin.length - 2);
+      expect(keysAt('all')).toHaveLength(ofAdmin.length - 1);
       for (const grant of ofAdmin) {
         expect(grant.tier, grant.permissionKey).toBe('P');
         expect(grant.ownershipScope, grant.permissionKey).toBe('any');

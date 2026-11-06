@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.93.0
- *   SHA-256 a07223c51642052506dd96f2879a57f21be7922895a59f59ab6aad89b543f709 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.94.0
+ *   SHA-256 7fbb6cde89ea43a7bc41b73b039c9afd4883e697c1f6831588cae203e85d6fc3 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2397,7 +2397,7 @@ export interface paths {
          *     |---|---|---|---|---|
          *     | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
          *     | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` | `pickup.read` | `confirmed_at` of the request |
-         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` (a cancelled request is not in it) | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` (only a pending request is in it) | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
          *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
          *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
          *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
@@ -2408,8 +2408,10 @@ export interface paths {
          *
          *     **It is a read and only a read.** It writes no audit event (it returns no record and no page of records, so the
          *     `auth.hub_boundary.crossed` of a list is not written), changes nothing, and is `background` activity: it never extends the idle lifetime
-         *     of a session. One request, one answer: each count is one query, and the counts of one key are one snapshot. The answer is
-         *     `Cache-Control: no-store`.
+         *     of a session. One request, one answer: each count is one query, and the counts of one key are one snapshot. **Each count is bounded
+         *     at 3 seconds** (`AC-QSUM-13`, Product Owner, 6 November 2026): a count that cannot finish in that time ends the whole read as the
+         *     platform's failed read (`503`, no code), and the client shows its failure with a way to try again; a queue that is missing from a
+         *     failed read is never told as `0`. The answer is `Cache-Control: no-store`.
          */
         get: operations["getQueueSummary"];
         put?: never;
@@ -5272,9 +5274,10 @@ export interface paths {
         put?: never;
         /**
          * Senior Ops initiates in-person replacement device binding
-         * @description `staff.device.reregister` - **Senior Ops** (or a Platform Admin) at the rider's hub, **in person**. **Its scope is
-         *     deliberately narrower than first registration's and is not widened** (Product decision, 8 October 2026): replacement stays at the
-         *     actor's **own hub** for both tiers, whereas `registerRiderDevice` may reach other hubs for a Platform Admin whose grant says so.
+         * @description `staff.device.reregister` - **Senior Ops** at the rider's hub, or a **Platform Admin** at any hub, **in person**. **The scope is the
+         *     grant's** (Product decision, 6 November 2026, replacing that of 8 October 2026 for the Platform Admin): Senior Ops replace at their own
+         *     hub and a Platform Admin at every hub, as `registerRiderDevice` does. The rider still attends in person and the identity is still
+         *     verified (`MSC-DEC-235`), and the reason, the verification note and the audit stay mandatory.
          *
          *     Split out of performOpsRecovery in R1, and connected to the cryptographic lifecycle it was
          *     never wired to: it issues a `RIDER_DEVICE_REREGISTRATION` grant which the NEW handset
@@ -12916,7 +12919,7 @@ export interface operations {
                 service_date?: string;
                 /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop, a Rider no request) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
                 manifested?: boolean;
-                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **A cancelled request is not in it**: its exception can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT` for a request that is not `PENDING`), so it is not the approver's work. Authorization-checked like every filter. */
+                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **Only a pending request is in it** (a cancelled, a confirmed or a declined request is not): the exception of a request that is not `PENDING` can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work. Authorization-checked like every filter. */
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
                 /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
                 cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";

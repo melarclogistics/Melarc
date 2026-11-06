@@ -16,7 +16,8 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
  * - **Transactional requirement:** the caller's own transaction, and no other. The counters of one key share one snapshot (`REPEATABLE
  *   READ`), so that the counts of one key agree with each other.
  * - **Locks:** none. A count is a read; nothing is locked.
- * - **Failure:** a counter that cannot answer throws, and the whole read fails (`500`); the platform never answers with the counts it has
+ * - **Failure:** a counter that cannot answer throws, and the whole read fails (`500`; a count that outlasts its bound of 3 seconds fails it as
+ *   the platform's `503`, `AC-QSUM-13`); the platform never answers with the counts it has
  *   and without the one it has not (a queue missing from the answer means "the session may not read it", and a failed read must never say
  *   that).
  */

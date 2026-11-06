@@ -3,7 +3,7 @@ import type { CopyRule } from './problem-copy';
 /**
  * The words of the rider screens (S0.60), keyed by operation and code like the rest of the table, and proposed for the Product Owner to review
  * with the composed screens. Each refused act names its own permission (ops-portal.md section 7): a first binding is a Senior Ops act, a
- * replacement is one too (and stays at the officer's own hub), and the report of a loss is any officer's. Nothing says anything about the
+ * replacement is one too (at the officer's own hub, for Senior Ops; a Platform Admin acts at every hub), and the report of a loss is any officer's. Nothing says anything about the
  * rider's PIN or key, which no answer carries; the words about the code say what it is for and that it is shown once.
  */
 const OTHER_HUB = 'This rider belongs to a hub your session does not act in.';

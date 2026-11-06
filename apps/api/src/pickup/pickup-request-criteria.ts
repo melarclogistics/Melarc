@@ -20,8 +20,9 @@ export interface PickupRequestCriteria {
   readonly state: string | null;
   /**
    * Only the requests whose exception (the one they carry, else the latest raised for them) is in this state. **`REQUESTED` is the approver's
-   * queue, and leaves out the cancelled requests** (task C1.1, `AC-QSUM-12`): the exception of a request that is not `PENDING` can no longer
-   * be decided (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work.
+   * queue, and holds only the requests in state `PENDING`** (`AC-QSUM-12`; task C1.1 left out the cancelled ones, the decision of 6 November 2026
+   * made it exactly the approval guard): the exception of a request that is not `PENDING` can no longer be decided
+   * (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work. The list and the count both take it from here.
    */
   readonly exceptionState: string | null;
   /**
@@ -81,7 +82,8 @@ export function pickupRequestCriteria(criteria: PickupRequestCriteria): SQL {
       requestsThatCanShowAnExceptionIn(exceptionState),
       sql`${shownException('state')} = ${exceptionState}::text`,
     );
-    if (exceptionState === 'REQUESTED') conditions.push(sql`state is distinct from 'CANCELLED'`);
+    // The approver's queue is the requests the approval guard accepts (`row.state !== 'PENDING'` is STATE_CONFLICT): pending ones alone.
+    if (exceptionState === 'REQUESTED') conditions.push(sql`state = 'PENDING'`);
   }
   if (cutoffExceptionState !== null) {
     conditions.push(sql`cutoff_exception_state = ${cutoffExceptionState}::text`);

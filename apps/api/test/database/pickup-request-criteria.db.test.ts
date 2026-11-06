@@ -25,8 +25,8 @@ import { insertVendor, vendorRow } from './support/vendors.js';
  * criteria were rewritten for the planner (a filter that is not asked for adds no condition; the filter on an exception's state starts from
  * the exceptions in that state), and measured at 400,000 requests the old form of the exception filter took 246 seconds for one call and the
  * new one two milliseconds. **A rewrite that is faster is worth nothing if it returns another set**, so the definition is kept here, written
- * out by hand as a plain condition for each filter (the form the criteria were rewritten from, with the two rules of task C1.1: the cancelled
- * requests are not in the approver's queue, and the cut-off decision is a filter of its own), and the two are compared, for every combination
+ * out by hand as a plain condition for each filter (the form the criteria were rewritten from, with the two rules of tasks C1.1 and P1.1: only the pending
+ * requests are in the approver's queue (C1.1 left out the cancelled ones, P1.1 every one that is not pending), and the cut-off decision is a filter of its own), and the two are compared, for every combination
  * of the filters and in every scope, over requests arranged to meet every
  * way an exception can be shown: none, requested, approved and carried, approved and not carried, refused, refused and asked for again,
  * several refused, an approval another request carries, and one the caller cannot see.
@@ -35,15 +35,16 @@ const ORACLE = (criteria: PickupRequestCriteria): SQL => {
   const { state, exceptionState, cutoffExceptionState, serviceDate, manifested } = criteria;
   const pool = manifested === false && state === 'CONFIRMED';
   // Task C1.1 changed the definition in two deliberate places, and the definition is written out here in its new form: a filter by the
-  // cut-off state (`cutoff_exception_state`, AC-QSUM-10), and the approver's queue (`REQUESTED`) without the cancelled requests, whose
-  // exception can no longer be decided (AC-QSUM-12).
+  // cut-off state (`cutoff_exception_state`, AC-QSUM-10), and the approver's queue (`REQUESTED`) of the pending requests alone, the ones whose
+  // exception can still be decided (AC-QSUM-12; task C1.1 left out the cancelled ones, the decision of 6 November 2026 made it every state the
+  // approval guard refuses).
   return sql`(${state}::text is null or state = ${state}::text)
     and (${exceptionState}::text is null or (
           select e.state from one_package_exception e
            where e.id = pickup_request.one_package_exception_id or e.pickup_request_id = pickup_request.id
            order by (e.id = pickup_request.one_package_exception_id) desc, e.requested_at desc, e.id desc
            limit 1) = ${exceptionState}::text)
-    and (${exceptionState}::text is distinct from 'REQUESTED' or state <> 'CANCELLED')
+    and (${exceptionState}::text is distinct from 'REQUESTED' or state = 'PENDING')
     and (${cutoffExceptionState}::text is null or cutoff_exception_state = ${cutoffExceptionState}::text)
     and (${serviceDate}::date is null or scheduled_service_date = ${serviceDate}::date)
     and (${manifested}::boolean is null or exists (
@@ -282,13 +283,19 @@ describe('the conditions of the list of pickup requests', () => {
     ]) {
       expect(found.length).toBeGreaterThan(5);
     }
-    // ... and the two rules task C1.1 made have something to act on: a cancelled request whose exception is still asked for (it must leave the
-    // approver's queue), and a late booking that is not confirmed (the filter by the cut-off state alone keeps it, the queue does not).
+    // ... and the rules tasks C1.1 and P1.1 made have something to act on: a cancelled request, and a confirmed one, whose exception is still
+    // asked for (they must leave the approver's queue; the generator makes no declined request), and a late booking that is not confirmed (the
+    // filter by the cut-off state alone keeps it, the queue does not).
     const cancelledAsked = await admin.query<{ n: number }>(
       `select count(*)::int as n from pickup_request r where r.state = 'CANCELLED'
           and (select e.state from one_package_exception e where e.pickup_request_id = r.id order by e.requested_at desc, e.id desc limit 1) = 'REQUESTED'`,
     );
     expect(cancelledAsked.rows[0]?.n).toBeGreaterThan(0);
+    const confirmedAsked = await admin.query<{ n: number }>(
+      `select count(*)::int as n from pickup_request r where r.state = 'CONFIRMED'
+          and (select e.state from one_package_exception e where e.pickup_request_id = r.id order by e.requested_at desc, e.id desc limit 1) = 'REQUESTED'`,
+    );
+    expect(confirmedAsked.rows[0]?.n).toBeGreaterThan(0);
     const lateNotConfirmed = await admin.query<{ n: number }>(
       `select count(*)::int as n from pickup_request where state <> 'CONFIRMED' and cutoff_exception_state = 'PENDING_OPS_REVIEW'`,
     );

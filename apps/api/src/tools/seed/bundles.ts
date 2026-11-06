@@ -30,8 +30,9 @@ import type {
  * three lists of grants below (`SLICE_000_GRANTS`, `SLICE_001_GRANTS`, `NOTIFICATION_READ_GRANTS`) stay as they were written, because
  * they are the content that migrations 0043 and 0057 carry to a database seeded before them (the Platform Admin's operational grants at
  * `own`); `GRANTS`, what a new database is seeded with, is those lists with the Platform Admin's `own` grants made `all`
- * (`platformAdminAtEveryHub`), `staff.device.reregister` excepted, and migration 0075 brings a database seeded before the decision to
- * the same. `slice-001-grants.db.test.ts` holds the three stages to one result. The bundles are limited to the keys the slices built so
+ * (`platformAdminAtEveryHub`), and migrations 0075 and 0077 bring a database seeded before the decisions to the same (0077 for
+ * `staff.device.reregister`, which the decision of 5 November left at the actor's own hub and that of 6 November 2026 widened).
+ * `slice-001-grants.db.test.ts` holds the stages to one result. The bundles are limited to the keys the slices built so
  * far need. The Vendor's six keys and the Rider's seven for SLICE-001 are inert until an operation checks them.
  */
 
@@ -115,7 +116,7 @@ export const SLICE_000_GRANTS: readonly GrantSeed[] = [
   // hub. **The three keys of the staff identity's lifecycle that the catalogue gives `S: own hub · P: all hubs` (staff.read,
   // staff.identity.create, staff.identity.approve) were all-hub for Platform Admin** (Product decision, 22 October 2026): a seeded
   // Platform Admin has no primary hub, so its own hub is none, and it would read, create and approve no identity at all. The scope is
-  // the grant's; being a Platform Admin is no bypass. The remaining `own` grants below became `all` on 5 November 2026 (GRANTS, below).
+  // the grant's; being a Platform Admin is no bypass. The remaining `own` grants below became `all` on 5 November 2026, and the last of them, `staff.device.reregister`, on 6 November 2026 (GRANTS, below).
   ...staff(BUNDLE_IDS.platformAdmin, 'P', [
     ['dispatch.read', 'own'],
     ['permission.assignable_bundle.read', 'none'],
@@ -282,24 +283,19 @@ export const NOTIFICATION_READ_GRANTS: readonly GrantSeed[] = [
 ];
 
 /**
- * The keys whose Platform Admin grant stays at the actor's own hub when the Platform Admin is widened to every hub. `staff.device.reregister`:
- * the Product Owner's decision of 8 October 2026 is explicit that replacing a rider's device is done in person at a hub, for Senior Ops and
- * Platform Admin alike, and holds it with a negative test (`AC-SLICE-000-23`, `GBT-GS13`); the decision of 5 November 2026 does not name it,
- * so the narrower reading stands until the Product Owner says otherwise (permissions.md section 5; a finding for the Product Owner).
- */
-export const PLATFORM_ADMIN_OWN_HUB_KEYS: readonly string[] = ['staff.device.reregister'];
-
-/**
  * The Platform Admin holds every key it holds at all hubs (Product Owner, 5 November 2026; permissions.md section 5). **It is the scope of the
  * grants of the Platform Admin bundle** and not a bypass in code: the authorization step reads each grant's scope as it always did. Only a
  * grant of the Platform Admin bundle whose scope is `own` changes, and only its scope: the key, the ownership scope and the tier (which the
  * maker-checker exception reads) are carried over, a grant of no hub (global configuration) stays so, and no other bundle is touched.
+ *
+ * **No key is excepted.** `staff.device.reregister` was, from 5 November 2026, on the strength of the decision of 8 October 2026 (a rider's
+ * device is replaced in person at a hub); the Product Owner's decision of 6 November 2026 overrides it for the Platform Admin alone, and Senior
+ * Ops keep the key at their own hub (this function never touches their bundle). The rider still attends in person; the reason, the
+ * verification note and the audit stay mandatory.
  */
 export function platformAdminAtEveryHub(grants: readonly GrantSeed[]): GrantSeed[] {
   return grants.map((grant) =>
-    grant.bundleId === BUNDLE_IDS.platformAdmin &&
-    grant.hubScope === 'own' &&
-    !PLATFORM_ADMIN_OWN_HUB_KEYS.includes(grant.permissionKey)
+    grant.bundleId === BUNDLE_IDS.platformAdmin && grant.hubScope === 'own'
       ? { ...grant, hubScope: 'all' as const }
       : grant,
   );

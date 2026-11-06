@@ -6,6 +6,7 @@ import { parseEnrolmentUri } from '../../src/platform/auth/rider/enrolment-uri.j
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { arrangedFixedSession, presenting } from './support/http-sessions.js';
+import { grant, newBundle } from './support/policy-fixtures.js';
 import {
   SOME_PIN_HASH,
   insertRider,
@@ -31,7 +32,7 @@ import {
  * the in-person start of a rider's device binding. The grant travels as a QR code (a 127-character enrolment URI, `no-store`) and never as a
  * message; the officer learns no PIN, key or session; the first registration is the one operation whose replay returns a secret, sealed, and
  * only while the grant is still usable; the replacement takes the rider's ETag and a verification note; and the scope of each key is the
- * catalogue's (registration may reach every hub for a Platform Admin whose grant says so, replacement stays at the actor's own hub).
+ * catalogue's (both may reach every hub for a Platform Admin whose grant says so, and stay at their own hub for Senior Ops; replacement was held at the Platform Admin's own hub until the decision of 6 November 2026).
  */
 const REGISTER = (id: string) => `${API}/ops/riders/${id}/device/register`;
 const REREGISTER = (id: string) => `${API}/ops/riders/${id}/device/reregister`;
@@ -520,10 +521,15 @@ describe('registerRiderDevice: the first binding, in person (AC-SLICE-000-40, -7
 });
 
 describe('who may start a first binding (AC-SLICE-000-23, GBT-GS13)', () => {
-  // Break caught: Ops Staff holding the act that grants access, or Platform Admin status read as a bypass.
-  it('refuses Ops Staff and a bundle without the key with PERMISSION_DENIED, whatever the hub', async () => {
+  // Break caught: Ops Staff holding the act that grants access, or Platform Admin status read as a bypass (a bundle at the Platform Admin's tier
+  // that holds the replacement key at every hub and not the registration key is refused).
+  it('refuses Ops Staff and a bundle without the key with PERMISSION_DENIED, whatever the hub or the tier', async () => {
     const rider = await fresh();
-    for (const bundle of [BUNDLE_IDS.opsStaff, BUNDLE_IDS.finance]) {
+    const adminTierWithoutTheKey = await newBundle(routes.admin, [
+      grant('staff.device.reregister', 'all', 'any', 'P'),
+      grant('staff.read', 'all', 'any', 'P'),
+    ]);
+    for (const bundle of [BUNDLE_IDS.opsStaff, BUNDLE_IDS.finance, adminTierWithoutTheKey]) {
       const refused = await register(await routes.actor(bundle, HUB_A), rider.id);
       expect([bundle, refused.status, codeOf(refused)]).toEqual([bundle, 403, 'PERMISSION_DENIED']);
     }
@@ -835,8 +841,9 @@ describe('reregisterRiderDevice: the replacement handset, in person (AC-SLICE-00
     ]);
   });
 
-  // Break caught (AC-23, GBT-GS13): the replacement scope widened to a Platform Admin's all-hub registration grant, or lost to a Senior Ops.
-  it('holds the replacement to the actor’s own hub for both tiers, and refuses Ops Staff', async () => {
+  // Break caught (AC-23, GBT-GS13; the decision of 6 November 2026): Senior Ops allowed past their own hub, the Platform Admin held at its own hub
+  // again (a Platform Admin with no hub, or with another hub, refused), Ops Staff let in, or the act made without the grant of its key.
+  it('holds Senior Ops to their own hub, lets a Platform Admin replace at every hub, and refuses Ops Staff', async () => {
     const rider = await fresh({ pinHash: SOME_PIN_HASH, hubId: HUB_A });
     await insertRiderDevice(routes.admin, rider.id);
     const reader = await routes.seniorOps(HUB_A);
@@ -844,27 +851,130 @@ describe('reregisterRiderDevice: the replacement handset, in person (AC-SLICE-00
 
     const opsStaff = await reregister(await routes.opsStaff(HUB_A), rider.id, etag);
     const seniorElsewhere = await reregister(await routes.seniorOps(HUB_B), rider.id, etag);
-    // A Platform Admin whose registration grant is all-hub still replaces at their own hub only: with no hub of their own, at none.
+    expect([opsStaff.status, codeOf(opsStaff)]).toEqual([403, 'PERMISSION_DENIED']);
+    expect([seniorElsewhere.status, codeOf(seniorElsewhere)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
+    // A refusal issues nothing.
+    expect(await grantsOf(rider.id)).toEqual([]);
+
+    // A Platform Admin holds the key at every hub: the seeded one with no hub, one of another hub and one of the rider's own all replace it.
     const adminNoHub = await reregister(await routes.platformAdmin(), rider.id, etag);
     const adminElsewhere = await reregister(
       await routes.actor(BUNDLE_IDS.platformAdmin, HUB_B),
       rider.id,
       etag,
     );
-
-    expect([opsStaff.status, codeOf(opsStaff)]).toEqual([403, 'PERMISSION_DENIED']);
-    for (const refused of [seniorElsewhere, adminNoHub, adminElsewhere]) {
-      expect([refused.status, codeOf(refused)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
-    }
-    expect(await grantsOf(rider.id)).toEqual([]);
-
     const adminHere = await reregister(
       await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A),
       rider.id,
       etag,
     );
     const senior = await reregister(reader, rider.id, etag);
-    expect([adminHere.status, senior.status]).toEqual([200, 200]);
+    expect([adminNoHub.status, adminElsewhere.status, adminHere.status, senior.status]).toEqual([
+      200, 200, 200, 200,
+    ]);
+    // Each replaces the grant of the one before, as the act always did.
+    expect((await grantsOf(rider.id)).map((grant) => grant.state)).toEqual([
+      'SUPERSEDED',
+      'SUPERSEDED',
+      'SUPERSEDED',
+      'PENDING',
+    ]);
+  });
+
+  // Break caught (AC-23, AC-108; decision D14: the hub of an act is the record’s, never the actor’s): the audit event of a Platform Admin’s
+  // replacement filed under the administrator’s hub (or under none, for one with no hub), or the reason and the verification note left optional for
+  // that actor because the check was kept for the Senior Ops path alone.
+  it('files a Platform Admin’s replacement under the rider’s hub with the actor, the reason and the note, and refuses it without them', async () => {
+    const rider = await fresh({ pinHash: SOME_PIN_HASH, hubId: HUB_A });
+    await insertRiderDevice(routes.admin, rider.id);
+    const etag = await versionOf(await routes.seniorOps(HUB_A), rider.id);
+    const administrators = [
+      await routes.platformAdmin(),
+      await routes.actor(BUNDLE_IDS.platformAdmin, HUB_B),
+    ];
+
+    for (const who of administrators) {
+      const noNote = await reregister(who, rider.id, etag, {
+        reason_code: 'RIDER_HANDSET_CHANGED',
+      });
+      const noReason = await reregister(who, rider.id, etag, {
+        reason_code: '',
+        verification_note: NOTE,
+      });
+      expect([noNote.status, codeOf(noNote)]).toEqual([400, 'VALIDATION_FAILED']);
+      expect([noReason.status, codeOf(noReason)]).toEqual([422, 'REASON_REQUIRED']);
+    }
+    expect(await grantsOf(rider.id)).toEqual([]);
+
+    for (const who of administrators) {
+      expect((await reregister(who, rider.id, etag)).status).toBe(200);
+      const grants = await grantsOf(rider.id);
+      const issued = (await eventsFor([grants[grants.length - 1]?.id ?? ''])).find(
+        (each) => each.event_code === 'auth.setup_grant.issued',
+      );
+      expect(issued).toMatchObject({
+        actor_id: who.identity.id,
+        responsible_hub_id: HUB_A,
+        reason_code: 'RIDER_HANDSET_CHANGED',
+        note: NOTE,
+        related_ids: { principal_id: rider.id, issued_by: who.identity.id },
+      });
+    }
+  });
+
+  // Break caught (AC-23; the decision of 6 November 2026): a bypass of the hub for these two keys that reads the tier as "every hub". The seeded
+  // Platform Admin now holds both keys at every hub, so only a bundle arranged at its own hub can show that a grant of tier P is still held to it.
+  it('holds a grant of tier P at its own hub to that hub, for the replacement and for the first registration', async () => {
+    const own = await newBundle(routes.admin, [
+      grant('staff.device.reregister', 'own', 'any', 'P'),
+      grant('staff.device.register', 'own', 'any', 'P'),
+      grant('staff.read', 'own', 'any', 'P'),
+    ]);
+    const replaced = await fresh({ pinHash: SOME_PIN_HASH, hubId: HUB_A });
+    await insertRiderDevice(routes.admin, replaced.id);
+    const first = await fresh({ hubId: HUB_A });
+    const etag = await versionOf(await routes.seniorOps(HUB_A), replaced.id);
+
+    const elsewhere = await routes.actor(own, HUB_B);
+    const refusedReplacement = await reregister(elsewhere, replaced.id, etag);
+    const refusedRegistration = await register(elsewhere, first.id);
+    expect([refusedReplacement.status, codeOf(refusedReplacement)]).toEqual([
+      403,
+      'HUB_SCOPE_VIOLATION',
+    ]);
+    expect([refusedRegistration.status, codeOf(refusedRegistration)]).toEqual([
+      403,
+      'HUB_SCOPE_VIOLATION',
+    ]);
+    expect(await grantsOf(replaced.id)).toEqual([]);
+    expect(await grantsOf(first.id)).toEqual([]);
+
+    const here = await routes.actor(own, HUB_A);
+    expect((await reregister(here, replaced.id, etag)).status).toBe(200);
+    expect((await register(here, first.id)).status).toBe(200);
+  });
+
+  // Break caught: the role name read as a bypass for replacement. A bundle at the Platform Admin's tier that holds the registration key at every
+  // hub and not the replacement key is refused, as Finance's is: the authority is the grant of the key, never the tier or the name.
+  it('refuses a bundle that does not hold the key, whatever its tier, the hub or the registration grant', async () => {
+    const rider = await fresh({ pinHash: SOME_PIN_HASH, hubId: HUB_A });
+    await insertRiderDevice(routes.admin, rider.id);
+    const etag = await versionOf(await routes.seniorOps(HUB_A), rider.id);
+    const adminTierWithoutTheKey = await routes.actor(
+      await newBundle(routes.admin, [
+        grant('staff.device.register', 'all', 'any', 'P'),
+        grant('staff.read', 'all', 'any', 'P'),
+      ]),
+      HUB_A,
+    );
+
+    const finance = await reregister(await routes.actor(BUNDLE_IDS.finance, HUB_A), rider.id, etag);
+    const adminTier = await reregister(adminTierWithoutTheKey, rider.id, etag);
+
+    for (const refused of [finance, adminTier]) {
+      expect([refused.status, codeOf(refused)]).toEqual([403, 'PERMISSION_DENIED']);
+    }
+    expect(await grantsOf(rider.id)).toEqual([]);
   });
 
   it('answers a rider that does not exist NOT_FOUND, and a path that is not an id VALIDATION_FAILED', async () => {
