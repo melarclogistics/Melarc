@@ -69,6 +69,8 @@ import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
+import { RecordLookupController } from './lookup/record-lookup.controller.js';
+import { recordLookupProviders } from './lookup/record-lookup-providers.js';
 import { QueueSummaryController } from './queue-summary/queue-summary.controller.js';
 import { queueSummaryProviders } from './queue-summary/queue-summary-providers.js';
 import { guardChainProviders } from './routes/guard-chain.js';
@@ -136,6 +138,7 @@ export class PlatformModule {
               TrustedBrowserController,
               CredentialRecoveryController,
               QueueSummaryController,
+              RecordLookupController,
             ],
       imports: [
         HealthModule,
@@ -189,6 +192,8 @@ export class PlatformModule {
         ...sessionOperationsProviders,
         // The service of the count of each queue the session may read (task C1), built on the runner above and the counters the domains own.
         ...queueSummaryProviders,
+        // The service of the lookup of a record by its code, a name or a phone number (task C2), built on the runner above and the sources the domains own.
+        ...recordLookupProviders,
         NotFoundFallback,
         LifecycleService,
         ShutdownRegistry,

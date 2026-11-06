@@ -243,6 +243,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   { operation: 'signOut', text: 'Sign-out did not finish, so you are still signed in.' },
   { operation: 'listReasonDefinitions', text: 'The reasons could not be loaded.' },
   { operation: 'getQueueSummary', text: 'The summary of what is waiting could not be read.' },
+  { operation: 'lookupRecords', text: 'The search could not be completed.' },
   {
     context: 'note',
     code: 'VALIDATION_FAILED',

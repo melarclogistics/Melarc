@@ -200,6 +200,13 @@ export const pickupRequest = pgTable(
     index('pickup_request_carried_exception_idx')
       .on(table.onePackageExceptionId)
       .where(sql`${table.onePackageExceptionId} IS NOT NULL`),
+    // The search by a phone number typed in full (`lookupRecords`, task C2): an equality on either contact phone. An equality is leakproof, so it
+    // runs, and an index on it is used, before the row-level security policy (a scan of 400,000 requests took 0.1 s, the index 0.2 ms). The second
+    // is partial: most requests have no second number.
+    index('pickup_request_primary_phone_idx').on(table.primaryPhone),
+    index('pickup_request_secondary_phone_idx')
+      .on(table.secondaryPhone)
+      .where(sql`${table.secondaryPhone} IS NOT NULL`),
     check(
       'pickup_request_code_format',
       sql`${table.code} ~ '^[A-Z]{3}-PR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$'`,

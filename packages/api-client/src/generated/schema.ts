@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.91.0-c1-queue-summary
- *   SHA-256 3f251a3bd3558a9ca8779d9377e19fef3dcbbf16adddccb1e73cf7f6d855f9bf (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.92.0
+ *   SHA-256 e0447d5b250021054efc4492b0a15346983b1e2a83d609d2022149da1d4c1de3 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2412,6 +2412,56 @@ export interface paths {
          *     `Cache-Control: no-store`.
          */
         get: operations["getQueueSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find a record by its code, a name or a phone number typed in full
+         * @description Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
+         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-12`), is
+         *     features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
+         *
+         *     **The query `q` is one string of 2 to 64 characters as sent**; anything else is `VALIDATION_FAILED` naming the parameter `q`. The server then
+         *     trims it and makes each run of white space inside it one space, and refuses a text of fewer than 2 characters after that, and a
+         *     text with a NUL character, the same way. **The server decides what it is, in this order, and asks only the question that kind of
+         *     query means.** (1) Text of the shape of an operational code (`HUB-TT-XXXXXX`, case does not matter) returns **at most the record that
+         *     carries it**: a pickup request (`PR`) or a pickup run (`MF`); a code that matches nothing the session may open is an empty answer,
+         *     never `403` or `404`. (2) A phone number **typed in full**, normalised as `findAdHocSender` normalises one, returns the pickup
+         *     requests whose own contact phone is that number and the riders whose phone it is; a partial or invalid number matches no phone and
+         *     is read as a name; the phone of an ad-hoc sender is never searched. (3) Anything else is a **case-insensitive word-prefix search**
+         *     of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). (4) A vendor's
+         *     account identifier (eight characters) is matched exactly in addition to the name.
+         *
+         *     **No permission admits the call; each kind is admitted by the key of its own read**: `pickup.read` (requests and runs),
+         *     `vendor.read`, `dispatch.read` and `staff.read`. **A result is a record the same session could open through that kind's own read**:
+         *     each kind is searched in the transaction and under the grant of its own key, so the hubs of that grant, and row-level security, scope
+         *     it; a record of another hub is never returned. A kind whose key the session does not hold is absent from the answer, which tells
+         *     nothing about the records. No key is added.
+         *
+         *     **The answer is at most 8 results per kind and 20 in all**, in the fixed order of `RecordLookupKind` (a pickup request newest first,
+         *     the others by name then id). A result is `kind`, `id` (the account's for a vendor), `code` where the record has one, `title`, and
+         *     the facts that say where the record stands: its own `state`, its `hub` and, for a pickup request and a pickup run, its `service_date`,
+         *     **and nothing else**. **A result names no page and carries no wording** (Product Owner, 6 November 2026): the Ops Portal maps the
+         *     `kind` and the `id` to its own route and writes its own line from the facts. **A phone number appears in a result only when the person
+         *     searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
+         *
+         *     **It is a read and only a read.** It writes one `auth.hub_boundary.crossed` for each hub other than the actor's own that the
+         *     returned results represent, as the lists do (audit.md section 5.4), and nothing else. It is `qualifying` activity: a typed search
+         *     is the person's own act. The answer is `Cache-Control: no-store`.
+         */
+        get: operations["lookupRecords"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9560,6 +9610,68 @@ export interface components {
              */
             queues: components["schemas"]["QueueSummaryEntry"][];
         };
+        /**
+         * @description The kinds of record a lookup can return, **in the order an answer lists them**: a closed list. A value is never renamed or reused, and a
+         *     kind built later is added here, in the feature and in the registry together.
+         * @enum {string}
+         */
+        RecordLookupKind: "PICKUP_REQUEST" | "PICKUP_MANIFEST" | "VENDOR_ACCOUNT" | "RIDER" | "STAFF_IDENTITY";
+        /**
+         * @description A pointer to one record found and the facts that say where it stands, and nothing else: no route and no wording (the Ops Portal gives a
+         *     kind and an id its own page and writes its own line), no email, address or credential, and no number in clear.
+         */
+        RecordLookupResult: {
+            kind: components["schemas"]["RecordLookupKind"];
+            /**
+             * Format: uuid
+             * @description The record's id, which its own read addresses. For a vendor it is the account's.
+             */
+            id: string;
+            /**
+             * @description The operational code of a pickup request or a pickup run, or a vendor account's identifier. **Absent for a rider and a staff member**, who
+             *     have none.
+             */
+            code?: string;
+            /** @description What the record is called, a code or a name. */
+            title: string;
+            /**
+             * @description The record's own state **as the value of its own enumeration, unchanged and not reworded**: the `state` of a pickup request
+             *     (`PickupRequest`) or of a pickup run (`PickupManifest`), the `status` of a vendor account (`VendorAccountSummary`), of a rider
+             *     (`RiderSummary`) or of a staff profile (`StaffIdentity`). Which enumeration a value belongs to follows `kind`. A client words it
+             *     itself, and a value it has no words for is shown as it is. Absent only for a kind that has none (every kind built so far has one).
+             */
+            state?: string;
+            /**
+             * @description The hub the record belongs to, by id and display name, as `authorized_hubs` of the session names a hub: the responsible hub of a
+             *     pickup request, a pickup run and a vendor account, the primary hub of a rider and a staff profile. **Absent for a staff profile
+             *     with no primary hub.** A label for the interface; it grants nothing.
+             */
+            hub?: {
+                /** Format: uuid */
+                id: string;
+                display_name: string;
+            };
+            /**
+             * Format: date
+             * @description The day a pickup request was promised (`scheduled_service_date`) or a pickup run is to be worked (`service_date`). **Absent for
+             *     every other kind.**
+             */
+            service_date?: string;
+            /**
+             * @description The phone number the person searched by, masked as the platform masks a destination it shows (`destination_hint`:
+             *     `+233******567`, the country part and the last three digits). **Present only on a record that the number found**, never any other
+             *     number and never in clear.
+             */
+            phone_hint?: string;
+        };
+        /** @description The answer of `lookupRecords`. */
+        RecordLookupPage: {
+            /**
+             * @description At most 8 for each kind and 20 in all, in the order of `RecordLookupKind`. **Empty when nothing matched or the session may search none
+             *     of the kinds**; it does not say which.
+             */
+            items: components["schemas"]["RecordLookupResult"][];
+        };
         SessionRevoke: {
             /**
              * @description A code of the reason catalogue (`ReasonDefinition`), validated against the catalogue's
@@ -15667,6 +15779,35 @@ export interface operations {
                     "application/json": components["schemas"]["QueueSummary"];
                 };
             };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    lookupRecords: {
+        parameters: {
+            query: {
+                /**
+                 * @description What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
+                 *     of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
+                 */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordLookupPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };

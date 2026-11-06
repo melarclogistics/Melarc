@@ -44,6 +44,11 @@ export interface PickupRequestRow {
   readonly onePackageExceptionId?: string;
   /** The request this one replaces (its chain), which must exist. */
   readonly replacesRequestId?: string;
+  /** Facts a search is arranged by (the global lookup); left out, 'Fixture Sender', +233200000001, no second phone, and the moment of the insert. */
+  readonly senderName?: string;
+  readonly primaryPhone?: string;
+  readonly secondaryPhone?: string;
+  readonly createdAt?: Date;
 }
 
 /** The actor of arranged rows: nobody a test signs in as. */
@@ -80,9 +85,10 @@ export async function insertPickupRequest(
     `insert into pickup_request (id, code, vendor_organization_id, ad_hoc_sender_id, sender_name, responsible_hub_id, pickup_intent, state,
                                  declared_package_count, resolved_pickup_location, primary_phone, scheduled_service_date,
                                  default_payer_intent, created_by, confirmed_at, confirmed_by, cancelled_at, cancelled_by,
-                                 cutoff_exception_state, attempt_number, one_package_exception_id, replaces_request_id, escalated_at)
-     values ($1, $2, $3, $4, 'Fixture Sender', $5, $6, $7, $8, '{"address":"Fixture shop"}'::jsonb, '+233200000001', $9, 'RECIPIENT_PAYS', $10,
-             $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+                                 cutoff_exception_state, attempt_number, one_package_exception_id, replaces_request_id, escalated_at,
+                                 secondary_phone, created_at)
+     values ($1, $2, $3, $4, $20, $5, $6, $7, $8, '{"address":"Fixture shop"}'::jsonb, $21, $9, 'RECIPIENT_PAYS', $10,
+             $11, $12, $13, $14, $15, $16, $17, $18, $19, $22, coalesce($23::timestamptz, now()))`,
     [
       row.id,
       row.code,
@@ -103,6 +109,10 @@ export async function insertPickupRequest(
       row.onePackageExceptionId ?? null,
       row.replacesRequestId ?? null,
       row.escalatedAt ?? null,
+      row.senderName ?? 'Fixture Sender',
+      row.primaryPhone ?? '+233200000001',
+      row.secondaryPhone ?? null,
+      row.createdAt ?? null,
     ],
   );
   if (row.attemptExtensionId !== undefined) {

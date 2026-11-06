@@ -1,0 +1,244 @@
+# Global record lookup
+
+> **Status:** ACTIVE SPECIFICATION — implementation status is stated in section 16
+> **Owns:** finding a record from anywhere in the Ops Portal by its code, a name or a phone number typed in full
+> **Slice:** none: a contract task of the Ops Portal redesign (task C2, Product Owner, 5 November 2026), delivered between `SLICE-001` and the shell step R4
+
+## 1. Purpose and scope
+
+The top bar's search and the Ctrl/Cmd K palette of the Ops Portal ([the Ops surface, section 4](../../surfaces/ops-portal.md#4-navigation-model)) open any record the person may open, by **its code, a name, or a phone number typed in full**. This feature owns the one read that serves them, `lookupRecords`, and the client hook that asks it. It is a way to **find** a record: opening it is the record's own read, with its own key and scope.
+
+**In scope:** the five kinds of record that have a built page in the Ops Portal: pickup requests, pickup runs (manifests), vendor accounts, riders and staff profiles; the three ways of asking; the scope of what is returned; the shape and the masking of the answer; the hook `useRecordLookup`.
+
+**Out of scope:** the palette and the top bar (step R4); a kind with no built page (orders, intakes, deliveries, payments); a search by email, by address or by what a record says; matching that forgives a typing error; a page after the first (a lookup returns at most 20 results and says no more); a search that writes anything.
+
+## 2. Governing requirements
+
+- [Master specification](../../PROJECT_MASTER_SPECIFICATION.md) section 17.4: **search never leaks another vendor's or an unauthorised hub's data**, because search crosses record boundaries by design.
+- [The Ops surface](../../surfaces/ops-portal.md), section 4 (the top bar and the palette) and section 10; [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md), task C2.
+- [permissions.md](../../contracts/permissions.md): no key is added; a kind is searched under the key of that kind's own read.
+- [data-scope-registry.md](../../contracts/data-scope-registry.md) section 7.3: the read is scoped by the rows of the registry and by nothing else.
+- [audit.md](../../contracts/audit.md) section 5.4: a staff read of a record outside the actor's own hub writes `auth.hub_boundary.crossed`.
+
+## 3. Actors and surfaces
+
+Any signed-in **Ops Portal staff session** (Ops Staff, Senior Ops, Platform Admin, Finance and any other staff bundle). A Vendor or a Rider session is refused by the surface gate, as it is for every Ops operation. The only surface is the Ops Portal.
+
+## 4. Preconditions
+
+A staff session. The kinds searched are those whose read key the session's bundle holds; a session that holds none of the four keys gets an empty list.
+
+## 5. Behavior
+
+**The query** is one string of **2 to 64 characters as sent**: the contract refuses anything else before the server reads it. The server then trims it and makes each run of white space one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character (which no name holds, and the database refuses). Each refusal is `VALIDATION_FAILED` naming the parameter `q`. The Ops Portal sends the text already trimmed and folded. The server decides what the query is, in this order, and **asks only the question that kind of query means**:
+
+1. **A code.** Text of the shape of an operational code (`HUB-TT-XXXXXX`: three letters, two letters, six letters or digits; case does not matter) returns **at most the record that carries that code**: a pickup request (`PR`) or a pickup run (`MF`). No other question is asked of any kind. A code that matches no record, or none the session may open, is an empty answer: never `403` or `404`, which would tell a person that a code exists.
+2. **A phone number typed in full.** Text that is a whole phone number, normalised exactly as `findAdHocSender` normalises one (`+233241234567`, `0241234567`, `233241234567` and `024 123 4567` are one number), returns the **pickup requests whose own contact phone (primary or secondary) is that number** and the **riders whose phone is that number**. A partial or invalid number matches no phone and is read as a name. The phone of an ad-hoc sender is never searched: an ad-hoc sender is global to staff, and a number resolved through it would tell a person which hub a sender is booked in.
+3. **A name.** Anything else is a **case-insensitive word-prefix** search: the text matches a name when the name, or any word of it (words are separated by spaces), begins with it. `%` and `_` are what they are in a name, not patterns. The names searched: a pickup request's sender name, a vendor's legal and trading names, a rider's name, a staff member's name.
+4. **A vendor's code** is its account identifier (eight characters, the sign-in identifier). When the text has its shape it is matched exactly **in addition to** the name, because an eight-letter name can have the same shape.
+
+**What is returned for a kind is what the person could open.** Each kind is searched **in the transaction and under the key of that kind's own read** (`pickup.read` for requests and runs, `vendor.read`, `dispatch.read`, `staff.read`), so the scope is the scope of that grant (the hubs of the grant, or every hub where the grant is of all) enforced by the same row-level security; a record of another hub, or of a hub the grant does not reach, is not returned. A kind whose key the session does not hold is **absent from the answer**, which tells nothing about whether such records exist.
+
+**The answer** is a list of at most **8 results per kind and 20 in all**. The kinds come in a fixed order (pickup requests, pickup runs, vendor accounts, riders, staff profiles); within a kind a pickup request comes newest first, the others by name, then id; the 20 are taken in that order, so a kind later in the order can be left out of a crowded answer, and an earlier kind is never. Each result has its **kind, id, code (when the record has one), title and the facts that say where the record stands: its own state, its hub (id and display name) and, for a pickup request and a pickup run, its service date**. The id of a vendor result is the account's, which is what its page is addressed by. **A result names no page and carries no wording** (the Product Owner's decision of 6 November 2026): the Ops Portal maps a kind and an id to its own route and writes its own line from the facts, so the words on the screen have one owner ([the Ops surface](../../surfaces/ops-portal.md#4-navigation-model)). **A phone number appears in a result only when the person searched by it, and then only masked** (`phone_hint`), as the platform masks a number it shows (`+233******567`: the country part and the last three digits). No clear phone, email, credential or address is ever in a result.
+
+**It is a read and only a read.** It writes nothing but the audit event of a hub crossing: **once for each hub other than the actor's own that the returned results represent** (the actor's own hub is its primary hub; a staff member with none, such as a Platform Admin without a hub, crosses every hub), as the lists write it; an answer with no result writes none. It is `qualifying` activity (a typed search is the person's own act), `Cache-Control: no-store`, and the same query asked twice reads twice.
+
+## 6. Entities
+
+[domain-model.md](../../contracts/domain-model.md): `PickupRequest` (section 6.2), `PickupManifest` (6.3), `VendorAccount` and `VendorOrganization` (6.8), `RiderIdentity`, `StaffIdentity`. Nothing is added.
+
+## 7. States
+
+None of its own. A result carries the state of its record as the **value of the record's own enumeration, unchanged and not reworded**: the `state` of a pickup request or a pickup run, the `status` of a vendor account, a rider or a staff profile ([state-machines.md](../../contracts/state-machines.md); the enumeration a value belongs to follows the result's kind). A cancelled or declined request is found like any other.
+
+## 8. Permissions and scope
+
+No permission admits the call: it is a `self` operation, and **each kind is admitted by the key of its own read**. [permissions.md](../../contracts/permissions.md) section 7; [data-scope-registry.md](../../contracts/data-scope-registry.md) section 7.3.
+
+| Kind | Key | Scope (the grant of that key) | Searched by |
+|---|---|---|---|
+| `PICKUP_REQUEST` | `pickup.read` | the hubs of the grant | code, contact phone in full, sender name |
+| `PICKUP_MANIFEST` | `pickup.read` | the hubs of the grant | code |
+| `VENDOR_ACCOUNT` | `vendor.read` | the hubs of the grant (the organisation's responsible hub) | account identifier, legal or trading name |
+| `RIDER` | `dispatch.read` | the hubs of the grant (the rider's primary hub) | phone in full, name |
+| `STAFF_IDENTITY` | `staff.read` | the hubs of the grant (the member's primary hub) | name |
+
+**Negative access:** a Vendor or a Rider session is `PERMISSION_DENIED` (surface gate); no session is `SESSION_INVALID`; a record outside the hubs of the grant, a vendor's record the session's key does not reach, and a kind the bundle holds no key for are **never returned**, and nothing in the answer says they exist.
+
+## 9. Settings
+
+None.
+
+## 10. Errors
+
+[errors-and-enums.md](../../contracts/errors-and-enums.md): `VALIDATION_FAILED` (naming the parameter `q`: missing, fewer than 2 or more than 64 characters as sent, fewer than 2 once trimmed, or a NUL character), `PERMISSION_DENIED` (surface), `SESSION_INVALID`.
+
+## 11. Audit and side effects
+
+`auth.hub_boundary.crossed` ([audit.md](../../contracts/audit.md) section 5.4), enhanced, once for each foreign hub the returned results represent, naming the hub and the operation. No notification, file or asynchronous effect.
+
+## 12. API operations
+
+`lookupRecords` (`GET /ops/lookup?q=`) in [openapi.yaml](../../contracts/openapi.yaml). Every identifier it returns is addressed by that record's own read (`getPickupRequest`, `getPickupManifest`, `getVendorAccount`, `getRider`, `getStaffIdentity`), which holds the authorized path to it.
+
+## 13. Acceptance criteria
+
+### `AC-LOOKUP-01` — The query is two to sixty-four characters as sent, and two once trimmed
+
+```text
+Given a staff session,
+When it asks lookupRecords with q missing, empty, one character, spaces around one character, more than 64 characters as sent (spaces included), or a NUL character in it,
+Then the answer is VALIDATION_FAILED naming the parameter q and nothing is read,
+And a query of 2 to 64 characters as sent whose trimmed text has 2 or more characters is searched on that trimmed text, a run of spaces inside it being one space.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`
+
+### `AC-LOOKUP-02` — A code finds at most the record that carries it
+
+```text
+Given a pickup request, a pickup run and a vendor account in the hubs of the session's grants,
+When the session asks for the request's code, the run's code, either in lower case or with spaces around it,
+Then the answer holds that record alone, whatever else in the data begins with or contains the text,
+And a code that names no record, a record of another hub, and a code of a record type that has no page here are an empty answer with status 200,
+And a session without pickup.read asking for a request's code gets an empty answer.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-03` — A phone number counts only when typed in full
+
+```text
+Given a pickup request whose contact phone is +233241112222 and a rider whose phone is +233241112222,
+When the session asks for 024 111 2222, 0241112222, 233241112222 and +233 24 111 2222,
+Then each finds the request and the rider (the kinds it may search) and nothing else,
+And 024 111, 0241112 and a number with a letter in it find nothing by phone and are read as names,
+And an ad-hoc sender's own phone is never matched, so that a number that is a sender's phone and no request's contact phone finds nothing.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-04` — A name matches at the start of any word, without regard to case
+
+```text
+Given a request whose sender is "Kofi Mensah-Demo", a vendor "Asante Fabrics Ltd" and a rider "Ama Boateng",
+When the session asks for kofi, MENS, "kofi men", fabrics, "ama b" and "fab",
+Then the request, the vendor, the rider are found by exactly the words that begin a word of their names ("kofi", "MENS" (the second word of "Kofi Mensah-Demo"), "kofi men", "fabrics", "ama b", "fab"),
+And "ofi", "ensah" and "abrics" (the inside of a word) find nothing,
+And a "%" or "_" in the query is a character of a name and matches no other.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-05` — A kind is searched only if the session holds its key
+
+```text
+Given a bundle that holds pickup.read and staff.read and not vendor.read or dispatch.read, with a request, a vendor, a rider and a staff member named alike,
+When the session asks for the name,
+Then the answer holds the request and the staff member and neither the vendor nor the rider,
+And a session that holds none of the four keys gets 200 with an empty list.
+```
+
+**Governs:** this feature, section 5; [permissions.md](../../contracts/permissions.md) · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-06` — A result is one the session could open
+
+```text
+Given records of a first hub and of a second hub of every kind, a vendor of each hub, and sessions of an Ops Staff officer and a Senior Ops user of the first hub and of a Platform Admin with no primary hub,
+When each asks for a name, a code and a phone that match records of both hubs,
+Then the officer and the Senior Ops user are given the records of the first hub alone and the Platform Admin those of both,
+And every id returned opens, through its record's own read, for the session that was given it,
+And no record the session's grant of that kind's key does not reach is returned, whatever the other grants of the bundle reach (a bundle of pickup.read at its hub and staff.read at all hubs gives the requests of its hub and the staff of every hub).
+```
+
+**Governs:** this feature, sections 5 and 8; [data-scope-registry.md](../../contracts/data-scope-registry.md) section 7.3 · **Surface:** Melarc Ops · **Test level:** API and integration · **Code:** none
+
+### `AC-LOOKUP-07` — Only an Ops staff session may ask
+
+```text
+Given a Vendor session, a Rider session and a request with no session,
+When each asks lookupRecords,
+Then the Vendor and the Rider are PERMISSION_DENIED and the request is SESSION_INVALID.
+```
+
+**Governs:** this feature, section 3 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `PERMISSION_DENIED`, `SESSION_INVALID`
+
+### `AC-LOOKUP-08` — At most eight a kind, twenty in all, in a fixed order
+
+```text
+Given twelve requests, twelve vendors and twelve riders that a name matches,
+When the session asks for the name,
+Then the answer holds eight requests, eight vendors and four riders, in the order pickup requests, vendor accounts, riders,
+And the requests are newest first and the others by name then id, and asking again gives the same answer in the same order,
+And no staff member is returned when the twenty are taken, and none is read for.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-09` — A phone is shown only when searched by, and only masked
+
+```text
+Given a request and a rider with a phone,
+When the session searches by a name, by the code, and by the phone,
+Then no result of the first two carries a phone, a result of the third carries the number masked as its phone_hint, +233******567, and never in clear,
+And no result of any search carries an email, a credential, an address or an unmasked number anywhere.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-10` — A result carries the record's facts, not a route and not wording
+
+```text
+Given a result of each kind,
+When the session reads it,
+Then it carries its kind, the id of the record (the account's for a vendor), the code where the record has one (a request's or a run's operational code, a vendor's account identifier) and a title,
+And the record's own state as the value of its own enumeration, unchanged (the state of a request or a run, the status of a vendor account, a rider or a staff profile),
+And the record's hub as its id and display name (the responsible hub of a request, a run and a vendor, the primary hub of a rider and a staff profile; none for a staff profile with no primary hub),
+And, for a pickup request and a pickup run, the service date as a date (the request's scheduled service date, the run's service date), and for no other kind,
+And the answer carries no route, no subtitle, no sentence and no other field.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-11` — A lookup is the person's act, written down when it crosses a hub, and never cached
+
+```text
+Given a staff member whose primary hub is the first hub, and records of the first and second hubs,
+When they ask for a name that matches records of both,
+Then one auth.hub_boundary.crossed is written for the second hub and none for the first, naming the operation lookupRecords,
+And a staff member with no primary hub is written one for each hub the results represent,
+And an answer with no result writes no event, an event is written for no hub of a result that was cut from the twenty,
+And the answer is Cache-Control: no-store and the call extends the idle lifetime of the session.
+```
+
+**Governs:** this feature, sections 5 and 11; [audit.md](../../contracts/audit.md) section 5.4 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-LOOKUP-12` — The client asks late, asks little, and never shows an earlier query's answer
+
+```text
+Given the hook useRecordLookup in a signed-in Ops Portal,
+When the text changes faster than 200 ms, has fewer than two characters once trimmed, or the session has ended,
+Then no request is sent for it, and one request is sent for the text that stays still for 200 ms,
+And while a later text waits or is being answered the earlier text's results are not offered as its own,
+And a failed read is an error state with a way to try again, and an answer with no results is an empty state, never an error,
+And the page that opens a result is the one the Ops Portal gives its kind and id (recordRoute), never anything the answer says, and an id that is not an identifier opens nothing.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** Portal component tests · **Code:** none
+
+## 14. Unresolved requirements
+
+- **The words of a result line and the page a result opens are the Ops Portal's, not the API's** (the Product Owner's decision D1, 6 November 2026): the answer carries facts (the state as the record's own value, the hub, the service date, a masked phone) and the palette of step R4 writes the line in the Portal's presentation words and maps a kind and an id to its own route.
+- **A pickup request found by its sender's name carries its code as the title and no sender name**: the facts D1 names do not include one. Whether such a result should name the sender is the Product Owner's to say.
+- **The name search is slow at scale, and the remedy the Product Owner approved cannot take effect** (decision D3, 6 November 2026). Measured on a disposable database of 400,030 pickup requests in two hubs: the whole read through HTTP, 20 runs for each text after a warm-up, on a shared workstation (the run-to-run noise is visible: the first texts of the officer ran slower than the same scope for Senior Ops). **A name search takes, p90, 1.4 to 3.3 s for a session of one hub (Ops Staff, Senior Ops; median 1.3 to 2.3 s) and 0.7 to 1.2 s for a Platform Admin of every hub (median 0.6 to 0.7 s)**, against the 150 ms of D3, whatever the name (a common first name, a rare surname, a text that matches nothing). **The cause is the row-level security policy running first, not the missing index**: `ILIKE` is not leakproof, so the planner may neither run it before the policy nor use an index on it below the policy, and the plan is a sequential scan that evaluates the policy for each of the 400,000 rows (about 3 microseconds a row, 1.3 to 1.5 s); the same table and policy cost 0.1 s when the condition is leakproof and runs first (a phone number, next bullet). A `pg_trgm` GIN index on `pickup_request.sender_name` (8.5 MB) was built and tried: **the planner does not use it under the policy** (the same plan and time), while without the policy it answers in 34 ms. So the extension and the index were **not added**: they would change nothing a user sees and would cost every write. Caching the policy's settings and its hub set inside the policy expression did not reduce the time (where in the policy the cost lies is not identified), and a leakproof function cannot be created by a migration (no application login is a superuser). **What is leakproof, and so can run before the policy:** equality and the range comparisons of text, and `starts_with`; **not** `LIKE`, `ILIKE`, `lower`, `strpos` or a regular expression. An index serving an equality (the phone search, next bullet) and a btree range condition on `sender_name` (answered in 0.2 ms) were both used under the policy; no plan was taken of `starts_with`. Options, for the Product Owner: (a) **leave it until the volume needs it**: the cost is linear in the rows, so (extrapolated, not measured) a median of roughly 130 to 230 ms and a p90 of 140 to 330 ms at 40,000 requests, and a tenth of that at 4,000; production holds one hub; (b) **a derived table of the lower-cased words of a name with an ordinary btree index**, searched by range conditions, which are leakproof (the measurement above shows an index used under the policy for one), a new structure kept by triggers; (c) **bound the search to recent requests**, which is a product rule; (d) **find out why the policy costs 3 microseconds a row** and fix it in the policy of every table, which would speed every read that cannot use an index, the pool count of task C1 among them.
+- **The search by phone number is an equality on the request's two contact phones, which is leakproof and runs before the policy**: at 400,030 requests, with no index, the scan takes 0.1 s in the plan and the whole read a median of 85 to 150 ms (p90 up to 175 ms). A btree index on each of the two columns (migration `0076`; the second is partial, on the requests that have one) brings the plan to 0.2 ms and the whole read to a median of about 20 ms for a session of one hub, and about 40 ms for a Platform Admin, whose read also writes the hub-crossing events. The rider's phone, the codes and the vendor identifier are unique columns and are index probes.
+- **Typing-error tolerance, searching by email or address, and fuzzy matching** are not specified and not built.
+- **Masking** is the platform's existing rule for a number shown in a log or a hint ([OQ-049](../reporting/daily-operations-and-cash-report.md): the detailed masking design is still open); the lookup uses it unchanged.
+
+## 15. Related documents
+
+[The Ops surface](../../surfaces/ops-portal.md), [permissions.md](../../contracts/permissions.md), [data-scope-registry.md](../../contracts/data-scope-registry.md), [audit.md](../../contracts/audit.md), [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md).
+
+## 16. Implementation status
+
+Task C2 (6 November 2026): specified here; contracted as `lookupRecords`; built in the API and as the hook `useRecordLookup`. The palette and the top bar are step R4's and are not built by this task.

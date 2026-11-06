@@ -53,8 +53,8 @@ export function grantOfSession(
  * the key, which is the answer "this session may not do that".
  *
  * It exists for an operation that answers about **several** keys at once (`getQueueSummary` counts what a queue's own list would return,
- * and a list is read under the context of its own key): each key's work is then run in the context of that key's grant, and **never in a
- * wider one**. A grant of all hubs that the session holds for another key does not widen this one (`GBT-GS1`), because the scope is read
+ * and `lookupRecords` finds what each kind's own read would show; a list or a read is under the context of its own key): each key's work
+ * is then run in the context of that key's grant, and **never in a wider one**. A grant of all hubs that the session holds for another key does not widen this one (`GBT-GS1`), because the scope is read
  * from the grant of the key asked for and from nothing else. Nothing is taken from the request; the activity policy stays the route's.
  */
 export function authorizationForKey(

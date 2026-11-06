@@ -99,6 +99,8 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   revokeTrustedBrowser: ['STAFF'],
   // Task C1: the count of the work waiting in each queue the session may read; a session of the Ops Portal and no other.
   getQueueSummary: ['STAFF'],
+  // Task C2: the lookup of a record by its code, a name or a phone number typed in full; a session of the Ops Portal and no other.
+  lookupRecords: ['STAFF'],
   requestAdditionalDeviceGrant: ['VENDOR'],
   listVendorDevices: ['VENDOR'],
   revokeVendorDevice: ['VENDOR'],

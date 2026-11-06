@@ -65,6 +65,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'listVendorAccounts',
   'listVendorPickupLocations',
   'listVendorDevices',
+  'lookupRecords',
   'recoverStaffCredential',
   'recoverVendorCredential',
   'registerRiderDevice',
