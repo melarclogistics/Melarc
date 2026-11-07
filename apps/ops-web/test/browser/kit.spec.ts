@@ -78,6 +78,22 @@ const focusIn = (page: Page, selector: string): Promise<boolean> =>
 const overflow = (page: Page): Promise<number> =>
   page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
+/** The shadow a design token resolves to in this page, as the browser writes it. */
+function resolvedShadow(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement('span');
+    probe.style.boxShadow = `var(${name})`;
+    document.body.append(probe);
+    const shadow = getComputedStyle(probe).boxShadow;
+    probe.remove();
+    return shadow;
+  }, token);
+}
+
+/** The computed colour of an element: its text (`color`) or its fill (`backgroundColor`). */
+const colourOf = (locator: Locator, property: 'color' | 'backgroundColor'): Promise<string> =>
+  locator.evaluate((element, name) => getComputedStyle(element)[name], property);
+
 const GROUPS = [
   'header',
   'data',
@@ -85,6 +101,9 @@ const GROUPS = [
   'menus',
   'forms',
   'lists',
+  'badges',
+  'states',
+  'overlays',
   'example-queue',
   'example-record',
   'example-count',
@@ -1018,6 +1037,276 @@ test.describe('ReorderList in a browser', () => {
       'ACC-PR-9WXH4T',
     ]);
   });
+});
+
+test.describe('StatusBadge, CountBadge and Avatar in a browser', () => {
+  // Break caught: a badge without its dot, a dot that is not a 6px circle in the colour of its words, or a pair drawn in colours other than its tokens (a hand-picked colour).
+  test('draws each of the five pairs in the colours of its tokens, with a 6px round dot', async ({
+    page,
+  }) => {
+    await openKit(page, 'badges');
+    const pairs = specimen(page, 'The five pairs');
+
+    for (const [pair, token] of [
+      ['waiting', 'warning'],
+      ['success', 'success'],
+      ['info', 'info'],
+      ['neutral', 'neutral'],
+      ['danger', 'danger'],
+    ] as const) {
+      const badge = pairs.locator(`.ui-status-badge--${pair}`);
+      await expect(badge, pair).toHaveCount(1);
+      const foreground = await resolvedColour(page, `--color-status-${token}-foreground`, 'color');
+      expect(await colourOf(badge, 'color'), pair).toBe(foreground);
+      expect(await colourOf(badge, 'backgroundColor'), pair).toBe(
+        await resolvedColour(page, `--color-status-${token}-background`, 'backgroundColor'),
+      );
+      const dot = badge.locator('.ui-status-badge__dot');
+      const found = await box(dot);
+      expect([Math.round(found.width), Math.round(found.height)], pair).toEqual([6, 6]);
+      expect(await colourOf(dot, 'backgroundColor'), pair).toBe(foreground);
+      expect(await px(dot, 'border-top-left-radius'), pair).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  // Break caught: a variant of the count drawn in other colours than the ones named for it: strong is the primary action's pair, on-crimson is white at 18% on the crimson, and a 0 that was
+  // read has no fill in either.
+  test('draws strong as Ink with a white figure and on-crimson as white at 18%, and a 0 without a fill', async ({
+    page,
+  }) => {
+    await openKit(page, 'badges');
+    const strong = specimen(page, 'Strong, for the current view').locator('.ui-count-badge');
+    expect(await colourOf(strong.nth(1), 'backgroundColor')).toBe(
+      await resolvedColour(page, '--color-action-primary', 'backgroundColor'),
+    );
+    expect(await colourOf(strong.nth(1), 'color')).toBe(
+      await resolvedColour(page, '--color-action-primary-text', 'color'),
+    );
+    expect(await colourOf(strong.nth(0), 'backgroundColor')).toBe('rgba(0, 0, 0, 0)');
+
+    const onCrimson = specimen(page, 'On crimson').locator('.ui-count-badge');
+    expect(await colourOf(onCrimson.first(), 'backgroundColor')).toBe(
+      await resolvedColour(page, '--shell-active-badge', 'backgroundColor'),
+    );
+    expect(await colourOf(onCrimson.first(), 'color')).toBe(
+      await resolvedColour(page, '--shell-active-text', 'color'),
+    );
+    expect(await colourOf(onCrimson.nth(1), 'backgroundColor')).toBe('rgba(0, 0, 0, 0)');
+  });
+
+  // Break caught: an avatar that is a circle, in the muted text colour that does not read on its ground (4.22:1), or of a size other than 24, 32 and 40px; and a picture that
+  // never replaces the initials once it has loaded.
+  test('draws the initials in text.secondary on surface.selected, in an 8px tile of 24, 32 and 40px', async ({
+    page,
+  }) => {
+    await openKit(page, 'badges');
+    const sizes = specimen(page, 'Sizes: 24, 32 and 40px').locator('.ui-avatar');
+    const found: number[][] = [];
+    for (const avatar of await sizes.all()) {
+      const at = await box(avatar);
+      found.push([Math.round(at.width), Math.round(at.height)]);
+    }
+    expect(found).toEqual([
+      [24, 24],
+      [32, 32],
+      [40, 40],
+    ]);
+
+    expect(await px(sizes.nth(1), 'border-top-left-radius')).toBe(8);
+    const fallback = sizes.nth(1).locator('.ui-avatar__fallback');
+    expect(await colourOf(fallback, 'backgroundColor')).toBe(
+      await resolvedColour(page, '--color-surface-selected', 'backgroundColor'),
+    );
+    expect(await colourOf(fallback, 'color')).toBe(
+      await resolvedColour(page, '--color-text-secondary', 'color'),
+    );
+
+    await expect(specimen(page, 'A picture, once it has loaded').locator('img')).toHaveCount(2);
+  });
+});
+
+test.describe('EmptyState v2, Skeleton v2 and LoadingRow in a browser', () => {
+  // Break caught: a motif that is not a 10px square of the brand crimson, an all-clear that does not read as good news, or an empty state drawn in a frame of its own.
+  test('draws a 10px crimson square, and the all-clear title in the success colour, with no frame', async ({
+    page,
+  }) => {
+    await openKit(page, 'states');
+    const empty = specimen(page, 'Empty: nothing yet, with the next step').locator('.ui-empty-v2');
+    const motif = empty.locator('.ui-empty-v2__motif');
+    const at = await box(motif);
+    expect([Math.round(at.width), Math.round(at.height)]).toEqual([10, 10]);
+    expect(await colourOf(motif, 'backgroundColor')).toBe(
+      await resolvedColour(page, '--color-brand-default', 'backgroundColor'),
+    );
+    expect(await px(empty, 'border-top-width')).toBe(0);
+
+    const clear = specimen(page, 'All-clear: worked to nothing').locator('.ui-empty-v2__title');
+    expect(await colourOf(clear, 'color')).toBe(
+      await resolvedColour(page, '--color-status-success-foreground', 'color'),
+    );
+  });
+
+  // Break caught: a placeholder that pulses for someone who asked for no motion, or one that does not pulse for someone who did not.
+  for (const reduced of [false, true]) {
+    test(`pulses the bars of a loading card only where motion is welcome${reduced ? ' (it does not under reduced motion)' : ''}`, async ({
+      page,
+    }) => {
+      await openKit(page, 'states', { reducedMotion: reduced });
+      const bar = specimen(page, 'A card with a title and three lines')
+        .locator('.ui-skeleton-bar')
+        .first();
+
+      const running = await bar.evaluate((element) => element.getAnimations().length);
+
+      if (reduced) expect(running).toBe(0);
+      else expect(running).toBeGreaterThan(0);
+    });
+  }
+
+  // Break caught: loading rows of a height of their own, so that the table jumps when its rows arrive.
+  test('keeps the height of a row while the rows load', async ({ page }) => {
+    await openKit(page, 'states');
+    const queue = specimen(page, "The queue's table while it loads");
+    const loading = queue.getByRole('table', { name: 'Pickup requests, loading' });
+    const loaded = queue.getByRole('table', { name: 'Pickup requests, loaded' });
+
+    const loadingRow = await box(loading.locator('tbody tr').first());
+    const loadedRow = await box(loaded.locator('tbody tr').first());
+
+    expect(Math.round(loadingRow.height)).toBe(Math.round(loadedRow.height));
+  });
+});
+
+test.describe('Tooltip, Popover and Dialog in a browser', () => {
+  const tooltip = (page: Page) => page.locator('[data-slot="tooltip-content"]');
+  const confirm = (page: Page) =>
+    specimen(page, 'A hint on a button').getByRole('button', { name: 'Confirm the request' });
+
+  // Break caught: a tooltip that is there at once under the pointer (it flickers over what the pointer crosses), that never comes by keyboard focus, or that stays after Escape. The wait
+  // is measured inside the page, from the pointer event to the tooltip's being drawn, so that the time the test takes to ask does not count.
+  test('appears after 300ms under the pointer, at once on keyboard focus, and goes with Escape', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays');
+    const words = 'Tells the vendor that the hub has confirmed this pickup.';
+
+    const waited = await confirm(page).evaluate(async (element) => {
+      const start = performance.now();
+      element.dispatchEvent(
+        new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }),
+      );
+      while (document.querySelector('[data-slot="tooltip-content"]') === null) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      return performance.now() - start;
+    });
+    expect(waited).toBeGreaterThanOrEqual(290);
+    await page.keyboard.press('Escape');
+    await expect(tooltip(page)).toHaveCount(0);
+
+    await confirm(page).focus();
+    await expect(tooltip(page)).toContainText(words);
+    await page.keyboard.press('Escape');
+    await expect(tooltip(page)).toHaveCount(0);
+    await expect(confirm(page)).toBeFocused();
+  });
+
+  // Break caught: a tooltip that stands other than 8px from what it names, or without the one floating shadow.
+  test('stands 8px above its button on the floating shadow', async ({ page }) => {
+    await openKit(page, 'overlays');
+
+    await confirm(page).focus();
+    await expect(tooltip(page)).toBeVisible();
+
+    // Measured once the tooltip has finished coming in (it slides and grows into place).
+    await expect
+      .poll(async () => {
+        const button = await box(confirm(page));
+        const hint = await box(tooltip(page));
+        return Math.round(button.y - (hint.y + hint.height));
+      })
+      .toBe(8);
+    expect(await tooltip(page).evaluate((element) => getComputedStyle(element).boxShadow)).toBe(
+      await resolvedShadow(page, '--shadow-floating'),
+    );
+  });
+
+  const service = (page: Page) =>
+    specimen(page, 'Opened from a button').getByRole('button', { name: 'Service date' });
+
+  // Break caught: a popover that a keyboard cannot open, that does not take focus in, that stands other than 8px below its button or without the floating shadow, or that does not give
+  // focus back on Escape.
+  test('opens from the keyboard, stands 8px below its button, and Escape gives focus back', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays');
+    await service(page).focus();
+
+    await page.keyboard.press('Enter');
+    const popover = page.getByRole('dialog', { name: 'Choose a service date' });
+    await expect(popover).toBeVisible();
+
+    expect(await focusIn(page, '[data-slot="popover-content"]')).toBe(true);
+    await expect
+      .poll(async () => {
+        const button = await box(service(page));
+        const panel = await box(popover);
+        return Math.round(panel.y - (button.y + button.height));
+      })
+      .toBe(8);
+    expect(await popover.evaluate((element) => getComputedStyle(element).boxShadow)).toBe(
+      await resolvedShadow(page, '--shadow-floating'),
+    );
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    await expect(service(page)).toBeFocused();
+  });
+
+  // Break caught: a popover opened inside a dialog that is drawn under it (the page behind a modal dialog cannot be reached), or whose Escape closes the dialog with it.
+  test('opens inside a dialog, drawn into it, and Escape closes only the popover', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays');
+    await specimen(page, 'A dialog with a form')
+      .getByRole('button', { name: 'Add a note' })
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Add a note' });
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Choose a hub' }).click();
+    const popover = page.getByRole('dialog', { name: 'Choose a hub for the note' });
+    await expect(popover).toBeVisible();
+    await expect(page.locator('dialog [data-slot="popover-content"]')).toHaveCount(1);
+    await expect(popover.getByText('Tema')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    await expect(dialog).toBeVisible();
+  });
+
+  // Break caught: an open tooltip, popover or dialog that fails a rule only when it is open, in either theme.
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`has no violation with a tooltip, a popover and a dialog open, in the ${scheme} theme`, async ({
+      page,
+    }) => {
+      await openKit(page, 'overlays', { scheme });
+
+      await confirm(page).focus();
+      await expect(tooltip(page)).toBeVisible();
+      expect(await wcagViolations(page)).toEqual([]);
+
+      await service(page).click();
+      await expect(page.getByRole('dialog', { name: 'Choose a service date' })).toBeVisible();
+      expect(await wcagViolations(page)).toEqual([]);
+      await page.keyboard.press('Escape');
+
+      await specimen(page, 'A dialog with a form')
+        .getByRole('button', { name: 'Add a note' })
+        .click();
+      await expect(page.getByRole('dialog', { name: 'Add a note' })).toBeVisible();
+      expect(await wcagViolations(page)).toEqual([]);
+    });
+  }
 });
 
 test.describe('the composed examples in a browser', () => {

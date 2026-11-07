@@ -241,13 +241,6 @@
   pointer-events: none;
 }
 
-.ui-data-table__skeleton {
-  display: block;
-  height: 0.875rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-border-default);
-}
-
 .ui-data-table__table tbody .ui-data-table__message-row td {
   height: auto;
   padding: 0;
@@ -332,18 +325,6 @@
   height: 1.5rem;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .ui-data-table__skeleton {
-    animation: ui-data-table-pulse 1.6s ease-in-out infinite;
-  }
-}
-
-@keyframes ui-data-table-pulse {
-  50% {
-    opacity: 0.5;
-  }
-}
-
 @media (forced-colors: active) {
   .ui-data-table__table thead th {
     border-bottom-color: CanvasText;
@@ -354,8 +335,7 @@
     outline-offset: -1px;
   }
 
-  .ui-data-table__bulk,
-  .ui-data-table__skeleton {
+  .ui-data-table__bulk {
     border: 1px solid CanvasText;
   }
 }

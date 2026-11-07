@@ -232,3 +232,66 @@
 .showcase-kit-card .ui-view-tabs__scroll {
   padding-inline: var(--space-4);
 }
+
+/* ---- The badges, states and overlays groups (the second half of redesign step R5) ---- */
+
+.showcase-kit-row--end {
+  justify-content: flex-end;
+}
+
+/* A state or a domain as the code names it. */
+.showcase-kit-token {
+  font-family: var(--font-family-mono);
+  font-size: var(--text-body-sm-size);
+}
+
+.showcase-kit-line {
+  margin: 0;
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The crimson of the sidebar's current entry, for the count that sits on it. */
+.showcase-kit-crimson {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--shell-active);
+  color: var(--shell-active-text);
+  font-weight: var(--text-heading-sm-weight);
+}
+
+.showcase-kit-people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.showcase-kit-people li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* A person's name with their avatar, in the value of a fact. */
+.showcase-kit-person {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.showcase-kit-people__role {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+}
+
+.showcase-kit-choices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

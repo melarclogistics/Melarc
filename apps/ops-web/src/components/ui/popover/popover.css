@@ -1,0 +1,12 @@
+/*
+ * Popover (design/COMPONENT_PATTERNS.md, Popover): the popover primitive on the portal's surface, with the one floating shadow and the radius of a panel that floats (DESIGN_SYSTEM
+ * section 8). It never grows past the screen at 320px or 200% text: it scrolls inside itself. The offset and the name are the component's.
+ */
+.ui-popover {
+  max-width: calc(100vw - 1.5rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  border-color: var(--color-border-subtle);
+  background: var(--color-surface-default);
+  box-shadow: var(--shadow-floating);
+}

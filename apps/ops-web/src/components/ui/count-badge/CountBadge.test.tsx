@@ -62,6 +62,57 @@ describe('CountBadge', () => {
     );
   });
 
+  // Break caught: a variant that is not on the badge (the stylesheet selects on it), or a default other than the subtle pair that every existing use has always had.
+  it('is subtle unless it is told otherwise, and carries the variant it was given', () => {
+    const subtle = render(<CountBadge count={2} meaning="waiting" />);
+    expect(subtle.container.querySelector('.ui-count-badge')).toHaveAttribute(
+      'data-variant',
+      'subtle',
+    );
+    subtle.unmount();
+
+    for (const variant of ['subtle', 'strong', 'on-crimson'] as const) {
+      const { container, unmount } = render(
+        <CountBadge count={2} meaning="waiting" variant={variant} />,
+      );
+      expect(container.querySelector('.ui-count-badge')).toHaveAttribute('data-variant', variant);
+      unmount();
+    }
+  });
+
+  // Break caught: a variant that changes what is said or drawn as the figure: all three read the same to a screen reader, show the same number and go quiet at zero.
+  it.each(['subtle', 'strong', 'on-crimson'] as const)(
+    'says the same, and goes quiet at zero, in the %s variant',
+    (variant) => {
+      const { container, unmount } = render(
+        <CountBadge count={12480} meaning="waiting" variant={variant} />,
+      );
+      expect(screen.getByText('12,480 waiting')).toBeInTheDocument();
+      expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe('12,480');
+      unmount();
+
+      const none = render(<CountBadge count={0} meaning="waiting" variant={variant} />);
+      expect(none.container.querySelector('.ui-count-badge')).toHaveAttribute('data-quiet', 'true');
+      expect(screen.getByText('0 waiting')).toBeInTheDocument();
+    },
+  );
+
+  // Break caught: the sidebar's badge (the shell surface, no variant) changed by the new variants: it is drawn as it was, and the variant is separate from the ground.
+  it('keeps the shell surface as it was, whatever the variant is', () => {
+    const shell = render(<CountBadge count={4} meaning="waiting" surface="shell" />);
+    const badge = shell.container.querySelector('.ui-count-badge');
+    expect(badge).toHaveAttribute('data-surface', 'shell');
+    expect(badge).toHaveAttribute('data-variant', 'subtle');
+    shell.unmount();
+
+    const crimson = render(
+      <CountBadge count={4} meaning="waiting" surface="shell" variant="on-crimson" />,
+    );
+    const onCrimson = crimson.container.querySelector('.ui-count-badge');
+    expect(onCrimson).toHaveAttribute('data-surface', 'shell');
+    expect(onCrimson).toHaveAttribute('data-variant', 'on-crimson');
+  });
+
   // Break caught: a badge made by the primitive but not through it: the design system's badge is the one a count is.
   it('is the badge primitive, restyled through the tokens', () => {
     const { container } = render(<CountBadge count={2} meaning="waiting" />);
@@ -76,6 +127,12 @@ describe('CountBadge', () => {
         </li>
         <li>
           Staff <CountBadge count={0} meaning="waiting for approval" surface="shell" />
+        </li>
+        <li>
+          Open <CountBadge count={9} meaning="open" variant="strong" />
+        </li>
+        <li>
+          Current <CountBadge count={3} meaning="current" variant="on-crimson" surface="shell" />
         </li>
       </ul>,
     );

@@ -30,6 +30,7 @@ import {
 import { OperationalCode } from '../code/OperationalCode';
 import { Icon } from '../icon/Icon';
 import { AnimatePresence, motion, useMotion } from '../motion/motion';
+import { LoadingRow } from '../skeleton/LoadingRow';
 import { VisuallyHidden } from '../visually-hidden/VisuallyHidden';
 import './data-table.css';
 
@@ -157,8 +158,6 @@ export function RowTitle({ code, name }: RowTitleProps) {
     </span>
   );
 }
-
-const SKELETON_WIDTHS = ['60%', '80%', '45%', '70%', '55%'] as const;
 
 /**
  * The queue's table (PRODUCT_DESIGN_DIRECTION section 6.1; COMPONENT_PATTERNS, *DataTable*): TanStack Table's model (columns, row model, selection) over the
@@ -436,18 +435,12 @@ export function DataTable<Item>({
           <TableBody onKeyDown={onKeyDown}>
             {status === 'loading' ? (
               Array.from({ length: loadingRows }, (_, index) => (
-                <TableRow key={index} className="ui-data-table__skeleton-row" aria-hidden="true">
-                  {Array.from({ length: columnCount }, (_cell, cellIndex) => (
-                    <TableCell key={cellIndex}>
-                      <span
-                        className="ui-data-table__skeleton"
-                        style={{
-                          width: SKELETON_WIDTHS[(index + cellIndex) % SKELETON_WIDTHS.length],
-                        }}
-                      />
-                    </TableCell>
-                  ))}
-                </TableRow>
+                <LoadingRow
+                  key={index}
+                  columns={columnCount}
+                  index={index}
+                  className="ui-data-table__skeleton-row"
+                />
               ))
             ) : status === 'error' ? (
               <TableRow className="ui-data-table__message-row">

@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 
 import { PICKUP_STATE_MAP, serviceDateText } from '../../app/pages/pickup/pickup-presentation';
 import { Button as TouchButton } from '../../components/primitives/button';
+import { Avatar } from '../../components/ui/avatar/Avatar';
 import { Button } from '../../components/ui/button/Button';
 import { DataTable, RowTitle, type DataColumn } from '../../components/ui/data-table/DataTable';
-import { EmptyState } from '../../components/ui/empty-state/EmptyState';
+import { EmptyStateV2 } from '../../components/ui/empty-state/EmptyStateV2';
 import { FilterBar, type FilterChip } from '../../components/ui/filter-bar/FilterBar';
 import { Panel } from '../../components/ui/panel/Panel';
 import { PageHeader } from '../../components/ui/page-header/PageHeader';
@@ -132,9 +133,24 @@ export function QueueWorkspaceExample() {
                     },
                   }}
                   emptyState={
-                    <EmptyState kind="none" heading="Nothing in this view">
+                    <EmptyStateV2
+                      variant="filtered-empty"
+                      title="Nothing in this view"
+                      headingLevel={3}
+                      action={
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => {
+                            setView('all');
+                          }}
+                        >
+                          Show every request
+                        </Button>
+                      }
+                    >
                       No sample request has this state.
-                    </EmptyState>
+                    </EmptyStateV2>
                   }
                   maxHeight="28rem"
                 />
@@ -232,7 +248,16 @@ export function RecordPageExample() {
           <Panel title="Sender" headingLevel={3}>
             <DescriptionList
               items={[
-                { label: 'Name', value: request.sender_name },
+                {
+                  label: 'Name',
+                  value:
+                    request.sender_name === undefined ? undefined : (
+                      <span className="showcase-kit-person">
+                        <Avatar name={request.sender_name} />
+                        {request.sender_name}
+                      </span>
+                    ),
+                },
                 { label: 'Phone', value: '+233******111' },
               ]}
             />

@@ -1,0 +1,18 @@
+/*
+ * Tooltip (design/COMPONENT_PATTERNS.md, Tooltip): the tooltip primitive's inverse ground (the foreground colour as its ground, so it reads on a light page and on a dark one) with the one
+ * floating shadow, which a thing that floats takes (DESIGN_SYSTEM section 8). The delay and the offset are the component's, not the stylesheet's.
+ *
+ * The primitive draws an arrow. Melarc's tooltip has none: a shadow does not follow an arrow, and the arrow's own height is added to the offset, so that the tooltip would stand
+ * 8px plus an arrow from what it names. Made no size here, the arrow measures nothing and draws nothing (the library sets its own `display: block` on it, which only a size can beat
+ * without `!important`), and the box stands exactly the offset away. (Only the picture goes: the words for assistive technology are a span of their own and stay.)
+ */
+.ui-tooltip {
+  max-width: min(20rem, calc(100vw - 2rem));
+  box-shadow: var(--shadow-floating);
+  font-family: var(--font-family-sans);
+}
+
+.ui-tooltip svg {
+  width: 0;
+  height: 0;
+}

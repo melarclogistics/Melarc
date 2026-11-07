@@ -1,0 +1,35 @@
+/*
+ * Avatar (design/COMPONENT_PATTERNS.md, Avatar): the avatar primitive in the portal's look. A tile with the radius of the controls (radius.md), not a circle; the fallback is
+ * text.secondary on surface.selected (6.38:1 in the light theme; the muted text is 4.22:1 there and does not read). The sizes are 24, 32 and 40px. The stylesheets of components/ui
+ * are in no layer and win over Tailwind's utilities, so the primitive's round shape and its muted fill need no `!important`.
+ */
+.ui-avatar {
+  border-radius: var(--radius-md);
+}
+
+.ui-avatar__fallback {
+  border-radius: var(--radius-md);
+  background: var(--color-surface-selected);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.ui-avatar[data-ui-size='lg'] .ui-avatar__fallback {
+  font-size: var(--text-body-md-size);
+}
+
+.ui-avatar[data-ui-size='sm'] .ui-avatar__fallback {
+  font-size: 0.6875rem;
+}
+
+/* Forced colours drop the fill: the tile keeps a border, so that it is still a thing on the page. */
+@media (forced-colors: active) {
+  .ui-avatar__fallback {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

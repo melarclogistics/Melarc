@@ -1441,7 +1441,9 @@ The redesign replaces the list of components that were deferred until real scree
 - EmptyState v2;
 - Skeleton v2.
 
-**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as BUILT):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion. The second half (StatusBadge, CountBadge, EmptyState and Skeleton v2, Avatar, and the Tooltip, Popover and Dialog wrappers) follows.
+**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as BUILT):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion.
+
+**Built (redesign step R5, second half, 7 November 2026; COMPONENT_PATTERNS §37 records each as IMPLEMENTING):** StatusBadge v2 (the five status pairs of §4.4, a 6px dot, and one table of every state of the portal), CountBadge's variants (`subtle`, `strong`, `on-crimson`), EmptyState v2, Skeleton v2 with LoadingRow, Avatar, and the Tooltip and Popover wrappers (300ms and 8px, on the floating shadow of §8). The Dialog wrapper is the Dialog and AlertDialog of COMPONENT_PATTERNS §20, unchanged.
 
 A component that is not in the kit is added when a real screen needs it (§28).
 

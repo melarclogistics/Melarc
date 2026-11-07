@@ -9,7 +9,15 @@ export function formatCount(count: number): string {
   return NUMBER.format(count);
 }
 
+/**
+ * How the badge is drawn on the page (COMPONENT_PATTERNS, *count badge*, the second half of redesign step R5): `subtle` is the neutral pair (the default, as it has always been),
+ * `strong` is Ink with the figure in white (the current tab's count), and `on-crimson` is white at 18% over the brand crimson (a count on a crimson ground, the sidebar's current entry).
+ */
+export type CountBadgeVariant = 'subtle' | 'strong' | 'on-crimson';
+
 export interface CountBadgeProps {
+  /** The look of the badge. `subtle` is the neutral pair and the default; the sidebar's own grounds are `surface`, below, and need no variant. */
+  readonly variant?: CountBadgeVariant;
   /** How many. A whole number from zero; the figure is drawn as it is, never capped (`99+` would hide the size of a queue). */
   readonly count: number;
   /**
@@ -36,12 +44,18 @@ export interface CountBadgeProps {
  * The visible number is hidden from assistive technology and the whole phrase ("5 waiting for confirmation") is given to it in its place,
  * so that a screen reader says what the number is of and does not say the number twice.
  */
-export function CountBadge({ count, meaning, surface = 'page' }: CountBadgeProps) {
+export function CountBadge({
+  count,
+  meaning,
+  surface = 'page',
+  variant = 'subtle',
+}: CountBadgeProps) {
   return (
     <Badge
       variant="neutral"
       className="ui-count-badge"
       data-surface={surface}
+      data-variant={variant}
       data-quiet={count === 0 ? 'true' : undefined}
     >
       {meaning === undefined ? (

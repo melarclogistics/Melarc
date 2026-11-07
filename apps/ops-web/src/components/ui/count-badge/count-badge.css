@@ -67,6 +67,36 @@
   color: var(--shell-active-text);
 }
 
+/*
+ * The variants (the second half of redesign step R5). `subtle` is the neutral pair above and needs no rule. `strong` is Ink with the figure in white
+ * (the primary action's pair, 15.3:1 in the light theme): the count of the current tab. `on-crimson` is the sidebar's pill on the filled current entry (white at 18% over
+ * the crimson, 4.63:1: see above), for a count on a crimson ground anywhere. A count of 0 that was read stays quiet in each: the border and the text without the fill.
+ * They come after the shell's rules, so a variant that is asked for wins over the surface.
+ */
+.ui-count-badge[data-variant='strong'] {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+}
+
+.ui-count-badge[data-variant='strong'][data-quiet='true'] {
+  border-color: var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.ui-count-badge[data-variant='on-crimson'] {
+  border-color: transparent;
+  background: var(--shell-active-badge);
+  color: var(--shell-active-text);
+}
+
+.ui-count-badge[data-variant='on-crimson'][data-quiet='true'] {
+  border-color: var(--shell-active-text);
+  background: transparent;
+  color: var(--shell-active-text);
+}
+
 /* Forced colours drop the fills and keep the figure and its border. */
 @media (forced-colors: active) {
   .ui-count-badge,

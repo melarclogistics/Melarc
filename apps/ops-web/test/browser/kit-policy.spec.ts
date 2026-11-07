@@ -93,6 +93,31 @@ test.describe('the kit in a production build under the strict content-security p
     expect(problems).toEqual([]);
   });
 
+  // Break caught: the tooltip, the popover or the dialog (Radix UI places and styles the first two by script as they open) needing more of the policy, or an avatar's picture or a
+  // skeleton's pulse refused by it.
+  test('the tooltip, the popover, the dialog, the avatar and the loading bars raise no violation', async ({
+    page,
+  }) => {
+    const { violations, problems } = await open(page, 'overlays');
+    await page.getByRole('button', { name: 'Confirm the request' }).focus();
+    await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Service date' }).click();
+    await expect(page.getByRole('dialog', { name: 'Choose a service date' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Add a note' }).click();
+    await expect(page.getByRole('dialog', { name: 'Add a note' })).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    // The violations and the problems are collected for the life of the page, over the pages that follow.
+    await page.goto(`${KIT}/badges`);
+    await expect(page.locator('.ui-avatar img')).toHaveCount(2);
+    await page.goto(`${KIT}/states`);
+    await expect(page.locator('.ui-skeleton-bar').first()).toBeVisible();
+
+    expect(violations).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
   // Break caught: the relaxation kept after nothing needs it, or a claim that cannot be checked: Motion and the libraries do set styles at run time (a
   // transform on a gliding item, the toaster's stylesheet), which is what `style-src` allows.
   test('Motion sets styles at run time, which is what style-src allows', async ({ page }) => {

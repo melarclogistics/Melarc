@@ -3,13 +3,16 @@ import { Link, useParams } from 'react-router';
 
 import { PageHeading } from '../../components/PageHeading';
 import { Toaster } from '../../components/ui/toast/Toast';
+import { BadgesGroup } from './BadgesGroup';
 import { DataGroup } from './DataGroup';
 import { BlindCountExample, QueueWorkspaceExample, RecordPageExample } from './Examples';
 import { FormsGroup } from './FormsGroup';
 import { HeaderGroup } from './HeaderGroup';
 import { ListsGroup } from './ListsGroup';
 import { MenusGroup } from './MenusGroup';
+import { OverlaysGroup } from './OverlaysGroup';
 import { PanelsGroup } from './PanelsGroup';
+import { StatesGroup } from './StatesGroup';
 import './kit.css';
 
 /**
@@ -47,6 +50,24 @@ export const KIT_GROUPS: readonly Group[] = [
   },
   { id: 'forms', title: 'Forms', summary: 'DateField', page: () => <FormsGroup /> },
   { id: 'lists', title: 'Lists', summary: 'ReorderList', page: () => <ListsGroup /> },
+  {
+    id: 'badges',
+    title: 'Badges and avatars',
+    summary: 'StatusBadge with the one table of statuses, CountBadge and Avatar',
+    page: () => <BadgesGroup />,
+  },
+  {
+    id: 'states',
+    title: 'Empty and loading states',
+    summary: 'EmptyState v2, Skeleton v2 and LoadingRow',
+    page: () => <StatesGroup />,
+  },
+  {
+    id: 'overlays',
+    title: 'Tooltips, popovers and dialogs',
+    summary: 'Tooltip, Popover and Dialog',
+    page: () => <OverlaysGroup />,
+  },
   {
     id: 'example-queue',
     title: 'Example: the queue workspace',
