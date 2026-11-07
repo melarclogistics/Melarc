@@ -1,13 +1,17 @@
 /**
- * The proof that the browser matrix of the CI workflow runs every browser test of the Ops Portal, once, from Playwright's own list of
- * the tests and not from a reading of the workflow's text or of the configuration:
+ * The proof that the browser jobs of the CI workflow run every browser test of the Ops Portal that each kind of run must run, once, from
+ * Playwright's own list of the tests and not from a reading of the workflow's text or of the configuration:
  *
- *   - the workflow's browser job lists a shard of an engine in each entry of its matrix (`browserMatrix`, scripts/ci-workflow.ts);
- *   - the Ops Portal's configuration (apps/ops-web/playwright.config.ts) is asked, as that job asks it, for the tests of the engine
+ *   - the workflow's browser jobs list a shard of an engine in each entry of their matrices (`browserMatrix`, scripts/ci-workflow.ts);
+ *   - which of those jobs a kind of run makes is read from the job's condition (`jobRunsOn`): a pull request makes the jobs with none,
+ *     which must hold the Chromium shards and no other; a push to main, the nightly run and a manual run make them all, which must
+ *     hold the shards of every engine (the Product Owner's decision of 7 November 2026);
+ *   - the Ops Portal's configuration (apps/ops-web/playwright.config.ts) is asked, as a job asks it, for the tests of the engine
  *     (`MELARC_BROWSERS`) and for the shard (`MELARC_BROWSER_SHARD`, Playwright's `--shard`), with `playwright test --list`, which starts
  *     no browser and no server;
- *   - the shards of an engine must hold, between them, every test of every project of that engine once: none left to no job, none run
- *     by two, none that the whole run does not have, no shard empty, and no project that no engine's name claims.
+ *   - the shards that a kind of run makes of an engine it must run hold, between them, every test of every project of that engine once:
+ *     none left to no job, none run by two, none that the whole run does not have, no shard empty, and no project that no engine's name
+ *     claims; and a kind of run that must not run an engine makes no shard of it.
  *
  * It starts nothing but the listing, so it runs wherever the dependencies are installed (the unit job of CI, a developer's machine).
  * The listing is a function (`TestLister`), so that the proof can be shown to fail on a double of Playwright, and on the real one with
@@ -18,10 +22,15 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
-import { parse } from 'yaml';
-
-import { BROWSERS, browserMatrix, type BrowserMatrix, type BrowserShard } from './ci-workflow.ts';
-import { isRecord, stepsOf } from './workflow-shapes.ts';
+import {
+  BROWSERS,
+  RUN_EVENTS,
+  browserJobsOf,
+  jobRunsOn,
+  requiredEngines,
+  type BrowserShard,
+} from './ci-workflow.ts';
+import { isRecord } from './workflow-shapes.ts';
 
 /** What `playwright test --list` says of one run. */
 export interface TestListing {
@@ -43,28 +52,6 @@ export type TestLister = (query: ListQuery) => Promise<TestListing>;
 
 const BROWSER_TESTS = 'pnpm run test:browser';
 
-/** The browser job of a workflow, the one that runs the browser tests, with its matrix; or why there is not exactly one. */
-export function browserJobOf(
-  workflowText: string,
-): { id: string; matrix: BrowserMatrix } | { problem: string } {
-  const workflow: unknown = parse(workflowText);
-  const jobs = isRecord(workflow) && isRecord(workflow.jobs) ? workflow.jobs : {};
-  const running = Object.entries(jobs).filter(
-    ([, job]) =>
-      isRecord(job) &&
-      stepsOf(job).some(
-        (step) => typeof step.run === 'string' && step.run.trim() === BROWSER_TESTS,
-      ),
-  );
-  const [only] = running;
-  if (running.length !== 1 || only === undefined || !isRecord(only[1])) {
-    return {
-      problem: `${String(running.length)} jobs of the workflow run ${BROWSER_TESTS}; exactly one job (a matrix) must`,
-    };
-  }
-  return { id: only[0], matrix: browserMatrix(only[1]) };
-}
-
 /** The project a test key belongs to. */
 const projectOf = (key: string): string => key.slice(0, Math.max(0, key.indexOf('|')));
 
@@ -79,13 +66,15 @@ const sameNames = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.toSorted().join('\n') === b.toSorted().join('\n');
 
 /**
- * What is wrong with the way the entries of the matrix cover the tests, from the listing of each run; empty means that for every
- * engine the entries' shards hold every test of every project of that engine exactly once. It asks for the listing it needs, so
- * that a double can stand for Playwright, and a failed listing is a problem and never a pass.
+ * What is wrong with the way the entries (the shards that a kind of run makes) cover the tests, from the listing of each run; empty
+ * means that for every engine in `required` the entries' shards hold every test of every project of that engine exactly once, and
+ * that no entry runs an engine that is not in it. It asks for the listing it needs, so that a double can stand for Playwright, and a
+ * failed listing is a problem and never a pass.
  */
 export async function findShardProblems(
   entries: readonly BrowserShard[],
   list: TestLister,
+  required: readonly string[] = BROWSERS,
 ): Promise<string[]> {
   const problems: string[] = [];
   const attempt = async (query: ListQuery, what: string): Promise<TestListing | undefined> => {
@@ -150,6 +139,15 @@ export async function findShardProblems(
     }
 
     const jobs = entries.filter((entry) => entry.engine === engine);
+    // An engine this kind of run must not run (Firefox and WebKit on a pull request) has no shard in it: running it is the finding.
+    if (!required.includes(engine)) {
+      if (jobs.length > 0) {
+        problems.push(
+          `${engine}: ${String(jobs.length)} of its shards run here (${jobs.map((job) => `${String(job.shard)}/${String(job.shards)}`).join(', ')}), and only ${required.join(', ')} may`,
+        );
+      }
+      continue;
+    }
     if (jobs.length === 0) {
       problems.push(
         `no job runs ${engine}: its ${String(whole.tests.length)} tests (${byProject(whole.tests)}) are run by nothing`,
@@ -204,17 +202,30 @@ export async function findShardProblems(
   return problems;
 }
 
-/** The problems of a workflow's browser job, matrix and coverage, from the listing; empty means every test is run once. */
+/**
+ * The problems of a workflow's browser jobs, their matrices and what each kind of run covers, from the listing; empty means that a pull
+ * request runs every test of Chromium once and nothing of the other engines, and that a push to main, the nightly run and a manual run
+ * run every test of every engine once. A problem that two kinds of run share is said once, naming them.
+ */
 export async function browserCoverageProblems(
   workflowText: string,
   list: TestLister,
 ): Promise<string[]> {
-  const job = browserJobOf(workflowText);
-  if ('problem' in job) return [job.problem];
-  return [
-    ...job.matrix.faults.map((fault) => `job ${job.id}: ${fault}`),
-    ...(await findShardProblems(job.matrix.shards, list)),
-  ];
+  const jobs = browserJobsOf(workflowText);
+  if (jobs.length === 0) return [`no job of the workflow runs ${BROWSER_TESTS}`];
+  const problems = jobs.flatMap((job) => job.faults.map((fault) => `job ${job.id}: ${fault}`));
+  const kinds = new Map<string, string[]>();
+  for (const [event, label] of Object.entries(RUN_EVENTS)) {
+    const running = jobs.filter((job) => jobRunsOn(job.body, event) === true);
+    const found = await findShardProblems(
+      running.flatMap((job) => job.entries),
+      list,
+      requiredEngines(event),
+    );
+    for (const problem of found) kinds.set(problem, [...(kinds.get(problem) ?? []), label]);
+  }
+  for (const [problem, labels] of kinds) problems.push(`${labels.join(', ')}: ${problem}`);
+  return problems;
 }
 
 /** Keeps at most `limit` of the tasks it is given running. */

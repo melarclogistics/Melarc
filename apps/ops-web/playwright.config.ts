@@ -22,8 +22,9 @@ type Engine = keyof typeof ENGINES;
 const isEngine = (name: string): name is Engine => Object.hasOwn(ENGINES, name);
 
 /**
- * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs all three, each in jobs
- * of its own (the supported browsers of surfaces/ops-portal.md section 11, by their engines). Without the variable only Chromium
+ * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs Chromium on every pull request
+ * and all three on a push to main, every night and by hand, each engine in jobs of its own (the supported browsers of
+ * surfaces/ops-portal.md section 11, by their engines; DEVELOPMENT.md, "What CI runs when"). Without the variable only Chromium
  * runs, so a machine that has installed only Chromium works; the others need `playwright install firefox webkit`.
  */
 function requestedEngines(value: string | undefined): Engine[] {

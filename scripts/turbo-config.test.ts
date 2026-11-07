@@ -102,7 +102,8 @@ describe('turbo.json', () => {
   // Break caught (the first hosted run, 12 October 2026): the variables that say "this is a GitHub-hosted runner" dropped by Turborepo's
   // strict environment, so that the HTTPS run sees `CI` and not `GITHUB_ACTIONS` or `RUNNER_ENVIRONMENT`, refuses to put the CA in the
   // system store, and WebKit's proofs fail to trust for a reason that has nothing to do with WebKit. The run decides what it may do on
-  // exactly these variables (`e2e/harness/https-run.ts`, `e2e/harness/system-trust.ts`).
+  // exactly these variables (`e2e/harness/https-run.ts`, `e2e/harness/system-trust.ts`). And, since 7 November 2026, the shard of the run
+  // (`MELARC_HTTPS_SHARD`): dropped here, every job of the matrix would make the whole run and be as long as before it was split.
   it('passes the variables the HTTPS run decides on through to it', () => {
     const task = turbo.tasks?.['test:e2e:https'];
     assert.ok(task !== undefined, 'test:e2e:https is a task');
@@ -112,6 +113,7 @@ describe('turbo.json', () => {
       'GITHUB_ACTIONS',
       'RUNNER_ENVIRONMENT',
       'MELARC_E2E_KEYS_CLEARED',
+      'MELARC_HTTPS_SHARD',
       'OPENSSL',
       'CERTUTIL',
       'PLAYWRIGHT_BROWSERS_PATH',

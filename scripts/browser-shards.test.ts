@@ -7,14 +7,19 @@ import { stringify } from 'yaml';
 
 import {
   browserCoverageProblems,
-  browserJobOf,
   findShardProblems,
   listingFrom,
   playwrightLister,
   runListing,
   type TestLister,
 } from './browser-shards.ts';
-import { BROWSERS, type BrowserShard } from './ci-workflow.ts';
+import {
+  BROWSERS,
+  RUN_EVENTS,
+  browserJobsOf,
+  jobRunsOn,
+  type BrowserShard,
+} from './ci-workflow.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const BROWSER_TESTS = 'pnpm run test:browser';
@@ -281,55 +286,174 @@ describe('the proof that the shards hold every test once, on a double of Playwri
   });
 });
 
-describe('the browser job of a workflow', () => {
+describe('the browser jobs of a workflow, and what each kind of run runs of them', () => {
   const step = { name: 'Browser tests', run: BROWSER_TESTS };
-  const workflowOf = (jobs: Record<string, unknown>): string => stringify({ jobs });
-  const matrixJob = (entries: BrowserShard[]): Record<string, unknown> => ({
+  const matrixJob = (
+    entries: BrowserShard[],
+    condition: string | null = null,
+  ): Record<string, unknown> => ({
+    ...(condition === null ? {} : { if: condition }),
     strategy: { 'fail-fast': false, matrix: { include: entries } },
     steps: [step],
   });
+  const CONDITION = "github.event_name != 'pull_request'";
+  const of = (...engines: string[]): BrowserShard[] =>
+    GOOD.filter((entry) => engines.includes(entry.engine));
+  /** The workflow of the decision: Chromium in a job every run makes, Firefox and WebKit in a job a pull request does not. */
+  const workflowOf = (
+    chromium: BrowserShard[] = of('chromium'),
+    others: BrowserShard[] = of('firefox', 'webkit'),
+    condition: string | null = CONDITION,
+  ): string =>
+    stringify({
+      jobs: {
+        unit: { steps: [] },
+        'browser-chromium': matrixJob(chromium),
+        'browser-firefox-webkit': matrixJob(others, condition),
+      },
+    });
+  const coverage = (text: string) => browserCoverageProblems(text, fakePlaywright(SMALL));
 
-  it('is the one job that runs the browser tests, with its matrix', () => {
-    const found = browserJobOf(workflowOf({ unit: { steps: [] }, browser: matrixJob(GOOD) }));
-    assert.ok('id' in found);
-    assert.equal(found.id, 'browser');
-    assert.equal(found.matrix.shards.length, GOOD.length);
-    assert.deepEqual(found.matrix.faults, []);
-  });
-
-  // Break caught: browser tests run by no job (the workflow would prove nothing), or by two (the coverage could not be told).
-  it('is not found when no job, or more than one job, runs the browser tests', () => {
-    for (const jobs of [{ unit: { steps: [] } }, { a: matrixJob(GOOD), b: matrixJob(GOOD) }, {}]) {
-      const found = browserJobOf(workflowOf(jobs));
-      assert.ok('problem' in found, JSON.stringify(jobs));
-      assert.match(
-        found.problem,
-        /jobs of the workflow run pnpm run test:browser; exactly one job \(a matrix\) must/,
-      );
-    }
-    assert.ok('problem' in browserJobOf(''));
-  });
-
-  it('is judged by the matrix it lists and by what the matrix covers', async () => {
-    const list = fakePlaywright(SMALL);
+  it('finds the jobs that run the browser tests, with the shards of each', () => {
+    const found = browserJobsOf(workflowOf());
     assert.deepEqual(
-      await browserCoverageProblems(workflowOf({ browser: matrixJob(GOOD) }), list),
+      found.map((job) => job.id),
+      ['browser-chromium', 'browser-firefox-webkit'],
+    );
+    assert.deepEqual(
+      found.map((job) => job.entries.length),
+      [of('chromium').length, of('firefox', 'webkit').length],
+    );
+    assert.deepEqual(
+      found.flatMap((job) => job.faults),
       [],
     );
+  });
 
-    const dropped = GOOD.filter((entry) => !(entry.engine === 'webkit' && entry.shard === 1));
-    const problems = await browserCoverageProblems(
-      workflowOf({ browser: matrixJob(dropped) }),
-      list,
+  // Break caught: a job that runs nothing of the browser tests is not looked at, and a workflow with none has nothing to prove.
+  it('finds no browser job in a workflow without one, and says so', async () => {
+    assert.deepEqual(browserJobsOf(stringify({ jobs: { unit: { steps: [] } } })), []);
+    assert.deepEqual(browserJobsOf(''), []);
+    assert.deepEqual(await coverage(stringify({ jobs: {} })), [
+      'no job of the workflow runs pnpm run test:browser',
+    ]);
+  });
+
+  // Which kind of run makes which job, by the one condition the rules allow (a job with none is made by every run).
+  it('reads which jobs each kind of run makes from the condition of the job', () => {
+    const [chromium, others] = browserJobsOf(workflowOf());
+    assert.ok(chromium !== undefined && others !== undefined);
+    for (const event of Object.keys(RUN_EVENTS)) {
+      assert.equal(jobRunsOn(chromium.body, event), true, event);
+      assert.equal(jobRunsOn(others.body, event), event !== 'pull_request', event);
+    }
+    // A condition of any other form says nothing: the job is not counted as run by any kind of run.
+    for (const condition of ["github.event_name == 'push'", 'always()', 'false']) {
+      const [, odd] = browserJobsOf(workflowOf(of('chromium'), of('firefox', 'webkit'), condition));
+      assert.ok(odd !== undefined);
+      for (const event of Object.keys(RUN_EVENTS))
+        assert.equal(jobRunsOn(odd.body, event), undefined);
+    }
+  });
+
+  it('is accepted when a pull request runs Chromium, and every other kind of run every engine', async () => {
+    assert.deepEqual(await coverage(workflowOf()), []);
+  });
+
+  // (a) Break caught: a Chromium shard taken out of the workflow, so that a pull request, and every other run, leaves tests unrun.
+  it('(a) reports a Chromium shard dropped, on every kind of run', async () => {
+    const problems = await coverage(workflowOf(of('chromium').slice(1)));
+    assert.equal(problems.length, 2, problems.join('\n'));
+    assert.match(
+      problems.find((problem) => problem.includes('tests are run by no job')) ?? '',
+      /^on a pull request, on a push to main, in the nightly run, in a manual run: chromium: 14 of 41 tests are run by no job/,
     );
+    assert.match(
+      problems.join('\n'),
+      /job browser-chromium: chromium has no entry for shard 1 of 3/,
+    );
+  });
+
+  // (b) Break caught: a Firefox or WebKit shard taken out, so that main and the nightly run leave tests unrun while every pull request is as green as before.
+  for (const [engine, others] of [
+    ['firefox', of('webkit').concat(of('firefox').slice(1))],
+    ['webkit', of('firefox').concat(of('webkit').slice(1))],
+  ] as const) {
+    it(`(b) reports a ${engine} shard dropped on a push, at night and by hand, and not on a pull request`, async () => {
+      const problems = await coverage(workflowOf(undefined, others));
+      assert.ok(
+        problems.some((problem) =>
+          problem.startsWith(`on a push to main, in the nightly run, in a manual run: ${engine}: `),
+        ),
+        problems.join('\n'),
+      );
+      assert.ok(
+        problems.every((problem) => !problem.includes('on a pull request')),
+        problems.join('\n'),
+      );
+    });
+  }
+
+  it('(b) reports an engine missing altogether from the jobs that run on main', async () => {
+    const problems = await coverage(workflowOf(undefined, of('firefox')));
     assert.ok(
       problems.some((problem) =>
-        problem.startsWith('job browser: webkit has no entry for shard 1 of 2'),
+        problem.startsWith(
+          'on a push to main, in the nightly run, in a manual run: no job runs webkit: its 41 tests',
+        ),
       ),
       problems.join('\n'),
     );
+  });
+
+  // (c) Break caught: the Firefox and WebKit shards run on a pull request (the condition taken off the job, or the shards moved into
+  // the job that every run makes), which the Product Owner decided against.
+  it('(c) reports Firefox and WebKit shards run on a pull request, and only there', async () => {
+    const noCondition = await coverage(workflowOf(undefined, undefined, null));
+    assert.equal(noCondition.length, 2, noCondition.join('\n'));
+    for (const engine of ['firefox', 'webkit']) {
+      assert.ok(
+        noCondition.some(
+          (problem) =>
+            problem.startsWith(`on a pull request: ${engine}: `) && problem.includes('run here'),
+        ),
+        noCondition.join('\n'),
+      );
+    }
+    const moved = await coverage(workflowOf([...of('chromium'), ...of('firefox')], of('webkit')));
     assert.ok(
-      problems.some((problem) => /^webkit: \d+ of 41 tests are run by no job/.test(problem)),
+      moved.some(
+        (problem) =>
+          problem.startsWith('on a pull request: firefox: ') &&
+          problem.includes('and only chromium may'),
+      ),
+      moved.join('\n'),
+    );
+  });
+
+  it('(c) reports a condition that no kind of run satisfies, as Firefox and WebKit run nowhere', async () => {
+    const problems = await coverage(
+      workflowOf(undefined, undefined, "github.event_name == 'push'"),
+    );
+    assert.ok(
+      problems.some((problem) =>
+        problem.startsWith(
+          'on a push to main, in the nightly run, in a manual run: no job runs firefox',
+        ),
+      ),
+      problems.join('\n'),
+    );
+  });
+
+  // Break caught: the matrices of two jobs both listing an engine, which a run that makes both would run twice.
+  it('reports an engine whose shards are in both jobs, as tests run by more than one job', async () => {
+    const problems = await coverage(
+      workflowOf(of('chromium'), [...of('firefox', 'webkit'), ...of('chromium')]),
+    );
+    assert.ok(
+      problems.some(
+        (problem) => problem.includes('chromium: ') && problem.includes('run by more than one job'),
+      ),
       problems.join('\n'),
     );
   });
@@ -406,16 +530,37 @@ const configuration = readFileSync(resolve(root, 'apps/ops-web/playwright.config
 
 // The proof itself: the real workflow, the real configuration and the real Playwright, which lists the tests of every shard of
 // every engine (about thirty runs of `playwright test --list`, which starts no browser and no server).
-describe('this repository: the shards of the workflow hold every test of every project of every engine once', () => {
+describe('this repository: what each kind of run runs of the browser tests', () => {
   const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
   const list = playwrightLister(root);
-  const found = browserJobOf(workflow);
-  const entries = 'id' in found ? found.matrix.shards : [];
+  const jobs = browserJobsOf(workflow);
+  /** The shards a kind of run makes: those of the jobs it runs. */
+  const entriesOn = (event: string): BrowserShard[] =>
+    jobs.filter((job) => jobRunsOn(job.body, event) === true).flatMap((job) => job.entries);
+  const onPullRequest = entriesOn('pull_request');
+  const onMain = entriesOn('push');
 
-  it('has a browser job with a matrix that has no fault', () => {
-    assert.ok('id' in found, 'problem' in found ? found.problem : '');
-    assert.deepEqual(found.matrix.faults, []);
-    assert.ok(entries.length >= BROWSERS.length);
+  it('has the Chromium shards in a job every run makes and the others in a job a pull request does not, without a fault', () => {
+    assert.deepEqual(
+      jobs.map((job) => job.id),
+      ['browser-chromium', 'browser-firefox-webkit'],
+    );
+    assert.deepEqual(
+      jobs.flatMap((job) => job.faults),
+      [],
+    );
+    assert.deepEqual(
+      [...new Set(onPullRequest.map((entry) => entry.engine))],
+      ['chromium'],
+      'a pull request runs the Chromium shards and no other',
+    );
+    assert.deepEqual(
+      [...new Set(onMain.map((entry) => entry.engine))].toSorted(),
+      [...BROWSERS].toSorted(),
+    );
+    for (const event of ['push', 'schedule', 'workflow_dispatch']) {
+      assert.deepEqual(entriesOn(event), onMain, event);
+    }
   });
 
   // Break caught: the engines of the configuration and of the supported browsers parting, so that an engine is added where the matrix
@@ -426,17 +571,21 @@ describe('this repository: the shards of the workflow hold every test of every p
     assert.deepEqual(engines.toSorted(), BROWSERS.toSorted());
   });
 
-  it('holds every test of every project of every engine in exactly one job', async () => {
+  it('holds every test of every project in exactly one job: Chromium on a pull request, every engine on main', async () => {
     assert.deepEqual(await browserCoverageProblems(workflow, list), []);
+    assert.deepEqual(await findShardProblems(onPullRequest, list, ['chromium']), []);
+    for (const event of ['push', 'schedule', 'workflow_dispatch']) {
+      assert.deepEqual(await findShardProblems(entriesOn(event), list), [], event);
+    }
   });
 
   it('gives each engine more than one job, none of which runs the whole of it', async (context) => {
     for (const engine of BROWSERS) {
       const whole = await list({ engines: [engine] });
-      const jobs = entries.filter((entry) => entry.engine === engine);
-      assert.ok(jobs.length > 1, `${engine} has ${String(jobs.length)} job`);
+      const own = onMain.filter((entry) => entry.engine === engine);
+      assert.ok(own.length > 1, `${engine} has ${String(own.length)} job`);
       const sizes: number[] = [];
-      for (const job of jobs) {
+      for (const job of own) {
         const part = await list({
           engines: [engine],
           shard: { current: job.shard, total: job.shards },
@@ -448,7 +597,7 @@ describe('this repository: the shards of the workflow hold every test of every p
         sizes.push(part.tests.length);
       }
       context.diagnostic(
-        `${engine}: ${String(whole.tests.length)} tests in ${String(whole.projects.length)} projects, ${String(jobs.length)} jobs of ${sizes.join(', ')} tests`,
+        `${engine}: ${String(whole.tests.length)} tests in ${String(whole.projects.length)} projects, ${String(own.length)} jobs of ${sizes.join(', ')} tests`,
       );
     }
   });
@@ -459,7 +608,7 @@ describe('this repository: the shards of the workflow hold every test of every p
   it('cuts the real tests into shards of equal numbers of tests, as the double above does', async () => {
     for (const engine of BROWSERS) {
       const whole = await list({ engines: [engine] });
-      for (const job of entries.filter((entry) => entry.engine === engine)) {
+      for (const job of onMain.filter((entry) => entry.engine === engine)) {
         const part = await list({
           engines: [engine],
           shard: { current: job.shard, total: job.shards },
@@ -474,13 +623,16 @@ describe('this repository: the shards of the workflow hold every test of every p
     }
   });
 
-  // Break caught (the failure to show, on the real tests): a shard taken out of the workflow's matrix leaves tests that no job runs.
+  // Break caught (the failure to show, on the real tests): a shard taken out of the workflow's matrix leaves tests that no job runs, on
+  // main and at night for Firefox and WebKit, and on every kind of run for Chromium.
   for (const engine of BROWSERS) {
     it(`fails when a shard of ${engine} is taken out of the matrix`, async (context) => {
-      const taken = entries.filter((entry) => entry.engine === engine)[1];
+      const taken = onMain.filter((entry) => entry.engine === engine)[1];
       assert.ok(taken !== undefined);
-      const without = entries.filter((entry) => entry !== taken);
-      const problems = await findShardProblems(without, list);
+      const problems = await findShardProblems(
+        onMain.filter((entry) => entry !== taken),
+        list,
+      );
       assert.equal(problems.length, 1, problems.join('\n'));
       assert.match(
         problems[0] ?? '',
@@ -493,7 +645,7 @@ describe('this repository: the shards of the workflow hold every test of every p
 
     it(`fails when ${engine} is taken out of the matrix`, async (context) => {
       const problems = await findShardProblems(
-        entries.filter((entry) => entry.engine !== engine),
+        onMain.filter((entry) => entry.engine !== engine),
         list,
       );
       assert.equal(problems.length, 1, problems.join('\n'));
@@ -504,13 +656,121 @@ describe('this repository: the shards of the workflow hold every test of every p
 
   // Break caught: the shard of an engine counted for another (a typo that moves a job to the wrong part of the list).
   it('fails when two jobs of an engine run one shard', async () => {
-    const [first] = entries;
+    const [first] = onMain;
     assert.ok(first !== undefined);
-    const problems = await findShardProblems([...entries, first], list);
+    const problems = await findShardProblems([...onMain, first], list);
     assert.ok(
       problems.some((problem) => problem.includes('tests are run by more than one job')),
       problems.join('\n'),
     );
+  });
+
+  // The decision of 7 November 2026, broken once each way on the real tests (the failures to show). A pull request: a Chromium shard
+  // out, and a Firefox or WebKit shard in.
+  it('fails when a pull request leaves a Chromium shard out, and when it runs a Firefox or WebKit shard', async (context) => {
+    const chromium = onPullRequest.filter((entry) => entry.engine === 'chromium');
+    const [dropped] = chromium;
+    assert.ok(dropped !== undefined && chromium.length > 1);
+    const left = await findShardProblems(
+      onPullRequest.filter((entry) => entry !== dropped),
+      list,
+      ['chromium'],
+    );
+    assert.equal(left.length, 1, left.join('\n'));
+    assert.match(left[0] ?? '', /^chromium: \d+ of \d+ tests are run by no job/);
+    context.diagnostic(
+      `a pull request without chromium 1/${String(dropped.shards)}: ${left[0] ?? ''}`,
+    );
+
+    for (const engine of ['firefox', 'webkit']) {
+      const extra = onMain.find((entry) => entry.engine === engine);
+      assert.ok(extra !== undefined);
+      const added = await findShardProblems([...onPullRequest, extra], list, ['chromium']);
+      assert.equal(added.length, 1, added.join('\n'));
+      assert.match(added[0] ?? '', new RegExp(`^${engine}: 1 of its shards run here \\(`));
+      context.diagnostic(
+        `a pull request that runs ${engine} 1/${String(extra.shards)}: ${added[0] ?? ''}`,
+      );
+    }
+  });
+
+  // The same, on the text of the real workflow, changed as a person would change it: the shards, the condition, the job.
+  describe('with the real workflow changed by one line', () => {
+    const without = (line: string): string => {
+      assert.ok(workflow.includes(line), line);
+      return workflow.replace(line, '');
+    };
+    const CONDITION_LINE = "    if: github.event_name != 'pull_request'\n";
+    const ON_MAIN = 'on a push to main, in the nightly run, in a manual run';
+    const check = async (
+      text: string,
+      context: { diagnostic: (message: string) => void },
+    ): Promise<string[]> => {
+      const problems = await browserCoverageProblems(text, list);
+      for (const problem of problems) context.diagnostic(problem.slice(0, 260));
+      return problems;
+    };
+
+    it('reports the condition taken off the Firefox and WebKit job: both run on a pull request', async (context) => {
+      const problems = await check(without(CONDITION_LINE), context);
+      assert.equal(problems.length, 2, problems.join('\n'));
+      assert.ok(
+        problems.every((problem) => problem.startsWith('on a pull request: ')),
+        problems.join('\n'),
+      );
+    });
+
+    it('reports a Firefox shard taken out of the workflow: main and the nightly run lose it, a pull request does not', async (context) => {
+      const problems = await check(
+        without('          - { engine: firefox, shard: 2, shards: 9 }\n'),
+        context,
+      );
+      assert.ok(
+        problems.some((problem) => problem.startsWith(`${ON_MAIN}: firefox: `)),
+        problems.join('\n'),
+      );
+      assert.ok(
+        problems.every((problem) => !problem.startsWith('on a pull request')),
+        problems.join('\n'),
+      );
+    });
+
+    it('reports a WebKit shard taken out of the workflow', async (context) => {
+      const problems = await check(
+        without('          - { engine: webkit, shard: 8, shards: 8 }\n'),
+        context,
+      );
+      assert.ok(
+        problems.some((problem) => problem.startsWith(`${ON_MAIN}: webkit: `)),
+        problems.join('\n'),
+      );
+    });
+
+    it('reports a Chromium shard taken out of the workflow, on every kind of run', async (context) => {
+      const problems = await check(
+        without('          - { engine: chromium, shard: 7, shards: 7 }\n'),
+        context,
+      );
+      assert.ok(
+        problems.some((problem) =>
+          problem.startsWith(
+            'on a pull request, on a push to main, in the nightly run, in a manual run: chromium: ',
+          ),
+        ),
+        problems.join('\n'),
+      );
+    });
+
+    it('reports a condition that is not the decided one: Firefox and WebKit run nowhere', async (context) => {
+      const problems = await check(
+        workflow.replace(CONDITION_LINE, "    if: github.event_name == 'push'\n"),
+        context,
+      );
+      assert.ok(
+        problems.some((problem) => problem.startsWith(`${ON_MAIN}: no job runs firefox`)),
+        problems.join('\n'),
+      );
+    });
   });
 
   // Break caught: a value that is not a shard read as "no shard", so that a typo in the workflow runs the whole engine in every job.
