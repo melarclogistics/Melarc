@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { watchPage, wcagViolations } from './support/page';
+import { settled, watchPage, wcagViolations } from './support/page';
 
 /**
  * The dialogs of the development-only showcase, in a real browser, in each engine. A modal dialog is the one component whose defining
@@ -158,10 +158,12 @@ test.describe('a modal dialog in a browser', () => {
     await expect(field).toHaveValue('typed in the dialog');
   });
 
-  // Break caught: the scrim not drawn, so the page behind looks live. A test cannot read a pixel, so the style that draws it is read.
+  // Break caught: the scrim not drawn, so the page behind looks live. A test cannot read a pixel, so the style that draws it is read, once the scrim has
+  // arrived: it fades in over motion.normal, and a read in the middle of that is a read of neither state.
   test('draws a scrim over the page', async ({ page }) => {
     await openShowcase(page);
     await openWithKeyboard(page, 'Open the demo dialog');
+    await settled(page);
 
     const backdrop = await page.evaluate(() => {
       const dialog = document.querySelector('dialog');
@@ -466,4 +468,147 @@ test.describe('the reason and confirmation workflow in a browser', () => {
       await page.unrouteAll();
     }
   });
+});
+
+/** What a token comes to, written by the browser as the value of a CSS property: `var(--shadow-floating)` as a `box-shadow`, `var(--motion-normal)` as a duration. */
+const resolved = (page: Page, property: string, token: string): Promise<string> =>
+  page.evaluate(
+    ([name, from]) => {
+      const probe = document.createElement('span');
+      probe.style.setProperty(name, `var(${from})`);
+      document.body.append(probe);
+      const value = getComputedStyle(probe).getPropertyValue(name);
+      probe.remove();
+      return value;
+    },
+    [property, token] as const,
+  );
+
+/** The two dialogs of the showcase that Melarc's pages are built from: the dialog, and the question before a hard-to-undo act. */
+const DIALOGS = [
+  { kind: 'dialog', opener: 'Open the demo dialog', role: 'dialog', name: 'Demo dialog' },
+  {
+    kind: 'alert dialog',
+    opener: 'Open the demo confirmation',
+    role: 'alertdialog',
+    name: 'End this demo session?',
+  },
+] as const;
+
+test.describe('the defaults that Melarc dialogs carry, in a browser (COMPONENT_PATTERNS section 37)', () => {
+  for (const { kind, opener, role, name } of DIALOGS) {
+    // Break caught: a dialog that lost the surface, the corners or the one soft shadow of a thing that floats (DESIGN_SYSTEM sections 4 and 8): a panel that looks flat
+    // on the scrim, or takes a shadow, a radius or a colour of its own that is not a token.
+    test(`the ${kind} has the default surface, the strong border, 12px corners and the floating shadow`, async ({
+      page,
+    }) => {
+      await openShowcase(page);
+      await openWithKeyboard(page, opener);
+      const panel = page.getByRole(role, { name });
+      await expect(panel).toBeVisible();
+      await settled(page);
+
+      const drawn = await panel.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          shadow: style.getPropertyValue('box-shadow'),
+          radius: style.getPropertyValue('border-radius'),
+          background: style.getPropertyValue('background-color'),
+          border: style.getPropertyValue('border-top-color'),
+          opacity: style.getPropertyValue('opacity'),
+        };
+      });
+      expect(drawn.shadow).toBe(await resolved(page, 'box-shadow', '--shadow-floating'));
+      expect(drawn.shadow).not.toBe('none');
+      expect(drawn.radius).toBe(await resolved(page, 'border-radius', '--radius-lg'));
+      expect(drawn.radius).toBe('12px');
+      expect(drawn.background).toBe(
+        await resolved(page, 'background-color', '--color-surface-default'),
+      );
+      expect(drawn.border).toBe(await resolved(page, 'border-top-color', '--color-border-strong'));
+      expect(drawn.opacity).toBe('1');
+    });
+
+    // Break caught: a dialog that appears with no motion at all (it was so before), one that takes a duration or an easing that is not the token's (a number written in the
+    // stylesheet), or a scrim that pops while the panel eases in. The starts of the animations are read from the events, in the page, and each one's duration and easing at
+    // the moment it starts; an animation that lasts no time still sends the event, and would show here as a duration of 0s.
+    test(`the ${kind} comes in over motion.normal on the enter easing, and its scrim with it`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await openShowcase(page);
+
+      const starts = await page.evaluate(async (label) => {
+        const found: { pseudo: string; name: string; duration: string; easing: string }[] = [];
+        const onStart = (event: AnimationEvent): void => {
+          if (!(event.target instanceof Element) || !event.target.classList.contains('ui-dialog'))
+            return;
+          const style = getComputedStyle(event.target, event.pseudoElement || null);
+          found.push({
+            pseudo: event.pseudoElement,
+            name: event.animationName,
+            duration: style.animationDuration,
+            easing: style.animationTimingFunction,
+          });
+        };
+        document.addEventListener('animationstart', onStart, true);
+        [...document.querySelectorAll('button')]
+          .find((button) => button.textContent === label)
+          ?.click();
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 1000);
+        });
+        document.removeEventListener('animationstart', onStart, true);
+        return found;
+      }, opener);
+
+      const duration = await resolved(page, 'animation-duration', '--motion-normal');
+      const easing = await resolved(page, 'animation-timing-function', '--motion-ease-enter');
+      expect(duration).toBe('0.2s');
+      // The panel's and the scrim's, whichever the browser reports first.
+      expect(starts).toHaveLength(2);
+      expect(starts).toContainEqual({ pseudo: '', name: 'ui-dialog-enter', duration, easing });
+      expect(starts).toContainEqual({
+        pseudo: '::backdrop',
+        name: 'ui-dialog-scrim-enter',
+        duration,
+        easing,
+      });
+    });
+
+    // Break caught: a dialog that animates for someone who asked the system for less motion: the animation is to be switched off, and not only given no time (an animation of
+    // no duration still sends its events), which is what the count of the starts shows.
+    test(`the ${kind} does not animate under reduced motion, not even for no time`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await openShowcase(page);
+
+      const started = await page.evaluate(async (label) => {
+        let count = 0;
+        const onStart = (event: AnimationEvent): void => {
+          if (event.target instanceof Element && event.target.classList.contains('ui-dialog')) {
+            count += 1;
+          }
+        };
+        document.addEventListener('animationstart', onStart, true);
+        [...document.querySelectorAll('button')]
+          .find((button) => button.textContent === label)
+          ?.click();
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 1000);
+        });
+        document.removeEventListener('animationstart', onStart, true);
+        return { count, open: document.querySelector('dialog[open]') !== null };
+      }, opener);
+
+      expect(started).toEqual({ count: 0, open: true });
+      await expect(page.getByRole(role, { name })).toBeVisible();
+      expect(
+        await page
+          .getByRole(role, { name })
+          .evaluate((element) => getComputedStyle(element).animationName),
+      ).toBe('none');
+    });
+  }
 });

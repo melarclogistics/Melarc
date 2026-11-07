@@ -861,11 +861,11 @@ describe('DatePicker: what the one field adds', () => {
   });
 
   // Break caught: the words for a day that its month does not have saying the wrong day or month, a month's name in the browser's language, a fault found only on leaving, or the
-  // 29th of February refused in a leap year.
+  // 29th of February refused in a leap year. The 29th of February of a year that is not a leap year names the year (the Product Owner's decision of 7 November 2026, afternoon).
   it.each([
     ['30022026', '30/02/2026', 'There is no 30 February'],
     ['31022026', '31/02/2026', 'There is no 31 February'],
-    ['29022027', '29/02/2027', 'There is no 29 February'],
+    ['29022027', '29/02/2027', '2027 has no 29 February'],
     ['31042026', '31/04/2026', 'There is no 31 April'],
     ['31112026', '31/11/2026', 'There is no 31 November'],
   ])('refuses %s at once, and says %j', async (digits, written, message) => {

@@ -3,6 +3,7 @@ import { Outlet } from 'react-router';
 
 import { Alert } from '../components/ui/alert/Alert';
 import { Button } from '../components/ui/button/Button';
+import { Toaster } from '../components/ui/toast/Toast';
 import { useSession } from '../platform/session/session-context';
 import { useSignOut } from '../platform/session/use-sign-out';
 import { useFrameLayout } from './frame-chrome';
@@ -21,6 +22,10 @@ import { ShellChrome } from './shell/ShellChrome';
  * top bar the hub switcher, the search, the New menu and the account menu, which holds the sign-out that every signed-in screen carries. Hiding an
  * entry is not enforcement; the guard of each route and the server check again. A sign-out that did not finish is told at the top of the page, where
  * the person is looking.
+ *
+ * It draws **the one toaster of the application** (`Toaster`, bottom right): a toast that a screen raises (`showToast`) is shown here, once, and a screen never
+ * mounts a toaster of its own. The showcase's pages are outside the shell and mount their own; a second toaster mounted anywhere draws nothing, so a toast is
+ * never shown twice.
  *
  * It does not hold the **choice of hub** (`HubChoiceScope`, in `AppProviders`, above the router and inside the session): the choice must survive a
  * visit to a page that is outside the shell, an address that matches no route or the page of a route that failed. It is keyed by the session, so
@@ -73,6 +78,7 @@ export function AuthenticatedOpsShell({
         signOutFailed={outcome === 'failed'}
       />
       {page}
+      <Toaster />
     </Fragment>
   );
 }

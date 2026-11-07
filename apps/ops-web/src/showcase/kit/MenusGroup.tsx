@@ -52,7 +52,7 @@ function ToastSpecimens() {
   return (
     <KitSection
       title="Toast"
-      note="A message at the bottom right with its tone, at most one action (Open, or Undo only where the server allows undoing the act), and, with an action, it stays until it is dismissed. An important outcome is never only a toast. Alt+T moves the keyboard to the toasts."
+      note="A message at the bottom right with its tone and up to two actions under it: a primary one (Open, or Undo only where the server allows undoing the act) and a secondary one in the screen's own words (Book another, as the task form's success has it). With any action it stays until it is dismissed, and using either takes it away. An important outcome is never only a toast. Alt+T moves the keyboard to the toasts."
     >
       <Specimen label="Press a button to raise one">
         <div className="showcase-kit-row">
@@ -128,6 +128,19 @@ function ToastSpecimens() {
             }}
           >
             With Undo
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              showToast({
+                tone: 'success',
+                message: 'Request ACC-PR-4HT9WD booked.',
+                action: { label: 'Open', onClick: () => undefined },
+                secondaryAction: { label: 'Book another', onClick: () => undefined },
+              });
+            }}
+          >
+            With two actions
           </Button>
         </div>
       </Specimen>

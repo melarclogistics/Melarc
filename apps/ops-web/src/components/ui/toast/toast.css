@@ -1,8 +1,8 @@
 /*
  * Toast (design/COMPONENT_PATTERNS.md section 21, *Toast*; brief section 8): a raised surface with the one floating shadow (a toast floats), the default border
- * and 12px corners. A disc of 22px carries the tone's pair and its icon, the message is the primary text, and the one action is a text button; the dismiss
- * control is a 24px icon button. Sonner places and stacks the toasts and handles swiping, the hotkey and the live region; this draws what is inside one.
- * Sonner's own animations stop under reduced motion in its stylesheet.
+ * and 12px corners. A disc of 22px carries the tone's pair and its icon, the message is the primary text, the actions (up to two: a primary one and a secondary
+ * one) are text buttons under the message, and the dismiss control is a 24px icon button. Sonner places and stacks the toasts and handles swiping, the hotkey
+ * and the live region; this draws what is inside one. Sonner's own animations stop under reduced motion in its stylesheet.
  */
 .ui-toast {
   display: flex;
@@ -64,18 +64,36 @@
   height: 0.8125rem;
 }
 
-.ui-toast__message {
+/* The message, and under it the actions, in one column between the disc and the dismiss control. */
+.ui-toast__body {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ui-toast__message {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-/* The one action: a text button in the link colours, as tall as a dense control. */
+/*
+ * The actions, under the message, the primary one first. Each text starts where the message's does (a button's own padding on the start side is taken out of the
+ * row), and the row does not make the toast taller than its buttons need (the buttons are 36px, a dense control, and the toast's own padding is under them).
+ */
+.ui-toast__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-1);
+  margin: 0 0 calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+}
+
+/* An action: a text button in the link colours, as tall as a dense control. */
 .ui-toast__action {
   flex: none;
   min-height: var(--control-height-sm);
-  margin: calc(-1 * var(--space-2)) 0;
   padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-md);
@@ -90,6 +108,16 @@
 .ui-toast__action:hover {
   background: var(--color-surface-subtle);
   color: var(--color-text-link-hover);
+}
+
+/* The secondary action is the quieter one: the secondary text, at the weight of the message (6.38:1 on the raised surface in the light theme). */
+.ui-toast__action[data-action='secondary'] {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-toast__action[data-action='secondary']:hover {
+  color: var(--color-text-primary);
 }
 
 .ui-toast__close {

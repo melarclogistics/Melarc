@@ -108,6 +108,22 @@ export function watchPage(page: Page) {
 }
 
 /**
+ * Waits until the page has stopped moving: every transition and every animation that is running and will end (a fade, a slide, a glide) has ended. One that
+ * never ends (a spinner, a caret) is not waited for, and neither is one that is paused. A read of a colour, an opacity or a place that is made before
+ * this is a read of the middle of a movement, which is neither the state it comes from nor the one it goes to. Animations of pseudo-elements (a dialog's
+ * scrim) are among those the document lists.
+ */
+export async function settled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const moving = document.getAnimations().filter((animation) => {
+      const end = animation.effect?.getComputedTiming().endTime;
+      return animation.playState === 'running' && typeof end === 'number' && Number.isFinite(end);
+    });
+    await Promise.allSettled(moving.map((animation) => animation.finished));
+  });
+}
+
+/**
  * One line per violation: the rule, what it asks for and the first elements that break it. `disable` names rules of axe to leave out of this
  * scan, for the one state in which axe is known to be wrong, with the reason written where it is used. `include` limits the scan to the part of the
  * page a selector names (the sidebar, when it is the sidebar that is under test), so that a test of one part fails for that part only.
@@ -115,18 +131,14 @@ export function watchPage(page: Page) {
  * **The colours are those of a page that has stopped changing.** axe reads the colour of each element at the moment it reaches it, so a button the pointer
  * has just pressed (its fill takes `motion.fast` to arrive under the pointer) is read as a colour that is neither state, and the contrast of a primary button
  * failed in about one run in three at 768px (found in the review of 7 November 2026, and present with the stylesheet and the components of the baseline tree
- * too). The transitions under way are waited for: they are finite, and an animation that never ends (a spinner) is not one of them.
+ * too). The transitions and the animations under way are waited for (`settled`): they are finite, and an animation that never ends (a spinner) is not one of
+ * them. A panel that fades in (a dialog, a popover) is read in the same way, at its own opacity once it has arrived and not part way.
  */
 export async function wcagViolations(
   page: Page,
   options: { readonly disable?: readonly string[]; readonly include?: string } = {},
 ): Promise<string[]> {
-  await page.evaluate(async () => {
-    const transitions = document
-      .getAnimations()
-      .filter((animation) => animation instanceof CSSTransition);
-    await Promise.allSettled(transitions.map((animation) => animation.finished));
-  });
+  await settled(page);
   const scan = new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .disableRules([...(options.disable ?? [])]);

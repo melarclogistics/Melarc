@@ -456,24 +456,38 @@ test.describe('the date field in a browser: reflow, enlarged text, forced colour
     expect(bar.colour).not.toBe(system.canvas);
   });
 
-  // Break caught: a calendar that animates for someone who asked the system for less motion. The check can fail: with no preference the
-  // popover does animate.
+  // Break caught: a calendar that animates for someone who asked the system for less motion, or one that does not animate for anyone else. The check can fail both ways. With
+  // no preference the popover must start an animation that LASTS SOME TIME: an event is also delivered for an animation of no duration, so the animation removed fails the
+  // first assertion, and so does its token (`--motion-normal`) set to 0. Under reduced motion it must start NO animation at all, not even one that lasts no time (the
+  // stylesheet switches the animation off, it does not only shorten it), so the rule of date-picker.css taken away fails the second. The three breaks were made, run and
+  // restored, and their output is in R5-report.md section 11.1.
   test('animates the calendar only when motion is welcome', async ({ page }) => {
     await openShowcase(page);
     // The animations are not sampled frame by frame. The popover primitive keeps its animation off until it has placed the calendar, and the calendar's
     // first frame can take longer than its whole animation (350 to 460 ms in a headless browser without a GPU, against 200 ms), so a sample finds
     // none that is running about half of the time. The start of an animation is an event, delivered even when the frame was late: the starts of the
-    // calendar's animations are counted (-1 if the calendar never came).
-    const animations = (): Promise<number> =>
+    // calendar's animations are counted, all of them and those that last some time (both -1 if the calendar never came).
+    const starts = (): Promise<{ all: number; timed: number }> =>
       page.evaluate(async () => {
-        let started = 0;
+        let all = 0;
+        let timed = 0;
+        const seconds = (text: string): number =>
+          text.endsWith('ms') ? parseFloat(text) / 1000 : parseFloat(text);
         const onStart = (event: AnimationEvent): void => {
+          const target = event.target;
           if (
-            event.target instanceof Element &&
-            event.target.classList.contains('ui-date-picker__popover')
+            !(target instanceof Element) ||
+            !target.classList.contains('ui-date-picker__popover')
           ) {
-            started += 1;
+            return;
           }
+          all += 1;
+          // The animation's own duration, read from the computed style of the element at the moment it starts (names and durations are lists, in step).
+          const style = getComputedStyle(target);
+          const names = style.animationName.split(',').map((part) => part.trim());
+          const durations = style.animationDuration.split(',').map((part) => part.trim());
+          const at = Math.max(0, names.indexOf(event.animationName));
+          if (seconds(durations[at % durations.length] ?? '0s') > 0) timed += 1;
         };
         const wait = (milliseconds: number): Promise<void> =>
           new Promise<void>((resolve) => {
@@ -491,16 +505,16 @@ test.describe('the date field in a browser: reflow, enlarged text, forced colour
         const drawn = document.querySelector('.ui-date-picker__popover') !== null;
         await wait(1000);
         document.removeEventListener('animationstart', onStart, true);
-        return drawn ? started : -1;
+        return drawn ? { all, timed } : { all: -1, timed: -1 };
       });
 
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    expect(await animations()).toBeGreaterThan(0);
+    expect((await starts()).timed).toBeGreaterThan(0);
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toBeHidden();
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    expect(await animations()).toBe(0);
+    expect((await starts()).all).toBe(0);
   });
 });
 
@@ -577,6 +591,14 @@ test.describe('the date field in a browser: what the one field adds', () => {
     await page.keyboard.press('Tab');
     await expect(noDay).toBeVisible();
     await expect(field(page)).toHaveValue('30/02/2026');
+    await expect(page.getByText('The page holds: no date')).toBeVisible();
+
+    // The 29th of February of a year that is not a leap year names the year (the Product Owner's decision of 7 November 2026, afternoon); every other such day keeps its words.
+    await field(page).fill('');
+    await page.keyboard.type('29022027');
+    await expect(page.getByText('2027 has no 29 February')).toBeVisible();
+    await expect(noDay).toBeHidden();
+    await expect(field(page)).toHaveValue('29/02/2027');
     await expect(page.getByText('The page holds: no date')).toBeVisible();
   });
 

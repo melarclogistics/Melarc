@@ -805,6 +805,7 @@ describe('the targets of this repository', () => {
     assert.deepEqual(
       opening.toSorted(),
       [
+        'frame-toaster.spec.ts',
         'my-work.spec.ts',
         'palette.spec.ts',
         'queue-summary.spec.ts',

@@ -99,6 +99,8 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *               minutes at a person's pace, counted by operation. It is skipped unless MELARC_MEASURE=1 (it takes about three and a half minutes).
  *   kit         the Melarc component kit of the showcase (`/__showcase/kit/<group>`, redesign step R5): WCAG 2.2 in both themes, sizes and looks, the keyboard,
  *               and what moves, against the development server; and, in a project of its own, the same pages built for production under the strict policy.
+ *   frame-toaster the application's one toaster in the signed-in frame (the follow-up of 7 November 2026, afternoon), against the development server: a toast is
+ *               raised through the module the application itself runs, which only the development server serves, so that no hook is put into the production build.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -332,6 +334,12 @@ export default defineConfig({
       name: `kit-policy-${engine}`,
       testMatch: 'kit-policy.spec.ts',
       use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The application's one toaster in the signed-in frame, against the development server (a toast is raised through the module that the application itself runs).
+      name: `frame-toaster-${engine}`,
+      testMatch: 'frame-toaster.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),
   webServer: [

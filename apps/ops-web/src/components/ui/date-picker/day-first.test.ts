@@ -79,11 +79,17 @@ describe('readDayFirst', () => {
   );
 
   // Break caught: a day that its month does not have moved to one that it does (30 February read as the 28th), accepted for the shape alone, or refused in words that do not
-  // name the day and the month the person typed.
+  // name the day and the month the person typed. The 29th of February of a year that is not a leap year names the year (the Product Owner's decision of 7 November 2026,
+  // afternoon): `2027 has no 29 February`, in the year as it was typed (four digits), and a year that only looks like a leap year (1900, 2100: not divisible by 400) is named too.
   it.each([
     ['30/02/2026', 'There is no 30 February'],
     ['31/02/2026', 'There is no 31 February'],
-    ['29/02/2027', 'There is no 29 February'],
+    ['29/02/2027', '2027 has no 29 February'],
+    ['29/02/2026', '2026 has no 29 February'],
+    ['29/02/2100', '2100 has no 29 February'],
+    ['29/02/1900', '1900 has no 29 February'],
+    ['29/02/0100', '0100 has no 29 February'],
+    ['30/02/2027', 'There is no 30 February'],
     ['30/02/2028', 'There is no 30 February'],
     ['31/04/2026', 'There is no 31 April'],
     ['31/06/2026', 'There is no 31 June'],
@@ -110,13 +116,18 @@ describe('readDayFirst', () => {
     });
   });
 
-  // Break caught: the 29th of February refused in a leap year, or the last day of a month refused.
-  it.each(['29/02/2028', '29/02/2024', '31/01/2026', '30/04/2026', '28/02/2027', '31/12/2026'])(
-    'reads %s, a last day, as a date',
-    (text) => {
-      expect(readDayFirst(text)?.ok).toBe(true);
-    },
-  );
+  // Break caught: the 29th of February refused in a leap year (2000 is one: it is divisible by 400), or the last day of a month refused.
+  it.each([
+    '29/02/2028',
+    '29/02/2024',
+    '29/02/2000',
+    '31/01/2026',
+    '30/04/2026',
+    '28/02/2027',
+    '31/12/2026',
+  ])('reads %s, a last day, as a date', (text) => {
+    expect(readDayFirst(text)?.ok).toBe(true);
+  });
 
   // Break caught: an empty field read as a mistake, which would shout at a person who has not begun.
   it('does not read an empty text at all', () => {
@@ -125,17 +136,23 @@ describe('readDayFirst', () => {
 
   // Break caught: a message for a mistake in a developer's words ("invalid input", "parse error", "ISO format") or one too long to read at a glance under a field.
   it('has words for each way a text can be wrong, in plain terms and without a technical word', () => {
-    for (const message of [...Object.values(DAY_FIRST_MESSAGES), noSuchDayMessage(31, 11)]) {
+    for (const message of [
+      ...Object.values(DAY_FIRST_MESSAGES),
+      noSuchDayMessage(31, 11, 2026),
+      noSuchDayMessage(29, 2, 2027),
+    ]) {
       expect(message).not.toMatch(/regex|format string|ISO|parse|invalid input/i);
       expect(message.length).toBeLessThan(80);
     }
   });
 
-  // Break caught: the two words the Product Owner chose for the two refusals of 7 November 2026 changed (a full stop added, a word changed), which a screen reader and a person
-  // would meet, and which the tests of the pages that show them look for.
+  // Break caught: the words the Product Owner chose for the refusals of 7 November 2026 changed (a full stop added, a word changed), which a screen reader and a person would
+  // meet, and which the tests of the pages that show them look for; or the year named for a day that is not the 29th of February, or left out of the 29th.
   it('refuses with the words the Product Owner chose', () => {
     expect(DAY_FIRST_MESSAGES.year).toBe('Enter the year in full, for example 2026');
-    expect(noSuchDayMessage(30, 2)).toBe('There is no 30 February');
+    expect(noSuchDayMessage(30, 2, 2026)).toBe('There is no 30 February');
+    expect(noSuchDayMessage(31, 4, 2027)).toBe('There is no 31 April');
+    expect(noSuchDayMessage(29, 2, 2027)).toBe('2027 has no 29 February');
   });
 });
 

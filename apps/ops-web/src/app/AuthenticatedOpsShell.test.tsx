@@ -6,6 +6,7 @@ import { installFakeApi, json, signedInApi, type FakeApi } from '../test-support
 import { renderApp } from '../test-support/render-app';
 import { sessionFixture } from '../test-support/session-fixture';
 import { wcagViolations } from '../test-support/wcag';
+import { dismissToast, showToast } from '../components/ui/toast/Toast';
 import { ANY_SIGNED_IN_SESSION, type SignedInRoute } from './navigation/route-registry';
 
 let api: FakeApi;
@@ -58,6 +59,10 @@ const REGISTRY: readonly SignedInRoute[] = [
 
 const signInStandIn = [{ path: 'sign-in', element: <h1 tabIndex={-1}>Sign-in stand-in</h1> }];
 
+/** The places toasts are drawn: Sonner's one region, named "Notifications". */
+const toasters = (): NodeListOf<Element> =>
+  document.querySelectorAll('section[aria-label^="Notifications"]');
+
 function open(permissions: readonly string[] | undefined, path = '/', routes = REGISTRY) {
   api = installFakeApi(
     signedInApi(
@@ -99,6 +104,37 @@ describe('the authenticated Ops shell: what it holds', () => {
     expect(main).not.toContainElement(sidebar);
     expect(main).not.toContainElement(bar);
     expect(bar).not.toContainElement(navigation());
+  });
+
+  // Break caught: no toaster in the frame, so that a toast a screen raises is never seen, or two of them, so that every toast is shown twice. The frame draws the one
+  // toaster of the application, at the bottom right, and it is still the one after the person has gone to another page of the shell.
+  it('draws the one toaster of the application, bottom right, and a toast that is raised is shown once', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    expect(toasters()).toHaveLength(1);
+    // It is drawn into the body, outside the main landmark: a sheet that hides the page from assistive technology would otherwise leave the whole of main exposed (a live region is
+    // never hidden, and neither is what holds it).
+    const region = screen.getByRole('region', { name: /^Notifications/ });
+    expect(region.parentElement).toBe(document.body);
+    expect(screen.getByRole('main')).not.toContainElement(region);
+
+    act(() => {
+      showToast({ tone: 'success', message: 'Request ACC-PR-7KQ2MZ booked.' });
+    });
+    expect(await screen.findAllByText('Request ACC-PR-7KQ2MZ booked.')).toHaveLength(1);
+    const list = document.querySelector('[data-sonner-toaster]');
+    expect(list).toHaveAttribute('data-y-position', 'bottom');
+    expect(list).toHaveAttribute('data-x-position', 'right');
+
+    await act(async () => {
+      await router.navigate('/admin/staff');
+    });
+    await screen.findByRole('heading', { name: 'Staff identities' });
+    expect(toasters()).toHaveLength(1);
+    expect(screen.getAllByText('Request ACC-PR-7KQ2MZ booked.')).toHaveLength(1);
+    act(() => {
+      dismissToast();
+    });
   });
 
   // Break caught: the sign-out control missing from a signed-in screen: it lives in the account menu of the top bar, which every screen carries.
@@ -325,6 +361,41 @@ describe('the authenticated Ops shell: where it is not', () => {
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
+  });
+
+  // Break caught: a toaster drawn for a person who is not signed in (nothing there raises a toast), or a toaster that stays when the person leaves the shell and the
+  // next screen draws another.
+  it('has no toaster where it is not, and takes its toaster with it', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    expect(toasters()).toHaveLength(1);
+
+    await act(async () => {
+      await router.navigate('/sign-in');
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
+    expect(toasters()).toHaveLength(0);
+  });
+
+  // Break caught: the showcase, which mounts a toaster of its own, drawn inside the frame that has one, so that its toasts are shown twice. The showcase's routes are
+  // beside the shell and not under it, so exactly one toaster is drawn there; and a second one mounted anywhere draws nothing (Toast.test.tsx), so that this holds
+  // whoever is added to the route tree.
+  it('is not around the showcase, which has its own toaster: one toaster there, and a toast is shown once', async () => {
+    open(BUNDLE_KEY_SETS['Senior Ops'], '/__showcase/kit/menus');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Kit showcase' }, { timeout: 10_000 }),
+    ).toBeVisible();
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
+    expect(toasters()).toHaveLength(1);
+    act(() => {
+      showToast({ tone: 'info', message: 'Raised on the showcase.' });
+    });
+    expect(await screen.findAllByText('Raised on the showcase.')).toHaveLength(1);
+    act(() => {
+      dismissToast();
+    });
   });
 
   it('leaves with the person: going to a page outside it takes the navigation away', async () => {

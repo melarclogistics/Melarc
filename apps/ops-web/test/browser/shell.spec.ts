@@ -546,6 +546,26 @@ test.describe('the authenticated Ops shell in a browser', () => {
     );
   });
 
+  // Break caught: no toaster in the signed-in frame (a toast that a screen raises is never seen), or two (every toast shown twice). The production build draws exactly one,
+  // a polite region named Notifications, under the strict policy: Sonner inserts a stylesheet when it loads, which the policy's one relaxation (inline style) allows, and
+  // the browser reports each violation, none may be raised.
+  test('draws the application’s one toaster, a polite region named Notifications', async ({
+    page,
+  }) => {
+    const seen = watchPage(page);
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    await page.goto('/');
+    await expect(primaryNav(page)).toBeVisible();
+
+    const toaster = page.locator('section[aria-label^="Notifications"]');
+    await expect(toaster).toHaveCount(1);
+    await expect(toaster).toHaveAttribute('aria-live', 'polite');
+    await expect(toaster).toHaveAttribute('aria-label', 'Notifications alt+T');
+    expect(violations).toEqual([]);
+    expect(seen.problems).toEqual([]);
+  });
+
   // Break caught: the entries not in the groups of the specification or not in their order, a group named by a heading that adds to the page's
   // outline, an entry with no picture (the same family of icons everywhere is the rule), or a picture that reaches a screen reader as a second name.
   test('lists the entries in groups, each a list named by its heading, each entry with an icon of the family that is decoration beside its name', async ({

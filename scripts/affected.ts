@@ -407,6 +407,8 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
   ],
   // My work: the landing, and the folder of the page itself.
   'my-work.spec.ts': ['apps/ops-web/src/app/pages/my-work/'],
+  // The application's one toaster in the signed-in frame (the follow-up of 7 November 2026, afternoon): it opens on My work, the landing, and raises a toast in it.
+  'frame-toaster.spec.ts': ['apps/ops-web/src/app/pages/my-work/'],
 };
 export const OPS_ENTRY = 'apps/ops-web/src/main.tsx';
 const OPS_PAGES = 'apps/ops-web/src/app/pages/';

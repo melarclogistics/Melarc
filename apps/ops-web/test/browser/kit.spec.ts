@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { watchPage, wcagViolations } from './support/page';
+import { settled, watchPage, wcagViolations } from './support/page';
 
 /**
  * The Melarc component kit in the development-only showcase (`/__showcase/kit/<group>`; redesign step R5; COMPONENT_PATTERNS section 37), in a real browser: the
@@ -959,13 +959,80 @@ test.describe('ActionMenu and Toast in a browser', () => {
     await expect(toasts(page)).toHaveCount(0);
   });
 
-  // Break caught: a toast that fails a rule in either theme, with an action showing.
+  // Break caught: two actions that squeeze the message into a few words beside them instead of standing under it, that a keyboard cannot reach in the order primary,
+  // secondary, dismiss, that are not told apart (the secondary one is the quieter), or that leave the toast on the screen after one of them is used.
+  test('has two actions under the message, told apart, reached from the keyboard in order, and either takes the toast away', async ({
+    page,
+  }) => {
+    await openKit(page, 'menus', { width: 1440 });
+    await page.getByRole('button', { name: 'With two actions' }).focus();
+    await page.keyboard.press('Enter');
+    const toast = page.locator('.ui-toast', { hasText: 'Request ACC-PR-4HT9WD booked.' });
+    await expect(toast).toBeVisible();
+    // Sonner slides a toast in: the boxes are read once it has arrived, or the message and the actions would be read at two moments of the slide.
+    await settled(page);
+
+    // Under the message and not beside it; the dismiss control is at the end of the toast, as it is with one action.
+    const message = await box(toast.locator('.ui-toast__message'));
+    const actions = await box(toast.locator('.ui-toast__actions'));
+    const dismiss = toast.getByRole('button', { name: 'Dismiss this message' });
+    expect(actions.y).toBeGreaterThanOrEqual(message.y + message.height - 1);
+    expect((await box(dismiss)).x).toBeGreaterThan(actions.x + actions.width - 1);
+    // The primary action is in the link colour, the secondary one in the quieter secondary text.
+    const primary = toast.getByRole('button', { name: 'Open', exact: true });
+    const secondary = toast.getByRole('button', { name: 'Book another', exact: true });
+    expect(await colourOf(primary, 'color')).toBe(
+      await resolvedColour(page, '--color-text-link', 'color'),
+    );
+    expect(await colourOf(secondary, 'color')).toBe(
+      await resolvedColour(page, '--color-text-secondary', 'color'),
+    );
+
+    // The keyboard: Alt+T moves to the toasts, and the Tab order is the primary action, the secondary one, then dismiss.
+    await page.keyboard.press('Alt+T');
+    for (let step = 0; step < 3; step += 1) {
+      if (await primary.evaluate((element) => element === document.activeElement)) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(primary).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(secondary).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dismiss).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(secondary).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toasts(page)).toHaveCount(0);
+
+    // The primary action takes it away too.
+    await page.getByRole('button', { name: 'With two actions' }).click();
+    await expect(toast).toBeVisible();
+    await primary.click();
+    await expect(toasts(page)).toHaveCount(0);
+  });
+
+  // Break caught: a toast with two actions that goes before the person can use either (WCAG 2.2.1): any action keeps it until it is dismissed.
+  test('stays with two actions until it is dismissed', async ({ page }) => {
+    await page.clock.install();
+    await openKit(page, 'menus');
+
+    await page.getByRole('button', { name: 'With two actions' }).click();
+    const kept = page.locator('.ui-toast', { hasText: 'Request ACC-PR-4HT9WD booked.' });
+    await expect(kept).toBeVisible();
+    await page.clock.runFor(120_000);
+    await expect(kept).toBeVisible();
+    await kept.getByRole('button', { name: 'Dismiss this message' }).click();
+    await expect(kept).toHaveCount(0);
+  });
+
+  // Break caught: a toast that fails a rule in either theme, with an action showing, and with two.
   for (const scheme of ['light', 'dark'] as const) {
     test(`has no violation with toasts showing, in the ${scheme} theme`, async ({ page }) => {
       await openKit(page, 'menus', { scheme });
       await page.getByRole('button', { name: 'With Undo' }).click();
       await page.getByRole('button', { name: 'Danger', exact: true }).click();
-      await expect(toasts(page)).toHaveCount(2);
+      await page.getByRole('button', { name: 'With two actions' }).click();
+      await expect(toasts(page)).toHaveCount(3);
 
       expect(await wcagViolations(page)).toEqual([]);
     });

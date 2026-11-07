@@ -30,8 +30,15 @@ export const DAY_FIRST_MESSAGES: Readonly<Record<'shape' | 'year' | 'calendar', 
   calendar: 'That day is not on the calendar. Check the day and the month.',
 };
 
-/** The words for a day that its month does not have: `There is no 30 February`. */
-export function noSuchDayMessage(day: number, month: number): string {
+/**
+ * The words for a day that its month does not have: `There is no 30 February`, and so for every such day but one. **The 29th of February in a year that is not a leap year
+ * names the year**, because that is the one that a person can mistake for a real day (the Product Owner's decision of 7 November 2026, afternoon): `2027 has no 29 February`.
+ * The year is written as it was typed, in four digits.
+ */
+export function noSuchDayMessage(day: number, month: number, year: number): string {
+  if (day === 29 && month === 2 && daysInMonth(year, 2) < 29) {
+    return `${String(year).padStart(4, '0')} has no 29 February`;
+  }
   return `There is no ${String(day)} ${monthName(month)}`;
 }
 
@@ -52,7 +59,8 @@ export function formatDayFirst(date: CalendarDate | null): string {
 
 /**
  * Reads a text strictly. An empty text is not read at all: it is no date, and no mistake. A text written whole but for a year of fewer than four digits is refused for its year
- * before anything else is said of it; a day that its month does not have is named (`There is no 30 February`).
+ * before anything else is said of it; a day that its month does not have is named (`There is no 30 February`; the 29th of February of a year that is not a leap year names the year,
+ * `2027 has no 29 February`).
  */
 export function readDayFirst(text: string): DayFirstReading | undefined {
   if (text === '') return undefined;
@@ -65,7 +73,7 @@ export function readDayFirst(text: string): DayFirstReading | undefined {
   const [day, month, year] = [Number(match[1]), Number(match[2]), Number(match[3])];
   if (isRealDate(year, month, day)) return { ok: true, date: new CalendarDate(year, month, day) };
   if (year >= 1 && month >= 1 && month <= 12 && day >= 29 && day <= 31) {
-    return { ok: false, problem: 'no-such-day', message: noSuchDayMessage(day, month) };
+    return { ok: false, problem: 'no-such-day', message: noSuchDayMessage(day, month, year) };
   }
   return { ok: false, problem: 'calendar', message: DAY_FIRST_MESSAGES.calendar };
 }
