@@ -85,7 +85,9 @@ describe('SidePanel, beside the list', () => {
   });
 
   // Break caught: a panel with no name (the code), one that claims to take over the page (modal), or one that hides the summary from the keyboard.
+  // (It asks for less motion for the reason the test below gives: `toBeVisible` reads the opacity of the entrance's first frame.)
   it('is a dialog named by the code that does not take over the page, with the summary in it', async () => {
+    setScreen(REDUCED_AND_WIDE);
     const user = userEvent.setup();
     render(<Page />);
 
@@ -208,7 +210,10 @@ describe('SidePanel, beside the list', () => {
   });
 
   // Break caught: the heading showing the status or the link when the page gave none: nothing is drawn for what was not given.
+  // The test is not about the entrance, so it asks for less motion: with the entrance on, the panel fades in from opacity 0 over 280 ms and `toBeVisible`
+  // reads that opacity, so an assertion made before the first frame failed whenever the whole file ran slowly.
   it('draws the status and the link only when it is given them', async () => {
+    setScreen(REDUCED_AND_WIDE);
     const { rerender } = render(
       <MemoryRouter>
         <SidePanel open code="ACC-PR-7KQ2MZ" onClose={vi.fn()}>
