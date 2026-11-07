@@ -359,7 +359,9 @@ describe('a live session', () => {
     ).toBe(2);
   });
 
-  it('refuses 429 RATE_LIMITED once the bucket is spent, with no Retry-After and nothing served', async () => {
+  // Break caught (A2 of the audit; AC-SLICE-000-131): the refusal of a session that has one leaving the server without the wait the limiter decided (nothing,
+  // a nought, or a figure that is not whole seconds inside the window), so that a client cannot honour it.
+  it('refuses 429 RATE_LIMITED once the bucket is spent, with a Retry-After of whole seconds and nothing served', async () => {
     const persona = await staffPersona(machinery, admin);
     const limit = Number(
       (
@@ -377,7 +379,10 @@ describe('a live session', () => {
     expect(limit).toBe(120);
     expect(spent.status).toBe(429);
     expect(spent.body).toMatchObject({ code: 'RATE_LIMITED' });
-    expect(spent.headers.get('retry-after')).toBeNull();
+    // The window is 60 seconds and the 120 requests were made a moment ago: the oldest leaves within it, and never in less than a second.
+    const wait = spent.headers.get('retry-after');
+    expect(wait).toMatch(/^[1-9][0-9]?$/);
+    expect(Number(wait)).toBeLessThanOrEqual(60);
     expect(handled).toBe(0);
   }, 60_000);
 

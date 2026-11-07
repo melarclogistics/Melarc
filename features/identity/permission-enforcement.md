@@ -280,10 +280,12 @@ Then VALIDATION_FAILED is always 400 and is declared under 422 by no operation,
 And CSRF_VALIDATION_FAILED is 403,
 And IDEMPOTENCY_KEY_CONFLICT is 409 and is declared on every operation that takes an Idempotency-Key,
 And a named business-rule code is 422, except MFA_ENROLMENT_REQUIRED, which is 403,
-And SESSION_SUPERSEDED is answered 401 to a displaced vendor session by every operation that authenticates a vendor session, and is declared by none.
+And SESSION_SUPERSEDED is answered 401 to a displaced vendor session by every operation that authenticates a vendor session, and is declared by none,
+And RATE_LIMITED is 429 and is declared on every operation the authenticated limiter covers (every operation that needs a session: the route inventory of the running API says which), by the contract's shared response `RateLimited` (an operation reached before a session exists answers it, where a bucket limits it, with `RateLimitedAnonymous`: errors-and-enums.md section 4), with RATE_LIMITED in its x-error-codes and in the description the application gives of itself, and a new operation that needs a session cannot leave it out,
+And the 429 told to a caller who has a session carries Retry-After in whole seconds from 1 to 60, and a 429 told before a session exists (the other five buckets, and a full hash admission) carries none (errors-and-enums.md §4).
 ```
 
-**Governs:** [errors-and-enums.md](../../contracts/errors-and-enums.md) §4 · **Surface:** backend · **Test level:** contract
+**Governs:** [errors-and-enums.md](../../contracts/errors-and-enums.md) §4, [settings.md](../../contracts/settings.md) §7.7 · **Surface:** backend · **Test level:** contract
 
 ### `AC-SLICE-000-132` — The reason catalogue is readable for the operations and branches that take a reason, and by no one else
 

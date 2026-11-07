@@ -1074,7 +1074,8 @@ const crossingsOf = (actorId: string) =>
 /**
  * The lookup has no limiter of its own (the audit of 7 November 2026, A5): the authentication step counts every request of a session in its one bucket of
  * API requests (`rate_limit_authenticated_api`, settings.md section 7.7), and the lookup, which declares `RATE_LIMITED`, answers the request past the limit
- * with the documented 429. The sessions of the other tests of this file are not used: each has its own bucket, and this test spends a whole one.
+ * with the documented 429, which carries a `Retry-After` (A2 of the audit, `AC-SLICE-000-131`). The sessions of the other tests of this file are not
+ * used: each has its own bucket, and this test spends a whole one.
  */
 describe('a lookup is counted in the session’s bucket of API requests (AC-LOOKUP-14)', () => {
   // Break caught: no limit on the lookup (a typed search that asks as fast as it likes), a limit that is not the setting's, a bucket of the lookup's own (the
@@ -1105,7 +1106,10 @@ describe('a lookup is counted in the session’s bucket of API requests (AC-LOOK
     // The next, of a text that would cross both hubs for a Platform Admin without a hub of its own, is refused and does nothing.
     const spent = await ask(asker, 'zuko');
     expect([spent.status, codeOf(spent)]).toEqual([429, 'RATE_LIMITED']);
-    expect(spent.header('retry-after')).toBeNull();
+    // It is told when to come back (AC-SLICE-000-131): whole seconds inside the limiter's 60-second window, and never nought.
+    const wait = spent.header('retry-after');
+    expect(wait).toMatch(/^[1-9][0-9]?$/);
+    expect(Number(wait)).toBeLessThanOrEqual(60);
     expect(spent.text).not.toContain('items');
     expect(
       await routes.rows(

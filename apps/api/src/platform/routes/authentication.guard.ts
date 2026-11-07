@@ -24,6 +24,7 @@ import { ErrorCode } from '../http/error-codes.js';
 import { credentialModesOf } from '../openapi/operation-statements.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
 import { currentRequestContext } from '../logging/request-context.js';
+import { needsSession } from './access-declaration.js';
 import { accessDetailOf, accessKindOf } from './access-kind.js';
 
 /**
@@ -36,7 +37,9 @@ import { accessDetailOf, accessKindOf } from './access-kind.js';
  *   the operation's schema.
  * - **The authenticated-API bucket is applied here, to the session just found** (`rate_limit_authenticated_api`, keyed on the
  *   session id): keyed on a credential that had not been verified it would let any caller invent keys and fill the limiter's table
- *   (plan §7.16, finding on step 1). A limiter that cannot decide, or none composed, fails closed (`503`).
+ *   (plan §7.16, finding on step 1). A limiter that cannot decide, or none composed, fails closed (`503`). Its refusal is the
+ *   `429 RATE_LIMITED` **with `Retry-After`** (`ApiException.rateLimited`; `AC-SLICE-000-131`), and every route that needs a session
+ *   (`needsSession`) is covered, which the description states (`rate-limit-statement.ts`) and `rate-limit-coverage.test.ts` holds.
  * - **A credential with no authenticator composed is not judged by guess**: `503`, the operational failure. A request that presents
  *   no credential is refused `401` whether or not one is composed.
  * - The session is kept beside the request (`authenticatedSessionOf`) for the slots after this one. A route that is anonymous or
@@ -57,7 +60,7 @@ export class AuthenticationGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const kind = accessKindOf(this.reflector, context);
-    if (kind !== 'self' && kind !== 'permission') return true;
+    if (!needsSession(kind)) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
     const credential = presentedCredential(request.headers, request.rawHeaders);
@@ -90,7 +93,8 @@ export class AuthenticationGuard implements CanActivate {
       'rate_limit_authenticated_api',
       outcome.authenticated.session.id,
     );
-    if (!decision.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
+    // The caller has a session, so the refusal tells it when to come back (`Retry-After`, A2 of the audit; errors-and-enums.md §4).
+    if (!decision.allowed) throw ApiException.rateLimited(decision.retryAfterSeconds);
     // The sub-ceiling inside the bucket (settings.md §7.7; R76), for an operation that states it can cause an outbound text: the same session key, a counter of its
     // own, decided here with no transaction of this request's open because the limiter's admission is its own. A request is counted when it is admitted and stays
     // counted whatever the operation then answers; one the ceiling refuses is counted nowhere in it and never reaches the operation, though it has already taken
@@ -100,7 +104,7 @@ export class AuthenticationGuard implements CanActivate {
         'provider_initiating_operation_ceiling_per_minute',
         outcome.authenticated.session.id,
       );
-      if (!ceiling.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
+      if (!ceiling.allowed) throw ApiException.rateLimited(ceiling.retryAfterSeconds);
     }
 
     holdAuthenticatedSession(request, outcome.authenticated);

@@ -260,7 +260,7 @@ And a request outside the window is not returned by the name through any other w
 ```text
 Given a staff session that has asked for as many lookups in a minute as the setting rate_limit_authenticated_api allows,
 When it asks one more in that minute,
-Then the answer is RATE_LIMITED (429, no Retry-After), nothing is read and no event is written,
+Then the answer is RATE_LIMITED (429, with the Retry-After that AC-SLICE-000-131 gives every such answer), nothing is read and no event is written,
 And the lookups were counted in the session's one bucket, shared with every other operation the session asks (a lookup has no bucket of its own and no other limit),
 And another session is not limited by it.
 ```

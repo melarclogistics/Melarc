@@ -44,6 +44,8 @@ export const FINDING_CODES = [
   'SCHEMA_ACCESS',
   'SCHEMA_UNMODELLED',
   'SCHEMA_SHAPE',
+  // The contract alone: a 429 that an operation must answer and does not (the rate limit, declared: errors-and-enums.md section 4).
+  'RATE_LIMIT_DECLARATION',
 ] as const;
 
 export type FindingCode = (typeof FINDING_CODES)[number];

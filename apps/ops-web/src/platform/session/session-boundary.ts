@@ -1,5 +1,6 @@
 import { apiErrorFromResponse, type BrowserApiClient } from '@melarc/api-client/browser';
 
+import { parseRetryAfter } from '../problem/rate-limit';
 import type { SessionStore } from './session-store';
 
 /**
@@ -24,6 +25,13 @@ export interface SessionBoundaryOptions {
    * before it, are stale and do not call it.
    */
   readonly onEnded: (code: string) => void;
+  /**
+   * The API said, to a request sent for the session that is current, that the request was too fast (`429`), with the wait it asked for in
+   * `Retry-After` (whole seconds) when it gave a usable one. The page holds its automatic reads for that wait (`platform/query/read-hold.ts`).
+   * It is called for every such answer to a signed-in session, from any call (a query, a mutation or a direct call) and never for a stale answer or
+   * for a request made while nobody is signed in (a refused sign-in has no wait to keep).
+   */
+  readonly onRateLimited?: (askedSeconds: number | undefined) => void;
 }
 
 type Verb = (
@@ -41,6 +49,8 @@ type Verb = (
  *   whatever it says. A late error from person A's session cannot end person B's, and a late success cannot show, cache or hold
  *   anything for B;
  * - an answer to a request sent for the current session that says the session ended ends it, once, whichever kind of call it was;
+ * - an answer to a request sent for the current session that says the request was too fast (`429`) tells `onRateLimited` the wait it asked for,
+ *   whichever kind of call it was (the page then holds its automatic reads; it does not end the session or fail anything else);
  * - every other failure (a refused permission, a refused sign-in, a validation, a fault, a connection that dropped) is the caller's
  *   to handle, and none of them ends a session.
  *
@@ -96,6 +106,9 @@ export class SessionBoundary {
     if (!result.response.ok && store.getState().status === 'signed-in') {
       const failure = apiErrorFromResponse(result.response, result.error);
       if (failure.endsSession && failure.code !== undefined) this.#options.onEnded(failure.code);
+      else if (result.response.status === 429) {
+        this.#options.onRateLimited?.(parseRetryAfter(result.response.headers.get('Retry-After')));
+      }
     }
     return result;
   }

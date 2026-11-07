@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.96.0
- *   SHA-256 7d68728f22cf8755e7327121c5554f5baea72e78c97eaae5a5636cb987e8b845 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.97.0
+ *   SHA-256 76585fb310758b6838df3c7761fd37e2efd886ffc78d136f668adc79b4e4f64d (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -12663,7 +12663,31 @@ export interface components {
             };
         };
         /**
-         * @description 429 - rate limited. Per credential, tightest on the shared vendor login and
+         * @description `429` `RATE_LIMITED` - **the one response of every operation the authenticated limiter covers**,
+         *     which is every operation that needs a session (Product Owner, 7 November 2026, A2 of the audit;
+         *     `AC-SLICE-000-131`). The request was counted in the session's one bucket of authenticated API
+         *     requests (`rate_limit_authenticated_api`, settings.md 7.7: the limit is that setting's and is not
+         *     restated here) or, for the five operations that cause a text, in the tighter ceiling inside it
+         *     (`provider_initiating_operation_ceiling_per_minute`), and the operation did not run.
+         *
+         *     **`Retry-After` says when to try again**: whole seconds, from 1 to 60, the time until the
+         *     limiter's 60-second window admits this session again, rounded up, never zero. It is sent on every
+         *     such answer. A refused request changes nothing, so asking again early is refused again and does
+         *     not make the wait longer. The operations reached before a session exists declare
+         *     `RateLimitedAnonymous` instead, whose answer carries no wait.
+         */
+        RateLimited: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description 429 - rate limited, **before a session exists**: the sign-in, second-step, recovery and rider-challenge
+         *     buckets and the redemption of a grant. Per credential, tightest on the shared vendor login and
          *     the rider device. The figures were set at MSC-DEC-371 (OQ-067 closed 5 September 2026)
          *     onto the six buckets and eight keys MSC-DEC-285 created at settings.md 7.7 (OQ-077
          *     closed); the RESPONSE was declarable before either landed, which is why it was
@@ -12672,8 +12696,12 @@ export interface components {
          *     **It is also the answer when bounded hash work has no free slot** (Product decision, 8 October
          *     2026): the request is refused at once, without verification and without moving any credential
          *     counter, so overload cannot be turned into a lockout.
+         *
+         *     **It carries no `Retry-After`** (errors-and-enums.md 4): a wait told to a caller who is not signed
+         *     in tells an attacker how long to wait. An operation that needs a session declares `RateLimited`,
+         *     whose answer does carry one (Product Owner, 7 November 2026).
          */
-        RateLimited: {
+        RateLimitedAnonymous: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12892,7 +12920,7 @@ export interface components {
         CacheControlNoStore: "no-store";
         /** @description Opaque record version. Send back as `If-Match` on the next mutation. */
         ETag: string;
-        /** @description Whole seconds the client should wait before it tries again (`TrustDataUnavailable`). */
+        /** @description Whole seconds the client should wait before it tries again (`TrustDataUnavailable`, and `RateLimited`, which is the answer to a caller who has a session and says from 1 to 60). */
         RetryAfter: number;
     };
     pathItems: never;
@@ -12933,6 +12961,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listPickupRequests: {
@@ -12972,6 +13001,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createPickupRequest: {
@@ -13034,6 +13064,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupRequest: {
@@ -13062,6 +13093,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmPickupRequest: {
@@ -13216,6 +13248,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reassignPickupRequestHub: {
@@ -13286,6 +13319,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveCutoffException: {
@@ -13357,6 +13391,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     amendPickupRequest: {
@@ -13427,6 +13462,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalatePickupRequest: {
@@ -13498,6 +13534,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     extendPickupAttempts: {
@@ -13569,6 +13606,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     waiveCancellationCharge: {
@@ -13609,6 +13647,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestOnePackageException: {
@@ -13642,6 +13681,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveOnePackageException: {
@@ -13671,6 +13711,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupStop: {
@@ -13699,6 +13740,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     arriveAtPickupStop: {
@@ -13760,6 +13802,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCollection: {
@@ -13829,6 +13872,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reportPickupFailure: {
@@ -13914,6 +13958,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     skipPickupStop: {
@@ -14021,6 +14066,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getHubIntake: {
@@ -14047,6 +14093,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     acquireIntakeLock: {
@@ -14072,6 +14119,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitBlindCount: {
@@ -14152,6 +14200,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     recordIntakeCondition: {
@@ -14222,6 +14271,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getIntakeSummary: {
@@ -14248,6 +14298,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     itemizeOrder: {
@@ -14330,6 +14381,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getOrder: {
@@ -14357,6 +14409,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestPayerCorrection: {
@@ -14428,6 +14481,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approvePayerCorrection: {
@@ -14497,6 +14551,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeHubIntake: {
@@ -14567,6 +14622,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listPickupManifests: {
@@ -14602,6 +14658,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createPickupManifest: {
@@ -14664,6 +14721,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupManifest: {
@@ -14692,6 +14750,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelPickupManifest: {
@@ -14763,6 +14822,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setManifestStopOrder: {
@@ -14833,6 +14893,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assignRider: {
@@ -14873,6 +14934,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     dispatchManifest: {
@@ -14945,6 +15007,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateRunCustodyHandover: {
@@ -14985,6 +15048,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     acceptRunCustodyHandover: {
@@ -15056,6 +15120,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     failRunCustodyHandover: {
@@ -15127,6 +15192,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRunCustodyHandovers: {
@@ -15160,6 +15226,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRunCustodyHandover: {
@@ -15188,6 +15255,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveHandshake: {
@@ -15253,6 +15321,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     disputeCollection: {
@@ -15318,6 +15387,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitHubHandover: {
@@ -15387,6 +15457,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateHandshake: {
@@ -15481,6 +15552,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestSmsHandshakeFallback: {
@@ -15611,6 +15683,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     adjudicateDiscrepancy: {
@@ -15649,6 +15722,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     staffSignIn: {
@@ -15705,7 +15779,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeStaffMfaSignIn: {
@@ -15752,7 +15826,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     listTrustedBrowsers: {
@@ -15783,6 +15857,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeTrustedBrowser: {
@@ -15819,6 +15894,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getQueueSummary: {
@@ -15845,6 +15921,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     lookupRecords: {
@@ -15899,6 +15976,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeStaffTrustedBrowsers: {
@@ -15964,6 +16042,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     riderSignIn: {
@@ -15991,7 +16070,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     vendorSignIn: {
@@ -16024,7 +16103,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     getCurrentSession: {
@@ -16046,6 +16125,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     signOut: {
@@ -16070,6 +16150,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listSessions: {
@@ -16099,6 +16180,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeSession: {
@@ -16131,6 +16213,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestCredentialRecovery: {
@@ -16159,7 +16242,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeCredentialRecovery: {
@@ -16192,7 +16275,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     revokeRiderDevice: {
@@ -16222,6 +16305,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRecipientConfirmation: {
@@ -16246,6 +16330,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordConfirmationAttempt: {
@@ -16309,6 +16394,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalateRecipientConfirmation: {
@@ -16372,6 +16458,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDeliveryRuns: {
@@ -16399,6 +16486,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createDeliveryRun: {
@@ -16460,6 +16548,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getDeliveryRun: {
@@ -16484,6 +16573,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setDeliveryStopOrder: {
@@ -16522,6 +16612,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assignDeliveryRider: {
@@ -16559,6 +16650,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     dispatchDeliveryRun: {
@@ -16604,6 +16696,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     startDeliveryRun: {
@@ -16637,6 +16730,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAssignableStaffRoleBundles: {
@@ -16661,6 +16755,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listStaffIdentities: {
@@ -16694,6 +16789,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createStaffIdentity: {
@@ -16756,6 +16852,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getStaffIdentity: {
@@ -16783,6 +16880,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveStaffIdentity: {
@@ -16823,6 +16921,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     proposeBundleChange: {
@@ -16862,6 +16961,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveBundleChange: {
@@ -16894,6 +16994,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEvidence: {
@@ -16957,6 +17058,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeEvidenceUpload: {
@@ -16992,6 +17094,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEvidenceRetrievalAuthorization: {
@@ -17021,6 +17124,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     arriveAtDeliveryStop: {
@@ -17079,6 +17183,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordRecipientCashPayment: {
@@ -17142,6 +17247,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestDeliveryOtp: {
@@ -17167,6 +17273,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeDeliveryStopDelivered: {
@@ -17235,6 +17342,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     authoriseDeliveryWithoutOtp: {
@@ -17272,6 +17380,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getCarrierHandoff: {
@@ -17298,6 +17407,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCarrierHandoff: {
@@ -17379,6 +17489,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCarrierHandoffs: {
@@ -17411,6 +17522,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordHandoffOutcome: {
@@ -17480,6 +17592,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     clearOutboundForDispatch: {
@@ -17545,6 +17658,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCourierProviders: {
@@ -17575,6 +17689,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     registerCourierProvider: {
@@ -17636,6 +17751,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deactivateCourierProvider: {
@@ -17670,6 +17786,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reactivateCourierProvider: {
@@ -17704,6 +17821,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listApprovedAgents: {
@@ -17734,6 +17852,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveAgent: {
@@ -17795,6 +17914,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     withdrawAgentApproval: {
@@ -17829,6 +17949,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     failDeliveryStop: {
@@ -17893,6 +18014,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openCashHandover: {
@@ -17954,6 +18076,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmCashHandover: {
@@ -17992,6 +18115,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveCashVariance: {
@@ -18029,6 +18153,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeStaffCredentialSetup: {
@@ -18057,7 +18182,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeMfaEnrolment: {
@@ -18085,7 +18210,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     resetStaffMfa: {
@@ -18129,6 +18254,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reissueStaffCredentialSetup: {
@@ -18168,6 +18294,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRiders: {
@@ -18201,6 +18328,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRider: {
@@ -18227,6 +18355,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     registerRiderDevice: {
@@ -18291,6 +18420,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeRiderDeviceEnrolment: {
@@ -18317,7 +18447,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
             503: components["responses"]["TrustDataUnavailable"];
         };
     };
@@ -18344,7 +18474,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeVendorCredentialSetup: {
@@ -18374,7 +18504,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     requestAdditionalDeviceGrant: {
@@ -18464,7 +18594,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     listVendorDevices: {
@@ -18488,6 +18618,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeVendorDevice: {
@@ -18522,6 +18653,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     beginMfaReenrolment: {
@@ -18550,7 +18682,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     recoverStaffCredential: {
@@ -18594,6 +18726,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listVendorAccounts: {
@@ -18627,6 +18760,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getVendorAccount: {
@@ -18654,6 +18788,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recoverVendorCredential: {
@@ -18696,6 +18831,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reissueVendorCredentialSetup: {
@@ -18735,6 +18871,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reregisterRiderDevice: {
@@ -18777,6 +18914,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reviseDeliveryCommitment: {
@@ -18845,6 +18983,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDeliveryCommitments: {
@@ -18876,6 +19015,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     overrideServiceWindow: {
@@ -18939,6 +19079,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assessParcelHandling: {
@@ -18969,6 +19110,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestVerificationFallback: {
@@ -19031,6 +19173,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordNextStopContact: {
@@ -19094,6 +19237,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordDoorstepContact: {
@@ -19157,6 +19301,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getStopPaymentDemand: {
@@ -19182,6 +19327,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listOperationalPaymentDemands: {
@@ -19213,6 +19359,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiatePaymentCollection: {
@@ -19273,6 +19420,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     authorizePaymentFallbackWhileUnresolved: {
@@ -19336,6 +19484,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPaymentCollection: {
@@ -19361,6 +19510,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     receiveHubtelPaymentCallback: {
@@ -19414,6 +19564,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     scheduleRedelivery: {
@@ -19477,6 +19628,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelRedelivery: {
@@ -19540,6 +19692,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateReturn: {
@@ -19600,6 +19753,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestReturnOtp: {
@@ -19625,6 +19779,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeReturnHandover: {
@@ -19688,6 +19843,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     proposeAdjustmentResolution: {
@@ -19752,6 +19908,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideAdjustmentResolution: {
@@ -19816,6 +19973,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitVendorContactAssistance: {
@@ -19877,6 +20035,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideDeliveryLocationChange: {
@@ -19901,6 +20060,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestDeliveryLocationChange: {
@@ -19962,6 +20122,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmManualPayment: {
@@ -20025,6 +20186,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRoadExpenses: {
@@ -20053,6 +20215,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createRoadExpense: {
@@ -20114,6 +20277,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideRoadExpense: {
@@ -20145,6 +20309,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRunCashSummary: {
@@ -20170,6 +20335,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listHubCashReconciliations: {
@@ -20201,6 +20367,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordHubCashCount: {
@@ -20264,6 +20431,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveHubCashVariance: {
@@ -20295,6 +20463,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCashDisposition: {
@@ -20359,6 +20528,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createVendorOrganization: {
@@ -20420,6 +20590,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideVendorOrganization: {
@@ -20458,6 +20629,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     enableVendorAllowance: {
@@ -20495,6 +20667,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     disableVendorAllowance: {
@@ -20532,6 +20705,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     suspendVendor: {
@@ -20570,6 +20744,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reactivateVendor: {
@@ -20607,6 +20782,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     terminateVendor: {
@@ -20644,6 +20820,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideHeldParcelDisposition: {
@@ -20681,6 +20858,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalateHeldParcel: {
@@ -20718,6 +20896,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listSecurityRiskHolds: {
@@ -20750,6 +20929,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openSecurityRiskHold: {
@@ -20817,6 +20997,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     clearSecurityRiskHold: {
@@ -20883,6 +21064,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     findAdHocSender: {
@@ -20911,6 +21093,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listVendorPickupLocations: {
@@ -20940,6 +21123,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createVendorPickupLocation: {
@@ -21004,6 +21188,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateVendorPickupLocation: {
@@ -21042,6 +21227,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setDefaultVendorPickupLocation: {
@@ -21075,6 +21261,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deactivateVendorPickupLocation: {
@@ -21108,6 +21295,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getVendorOperationalEligibility: {
@@ -21133,6 +21321,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getDailyOperationsCashReport: {
@@ -21161,6 +21350,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listParcelCustodyReturns: {
@@ -21192,6 +21382,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openParcelCustodyReturn: {
@@ -21253,6 +21444,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getParcelCustodyReturn: {
@@ -21279,6 +21471,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmParcelCustodyReturn: {
@@ -21349,6 +21542,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveParcelCustodyVariance: {
@@ -21413,6 +21607,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listReasonDefinitions: {
@@ -21445,6 +21640,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertReasonDefinition: {
@@ -21476,6 +21672,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAccountingExports: {
@@ -21513,6 +21710,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestAccountingExport: {
@@ -21544,6 +21742,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getAccountingExport: {
@@ -21572,6 +21771,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createAccountingExportRetrievalAuthorization: {
@@ -21601,6 +21801,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
 }

@@ -1862,6 +1862,8 @@ acted.
   `unavailable`, `session-ended`, `stale`) and words it from a table keyed by **operation, context and code**; the most specific rule
   wins, and a rule for a whole operation does not speak over a code that has a meaning of its own. The generic wording is proposed
   for the Product Owner to review as part of the composed screens. A request id is shown as a reference, for a person to quote.
+  A `rate-limited` problem of a signed-in call carries the wait the API asked for and holds the automatic reads for it; its words and
+  its rules are [the Ops surface's](../surfaces/ops-portal.md#8-the-nine-interface-states).
 - **The nine states are asked of every screen**: `describeInterfaceStates(screen, {...})` fails the screen's test unless each of the
   nine is tested or marked not applicable with a reason of a sentence. Offline is excused for every screen, once, in the words of the
   specification.

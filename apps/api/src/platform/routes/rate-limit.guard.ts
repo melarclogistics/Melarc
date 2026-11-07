@@ -20,8 +20,9 @@ import { LIMIT_PARTITIONS, type LimitPartitions } from './limit-partitions.js';
  * Step 1 of the refusal order (permission-enforcement.md §5.1; `AC-SLICE-000-130`): the rate limit, **before anything is verified or
  * counted**. For a pre-authentication operation that names a bucket it takes the bucket's identifier from the body with a bounded
  * extraction, without the validation of step 8, puts it in the bucket's canonical form, and asks the authoritative limiter. A
- * refusal is `429 RATE_LIMITED` (no `Retry-After`: errors-and-enums.md §4), and consumption is the limiter's own commit, which does not
- * wait for what the request goes on to do.
+ * refusal is `429 RATE_LIMITED` with **no `Retry-After`**: only a caller who has a session is told when to come back
+ * (`ApiException.rateLimited`, the authentication guard; errors-and-enums.md §4), because a wait told to a caller who is not signed in tells
+ * an attacker how long to wait. Consumption is the limiter's own commit, which does not wait for what the request goes on to do.
  *
  * - **Where no identifier can be taken** (no body, not an object, absent, not text, empty, over its bound, a body that could not be
  *   parsed), the request meets the coarse admission limits of the transport and is neither counted nor refused for it.

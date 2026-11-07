@@ -417,8 +417,9 @@ describe('the rate limit comes first (AC-SLICE-000-130, step 1)', () => {
     ]);
   });
 
-  // Break caught (errors-and-enums.md §4): a Retry-After on a 429, which tells an attacker how long to wait.
-  it('answers 429 with no Retry-After', async () => {
+  // Break caught (errors-and-enums.md §4): a Retry-After on a 429 told before a session exists, which tells an attacker how long to wait. (The 429
+  // told to a caller who has a session carries one: AC-SLICE-000-131, `authentication.guard.test.ts`.)
+  it('answers a 429 before a session exists with no Retry-After', async () => {
     const app = await start();
     for (let index = 0; index < LIMIT_PER_MINUTE; index += 1) {
       await call(app, 'POST', 'limited', { email: 'ada@example.test' });

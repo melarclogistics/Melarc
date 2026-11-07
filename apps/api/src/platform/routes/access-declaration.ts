@@ -32,6 +32,17 @@ export const ACCESS_DETAIL_KEY = 'melarc:access-detail';
 export type AccessDeclaration = 'technical' | 'anonymous' | 'self' | 'permission';
 
 /**
+ * Whether a route needs a session: it is `self` or `permission`. These are exactly the routes the authentication guard authenticates and then
+ * counts in the authenticated-API bucket (`rate_limit_authenticated_api`, settings.md §7.7), the routes whose `429` carries `Retry-After`
+ * (errors-and-enums.md §4), and the routes whose description states that `429` (`platform/openapi/rate-limit-statement.ts`). The guard, the
+ * description and `rate-limit-coverage.test.ts` all ask this one question, so a route cannot be counted by the limiter and left out of
+ * what the application says of itself, and a new kind of route has to decide here.
+ */
+export function needsSession(kind: AccessDeclaration | undefined): boolean {
+  return kind === 'self' || kind === 'permission';
+}
+
+/**
  * The bucket an anonymous operation is limited in, and the identifier it is keyed on: taken from the body with a bounded
  * extraction before the body is validated (`boundedIdentifier`), and put into the canonical form the bucket's key uses by
  * `canonical` (lower-casing an email, reading a phone number in its canonical form belong to the credential rules, S0.3).

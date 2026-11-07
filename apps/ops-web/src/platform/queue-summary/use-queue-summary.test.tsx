@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { errorResponse, installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import { renderWithProviders } from '../../test-support/render-providers';
+import { holdOf } from '../query/read-hold';
 import {
   useQueueSummary,
   useRefreshQueueSummary,
@@ -301,5 +302,105 @@ describe('what is kept', () => {
     await waitFor(() => {
       expect(view.queryClient.getQueryData(['queue-summary'])).toBeUndefined();
     });
+  });
+});
+
+describe('when the API has asked the page to wait (a 429 with Retry-After; A2 of the audit)', () => {
+  /** The shell as it is wired: the read on return, the figures, and a refresh the person asks for. */
+  function Shell() {
+    const navigate = useNavigate();
+    const { pathname } = useLocation();
+    const refresh = useRefreshQueueSummary();
+    useRefreshQueueSummaryOnReturn(pathname);
+    return (
+      <>
+        <Asker />
+        <button
+          type="button"
+          onClick={() => {
+            void navigate('/pickup-requests');
+          }}
+        >
+          Go to the queue
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void navigate('/manifests');
+          }}
+        >
+          Go to the manifests
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void refresh();
+          }}
+        >
+          Refresh
+        </button>
+      </>
+    );
+  }
+
+  // Break caught: the read on return sent while the API has asked the page to wait (the load it refused), sent for every page returned to when the wait
+  // is over, never sent, or sent again by itself; or the refresh the person asks for held back.
+  it('reads on return once, when the wait is over, and never holds the refresh the person asks for', async () => {
+    api = installFakeApi({ [SUMMARY]: answering() });
+    const { user, queryClient } = renderWithProviders(<Shell />, { signedIn: true });
+    await screen.findByText('Waiting: 1');
+    act(() => {
+      holdOf(queryClient).hold(30);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Go to the queue' }));
+    await user.click(screen.getByRole('button', { name: 'Go to the manifests' }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reads()).toBe(1);
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByText('Waiting: 2')).toBeVisible();
+    expect(reads()).toBe(2);
+
+    act(() => {
+      holdOf(queryClient).release();
+    });
+    expect(await screen.findByText('Waiting: 3')).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reads()).toBe(3);
+  });
+
+  // Break caught (no automatic retry loop): a summary refused with a 429 read again by the page when the wait is over, and again, at the pace of the
+  // server's patience.
+  it('is not read again by itself after a 429, however long the wait', async () => {
+    let answers = 0;
+    api = installFakeApi({
+      [SUMMARY]: () => {
+        answers += 1;
+        return answers === 1
+          ? json(200, { queues: [] })
+          : json(
+              429,
+              { code: 'RATE_LIMITED', message: 'Diagnostic text.', request_id: 'req-test-429' },
+              { 'Retry-After': '1' },
+            );
+      },
+    });
+    const { user, queryClient } = renderWithProviders(<Shell />, { signedIn: true });
+    await screen.findByText('Waiting: undefined');
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => {
+      expect(holdOf(queryClient).held).toBe(true);
+    });
+    await waitFor(
+      () => {
+        expect(holdOf(queryClient).held).toBe(false);
+      },
+      { timeout: 3_000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(reads()).toBe(2);
   });
 });

@@ -156,7 +156,7 @@ describe('ERROR_STATUS: one rule for every operation (errors-and-enums.md §4, A
 
 describe('ApiException: what an error answer may carry beyond its code', () => {
   // Break caught: the declared error headers drifting from the contract. Today the contract declares one header on any error
-  // response (`Retry-After`, on the 503 of TRUST_DATA_UNAVAILABLE), and the platform may set that and no other.
+  // response (`Retry-After`, on the 503 of TRUST_DATA_UNAVAILABLE and the 429 of RateLimited), and the platform may set that and no other.
   it('may set exactly the headers the contract declares on error responses', () => {
     const declared = new Set<string>();
     const components = object(contract.components, 'components');
@@ -209,6 +209,27 @@ describe('ApiException: what an error answer may carry beyond its code', () => {
     const exception = new ApiException(ErrorCode.NotFound, 404, 'Resource not found');
 
     expect(exception.headers).toEqual({});
+  });
+
+  // Break caught (A2 of the audit; AC-SLICE-000-131): the 429 told to a caller who has a session without its wait, or with a wait of nought or a
+  // fraction (which sends the client back early to be refused again), or with a status other than the table's.
+  it.each([
+    [30, '30'],
+    [1, '1'],
+    [0.2, '1'],
+    [0, '1'],
+    [59.2, '60'],
+  ])('tells a caller with a session a wait of %s seconds as the whole seconds %s', (wait, told) => {
+    const exception = ApiException.rateLimited(wait);
+
+    expect(exception.code).toBe(ErrorCode.RateLimited);
+    expect(exception.getStatus()).toBe(429);
+    expect(exception.headers).toEqual({ 'Retry-After': told });
+  });
+
+  // Break caught: the answer given before a session exists, made with `of`, gaining a wait that tells an attacker how long to wait.
+  it('gives the answer made without a session no wait', () => {
+    expect(ApiException.of(ErrorCode.RateLimited, 'Too many requests').headers).toEqual({});
   });
 
   // Break caught: the factory choosing its own status, or inventing one for a code that has none.

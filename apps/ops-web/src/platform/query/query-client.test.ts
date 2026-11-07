@@ -1,7 +1,8 @@
 import { MutationObserver, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createQueryClient, shouldRetryQuery } from './query-client';
+import { createQueryClient, endSession, shouldRetryQuery } from './query-client';
+import { holdOf } from './read-hold';
 
 const httpError = (status: number) =>
   Object.assign(new Error(`HTTP ${String(status)}`), { status });
@@ -98,5 +99,72 @@ describe('createQueryClient', () => {
   // Break caught: one client shared between tests or users, carrying one session's cached data to another.
   it('creates an independent client each time', () => {
     expect(createQueryClient()).not.toBe(createQueryClient());
+  });
+});
+
+describe('a request that was too fast (429; A2 of the audit)', () => {
+  const tooFast = () => Object.assign(new Error('HTTP 429'), { status: 429 });
+
+  // Break caught: a 429 replayed by the client, which is the very load the API refused. The page waits (the hold) and sends nothing again by itself.
+  it('is never tried again, by a query or by a mutation', async () => {
+    const client = createQueryClient();
+    const queryFn = vi.fn(() => Promise.reject(tooFast()));
+    const mutationFn = vi.fn(() => Promise.reject(tooFast()));
+
+    await settleWithError(
+      new QueryObserver(client, { queryKey: ['limited'], queryFn, retryDelay: 1 }),
+    );
+    await new MutationObserver(client, { mutationFn }).mutate().catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    expect(mutationFn).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: a cached read renewed by the opening of a page while the API has asked the page to wait, or one that is never renewed after it.
+  it('keeps the opening of a page from renewing a cached read while the page is holding, and not otherwise', async () => {
+    const client = createQueryClient();
+    const queryFn = vi.fn(() => Promise.resolve('fresh'));
+    client.setQueryData(['cached'], 'old');
+    holdOf(client).hold(30);
+
+    const held = new QueryObserver(client, { queryKey: ['cached'], queryFn });
+    const stopHeld = held.subscribe(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(queryFn).not.toHaveBeenCalled();
+    stopHeld();
+
+    holdOf(client).clear();
+    const free = new QueryObserver(client, { queryKey: ['cached'], queryFn });
+    const stopFree = free.subscribe(() => undefined);
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1);
+    });
+    stopFree();
+  });
+
+  // Break caught: a read that has no data yet being held back as if it were a renewal: the first read of a page must still be sent.
+  it('does not hold back the first read of a query that has no data yet', async () => {
+    const client = createQueryClient();
+    const queryFn = vi.fn(() => Promise.resolve('first'));
+    holdOf(client).hold(30);
+
+    const observer = new QueryObserver(client, { queryKey: ['first'], queryFn });
+    const stop = observer.subscribe(() => undefined);
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1);
+    });
+    stop();
+    holdOf(client).clear();
+  });
+
+  // Break caught: the wait of one person kept for the next one on the same browser.
+  it('ends with the session', () => {
+    const client = createQueryClient();
+    holdOf(client).hold(30);
+
+    endSession(client);
+
+    expect(holdOf(client).held).toBe(false);
   });
 });

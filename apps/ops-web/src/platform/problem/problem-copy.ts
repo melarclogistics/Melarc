@@ -8,6 +8,7 @@ import { NOTIFICATION_COPY } from './notification-copy';
 import { PICKUP_COPY } from './pickup-copy';
 import { RIDER_COPY } from './rider-copy';
 import { STAFF_COPY } from './staff-copy';
+import { RATE_LIMITED_MESSAGE, rateLimitWaitSeconds } from './rate-limit';
 import { VENDOR_COPY } from './vendor-copy';
 
 /**
@@ -27,6 +28,12 @@ export type ProblemKind =
   | 'conflict'
   /** The request, or something in it, was not accepted: validation, or a reason. */
   | 'invalid'
+  /**
+   * The request was too fast (`RATE_LIMITED`, `429`): the one handling of `rate-limit.ts` beside this file. The words are the calm
+   * `RATE_LIMITED_MESSAGE` unless the table has words for the operation (the screens reached before sign-in), `waitSeconds` is the wait the
+   * page keeps its automatic reads still for (`platform/query/read-hold.ts`), and the command palette shows the words in its status line, not
+   * in an error alert.
+   */
   | 'rate-limited'
   /** The API answered and declined for some other reason. */
   | 'refused'
@@ -53,6 +60,11 @@ export interface Problem {
   readonly rule?: string;
   /** The stops a refusal names (`details.stops`), as identifiers. */
   readonly stops?: readonly string[];
+  /**
+   * For a `rate-limited` problem: the whole seconds the page keeps its automatic reads still, from one to a minute: what the API asked in
+   * `Retry-After`, or a few seconds when it asked for nothing usable (`rateLimitWaitSeconds`).
+   */
+  readonly waitSeconds?: number;
 }
 
 /** Where a call was made, so that the words can be the right ones for it. */
@@ -273,7 +285,7 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   'not-found': 'This record could not be found.',
   conflict: 'This record changed after you opened it. Reload it to see its current state.',
   invalid: 'Some of what was entered was not accepted. Check it and try again.',
-  'rate-limited': 'Too many requests. Wait a minute, then try again.',
+  'rate-limited': RATE_LIMITED_MESSAGE,
   refused: 'The request was not accepted.',
   unavailable: 'The server could not be reached or could not finish this. Try again.',
   'session-ended': '',
@@ -409,5 +421,12 @@ export function problemOf(error: unknown, place: ProblemPlace = {}): Problem {
       : {}),
     ...(error instanceof OperationFailure && error.rule !== undefined ? { rule: error.rule } : {}),
     ...(error instanceof OperationFailure && error.stops.length > 0 ? { stops: error.stops } : {}),
+    ...(kind === 'rate-limited'
+      ? {
+          waitSeconds: rateLimitWaitSeconds(
+            error instanceof OperationFailure ? error.retryAfterSeconds : undefined,
+          ),
+        }
+      : {}),
   };
 }

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router';
 
 import { ApiClientProvider } from '../platform/api/api-client';
 import { createQueryClient, endSession } from '../platform/query/query-client';
+import { holdOf } from '../platform/query/read-hold';
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
 import { SessionStore, type SessionView } from '../platform/session/session-store';
@@ -37,6 +38,9 @@ export function renderWithProviders(ui: ReactElement, options: ProvidersOptions 
       ended.push(code);
       endSession(queryClient);
       store.end();
+    },
+    onRateLimited: (askedSeconds) => {
+      holdOf(queryClient).hold(askedSeconds);
     },
   });
   const user = userEvent.setup();

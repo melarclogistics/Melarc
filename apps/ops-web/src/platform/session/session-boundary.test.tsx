@@ -1,4 +1,4 @@
-import type { BrowserApiClient } from '@melarc/api-client/browser';
+import { createBrowserApiClient, type BrowserApiClient } from '@melarc/api-client/browser';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,8 @@ import { AppProviders } from '../../app/providers';
 import { errorResponse, installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import { sessionFixture } from '../../test-support/session-fixture';
 import { useApiClient } from '../api/api-client';
-import { answerOf } from '../api/api-response';
+import { answerOf, OperationFailure } from '../api/api-response';
+import { holdOf } from '../query/read-hold';
 import { useSessionStore } from './session-context';
 import { SessionBoundary, StaleSessionError } from './session-boundary';
 import { SessionStore } from './session-store';
@@ -516,5 +517,134 @@ describe('ending the session from the page (SessionBoundary.end)', () => {
     boundary.end('SIGNED_OUT');
     boundary.end('SIGNED_OUT');
     expect(ended).toEqual(['SIGNED_OUT']);
+  });
+});
+
+describe('a call that is answered "too fast" (429; A2 of the audit)', () => {
+  const TOO_FAST = (wait?: string) => () =>
+    json(
+      429,
+      { code: 'RATE_LIMITED', message: 'Diagnostic text.', request_id: 'req-test-429' },
+      wait === undefined ? {} : { 'Retry-After': wait },
+    );
+  const call = (client: BrowserApiClient) =>
+    client.POST('/auth/staff/setup/credential', {
+      body: { setup_token: 'synthetic-setup-token', password: 'synthetic-password' },
+    });
+
+  // Break caught: a 429 noticed by the query cache alone, so that a call a screen makes by itself is refused and the page goes on reading as fast as
+  // before; or one that ends the session or fails anything else.
+  it('holds the automatic reads for the wait it asked for, for a call outside any cache, and ends nothing', async () => {
+    api.on('POST /auth/staff/setup/credential', TOO_FAST('30'));
+    const { client, store, queryClient, navigate } = mount();
+    act(() => {
+      store.signedIn(PERSON_A);
+    });
+    const hold = holdOf(queryClient);
+    expect(hold.held).toBe(false);
+
+    const result = await call(client);
+
+    expect(result.response.status).toBe(429);
+    expect(hold.held).toBe(true);
+    expect(store.getState().status).toBe('signed-in');
+    expect(navigate).not.toHaveBeenCalled();
+    hold.clear();
+  });
+
+  // Break caught: the same event noticed by only some of the kinds of call, as the end of a session once was.
+  it('holds them alike when a query is answered 429, and a query is not tried again by itself', async () => {
+    api.on('GET /auth/session', TOO_FAST('20'));
+    const { client, store, queryClient } = mount();
+    act(() => {
+      store.signedIn(PERSON_A);
+    });
+
+    await expect(
+      queryClient.query({
+        queryKey: ['who'],
+        queryFn: async () => answerOf(await client.GET('/auth/session')).data,
+        // The client's own rule for a query (`shouldRetryQuery`) is what is pinned: a 429 is never tried again.
+        retry: queryClient.getDefaultOptions().queries?.retry ?? false,
+      }),
+    ).rejects.toBeInstanceOf(OperationFailure);
+
+    expect(holdOf(queryClient).held).toBe(true);
+    expect(api.requests.filter((request) => request.url.endsWith('/auth/session'))).toHaveLength(1);
+    holdOf(queryClient).clear();
+  });
+
+  // Break caught: the wait the API gave read wrongly on its way to the hold (a header in another form taken for seconds, or the figure lost). The hold
+  // keeps it to a few seconds when there is none and to a minute at most (`read-hold.test.ts`); here the boundary tells what the header said.
+  it.each([
+    ['30', 30],
+    [undefined, undefined],
+    ['soon', undefined],
+    ['0', undefined],
+    ['3600', 3600],
+  ])('tells the wait %j that the API asked for as %s', async (header, told) => {
+    api.on('POST /auth/staff/setup/credential', TOO_FAST(header));
+    const store = new SessionStore();
+    const onRateLimited = vi.fn();
+    const boundary = new SessionBoundary({ store, onEnded: () => undefined, onRateLimited });
+    const client = boundary.scope(createBrowserApiClient());
+    store.signedIn(PERSON_A);
+
+    await call(client);
+
+    expect(onRateLimited).toHaveBeenCalledExactlyOnceWith(told);
+  });
+
+  // Break caught: a refused sign-in (nobody is signed in) starting a wait that the next person's first reads would then sit through.
+  it('holds nothing for a call made while nobody is signed in, or for a failure that is not a 429', async () => {
+    api.on('POST /auth/staff/setup/credential', TOO_FAST('30'));
+    api.on('DELETE /auth/session', () => errorResponse(500, 'INTERNAL_ERROR'));
+    const { client, store, queryClient } = mount();
+
+    await call(client);
+    expect(holdOf(queryClient).held).toBe(false);
+
+    act(() => {
+      store.signedIn(PERSON_A);
+    });
+    await client.DELETE('/auth/session');
+    expect(holdOf(queryClient).held).toBe(false);
+  });
+
+  // Break caught: the wait of one person kept for the next one on the same browser.
+  it('ends with the session', async () => {
+    api.on('POST /auth/staff/setup/credential', TOO_FAST('30'));
+    api.on('DELETE /auth/session', () => errorResponse(401, 'SESSION_INVALID'));
+    const { client, store, queryClient } = mount();
+    act(() => {
+      store.signedIn(PERSON_A);
+    });
+    await call(client);
+    expect(holdOf(queryClient).held).toBe(true);
+
+    await client.DELETE('/auth/session');
+
+    expect(store.getState().status).toBe('signed-out');
+    expect(holdOf(queryClient).held).toBe(false);
+  });
+
+  // Break caught: a late answer to a request sent for a session that has gone starting a wait for the next one.
+  it('holds nothing for an answer to a request sent for a session that has gone', async () => {
+    const answer = gate();
+    api.on('POST /auth/staff/setup/credential', () => answer.promise);
+    const { client, store, queryClient } = mount();
+    act(() => {
+      store.signedIn(PERSON_A);
+    });
+
+    const late = call(client);
+    act(() => {
+      store.end();
+      store.signedIn(PERSON_B);
+    });
+    answer.release(TOO_FAST('30')());
+
+    await expect(late).rejects.toBeInstanceOf(StaleSessionError);
+    expect(holdOf(queryClient).held).toBe(false);
   });
 });

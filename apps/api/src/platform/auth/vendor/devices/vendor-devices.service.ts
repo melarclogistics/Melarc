@@ -92,7 +92,8 @@ export class VendorDevicesService {
       'rate_limit_recovery',
       `${GRANT_LIMIT_NAMESPACE}\u0000${ref.id}`,
     );
-    if (!decision.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
+    // The caller holds a vendor session (the authentication guard found it), so this refusal carries `Retry-After` like the guard's own.
+    if (!decision.allowed) throw ApiException.rateLimited(decision.retryAfterSeconds);
 
     await runner.actAsAuthentication(authorized, authenticationContext(), async (handle) => {
       const { idempotency, directory } = this.#options;

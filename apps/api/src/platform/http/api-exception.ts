@@ -1,11 +1,12 @@
 import { HttpException } from '@nestjs/common';
 
-import { statusOf, type ErrorCode } from './error-codes.js';
+import { ErrorCode, statusOf } from './error-codes.js';
 
 /**
  * The headers the contract declares on an error response (contracts/openapi.yaml, `components.headers`, by way of the responses
  * that use them), and so the only ones an error answer may set. Today that is `Retry-After`, whole seconds, on the `503` of
- * `TRUST_DATA_UNAVAILABLE`. `error-codes.test.ts` compares this list with the contract both ways: a header added to an error
+ * `TRUST_DATA_UNAVAILABLE` and on the `429` told to a caller who has a session (`ApiException.rateLimited`). `error-codes.test.ts`
+ * compares this list with the contract both ways: a header added to an error
  * response of the contract must be added here with the rule for its value, and one dropped from the contract must be dropped
  * here. A header an operation sets on a *success* is declared by its response and is not this list's business.
  */
@@ -55,5 +56,18 @@ export class ApiException extends HttpException {
     headers?: Readonly<Record<string, string>>,
   ): ApiException {
     return new ApiException(code, statusOf(code), message, details, headers);
+  }
+
+  /**
+   * The `429 RATE_LIMITED` told to a caller who **has a session** (`AC-SLICE-000-131`; errors-and-enums.md §4, A2 of the audit): it carries
+   * `Retry-After`, the whole seconds until the limiter admits that session again. The limiter's own wait is already a whole number from one
+   * to its window; this is the one place a refusal turns it into the header, rounding up and never telling a wait of nought, so a client
+   * sent back early is not refused once more. An answer given before a session exists is made with `of` and carries none (an attacker is
+   * not told how long to wait), and the contract declares it with a response of its own (`RateLimitedAnonymous`).
+   */
+  static rateLimited(retryAfterSeconds: number): ApiException {
+    return ApiException.of(ErrorCode.RateLimited, 'Too many requests', undefined, {
+      'Retry-After': String(Math.max(1, Math.ceil(retryAfterSeconds))),
+    });
   }
 }

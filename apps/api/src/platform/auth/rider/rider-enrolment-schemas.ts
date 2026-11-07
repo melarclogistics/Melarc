@@ -9,18 +9,6 @@ type SchemaObject = Exclude<
 >;
 
 /**
- * The header of the contract's `TrustDataUnavailable` response (`RetryAfter`): whole seconds the client should wait before it tries again. The
- * grant is still good and nothing was written, so the wait is the whole of what the client owes (S0.57).
- */
-export const RETRY_AFTER_HEADERS = {
-  'Retry-After': {
-    description: 'Whole seconds the client should wait before it tries again',
-    required: false,
-    schema: { type: 'integer', minimum: 1 },
-  },
-} as unknown as Record<string, never>;
-
-/**
  * The shape `completeRiderDeviceEnrolment` takes, as the application describes it (S0.57; `RiderDeviceEnrolment`). The contract's schema is
  * what a request is validated against at run time; this is what the application **says** it takes, and the conformance check compares the
  * two (`pnpm run contract:check`), so a shape changed on one side only is a finding and not a surprise. What it gives is the registered device

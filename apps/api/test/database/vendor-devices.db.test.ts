@@ -147,6 +147,11 @@ describe('another browser, without a new secret (AC-SLICE-000-45)', () => {
     }
     const limited = await requestGrant(client);
     expect([limited.status, codeOf(limited)]).toEqual([429, 'RATE_LIMITED']);
+    // The vendor holds a session, so this refusal tells it when to come back like every other one it can be given (A2 of the audit; AC-SLICE-000-131):
+    // whole seconds inside the 60-second window, and never nought.
+    const wait = limited.header('retry-after');
+    expect(wait).toMatch(/^[1-9][0-9]?$/);
+    expect(Number(wait)).toBeLessThanOrEqual(60);
   });
 
   it('refuses a request with no Idempotency-Key, one without the synchronizer token, and one from another origin', async () => {

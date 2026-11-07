@@ -58,6 +58,8 @@ const AUTHENTICATED: AuthenticationOutcome = {
   authenticated: AUTHENTICATED_SESSION,
 };
 
+const CEILING_COUNTER = 'provider_initiating_operation_ceiling_per_minute';
+
 interface Calls {
   authenticated: { credential: PresentedCredential; correlationId: string }[];
   admitted: { bucket: string; key: string }[];
@@ -90,7 +92,8 @@ function fixtures(options: {
       }
       return Promise.resolve(
         options.limiter === 'refuses' || options.refusing === bucket
-          ? { allowed: false, retryAfterSeconds: 30 }
+          ? // A different wait for each counter, so that a refusal that told the other's (or a figure of its own) is seen.
+            { allowed: false, retryAfterSeconds: bucket === CEILING_COUNTER ? 7 : 30 }
           : { allowed: true },
       );
     },
@@ -236,6 +239,16 @@ describe('the authenticated-API bucket', () => {
     expect(authenticatedSessionOf(request as never)).toBeUndefined();
   });
 
+  // Break caught (A2 of the audit; AC-SLICE-000-131): the refusal of a caller who has a session without the wait the limiter decided, or with a
+  // figure of the guard's own, so that a client sent back early is refused once more.
+  it('tells the caller when to come back: the limiter’s wait, in whole seconds', async () => {
+    const { guard } = fixtures({ limiter: 'refuses' });
+
+    const refusal = await refusalOf(guard.canActivate(contextOf('self', COOKIE).context));
+
+    expect((refusal as ApiException).headers).toEqual({ 'Retry-After': '30' });
+  });
+
   // Break caught: a permissive fallback when the limiter cannot decide, or none is composed, for authenticated requests.
   it.each(['down', 'absent'] as const)('fails closed when the limiter is %s', async (limiter) => {
     const { guard } = fixtures({ limiter });
@@ -249,7 +262,7 @@ describe('the authenticated-API bucket', () => {
 });
 
 describe('the sub-ceiling of the provider-initiating operations (settings.md 7.7; R76)', () => {
-  const CEILING = 'provider_initiating_operation_ceiling_per_minute';
+  const CEILING = CEILING_COUNTER;
 
   // Break caught: the sub-ceiling asked before the bucket (a request the bucket refuses would have spent it), asked for a route that does not state it (every
   // request would spend the allowance of the few that cause a text), or keyed on anything but the session the bucket is keyed on.
@@ -282,6 +295,8 @@ describe('the sub-ceiling of the provider-initiating operations (settings.md 7.7
 
     expect(refusal).toMatchObject({ code: 'RATE_LIMITED' });
     expect((refusal as ApiException).getStatus()).toBe(429);
+    // The ceiling's own wait (7), and not the bucket's (30): the caller is told when this counter admits it again.
+    expect((refusal as ApiException).headers).toEqual({ 'Retry-After': '7' });
     expect(calls.admitted.map((entry) => entry.bucket)).toEqual([
       'rate_limit_authenticated_api',
       CEILING,

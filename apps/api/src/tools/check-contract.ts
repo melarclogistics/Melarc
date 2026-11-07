@@ -11,6 +11,10 @@ import { createApp } from '../create-app.js';
 import { locateContract } from '../platform/contract/locate-contract.js';
 import { assertRoutesAreSound } from '../platform/routes/route-inventory.js';
 import { checkApplication } from './contract/check-application.js';
+import {
+  checkRateLimitDeclarations,
+  countOperations,
+} from './contract/check-rate-limit-declarations.js';
 import { formatFinding } from './contract/findings.js';
 import { IMPLEMENTED_OPERATIONS } from './contract/implemented-scope.js';
 import { isJsonObject, type JsonObject } from '../platform/contract/json.js';
@@ -20,7 +24,9 @@ import { DESCRIBE_CONFIG } from './describe-config.js';
  * Checks the application against contracts/openapi.yaml and fails when they disagree: every route that is
  * live must be in the contract and in the declared scope, every operation in the scope must be live and
  * described, and each described operation must say what the contract says (parameters, headers, bodies,
- * responses, cookies, security, extensions). It needs no environment and no database.
+ * responses, cookies, security, extensions). It also reads the contract alone, for every operation in it, built or not, for the rate limit
+ * it declares (a session-taking operation answers 429 with `RateLimited`, a limited one before a session with `RateLimitedAnonymous`:
+ * `check-rate-limit-declarations.ts`). It needs no environment and no database.
  *
  * usage: node dist/tools/check-contract.js [--contract <file>] [--scope <id,id,...>]
  *
@@ -95,14 +101,18 @@ async function main(): Promise<number> {
     assertRoutesAreSound(app);
     const report = await checkApplication(app, { contract, scope });
 
-    const operations = `${String(report.checkedOperations.length)} operation${report.checkedOperations.length === 1 ? '' : 's'} in the implemented scope compared`;
-    if (report.findings.length === 0) {
+    // The contract alone, for every operation in it, built or not: the rate limit is declared on each one (errors-and-enums.md section 4).
+    const findings = [...report.findings, ...checkRateLimitDeclarations(contract)];
+    const operations =
+      `${String(report.checkedOperations.length)} operation${report.checkedOperations.length === 1 ? '' : 's'} in the implemented scope compared, ` +
+      `${String(countOperations(contract))} of the contract read for the rate limit they declare`;
+    if (findings.length === 0) {
       process.stdout.write(`Contract conformance: ${operations}, no findings.\n`);
       return 0;
     }
     process.stdout.write(
-      `Contract conformance: ${operations}, ${String(report.findings.length)} finding${report.findings.length === 1 ? '' : 's'}.\n\n` +
-        `${report.findings.map(formatFinding).join('\n\n')}\n`,
+      `Contract conformance: ${operations}, ${String(findings.length)} finding${findings.length === 1 ? '' : 's'}.\n\n` +
+        `${findings.map(formatFinding).join('\n\n')}\n`,
     );
     return 1;
   } finally {

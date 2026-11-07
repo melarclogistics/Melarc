@@ -20,6 +20,19 @@ export const ERROR_BODY_SCHEMA = Object.freeze({
 } as const);
 
 /**
+ * The header of the contract's `RetryAfter` (`components.headers`): whole seconds the client should wait before it tries again. It is stated on the
+ * `503` of `TRUST_DATA_UNAVAILABLE` (the grant is still good and nothing was written) and on the `429` told to a caller who has a session
+ * (`RateLimited`; `rate-limit-statement.ts`), and on no other answer. Not always sent by an operation that declares it, so not `required`.
+ */
+export const RETRY_AFTER_HEADERS = {
+  'Retry-After': {
+    description: 'Whole seconds the client should wait before it tries again',
+    required: false,
+    schema: { type: 'integer', minimum: 1 },
+  },
+} as unknown as Record<string, never>;
+
+/**
  * States the errors an operation answers with, from the codes it raises: the `x-error-codes` extension, and one response for each
  * status those codes are answered with (`statusOf`, errors-and-enums.md §4: one rule for every operation), each carrying the error
  * envelope. The statuses are **derived from the code's own table and never typed beside the codes**, so an operation that raises a

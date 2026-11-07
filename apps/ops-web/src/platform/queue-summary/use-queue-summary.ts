@@ -3,10 +3,14 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { useApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
+import { holdOf } from '../query/read-hold';
 import { parseQueueSummary, type QueueSummaryView } from './queue-summary-shape';
 
 /** The one key of the summary: the menu and the landing read the same query, so a page that asks while the menu is asking is given that read. */
 export const QUEUE_SUMMARY_KEY = ['queue-summary'] as const;
+
+/** What the refresh on return waits under while the page is holding its automatic reads (`read-hold.ts`): one read at the end, however many pages were returned to. */
+const RETURN_KEY = 'queue-summary-return';
 
 /**
  * `getQueueSummary`: how much work is waiting in each queue the session may read (task C1; reporting-data-dictionary.md section 5.5). The
@@ -18,7 +22,8 @@ export const QUEUE_SUMMARY_KEY = ['queue-summary'] as const;
  * opens (a new asker of a stale read starts one), and when the person asks for a refresh of a queue (`useRefreshQueueSummary`, which the
  * queue's refresh calls beside its own read). **Never on a timer, and never when the window is focused or the connection returns**: the
  * read is `background` for the session's idle lifetime (it does not count as the person acting), and a page that polled would only
- * show an unattended session how busy the queue is.
+ * show an unattended session how busy the queue is. **While the API has asked the page to wait** (a `429`, `Retry-After`), the read on return
+ * waits for the end of the wait and the renewal on opening is not made (`platform/query/read-hold.ts`); the refresh a person asks for does not wait.
  *
  * A read that failed is not tried again by the page (the menu draws no count and works as it does; the landing says so and offers
  * *Try again*), and an answer that is not what the contract describes fails as `unexpected-response`, like any other. What is read is
@@ -65,10 +70,15 @@ export function useRefreshQueueSummary(): () => Promise<void> {
  */
 export function useRefreshQueueSummaryOnReturn(pathname: string): void {
   const refresh = useRefreshQueueSummary();
+  const hold = holdOf(useQueryClient());
   const at = useRef(pathname);
   useEffect(() => {
     if (at.current === pathname) return;
     at.current = pathname;
-    void refresh();
-  }, [pathname, refresh]);
+    // This read is the page's own, not the person's: when the API has asked the page to wait (a `429`), it is sent once when the wait ends and not
+    // before (A2 of the audit; `read-hold.ts`). The refresh a person asks for on a queue (`useRefreshQueueSummary`) is never held.
+    hold.whenFree(RETURN_KEY, () => {
+      void refresh();
+    });
+  }, [pathname, refresh, hold]);
 }

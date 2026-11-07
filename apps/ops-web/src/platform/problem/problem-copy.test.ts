@@ -1,8 +1,10 @@
 import { ApiError, BrowserTransportError } from '@melarc/api-client/browser';
 import { describe, expect, it } from 'vitest';
 
+import { OperationFailure } from '../api/api-response';
 import { StaleSessionError } from '../session/session-boundary';
 import { lookupCopy, problemOf, type CopyRule } from './problem-copy';
+import { DEFAULT_RATE_LIMIT_WAIT_SECONDS, RATE_LIMITED_MESSAGE } from './rate-limit';
 
 const http = (status: number, code?: string, requestId?: string): ApiError =>
   new ApiError({
@@ -101,8 +103,63 @@ describe('problemOf: what a failed call is, for the person looking at the screen
     expect(problemOf(http(409, 'STATE_CONFLICT')).message).toMatch(/changed/i);
   });
 
-  it('says the same plain thing about a limit as the sign-in does: wait', () => {
-    expect(problemOf(http(429, 'RATE_LIMITED')).message).toMatch(/wait/i);
+  // Break caught (A2 of the audit; surfaces/ops-portal.md section 8): the words of a request that was too fast drifting from the Product Owner's, or
+  // worded as a fault, a lockout or a reason to leave.
+  it('says, calmly and in the Product Owner’s own words, that a request was too fast', () => {
+    expect(problemOf(http(429, 'RATE_LIMITED')).message).toBe(
+      "You're going a little fast. Try again in a few seconds.",
+    );
+    expect(problemOf(http(429, 'RATE_LIMITED'), { operation: 'lookupRecords' }).message).toBe(
+      RATE_LIMITED_MESSAGE,
+    );
+    expect(problemOf(http(429, 'RATE_LIMITED'), { operation: 'getQueueSummary' }).message).toBe(
+      RATE_LIMITED_MESSAGE,
+    );
+  });
+});
+
+describe('problemOf: the wait that goes with a request that was too fast (A2 of the audit)', () => {
+  const refused = (retryAfterSeconds?: number): OperationFailure =>
+    new OperationFailure(http(429, 'RATE_LIMITED'), [], {}, retryAfterSeconds);
+
+  // Break caught: the wait the API asked for ignored (the page would hold for a figure of its own), kept longer than the ceiling (an hour with
+  // no reads), or missing when the API gave none (the page would not wait at all).
+  it.each([
+    [30, 30],
+    [1, 1],
+    [60, 60],
+    [3600, 60],
+    [undefined, 5],
+  ] as const)('carries the wait of %s seconds that the API asked for as %s', (asked, kept) => {
+    expect(problemOf(refused(asked))).toMatchObject({ kind: 'rate-limited', waitSeconds: kept });
+  });
+
+  // Break caught: a refusal that is not an OperationFailure (a plain ApiError) read as one with a wait, or left with none.
+  it('carries the default wait for a refusal that was read without its headers', () => {
+    expect(problemOf(http(429, 'RATE_LIMITED'))).toMatchObject({
+      kind: 'rate-limited',
+      waitSeconds: DEFAULT_RATE_LIMIT_WAIT_SECONDS,
+    });
+  });
+
+  // Break caught: a wait given to a failure that is not a request that was too fast, which a screen would then hold its reads for.
+  it('carries no wait for any other kind of failure', () => {
+    for (const error of [
+      http(409, 'STATE_CONFLICT'),
+      http(500),
+      new ApiError({ kind: 'network' }),
+    ]) {
+      expect(problemOf(error).waitSeconds).toBeUndefined();
+    }
+  });
+
+  // Break caught: the sign-in screens losing their own words for a limit, which say what is true of an address that is not known to be anyone's.
+  it('leaves the screens reached before sign-in their own words, with the wait beside them', () => {
+    expect(problemOf(refused(), { operation: 'staffSignIn' })).toMatchObject({
+      kind: 'rate-limited',
+      message: 'Too many attempts. Wait a minute, then try again.',
+      waitSeconds: DEFAULT_RATE_LIMIT_WAIT_SECONDS,
+    });
   });
 });
 

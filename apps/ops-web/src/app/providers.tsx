@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 
 import { ApiClientProvider } from '../platform/api/api-client';
 import { createQueryClient, endSession } from '../platform/query/query-client';
+import { holdOf } from '../platform/query/read-hold';
 import { LANDING_PATH } from '../platform/session/paths';
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
@@ -28,7 +29,8 @@ export interface AppProvidersProps {
  *
  * The boundary is where the event is noticed, for every call the page makes (`SessionBoundary`): the API client is scoped by
  * it, so a query, a mutation and a screen's direct call (a secret is fetched that way) end the session alike, and an answer to
- * a request sent for a session that has gone does not end the next one.
+ * a request sent for a session that has gone does not end the next one. It is also where a `429` is noticed, by the same rule: the
+ * client's hold keeps the automatic reads still for the wait the API asked for (`platform/query/read-hold.ts`).
  */
 export function AppProviders({ children, navigate }: AppProvidersProps) {
   const [session] = useState(() => new SessionStore());
@@ -41,6 +43,10 @@ export function AppProviders({ children, navigate }: AppProvidersProps) {
           endSession(queryClient);
           session.end();
           navigate?.(LANDING_PATH);
+        },
+        // A request that was too fast (`429`): the page holds its automatic reads for the wait the API asked for (A2 of the audit).
+        onRateLimited: (askedSeconds) => {
+          holdOf(queryClient).hold(askedSeconds);
         },
       }),
   );

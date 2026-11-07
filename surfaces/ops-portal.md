@@ -422,6 +422,13 @@ The catalogue and the later approved decision win; the older prose is reported, 
 | `success`| Confirms the state reached, not merely that the request succeeded|
 | `permission-restricted`| Degrades to a clear refusal. §45.7: hidden buttons are not enforcement|
 
+**A request that was too fast (`RATE_LIMITED`, `429`) has one handling for every screen** (Product Owner, 7 November 2026, A2 of the audit; the server's side, and the `Retry-After` it gives a signed-in caller, is `AC-SLICE-000-131`; the limit is the setting's, [settings.md](../contracts/settings.md) §7.7, and is not restated here):
+
+- It is told in calm plain words, _"You're going a little fast. Try again in a few seconds."_, for every operation a signed-in person asks, and never as a fault, a lockout or a reason to leave. The screens reached before sign-in keep their own words, because their answer carries no wait.
+- It holds the **automatic** reads for the wait the API asked for (`Retry-After`, whole seconds; a short wait when the header is missing or unusable and a ceiling of one minute when it is absurd): the refresh of the counts beside the menu when a page is returned to and the search as the person types are sent once when the wait ends, and the renewal of a cached read when a page opens is not made while it lasts; none is ever a retry. A read the person asks for by pressing a control, or that follows the person's own act, is never held, and the hold ends by itself.
+- Nothing is tried again by itself: a `429` is never retried by the query client, and no timer re-sends a read when a hold ends.
+- The command palette ([step R4](../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign)) shows the same words in its status line and not in an error alert.
+
 ## 9. Concurrency is a first-class interface concern
 
 §17.4 requires **concurrency indication for sensitive work such as receiving**, and §22.8 approves an advisory soft lock showing the active receiver with takeover after an idle TTL.

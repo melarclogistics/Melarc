@@ -206,9 +206,14 @@ describe('sign-out: browser cookies are expired, a bearer sign-out sets none (au
     expect(staff).toEqual(['melarc_csrf', 'melarc_session']);
     expect(mfa).toEqual([]);
     // The 403 is the one a failed CSRF check answers with: every operation that lists CSRF_VALIDATION_FAILED has it.
-    expect(Object.keys(operation.responses as JsonObject)).toEqual(['204', '401', '403']);
+    // The 429 is the authenticated limiter's, which every operation that needs a session declares (A2 of the audit; AC-SLICE-000-131).
+    expect(Object.keys(operation.responses as JsonObject)).toEqual(['204', '401', '403', '429']);
     expect(operation.security).toBeUndefined();
-    expect(operation['x-error-codes']).toEqual(['CSRF_VALIDATION_FAILED', 'SESSION_INVALID']);
+    expect(operation['x-error-codes']).toEqual([
+      'CSRF_VALIDATION_FAILED',
+      'RATE_LIMITED',
+      'SESSION_INVALID',
+    ]);
   });
 
   it('declares its cookie header and what it clears in the contract itself', () => {

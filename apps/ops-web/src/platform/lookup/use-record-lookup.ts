@@ -1,13 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
 import { useApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
+import { holdOf } from '../query/read-hold';
 import { useSignedInSession } from '../session/use-permissions';
 import { parseRecordLookup, type RecordLookupResultView } from './record-lookup-shape';
 
 /** How long a text must stand still before it is asked of the server (`AC-LOOKUP-12`). */
 export const LOOKUP_DEBOUNCE_MS = 200;
+/** What a text that has stood still waits under while the page is holding its automatic reads: the latest text only (`read-hold.ts`). */
+const SETTLE_KEY = 'record-lookup';
 /** What the server accepts once the text is trimmed (`lookupRecords`, `q`). */
 export const LOOKUP_MIN_CHARACTERS = 2;
 export const LOOKUP_MAX_CHARACTERS = 64;
@@ -51,6 +54,12 @@ function searchableText(text: string): string | undefined {
  * that come are those of the text in `query`. A failed read is `error` and is not tried again by itself; the end of a session empties the cache
  * like any other, so one person's results are never the next person's. The server decides what the text is (a code, a number, a name), which
  * kinds the session may search and what it may open; the hook asks and judges.
+ *
+ * **A request that was too fast** (`429`; A2 of the audit, surfaces/ops-portal.md section 8) is told to the palette in two ways, and both are
+ * worded by `problemOf` as a `rate-limited` problem, whose words are calm and are shown in the palette's status line and not as an error alert: a
+ * lookup the server refused is `error`, whose `error` is the refusal (`problemOf(error).kind`), and a text typed while the page is holding its
+ * automatic reads for the wait the server asked for stays `waiting` and is asked once when the wait ends (`useReadHeld()` says the page is
+ * waiting). Nothing here asks again by itself after a refusal; *Try again* (`retry`) is the person's ask and is never held.
  */
 export function useRecordLookup(text: string): RecordLookupState {
   const client = useApiClient();
@@ -66,16 +75,23 @@ export function useRecordLookup(text: string): RecordLookupState {
     setSettled(undefined);
   }
 
-  // The text settles once it has stood still. The timer belongs to the text it was set for, and is cleared by the next one.
+  // The text settles once it has stood still. The timer belongs to the text it was set for, and is cleared by the next one. A search is the page's own
+  // read as much as the person's, so while the API has asked the page to wait (a `429`, `Retry-After`) a text that has stood still is asked once when the
+  // wait ends and not before (A2 of the audit; `platform/query/read-hold.ts`); a text typed after it replaces the one that waited, and one left behind is
+  // forgotten. *Try again* after a failure is the person's own ask and is never held.
+  const hold = holdOf(useQueryClient());
   useEffect(() => {
     if (wanted === undefined || wanted === settled) return undefined;
     const timer = setTimeout(() => {
-      setSettled(wanted);
+      hold.whenFree(SETTLE_KEY, () => {
+        setSettled(wanted);
+      });
     }, LOOKUP_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
+      hold.forget(SETTLE_KEY);
     };
-  }, [wanted, settled]);
+  }, [wanted, settled, hold]);
 
   const asking = me !== undefined && wanted !== undefined && wanted === settled;
   const read = useQuery({
