@@ -44,17 +44,26 @@ import { clientFor, createTestDatabase, type TestDatabase } from './support/test
  * - **A database seeded between the two decisions** (the build of 0075, then 0077): the second alone.
  * - **A database seeded after both** (a new one, or the owner's re-created): nothing was widened on it, so nothing is recorded.
  * - **A history the arithmetic of 0078 does not describe**: a warning, and nothing is written for what cannot be shown.
+ * - **Every history the migration lists** (revision 2, 3, 4 and 5), the exact before and after, the system actor and the labels of each event.
+ * - **A replay** (the Product Owner's rule of 7 November 2026, afternoon: the record is idempotent): the file applied again, by hand and by the migrator,
+ *   writes nothing more. The migration cannot read the ledger (a SYSTEM context reads nothing of it), so the two events have fixed identifiers and the
+ *   ledger's primary key is what refuses a second event of a widening.
  */
+const STEP_0043 = '0043_slice_001_grants.sql';
+const STEP_0057 = '0057_notification_read_grant.sql';
+const STEP_0075 = '0075_platform_admin_every_hub.sql';
 const STEP_0077 = '0077_platform_admin_device_replacement.sql';
-const STEPS = [
-  '0043_slice_001_grants.sql',
-  '0057_notification_read_grant.sql',
-  '0075_platform_admin_every_hub.sql',
-  STEP_0077,
-];
+const STEPS = [STEP_0043, STEP_0057, STEP_0075, STEP_0077];
 const RECORD_MIGRATION = '0078_bundle_widening_audit.sql';
 const LABEL_0075 = 'release-p1#platform-admin-every-hub';
 const LABEL_0077 = 'release-p1-1#platform-admin-device-replacement';
+/** The fixed identifiers of the two events (the `5eed` range of the seeded rows): what makes the record once-only. */
+const EVENT_0075 = '5eed0078-0000-4000-8000-000000000075';
+const EVENT_0077 = '5eed0078-0000-4000-8000-000000000077';
+const ALREADY_0075 =
+  'migration 0078: the widening of 0075_platform_admin_every_hub is already on record: nothing written';
+const ALREADY_0077 =
+  'migration 0078: the widening of 0077_platform_admin_device_replacement is already on record: nothing written';
 const REREGISTER = 'staff.device.reregister';
 const PLATFORM_ADMIN = BUNDLE_IDS.platformAdmin;
 const bundleIds = Object.values(BUNDLE_IDS);
@@ -97,19 +106,21 @@ const seedRow = (grant: GrantSeed) => ({
   tier: grant.tier,
 });
 
-/** A seed of the build between the two decisions: the current reference data, with the grants as that build wrote them. */
-async function seedAsOf0075(database: TestDatabase): Promise<void> {
+/** A seed of a build between the decisions of the release: the current reference data, with the grants as that build wrote them (only the grants matter to 0078). */
+async function seedWithGrants(database: TestDatabase, grants: readonly GrantSeed[]): Promise<void> {
   const { service, close } = buildService(database, { login: PROVISIONING_ROLE });
   try {
     const plan = referenceSeedPlan();
     await runSeed(service, {
       ...plan,
-      payload: { ...plan.payload, role_bundle_grant: AFTER_0075.map(seedRow) },
+      payload: { ...plan.payload, role_bundle_grant: grants.map(seedRow) },
     });
   } finally {
     await close();
   }
 }
+const seedAsOf0075 = (database: TestDatabase): Promise<void> =>
+  seedWithGrants(database, AFTER_0075);
 
 interface WideningEvent {
   readonly id: string;
@@ -356,6 +367,7 @@ describe('the owner’s database: seeded before the decisions, then 0043, 0057, 
       const [first] = await widenings(world.observer);
 
       expect(first).toMatchObject({
+        id: EVENT_0075,
         event_code: 'permission.bundle.widened',
         enhanced: true,
         outcome: 'SUCCEEDED',
@@ -403,6 +415,7 @@ describe('the owner’s database: seeded before the decisions, then 0043, 0057, 
       const second = (await widenings(world.observer))[1];
 
       expect(second).toMatchObject({
+        id: EVENT_0077,
         event_code: 'permission.bundle.widened',
         enhanced: true,
         outcome: 'SUCCEEDED',
@@ -487,6 +500,31 @@ describe('the owner’s database: seeded before the decisions, then 0043, 0057, 
       const events = await widenings(world.observer);
       expect(events).toHaveLength(2);
       for (const event of events) acceptedByTheWriter(event);
+    });
+
+    // Break caught (the Product Owner's rule: the record is idempotent): a file applied again that writes the two events again, so that the
+    // ledger, which can never be corrected, states one widening twice. The file is applied again by hand (the whole file, in one transaction, as
+    // a developer or a test would) and by the migrator (which finds nothing to apply): the ledger holds the same two rows, not two more and not
+    // two rewritten, and each skipped event is said in a notice so that a replay is seen and not silent.
+    it('writes the record once: applying the file again, by hand and by the migrator, writes nothing more', async () => {
+      const recorded = await widenings(world.observer);
+      expect(recorded.map((event) => event.id)).toEqual([EVENT_0075, EVENT_0077]);
+      world.notices.length = 0;
+
+      await applyMigration(world.migration, RECORD_MIGRATION);
+
+      expect(await widenings(world.observer)).toEqual(recorded);
+      expect(await world.observer.count('audit_event')).toBe(2);
+      expect(world.notices.filter((notice) => notice.includes('0078'))).toEqual([
+        ALREADY_0075,
+        ALREADY_0077,
+      ]);
+      expect(
+        (await runMigrations({ url: world.built.target.urlFor(MIGRATION_ROLE) })).applied,
+      ).toBe(0);
+      expect(await widenings(world.observer)).toEqual(recorded);
+      expect(await bundles(world.observer)).toEqual(before.bundles);
+      expect(await grantsHeld(world.observer)).toEqual(before.grants);
     });
   });
 });
@@ -582,6 +620,123 @@ describe('a database seeded between the two decisions: the build of 0075, then 0
     const [event] = events;
     if (event === undefined) throw new Error('0078 recorded no widening');
     acceptedByTheWriter(event);
+  });
+
+  // Break caught (idempotence on the history that holds one event): a replay that writes the record of 0077 again, or that invents the record
+  // of 0075 the second time round because the first run's events are not read; and a replay that is silent.
+  it('writes nothing more when applied again, and says it found the record of 0077 already there', async () => {
+    const recorded = await widenings(world.observer);
+    expect(recorded.map((event) => event.id)).toEqual([EVENT_0077]);
+    world.notices.length = 0;
+
+    await applyMigration(world.migration, RECORD_MIGRATION);
+
+    expect(await widenings(world.observer)).toEqual(recorded);
+    expect(world.notices.filter((notice) => notice.includes('0078'))).toEqual([ALREADY_0077]);
+  });
+});
+
+/**
+ * The histories of the migration's own header, each built as the release steps left it (the owner's database, at revision 5, and the one between the
+ * decisions, at revision 2, are the two blocks above): a bundle seeded with the keys of SLICE-001 and before `notification.read` has had 0057, 0075 and
+ * 0077 (revision 4), and one seeded with `notification.read` and before the Platform Admin decisions has had 0075 and 0077 (revision 3). Both are
+ * recorded at the revisions the arithmetic of the header gives, and a replay writes nothing more.
+ */
+describe.each([
+  {
+    revision: 4,
+    history: 'seeded before notification.read: 0057, 0075 and 0077 followed',
+    seed: [...SLICE_000_GRANTS, ...SLICE_001_GRANTS],
+    steps: [STEP_0057, STEP_0075, STEP_0077],
+  },
+  {
+    revision: 3,
+    history: 'seeded before the Platform Admin decisions: 0075 and 0077 followed',
+    seed: HISTORY,
+    steps: [STEP_0075, STEP_0077],
+  },
+])('a bundle at revision $revision, $history', ({ revision, seed, steps }) => {
+  let world: Upgraded;
+
+  beforeAll(async () => {
+    world = await upgraded((database) => seedWithGrants(database, seed), steps);
+    await applyMigration(world.migration, RECORD_MIGRATION);
+  });
+  afterAll(async () => {
+    await world.close();
+  });
+
+  // Break caught: the arithmetic of the revisions right for the owner's history and wrong for these (an event at the revision of the other step, one
+  // left out, or the grants listed as another history's), so that the ledger states a revision the bundle never had.
+  it('records both widenings, each at the revision it raised the bundle to, with the exact grants before and after', async () => {
+    expect((await bundles(world.observer)).find((row) => row.id === PLATFORM_ADMIN)).toEqual({
+      id: PLATFORM_ADMIN,
+      revision,
+      reduction_floor: 1,
+    });
+
+    const events = await widenings(world.observer);
+
+    expect(events.map((event) => [event.id, event.correlation_id, event.related_ids])).toEqual([
+      [
+        EVENT_0075,
+        LABEL_0075,
+        { bundle_id: PLATFORM_ADMIN, revision: revision - 1, reduction_floor: 1 },
+      ],
+      [EVENT_0077, LABEL_0077, { bundle_id: PLATFORM_ADMIN, revision, reduction_floor: 1 }],
+    ]);
+    expect(events[0]?.before_after).toEqual({
+      grants: {
+        before: WIDENED_BY_0075.map((grant) => textOf(grant, 'own')),
+        after: WIDENED_BY_0075.map((grant) => textOf(grant, 'all')),
+      },
+    });
+    expect(events[1]?.before_after).toEqual({
+      grants: { before: [`${REREGISTER}|own|any|P`], after: [`${REREGISTER}|all|any|P`] },
+    });
+    expect(events.map((event) => event.detail)).toEqual([
+      {
+        bundle_name: 'Platform Admin',
+        added: 0,
+        widened: 33,
+        widened_by_migration: '0075_platform_admin_every_hub',
+        recorded_by_migration: '0078_bundle_widening_audit',
+      },
+      {
+        bundle_name: 'Platform Admin',
+        added: 0,
+        widened: 1,
+        widened_by_migration: '0077_platform_admin_device_replacement',
+        recorded_by_migration: '0078_bundle_widening_audit',
+      },
+    ]);
+    for (const event of events) {
+      expect(event).toMatchObject({
+        actor_type: 'SYSTEM',
+        actor_id: null,
+        object_type: 'RoleBundle',
+        object_id: PLATFORM_ADMIN,
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+      });
+      acceptedByTheWriter(event);
+    }
+    expect(await world.observer.count('audit_event')).toBe(2);
+    expect(await grantsHeld(world.observer)).toEqual(GRANTS.map(labelOf).toSorted());
+  });
+
+  // Break caught: a replay that writes the pair again on a history other than the owner's.
+  it('writes nothing more when applied again', async () => {
+    const recorded = await widenings(world.observer);
+    world.notices.length = 0;
+
+    await applyMigration(world.migration, RECORD_MIGRATION);
+
+    expect(await widenings(world.observer)).toEqual(recorded);
+    expect(world.notices.filter((notice) => notice.includes('0078'))).toEqual([
+      ALREADY_0075,
+      ALREADY_0077,
+    ]);
   });
 });
 

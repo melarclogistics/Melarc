@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.97.0 with the rate limit declared, 7 November 2026)
+# Version: see `info.version` below (5.98.0 with a Rider's hub_id ignored on the list of requests, 7 November 2026)
 # Date:    7 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -11,6 +11,7 @@
 #   5.95.0  C3    the optional hub_id on four reads (hub filters)
 #   5.96.0  A1    the audit fixes (the Platform Admin's scope in the descriptions, lookupRecords answers, hub filters answer at once for a hub outside the grant)
 #   5.97.0  A2    the 429 `RATE_LIMITED` with `Retry-After` declared on every operation the authenticated limiter covers (`RateLimited`); the operations reached before a session exists declare `RateLimitedAnonymous`, which carries none
+#   5.98.0  F     the `hub_id` of `listPickupRequests` is judged as a UUID and ignored for a Rider (a Rider is shown no request, so its page is the one it is given without a hub, whatever hub is named); a staff session's `hub_id` outside its grant is answered at once by the three older lists as by the four (no change of any answer)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -21,7 +22,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.97.0
+  version: 5.98.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -459,7 +460,9 @@ paths:
             what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or
             that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It
             combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests
-            across hubs, and with `hub_id` those of that hub.
+            across hubs, and with `hub_id` those of that hub. **A Rider is shown no request, with or without a hub, and its `hub_id` is judged as a UUID
+            (a value that is not one is `VALIDATION_FAILED`, as for everyone) and then ignored** (the Product Owner, 7 November 2026): the page is the one it is
+            given without it, whatever hub is named, so that the time of the answer does not tell a Rider whether a hub exists or what it holds.
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/PageToken'
       responses:

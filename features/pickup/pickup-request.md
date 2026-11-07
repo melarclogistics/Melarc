@@ -534,7 +534,9 @@ And the bundle-change primitive reads each change as an ADDITION: the bundle's r
 And the session issued before keeps the snapshot it was issued with, and a sign-in after each migration carries the new scope,
 And the grants of the database, once both are applied, equal those a new seed writes, no other bundle's revision moves, and a second run of either changes nothing,
 And each widening is on record (the Product Owner's decision of 7 November 2026, audit finding A3): once migration 0078 is applied, the database has one enhanced permission.bundle.widened for the widening of 0075 and one for that of 0077, written by the system, each with the correlation label of its migration, the grants it widened as they were and as they are, and the revision it raised the bundle to, and 0078 changes no revision, no floor and no grant,
-And a database whose bundle was seeded after the decisions (its revision is 1) or has no bundle gets none, because nothing was widened on it.
+And a database whose bundle was seeded after the decisions (its revision is 1) or has no bundle gets none, because nothing was widened on it,
+And a database whose bundle has the revision that only 0077's widening leaves (2) gets the record of 0077 alone, and one at revision 3, 4 or 5 gets both (a history that the four release steps cannot have left, a floor other than 1 or a revision above 5, gets a warning and none),
+And the record is once-only (the Product Owner's decision of 7 November 2026, afternoon): applying 0078 again, by hand or by the migrator, writes nothing more, whatever the database holds, because each of the two events has a fixed identity that the ledger's primary key refuses to take twice.
 ```
 
 **Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §4 and §5, [permissions.md](../../contracts/permissions.md) §5, [audit.md](../../contracts/audit.md) §5.6 · **Surface:** backend · **Test level:** integration · **Code:** none

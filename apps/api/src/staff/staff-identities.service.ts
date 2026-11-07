@@ -3,8 +3,12 @@ import { sql } from 'drizzle-orm';
 import { mfaPostureOf, type MfaPosture } from '../platform/auth/mfa/mfa-reset-state.js';
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  hubOutsideStaffGrant,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
@@ -71,6 +75,10 @@ const literal = (text: string): string => text.replace(/[\\%_]/g, (character) =>
  *   lock, recomputed from the same facts in that transaction (S0.36, S0.37).
  * - **The list is ordered by the moment of creation, then the id**, so that a page does not move under a reader who is paging, and is
  *   paged by an opaque token that is only a position (`staff-identity-page-token.ts`).
+ * - **A `hub_id` outside a staff session's set of hubs is answered with no transaction and no statement** (task F, `AC-HUBF-13`; hub-filters.md section 5): the
+ *   database would walk that hub's index before row-level security discarded every row, and the time that takes tells a caller whether the hub exists. The
+ *   value is judged first (a value that is not a UUID is `VALIDATION_FAILED` naming `hub_id`); a hub inside the grant, a grant of every hub and no `hub_id`
+ *   read as before.
  */
 export class StaffIdentitiesService {
   readonly #options: StaffIdentitiesServiceOptions;
@@ -126,9 +134,17 @@ export class StaffIdentitiesService {
     }
     const search = filter.q?.trim() ?? '';
     if (search.length > MAX_SEARCH_LENGTH) throw invalid('q', 'maxLength');
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalid('hub_id', 'format');
     const after = filter.pageToken === undefined ? undefined : decodePageToken(filter.pageToken);
     if (filter.pageToken !== undefined && after === undefined)
       throw invalid('page_token', 'format');
+    // A hub the staff session's grant of this key does not reach is an empty page and **no transaction, no statement** (task F, `AC-HUBF-13`, as the four reads of
+    // task C3 answer it, `AC-HUBF-05`): the database would walk that hub's index and discard every row, and the time that takes tells a caller whether the hub
+    // exists and how much it holds. The answer is the one row-level security gives, since `authorized.scope` is the very set the transaction would run under; a hub
+    // that does not exist takes the same path and so the same time. Judged after every validation, so a value that is not a hub is still refused first.
+    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+      return { items: [], next_page_token: null };
+    }
 
     // What the list contains is written once, in `staffIdentityCriteria`, which the count of the profiles waiting for approval calls as well
     // (task C1).

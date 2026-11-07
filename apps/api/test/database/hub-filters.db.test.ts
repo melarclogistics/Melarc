@@ -2906,4 +2906,27 @@ describe('AC-HUBF-12: a Vendor’s and a Rider’s reads are narrowed inside wha
     }
     expect(await auditEvents()).toBe(events);
   });
+
+  // Break caught (task F, the Product Owner's rule of 7 November 2026: a Rider's `hub_id` is ignored where its own predicate cannot lead the statement): a hub
+  // applied to the statement of a Rider's list of requests, so that the database walks the named hub's index and the time of the answer tells a Rider whether the
+  // hub exists and what it holds (0.23 seconds for a hub of 200,000 requests, 0.013 for one that does not exist: hub-filters.md section 14.2). What the application's
+  // login sent is read as the driver was given it, values removed: for the Rider's own hub, for the other hub, for a hub that holds none of the records and for the
+  // identifier of no hub, the one statement it sends for none, so the page is the same page for the same reason.
+  it('sends the server one statement for a Rider’s list of requests, whatever hub it names and with none: the hub is judged and never applied', async () => {
+    const statementsFor = async (hub?: string): Promise<string[]> => {
+      const traced = await routes.kit.trace(() =>
+        riderOne.client.get(`${REQUESTS}${queryOf({ hub_id: hub })}`),
+      );
+      expect(traced.result.status, describeHub(hub ?? 'none')).toBe(200);
+      return traced.statements.filter((statement) => /\bfrom pickup_request\b/.test(statement));
+    };
+
+    const without = await statementsFor();
+    expect(without.length, 'the Rider’s list does read the table, as the control').toBeGreaterThan(
+      0,
+    );
+    for (const hub of [HUB_A, HUB_B, HUB_C, NO_HUB]) {
+      expect(await statementsFor(hub), describeHub(hub)).toEqual(without);
+    }
+  });
 });

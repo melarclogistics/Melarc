@@ -39,7 +39,16 @@
 --     puts back what it found.
 --
 -- A database that applied 0043 or 0057 under the old primitive has no record of those additions either; the decision names the widenings of 0075 and 0077 and this migration records those.
--- Applying this file to a database again would write the two events again: the migrator applies each file once, and a test applies it once to a database that has not had it.
+--
+-- The record is written once, whatever happens to this file (the Product Owner's rule of 7 November 2026, afternoon: it is idempotent). The migrator applies each file once, but the file can be applied by
+-- hand or by a test to a database that already holds it, and the ledger is append-only, so a second pair of events could never be taken back. The migration cannot ask the ledger whether an event is already
+-- there: the ledger is read by staff alone (a SYSTEM context is "INSERT only" on it: data-scope-registry.md section 4.5, AuditEvent; probed: it counts 0 of the ledger's rows), and this file runs as the
+-- migration identity, not as staff. So the guard is the identity of the event itself. Each of the two events has a fixed identifier of its own (5eed0078-0000-4000-8000-000000000075 for the widening of 0075,
+-- ...000077 for that of 0077: the `5eed` reserved range the seeded rows use), and the insert is `ON CONFLICT DO NOTHING`, with no conflict target (a target needs the right to read the column, and the ledger's
+-- read policy admits staff alone, so row-level security refuses the insert of a SYSTEM context that names one; the ledger's one unique constraint is its primary key): the primary key refuses the second event
+-- of a widening, with no read of the ledger and with nothing to race. A notice says when an event was already there. The fixed identifiers also keep the order of the two in the ledger, oldest step first (the
+-- ledger orders by `recorded_at`, then `id`). A database that applied an EARLIER TEXT of this file (it wrote the same two events under random identifiers, before the file had left the developer's machine) is
+-- refused by the history check of the runner until its journal row is corrected or it is reset (MIGRATION_AND_SEEDING.md section 5.5).
 
 ALTER TABLE "audit_event" DROP CONSTRAINT "audit_event_object_type_closed";--> statement-breakpoint
 ALTER TABLE "audit_event" ADD CONSTRAINT "audit_event_object_type_closed" CHECK ("audit_event"."object_type" IN ('StaffIdentity', 'RiderIdentity', 'VendorAccount', 'VendorCredential', 'Session', 'MfaFactor', 'MfaChallenge', 'RiderSignInChallenge', 'SetupGrant', 'RecoveryRequest', 'RegisteredDevice', 'HUB', 'PickupRequest', 'AdHocSender', 'PickupManifest', 'PickupStop', 'CollectionRecord', 'CollectionHandshake', 'CollectionDispute', 'RunCustodyHandover', 'PickupIntake', 'Order', 'PayerCorrection', 'Evidence', 'RoleBundle'));--> statement-breakpoint
@@ -268,6 +277,7 @@ DECLARE
   held_at_all integer;
   before_grants text[];
   after_grants text[];
+  written integer;
 BEGIN
   PERFORM melarc.lock_policy_keys(
     ARRAY[
@@ -294,13 +304,15 @@ BEGIN
     RAISE WARNING 'migration 0078: the Platform Admin bundle is at revision % and floor %, which the four release steps that changed it cannot leave: the widening of 0075 and 0077 is not recorded',
       held_revision, held_floor;
   ELSE
-    -- The oldest step first. The revision a step is recorded at is the stored one less the steps that followed it.
+    -- The oldest step first. The revision a step is recorded at is the stored one less the steps that followed it. Each step's event has the fixed identifier that makes its record once-only (see the header).
     FOR step IN
       SELECT *
         FROM (VALUES
-          (3, 'release-p1#platform-admin-every-hub', '0075_platform_admin_every_hub', widened_by_0075, held_revision - 1),
-          (2, 'release-p1-1#platform-admin-device-replacement', '0077_platform_admin_device_replacement', widened_by_0077, held_revision)
-        ) AS s(needs_revision, step_label, migration_name, permission_keys, raised_to)
+          (3, 'release-p1#platform-admin-every-hub', '0075_platform_admin_every_hub', widened_by_0075, held_revision - 1,
+           '5eed0078-0000-4000-8000-000000000075'::uuid),
+          (2, 'release-p1-1#platform-admin-device-replacement', '0077_platform_admin_device_replacement', widened_by_0077, held_revision,
+           '5eed0078-0000-4000-8000-000000000077'::uuid)
+        ) AS s(needs_revision, step_label, migration_name, permission_keys, raised_to, event_id)
        WHERE held_revision >= s.needs_revision
        ORDER BY s.needs_revision DESC
     LOOP
@@ -322,7 +334,7 @@ BEGIN
       PERFORM pg_catalog.set_config('melarc.task_capability', 'authentication', true);
       INSERT INTO public.audit_event (id, event_code, occurred_at, actor_type, actor_id, surface_context, object_type, object_id,
                                       correlation_id, related_ids, before_after, detail, outcome, enhanced, serialisation_version)
-        VALUES (pg_catalog.uuidv7(), 'permission.bundle.widened', pg_catalog.clock_timestamp(), 'SYSTEM', NULL, 'SYSTEM',
+        VALUES (step.event_id, 'permission.bundle.widened', pg_catalog.clock_timestamp(), 'SYSTEM', NULL, 'SYSTEM',
                 'RoleBundle', platform_admin, step.step_label,
                 pg_catalog.jsonb_build_object('bundle_id', platform_admin, 'revision', step.raised_to, 'reduction_floor', held_floor),
                 pg_catalog.jsonb_build_object('grants', pg_catalog.jsonb_build_object(
@@ -330,8 +342,13 @@ BEGIN
                 pg_catalog.jsonb_build_object('bundle_name', held_name, 'added', 0, 'widened', held,
                                               'widened_by_migration', step.migration_name,
                                               'recorded_by_migration', '0078_bundle_widening_audit'),
-                'SUCCEEDED', true, 1);
+                'SUCCEEDED', true, 1)
+        ON CONFLICT DO NOTHING;
+      GET DIAGNOSTICS written = ROW_COUNT;
       PERFORM pg_catalog.set_config('melarc.task_capability', 'policy_change', true);
+      IF written = 0 THEN
+        RAISE NOTICE 'migration 0078: the widening of % is already on record: nothing written', step.migration_name;
+      END IF;
     END LOOP;
   END IF;
 

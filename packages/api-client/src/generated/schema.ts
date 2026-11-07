@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.97.0
- *   SHA-256 76585fb310758b6838df3c7761fd37e2efd886ffc78d136f668adc79b4e4f64d (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.98.0
+ *   SHA-256 53d3bb272839b24a514527616aa44b14f93cca57a80e20a5d5e3016106c2020f (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -12975,7 +12975,7 @@ export interface operations {
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
                 /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
                 cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";
-                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. */
+                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. **A Rider is shown no request, with or without a hub, and its `hub_id` is judged as a UUID (a value that is not one is `VALIDATION_FAILED`, as for everyone) and then ignored** (the Product Owner, 7 November 2026): the page is the one it is given without it, whatever hub is named, so that the time of the answer does not tell a Rider whether a hub exists or what it holds. */
                 hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
