@@ -1,8 +1,15 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: 5.86
-# Date:    3 November 2026 (an unreleased working revision since 2 November: see the implementation plan, section 1.1)
+# Version: see `info.version` below (5.96.0 with the audit fixes of 7 November 2026)
+# Date:    7 November 2026 (a working revision: see the implementation plan, section 1.1)
+#
+# Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
+#   5.92.0  C2    lookupRecords (global lookup)
+#   5.93.0  C2.1  lookup follow-ups
+#   5.94.0  P1.1  Platform Admin device replacement and the release step
+#   5.95.0  C3    the optional hub_id on four reads (hub filters)
+#   5.96.0  A1    the audit fixes (the Platform Admin's scope in the descriptions, lookupRecords answers, hub filters answer at once for a hub outside the grant)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -13,7 +20,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.95.0
+  version: 5.96.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -3910,12 +3917,19 @@ paths:
         - browserSession: []
           csrfToken: []
       x-permission: self
-      x-error-codes: [CSRF_VALIDATION_FAILED, PERMISSION_DENIED, SESSION_INVALID, VALIDATION_FAILED]
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          VALIDATION_FAILED,
+        ]
       tags: [lookup]
       summary: Find a record by its code, a name or a phone number typed in full
       description: |
         Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
-        palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-13`), is
+        palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-15`), is
         features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
 
         **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
@@ -3955,8 +3969,16 @@ paths:
         searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
 
         **It is a read and only a read.** It writes one `auth.hub_boundary.crossed` for each hub other than the actor's own that the
-        returned results represent, as the lists do (audit.md section 5.4), and nothing else. It is `qualifying` activity: a typed search
-        is the person's own act. The answer is `Cache-Control: no-store`.
+        returned results represent, as the lists do (audit.md section 5.4), and nothing else. **The events are written together, in one
+        transaction, after every search has succeeded** (Product Owner, 7 November 2026, A4 of the audit): a lookup that fails writes none. It
+        is `qualifying` activity: a typed search is the person's own act. The answer is `Cache-Control: no-store`.
+
+        **It is counted and it is bounded** (Product Owner, 7 November 2026, A5 of the audit). Every request is counted in the session's one
+        bucket of authenticated API requests (`rate_limit_authenticated_api`, settings.md section 7.7; the limit is that setting's), as it
+        counts every operation the session may ask, by the authentication step before the CSRF check; the request past the limit is
+        `RATE_LIMITED` (429), reads nothing and writes no event. **Every statement of the lookup is bounded at 3 seconds**
+        (`AC-LOOKUP-15`, as a count of `getQueueSummary` is by `AC-QSUM-13`): a search that cannot finish in that time ends the whole read
+        as the platform's failed read (`503`, no code, nothing of the answer), and a client shows its failure with a way to try again.
       requestBody:
         required: true
         content:
@@ -3971,6 +3993,7 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
 
   /ops/staff/{id}/trusted-browsers:
     parameters: [{ $ref: '#/components/parameters/Id' }]
@@ -4881,7 +4904,7 @@ paths:
       tags: [delivery-runs]
       summary: Set the manual stop sequence
       description: |
-        Permission `dispatch.run.sequence` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+        Permission `dispatch.run.sequence` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
         closed 21 August 2026).
 
         Manual ordering only. Version 1 has **no route optimisation** and none may be inferred.
@@ -4925,7 +4948,7 @@ paths:
       tags: [delivery-runs]
       summary: Assign a rider to the run
       description: |
-        Permission `dispatch.run.assign` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+        Permission `dispatch.run.assign` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
         closed 21 August 2026).
 
         A distinct permissioned act, not a step inside dispatch (MSC-DEC-222 applied
@@ -8921,7 +8944,7 @@ paths:
       tags: [returns]
       summary: Send the return OTP to the recorded vendor/sender contact
       description: |
-        `returns.close` - **R** on their own assigned return, A S P on own hub. Mirrors
+        `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. Mirrors
         `requestDeliveryOtp` exactly, redirected to a different contact (28.4).
 
         **The request body is empty, and that is the guard**, the identical reasoning
@@ -8967,7 +8990,7 @@ paths:
       tags: [returns]
       summary: Close physical return custody against a valid OTP
       description: |
-        `returns.close` - **R** on their own assigned return, A S P on own hub. The signed
+        `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. The signed
         fulfilment machine names the actor as "Rider or Ops" (state-machines.md Sec9,
         `RETURN_TO_VENDOR_IN_PROGRESS -> RETURNED_TO_VENDOR`) - a rider executes a physical
         drop-off; Ops closes a return the vendor collects in person at the hub counter. **Both
@@ -9352,7 +9375,7 @@ paths:
       tags: [road-expenses]
       summary: List road expenses
       description: |
-        `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+        `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
         A rider sees their own; Ops sees their hub's. The scope is the registry's,
         not this operation's.
 
@@ -9441,7 +9464,7 @@ paths:
       tags: [payments]
       summary: The calculated cash position for a run
       description: |
-        `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+        `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
         A rider reads their OWN run: expected collections, confirmed digital,
         gross cash, applied collection-cash expenses, expected handover, the hub's counted
         result and their own variance. **It reaches no other rider's position, no hub-wide

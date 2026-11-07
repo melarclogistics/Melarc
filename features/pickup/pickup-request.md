@@ -187,7 +187,7 @@ Fields whose behaviour here is non-obvious: `attempt_number` (capped at 3), `rep
 | Key| Holders| Scope| Home|
 |---|---|---|---|
 | `pickup.request.create`| Ops, Senior Ops, Platform Admin, Vendor| Vendor: own only| [permissions.md](../../contracts/permissions.md) §7|
-| `pickup.request.confirm`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs) — **Ops only in V1**||
+| `pickup.request.confirm`| Ops, Senior Ops, Platform Admin| per [permissions.md](../../contracts/permissions.md) — **Ops only in V1**||
 | `pickup.request.cancel`| Ops, Senior Ops, Platform Admin, Vendor| Vendor: own `PENDING` only||
 | `pickup.exception.request`| Ops| own hub||
 | `pickup.exception.approve`| **A S P** (every Ops Staff member, Product Owner, 29 October 2026)| own hub · P: all hubs| Widened off `P only` at Gate C, and to every Ops Staff member on 29 October 2026. **The permission is authoritative, not the role**. Approver ≠ requester, and never available to a vendor|
@@ -502,6 +502,7 @@ Then the Platform Admin without hub_id is VALIDATION_FAILED naming /hub_id (requ
 And the officer without hub_id books in hub A, with the id of hub A books in hub A, and with the id of hub B is HUB_SCOPE_VIOLATION and nothing is written,
 And an id that names no hub is VALIDATION_FAILED naming /hub_id for a session whose grant reaches every hub, and HUB_SCOPE_VIOLATION for one whose grant reaches fewer (the scope is judged before anything of the hub is read, so that a caller learns nothing of a hub outside their grant),
 And a booking for a registered vendor is made in the vendor organisation's hub: a hub_id that names another hub is VALIDATION_FAILED naming /hub_id, and the one that names its hub changes nothing,
+And a staff session whose grant does not reach the hub of the organisation the booking names is HUB_SCOPE_VIOLATION, judged as soon as the organisation is found and before anything else of it is judged or told (an active, a suspended and a not-active organisation, and any hub_id the body names, are answered alike, and no configuration of that hub is read), so that an officer is told only that the organisation is not theirs (SECURITY_DESIGN.md 14.4b, staff alone),
 And a Vendor session that names a hub other than its organisation's is VALIDATION_FAILED,
 And the same Idempotency-Key and body replay the first answer, and the same key with another hub_id is IDEMPOTENCY_KEY_CONFLICT.
 ```
@@ -531,10 +532,27 @@ When migration 0075 is applied, and then migration 0077 (the Product Owner's dec
 Then every grant of the bundle that was of its own hub is of all hubs (0075 all but staff.device.reregister, 0077 that one), with the ownership scope and the tier of every grant unchanged and no key added or removed,
 And the bundle-change primitive reads each change as an ADDITION: the bundle's revision rises by one for each migration, its floor does not, no session is ended and no revocation is written,
 And the session issued before keeps the snapshot it was issued with, and a sign-in after each migration carries the new scope,
-And the grants of the database, once both are applied, equal those a new seed writes, no other bundle's revision moves, and a second run of either changes nothing.
+And the grants of the database, once both are applied, equal those a new seed writes, no other bundle's revision moves, and a second run of either changes nothing,
+And each widening is on record (the Product Owner's decision of 7 November 2026, audit finding A3): once migration 0078 is applied, the database has one enhanced permission.bundle.widened for the widening of 0075 and one for that of 0077, written by the system, each with the correlation label of its migration, the grants it widened as they were and as they are, and the revision it raised the bundle to, and 0078 changes no revision, no floor and no grant,
+And a database whose bundle was seeded after the decisions (its revision is 1) or has no bundle gets none, because nothing was widened on it.
 ```
 
-**Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §4 and §5, [permissions.md](../../contracts/permissions.md) §5 · **Surface:** backend · **Test level:** integration · **Code:** none
+**Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §4 and §5, [permissions.md](../../contracts/permissions.md) §5, [audit.md](../../contracts/audit.md) §5.6 · **Surface:** backend · **Test level:** integration · **Code:** none
+
+### `AC-SLICE-001-85` — A widening of a bundle is on record, and a reduction is recorded as before
+
+```text
+Given a bundle that holds some grants, a live session issued from it, and the bundle-change primitive called with the correlation label of a release step,
+When a grant is added, or the hub scope of a grant is widened from none to own or from own to all, or the ownership scope or the tier of a grant is widened (an addition),
+Then the bundle's revision rises by one and its floor does not, the session stays live, and no auth.session.authority_revoked is written,
+And one enhanced permission.bundle.widened is written in the same transaction, by the system with no actor and no hub, about the bundle, carrying that correlation label, the bundle's new revision and its floor, and as before and after the grants the change added or widened (an added grant has no before), each as its key, hub scope, ownership scope and tier,
+And a change that removes a grant, narrows any attribute, or adds one grant and removes another is a reduction: it ends the sessions below the new floor and writes their auth.session.authority_revoked as it did, and writes no permission.bundle.widened,
+And a change of the name alone, and a change that sets the grants the bundle already holds, write no event and raise nothing,
+And a change that is rolled back leaves no event,
+And the event is one the audit writer would accept: its code, tier, object type and facts pass the writer's own checks, so that the ledger holds one shape of it.
+```
+
+**Governs:** [audit.md](../../contracts/audit.md) §5.6 and §6 category 6, [permission-enforcement.md](../identity/permission-enforcement.md) §5.5, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.10a (Product decision of 7 November 2026) · **Surface:** backend · **Test level:** integration · **Code:** none
 
 ---
 

@@ -547,6 +547,13 @@
       "when": 1793970247465,
       "tag": "0077_platform_admin_device_replacement",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794036498097,
+      "tag": "0078_bundle_widening_audit",
+      "breakpoints": true
     }
   ]
 }

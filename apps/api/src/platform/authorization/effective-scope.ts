@@ -23,6 +23,24 @@ export interface EffectiveScope {
   readonly authorizedHubIds: readonly string[];
 }
 
+/**
+ * Whether `hubId` is a hub this scope **cannot** reach: the scope is a set of hubs (`SET`, which includes the empty set that reaches nothing) and
+ * the hub is not in it. It is the answer the row-level security of a hub-scoped table gives for that hub (`melarc.hub_scope_mode() = 'ALL' OR
+ * responsible_hub_id = ANY (melarc.authorized_hub_ids())`, and `authorized_hub_ids` is this very set, written to the transaction by
+ * `contextOfAuthorization`), so a read that names such a hub in a filter can be answered **empty without opening a statement** (task A1,
+ * `AC-HUBF-05`): the database would walk the hub's index and discard every row, and the time that takes tells a caller whether the hub exists
+ * and how much it holds. `ALL` reaches every hub, so it excludes none.
+ *
+ * Identifiers are compared as lower-case text, as the context writes them (a UUID in capitals is the same hub). The caller has already judged
+ * `hubId` to be a UUID. A **staff** scope only: a Vendor's and a Rider's rows are scoped by what they own and not by a hub, so this answers
+ * nothing about them (`hubOutsideStaffGrant` in `authorized-request.ts` is the form a service calls).
+ */
+export function scopeExcludesHub(scope: EffectiveScope, hubId: string): boolean {
+  if (scope.hubScopeMode !== 'SET') return false;
+  const wanted = hubId.toLowerCase();
+  return !scope.authorizedHubIds.some((each) => each.toLowerCase() === wanted);
+}
+
 export function effectiveScope(
   grant: Pick<BundleGrantSnapshot, 'hubScope'> | undefined,
   sessionHubIds: readonly string[],

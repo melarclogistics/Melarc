@@ -4,7 +4,7 @@ import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-s
 import { contextOfSession } from '../auth/sessions/session-context.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import type { ActivityPolicy } from '../routes/access-declaration.js';
-import { effectiveScope, type EffectiveScope } from './effective-scope.js';
+import { effectiveScope, scopeExcludesHub, type EffectiveScope } from './effective-scope.js';
 
 /**
  * What the authorization step decided for one request, kept beside the request (S0.26): the session that acts, the grant that
@@ -69,6 +69,17 @@ export function authorizationForKey(
     grant,
     scope: effectiveScope(grant, authorized.session.authority.authorizedHubIds),
   };
+}
+
+/**
+ * Whether a **staff** read that names `hubId` in a filter names a hub its grant (the grant of this decision's key, as `authorizationForKey`
+ * made it) does not reach, so that its answer is empty before any statement is asked (task A1, `AC-HUBF-05`; `scopeExcludesHub`): a hub outside
+ * the grant and a hub that does not exist take the same, short time, because neither opens a transaction. `false` for a Vendor or a Rider, whose
+ * rows are scoped by what they own and not by a hub, for an all-hub grant and for a hub inside the grant: those read as they always did.
+ * `hubId` is already judged to be a UUID by the caller.
+ */
+export function hubOutsideStaffGrant(authorized: AuthorizedRequest, hubId: string): boolean {
+  return authorized.session.principalType === 'STAFF' && scopeExcludesHub(authorized.scope, hubId);
 }
 
 const held = new WeakMap<object, AuthorizedRequest>();

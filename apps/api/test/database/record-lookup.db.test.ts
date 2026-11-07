@@ -5,17 +5,18 @@ import { TestClient, type TestResponse } from '../../src/test-support/test-clien
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { HUBS } from '../../src/tools/seed/hubs.js';
 import { insertStaff, staffRow } from './support/identities.js';
+import { arrangedFixedSession } from './support/http-sessions.js';
 import { insertManifest, manifestRow } from './support/manifests.js';
 import { ARRANGER, insertPickupRequest, pickupRequestRow } from './support/pickups.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
-import { insertRider, riderRow } from './support/riders.js';
+import { insertRider, insertRiderDevice, riderRow } from './support/riders.js';
 import { API, HUB_A, HUB_B, OPS, codeOf, type Actor } from './support/staff-routes.js';
 import { insertVendor, vendorRow } from './support/vendors.js';
 import { startVendorRoutes, type VendorRoutes } from './support/vendor-routes.js';
 
 /**
  * `lookupRecords` against the real application and a real PostgreSQL (task C2 and C2.1; `features/operations/global-lookup.md`,
- * `AC-LOOKUP-01` to `-13`): a record found by its code, a name or a phone number typed in full, and only a record the same session could open
+ * `AC-LOOKUP-01` to `-15`): a record found by its code, a name or a phone number typed in full, and only a record the same session could open
  * through its own read. Two hubs, each with a vendor, a request, a run, a rider and a staff member whose names share a word ("Zuko") so that one
  * query meets every kind in both hubs. The call is a POST with the body `{ "q": ... }` that changes nothing (the Product Owner's decision of
  * 6 November 2026): a phone number typed in full is in no URL.
@@ -560,6 +561,42 @@ describe('only an Ops staff session may ask (AC-LOOKUP-07)', () => {
     const bare = await ask(anonymous, 'zuko');
     expect([bare.status, codeOf(bare)]).toEqual([401, 'SESSION_INVALID']);
   });
+
+  // Break caught (the audit of 7 November 2026, A6): a Rider's bearer credential served, or refused with the surface gate's PERMISSION_DENIED, which would
+  // tell a rider that the operation exists and is another surface's. This operation takes a browser session alone, so a bearer credential is a request with
+  // no usable session: SESSION_INVALID, the same answer in every word as a request with none (the negative-access sweep holds the same for every
+  // operation: negative-access-sweep.db.test.ts, SELF_SERVES). Nothing is read and nothing is written.
+  it('refuses a Rider’s bearer credential with SESSION_INVALID, as it refuses a request with no session, and writes no event', async () => {
+    const rider = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
+    const device = await insertRiderDevice(routes.admin, rider.id);
+    const session = await arrangedFixedSession(routes.kit, routes.admin, 'RIDER', {
+      principalId: rider.id,
+      registeredDeviceId: device.id,
+    });
+    const bearer = new TestClient({ baseUrl: routes.kit.app.baseUrl }).bearer(session.token);
+    const crossingsBefore = await routes.rows(
+      `select 1 from audit_event where event_code = 'auth.hub_boundary.crossed'`,
+    );
+
+    const asRider = await bearer.post(LOOKUP, { q: 'zuko' });
+    const bare = await ask(anonymous, 'zuko');
+
+    expect([asRider.status, codeOf(asRider)]).toEqual([401, 'SESSION_INVALID']);
+    expect(asRider.text).not.toContain('items');
+    // The same answer as no session at all: status, code and message, whatever the request's own identifier.
+    const told = (response: TestResponse): { code?: string; message?: string } => {
+      const { code, message } = response.json() as { code?: string; message?: string };
+      return { code, message };
+    };
+    expect(told(asRider)).toEqual(told(bare));
+    expect(
+      (
+        await routes.rows(
+          `select 1 from audit_event where event_code = 'auth.hub_boundary.crossed'`,
+        )
+      ).length,
+    ).toBe(crossingsBefore.length);
+  });
 });
 
 describe('at most eight a kind and twenty in all, in a fixed order (AC-LOOKUP-08)', () => {
@@ -1024,6 +1061,65 @@ describe('a name finds a pickup request only while it is current work (AC-LOOKUP
     expect(idsOf(await ask(officer, 'Declined31'))).toEqual([]);
     expect(idsOf(await ask(officer, 'Ahead10'))).toEqual([request.Ahead10?.id]);
   });
+});
+
+/** The hub-crossing events written for an actor (the rows, in the order of the hubs' ids). */
+const crossingsOf = (actorId: string) =>
+  routes.rows<{ responsible_hub_id: string }>(
+    `select responsible_hub_id from audit_event
+      where event_code = 'auth.hub_boundary.crossed' and actor_id = $1 order by responsible_hub_id`,
+    [actorId],
+  );
+
+/**
+ * The lookup has no limiter of its own (the audit of 7 November 2026, A5): the authentication step counts every request of a session in its one bucket of
+ * API requests (`rate_limit_authenticated_api`, settings.md section 7.7), and the lookup, which declares `RATE_LIMITED`, answers the request past the limit
+ * with the documented 429. The sessions of the other tests of this file are not used: each has its own bucket, and this test spends a whole one.
+ */
+describe('a lookup is counted in the session’s bucket of API requests (AC-LOOKUP-14)', () => {
+  // Break caught: no limit on the lookup (a typed search that asks as fast as it likes), a limit that is not the setting's, a bucket of the lookup's own (the
+  // admissions would not all be in the shared one), a refusal that is not the documented 429 (a defect 500, as an operation that does not declare it is
+  // answered), a refused request that still reads or writes, or a limit that spreads to another session.
+  it('refuses the request past the setting’s limit in a minute with RATE_LIMITED, reads nothing, writes no event, and limits that session alone', async () => {
+    const [setting] = await routes.rows<{ value: number }>(
+      `select value from setting where key = 'rate_limit_authenticated_api'`,
+    );
+    const limit = Number(setting?.value);
+    expect(limit).toBe(120);
+    const asker = await routes.platformAdmin();
+    const [started] = await routes.rows<{ now: Date }>(`select clock_timestamp() as now`);
+    const admitted = () =>
+      routes.rows<{ bucket: string; n: number }>(
+        `select bucket, count(*)::int as n from rate_limit_admission where admitted_at >= $1 group by bucket`,
+        [started?.now],
+      );
+
+    // As many lookups as the setting allows, of a code that names no record (one short statement each).
+    for (let index = 0; index < limit; index += 1) {
+      const answer = await ask(asker, 'ACC-PR-AAAAAA');
+      expect(answer.status, `lookup ${String(index + 1)} of ${String(limit)}`).toBe(200);
+    }
+    // Every one of them is in the one shared bucket, and in no other.
+    expect(await admitted()).toEqual([{ bucket: 'rate_limit_authenticated_api', n: limit }]);
+
+    // The next, of a text that would cross both hubs for a Platform Admin without a hub of its own, is refused and does nothing.
+    const spent = await ask(asker, 'zuko');
+    expect([spent.status, codeOf(spent)]).toEqual([429, 'RATE_LIMITED']);
+    expect(spent.header('retry-after')).toBeNull();
+    expect(spent.text).not.toContain('items');
+    expect(
+      await routes.rows(
+        `select 1 from audit_event where event_code = 'auth.hub_boundary.crossed' and actor_id = $1`,
+        [asker.identity.id],
+      ),
+    ).toEqual([]);
+    expect(await admitted()).toEqual([{ bucket: 'rate_limit_authenticated_api', n: limit }]);
+
+    // Another session is not limited by it, and a lookup that is answered crosses the hubs as before.
+    const other = await routes.platformAdmin();
+    expect((await ask(other, 'zuko')).status).toBe(200);
+    expect((await crossingsOf(other.identity.id)).length).toBe(2);
+  }, 180_000);
 });
 
 function failure(what: string): never {

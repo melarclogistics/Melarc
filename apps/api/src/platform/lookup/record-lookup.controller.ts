@@ -29,9 +29,15 @@ const correlationOf = (): string => currentRequestContext()?.requestId ?? random
  * it is protected as every staff POST is (the CSRF guard judges every method that is not safe, so the session's cookie, the synchronizer token and
  * the Ops Portal's `Origin` are required), its answer is `Cache-Control: no-store`, and it takes **no** `Idempotency-Key` (repeating it repeats a read).
  *
- * It is a `self` operation of the Ops Portal: any signed-in staff session may ask, and **no permission admits the call itself**; a Vendor or a Rider
- * session is refused by the surface gate, as it is for any Ops operation. What the session is given is decided kind by kind, by the key of each kind's
- * own read, and each kind is searched in the scope of that key's grant (`RecordLookupService`).
+ * It is a `self` operation of the Ops Portal: any signed-in staff session may ask, and **no permission admits the call itself**; a Vendor session is
+ * refused by the surface gate (`PERMISSION_DENIED`), as it is for any Ops operation, and a Rider's bearer credential, which this browser-only operation
+ * does not take, is `SESSION_INVALID` (`AC-LOOKUP-07`). What the session is given is decided kind by kind, by the key of each kind's own read, and each
+ * kind is searched in the scope of that key's grant (`RecordLookupService`).
+ *
+ * **It is counted and bounded** (the audit of 7 November 2026, A5): the authentication step counts every request of the session in its one bucket of
+ * API requests (`rate_limit_authenticated_api`) before the CSRF check and before this runs, and the request past the limit is `RATE_LIMITED` (`429`);
+ * the lookup has no limiter of its own. Every statement of the lookup is bounded at 3 seconds (`RECORD_LOOKUP_STATEMENT_TIMEOUT_MS`), and a search
+ * that outlasts it is the platform's failed read, `503` with no code (`AC-LOOKUP-14`, `-15`).
  *
  * It is **`qualifying`** activity: a search typed into the top bar is the person's own act, unlike the counts the portal reads on its own. Where
  * the application is composed without what the service needs, it fails closed (`503`).
@@ -53,6 +59,7 @@ export class RecordLookupController {
   @DescribeErrors(
     ErrorCode.CsrfValidationFailed,
     ErrorCode.PermissionDenied,
+    ErrorCode.RateLimited,
     ErrorCode.SessionInvalid,
     ErrorCode.ValidationFailed,
   )

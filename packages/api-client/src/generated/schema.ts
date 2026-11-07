@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.95.0
- *   SHA-256 e37a1e38941fd4411c6d010245581068f8c074ee814d4368401a166860f12e66 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.96.0
+ *   SHA-256 7d68728f22cf8755e7327121c5554f5baea72e78c97eaae5a5636cb987e8b845 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -2444,7 +2444,7 @@ export interface paths {
         /**
          * Find a record by its code, a name or a phone number typed in full
          * @description Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
-         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-13`), is
+         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-15`), is
          *     features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
          *
          *     **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
@@ -2484,8 +2484,16 @@ export interface paths {
          *     searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
          *
          *     **It is a read and only a read.** It writes one `auth.hub_boundary.crossed` for each hub other than the actor's own that the
-         *     returned results represent, as the lists do (audit.md section 5.4), and nothing else. It is `qualifying` activity: a typed search
-         *     is the person's own act. The answer is `Cache-Control: no-store`.
+         *     returned results represent, as the lists do (audit.md section 5.4), and nothing else. **The events are written together, in one
+         *     transaction, after every search has succeeded** (Product Owner, 7 November 2026, A4 of the audit): a lookup that fails writes none. It
+         *     is `qualifying` activity: a typed search is the person's own act. The answer is `Cache-Control: no-store`.
+         *
+         *     **It is counted and it is bounded** (Product Owner, 7 November 2026, A5 of the audit). Every request is counted in the session's one
+         *     bucket of authenticated API requests (`rate_limit_authenticated_api`, settings.md section 7.7; the limit is that setting's), as it
+         *     counts every operation the session may ask, by the authentication step before the CSRF check; the request past the limit is
+         *     `RATE_LIMITED` (429), reads nothing and writes no event. **Every statement of the lookup is bounded at 3 seconds**
+         *     (`AC-LOOKUP-15`, as a count of `getQueueSummary` is by `AC-QSUM-13`): a search that cannot finish in that time ends the whole read
+         *     as the platform's failed read (`503`, no code, nothing of the answer), and a client shows its failure with a way to try again.
          */
         post: operations["lookupRecords"];
         delete?: never;
@@ -3153,7 +3161,7 @@ export interface paths {
         get?: never;
         /**
          * Set the manual stop sequence
-         * @description Permission `dispatch.run.sequence` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+         * @description Permission `dispatch.run.sequence` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
          *     closed 21 August 2026).
          *
          *     Manual ordering only. Version 1 has **no route optimisation** and none may be inferred.
@@ -3185,7 +3193,7 @@ export interface paths {
         put?: never;
         /**
          * Assign a rider to the run
-         * @description Permission `dispatch.run.assign` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+         * @description Permission `dispatch.run.assign` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
          *     closed 21 August 2026).
          *
          *     A distinct permissioned act, not a step inside dispatch (MSC-DEC-222 applied
@@ -6031,7 +6039,7 @@ export interface paths {
         put?: never;
         /**
          * Send the return OTP to the recorded vendor/sender contact
-         * @description `returns.close` - **R** on their own assigned return, A S P on own hub. Mirrors
+         * @description `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. Mirrors
          *     `requestDeliveryOtp` exactly, redirected to a different contact (28.4).
          *
          *     **The request body is empty, and that is the guard**, the identical reasoning
@@ -6071,7 +6079,7 @@ export interface paths {
         put?: never;
         /**
          * Close physical return custody against a valid OTP
-         * @description `returns.close` - **R** on their own assigned return, A S P on own hub. The signed
+         * @description `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. The signed
          *     fulfilment machine names the actor as "Rider or Ops" (state-machines.md Sec9,
          *     `RETURN_TO_VENDOR_IN_PROGRESS -> RETURNED_TO_VENDOR`) - a rider executes a physical
          *     drop-off; Ops closes a return the vendor collects in person at the hub counter. **Both
@@ -6314,7 +6322,7 @@ export interface paths {
         };
         /**
          * List road expenses
-         * @description `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+         * @description `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
          *     A rider sees their own; Ops sees their hub's. The scope is the registry's,
          *     not this operation's.
          *
@@ -6395,7 +6403,7 @@ export interface paths {
         };
         /**
          * The calculated cash position for a run
-         * @description `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+         * @description `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
          *     A rider reads their OWN run: expected collections, confirmed digital,
          *     gross cash, applied collection-cash expenses, expected handover, the hub's counted
          *     result and their own variance. **It reaches no other rider's position, no hub-wide
@@ -15864,6 +15872,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listStaffTrustedBrowsers: {

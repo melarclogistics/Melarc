@@ -93,10 +93,10 @@ describe('the tier of each event is the catalogue’s, read from the document (G
 
   // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
   // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 79 enhanced, 5 that depend on the act, 116 ordinary, of 200', () => {
-    expect(ENHANCED_CODES).toHaveLength(79);
+  it('counts the tiers: 80 enhanced, 5 that depend on the act, 116 ordinary, of 201', () => {
+    expect(ENHANCED_CODES).toHaveLength(80);
     expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(200);
+    expect(AUDIT_EVENT_CODES).toHaveLength(201);
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
     expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(116);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
@@ -225,6 +225,51 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     expect(build({ ...suspended, beforeAfter: { status: 'ACTIVE_TO_SUSPENDED' } }).enhanced).toBe(
       true,
     );
+  });
+
+  // Break caught (audit finding A3, AC-SLICE-001-85): the widening of a bundle recorded as an ordinary event, with no grants that
+  // changed, with no bundle and revision, or as the act of a person (the primitive writes it as the system). The complete event, in the
+  // shape the primitive writes (migration 0078), is accepted, so the ledger holds one shape of it.
+  it('holds permission.bundle.widened to its tier and to the facts the catalogue names for it', () => {
+    const widened: AuditEventInput = {
+      code: 'permission.bundle.widened',
+      enhanced: true,
+      outcome: 'SUCCEEDED',
+      object: { type: 'RoleBundle', id: OBJECT_ID },
+      relatedIds: { bundle_id: OBJECT_ID, revision: 4, reduction_floor: 1 },
+      beforeAfter: {
+        grants: { before: ['dispatch.read|own|any|P'], after: ['dispatch.read|all|any|P'] },
+      },
+      detail: { bundle_name: 'Platform Admin', added: 0, widened: 1 },
+    };
+    expect(tierOf('permission.bundle.widened')).toBe('ENHANCED');
+    expect(build(widened, AUTHENTICATION).relatedIds).toEqual({
+      bundle_id: OBJECT_ID,
+      revision: 4,
+      reduction_floor: 1,
+    });
+    expect(refusalOf(() => build({ ...widened, enhanced: false }, AUTHENTICATION)).field).toBe(
+      'enhanced',
+    );
+    expect(
+      refusalOf(() => build({ ...widened, beforeAfter: undefined }, AUTHENTICATION)).field,
+    ).toBe('beforeAfter');
+    expect(refusalOf(() => build({ ...widened, relatedIds: {} }, AUTHENTICATION)).field).toBe(
+      'relatedIds',
+    );
+    expect(
+      refusalOf(() =>
+        build({ ...widened, relatedIds: { bundle_id: OBJECT_ID, revision: 4 } }, AUTHENTICATION),
+      ).field,
+    ).toBe('relatedIds');
+    // a person's act, never the system's
+    expect(refusalOf(() => build(widened, STAFF)).field).toBe('actor');
+    // the object is a bundle, an object type of the closed set
+    expect(
+      refusalOf(() =>
+        build({ ...widened, object: { type: 'Bundle', id: OBJECT_ID } }, AUTHENTICATION),
+      ).field,
+    ).toBe('object.type');
   });
 
   // Break caught: a read forced to fabricate a before and after (the placeholder the document's own wording invited), or a read

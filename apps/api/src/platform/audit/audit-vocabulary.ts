@@ -42,6 +42,8 @@ export const AUDIT_OBJECT_TYPES = [
   'Order',
   'PayerCorrection',
   'Evidence',
+  // The role bundle (domain-model.md §6.9), the object of the event a widened bundle writes (audit.md §5.6; migration 0078, audit finding A3).
+  'RoleBundle',
 ] as const;
 
 export type AuditObjectType = (typeof AUDIT_OBJECT_TYPES)[number];

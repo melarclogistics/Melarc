@@ -189,7 +189,7 @@ parcel, the stop still fails with a `HANDOFF_FAILURE` reason and the parcel come
 
 §24.7.2 keeps Melarc responsible *"until final delivery, failure, or return is recorded"*, and **Ops
 records it** with `recordHandoffOutcome` under `delivery.handoff.outcome` — Ops Staff, Senior Ops and
-Platform Admin at own hub (`MSC-DEC-417`, closing `OQ-135`). **The worklist is
+Platform Admin, each at the scope [permissions.md](../../contracts/permissions.md) gives it (`MSC-DEC-417`, closing `OQ-135`). **The worklist is
 `listCarrierHandoffs`**, filtered to the covered mode and the three states still in a third party's
 hands, so an outcome is never recorded only for the orders someone happened to remember.
 

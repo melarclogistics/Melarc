@@ -18,11 +18,16 @@ import { encodePageToken } from './notification-page-token.js';
  * route; the service states them again because it is the one place that knows what a filter may hold, and a read that trusted its caller
  * to have checked would pass a bad value on to a statement. The route test proves the answer a client sees; this proves the refusal.
  */
-const AUTHORIZED = {} as AuthorizedRequest;
 const AUDIT = {} as AuditWriter;
 
 /** A hub as the contract writes one (task C3: `hub_id`, beside `subject_id` and the others), with letters in it so that its capitals are another text. */
 const HUB = '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e01';
+
+/** A staff session whose grant reaches the one hub, `HUB`: what is asked below is asked by it, so that a hub inside its grant is read. */
+const AUTHORIZED = {
+  session: { principalType: 'STAFF', principalId: '11111111-1111-4111-8111-111111111111' },
+  scope: { hubScopeMode: 'SET', authorizedHubIds: [HUB] },
+} as unknown as AuthorizedRequest;
 /** Values that are not a hub, in the forms a client could send them: the service refuses each, naming the parameter, and reads nothing. */
 const NOT_A_HUB = [
   ['text that is not an identifier', 'not-a-uuid'],
@@ -195,9 +200,8 @@ const CONTEXT: SecurityContext = {
   correlationId: 'correlation',
 };
 
-const STAFF = {
-  session: { principalType: 'STAFF', principalId: '11111111-1111-4111-8111-111111111111' },
-} as unknown as AuthorizedRequest;
+/** The same staff session, as the statement tests ask it: its grant reaches the one hub, `HUB`. */
+const STAFF = AUTHORIZED;
 
 /** What a comparison of `column` with a bound value of `cast` is bound to, in the order the comparisons stand in the text. */
 function boundTo(
@@ -230,15 +234,16 @@ function guarded(
 }
 
 /**
- * The statement that selects the page of messages, as the driver is given it, for a list asked with `filter` (by the authorization given, or a bare
- * staff one), and the authorizations the runner was handed, in the order it was handed them.
+ * A list asked with `filter` (by the authorization given, or a bare staff one), on fakes: what it answered, every statement it gave the driver (text
+ * and bound values), and the authorizations the runner was handed, in the order it was handed them. A read that never reached the runner has none of
+ * the last two, which is how a read that opened no transaction is told from one that opened it and found nothing.
  */
-async function listStatement(
+async function attempt(
   filter: Parameters<NotificationLogService['list']>[2],
   authorized: AuthorizedRequest = STAFF,
 ): Promise<{
-  readonly sql: string;
-  readonly params: readonly unknown[];
+  readonly answer: unknown;
+  readonly statements: readonly { readonly sql: string; readonly params: readonly unknown[] }[];
   readonly received: readonly AuthorizedRequest[];
 }> {
   const statements: SQL[] = [];
@@ -268,12 +273,29 @@ async function listStatement(
   } as unknown as Pick<OperationRunner, 'read'>;
   const log = new NotificationLogService({ runner, audit: AUDIT });
 
-  await expect(log.list(authorized, 'correlation', filter)).resolves.toEqual({
-    items: [],
-    next_page_token: null,
-  });
-  const queries = statements.map((statement) => dialect.sqlToQuery(statement));
-  const listing = queries.filter((query) => /\bfrom\s+notification\b/.test(query.sql));
+  const answer = await log.list(authorized, 'correlation', filter);
+  return {
+    answer,
+    statements: statements.map((statement) => dialect.sqlToQuery(statement)),
+    received,
+  };
+}
+
+/**
+ * The statement that selects the page of messages, as the driver is given it, for a list asked with `filter` (by the authorization given, or a bare
+ * staff one), and the authorizations the runner was handed, in the order it was handed them.
+ */
+async function listStatement(
+  filter: Parameters<NotificationLogService['list']>[2],
+  authorized: AuthorizedRequest = STAFF,
+): Promise<{
+  readonly sql: string;
+  readonly params: readonly unknown[];
+  readonly received: readonly AuthorizedRequest[];
+}> {
+  const { answer, statements, received } = await attempt(filter, authorized);
+  expect(answer).toEqual({ items: [], next_page_token: null });
+  const listing = statements.filter((query) => /\bfrom\s+notification\b/.test(query.sql));
   expect(listing, 'the statements it ran').toHaveLength(1);
   const { sql, params } = listing[0] as { sql: string; params: unknown[] };
   return { sql, params, received };
@@ -291,8 +313,11 @@ function frozen<T extends object>(value: T): T {
   return Object.freeze(value);
 }
 
-/** What the guard decided for a staff session whose grant of `notification.read` reaches one hub, `HUB`: frozen, and its own object each time it is asked for. */
-const decided = (): AuthorizedRequest =>
+/**
+ * What the guard decided for a staff session whose grant of `notification.read` is `hubScope` (the hubs of the session, `HUB` alone, or every hub):
+ * frozen, and its own object each time it is asked for.
+ */
+const decided = (hubScope: 'own' | 'all' = 'own'): AuthorizedRequest =>
   frozen({
     session: {
       id: '33333333-3333-4333-8333-333333333333',
@@ -300,9 +325,7 @@ const decided = (): AuthorizedRequest =>
       principalId: '11111111-1111-4111-8111-111111111111',
       authority: {
         snapshot: {
-          grants: [
-            { permission: 'notification.read', hubScope: 'own', ownershipScope: 'any', tier: 'A' },
-          ],
+          grants: [{ permission: 'notification.read', hubScope, ownershipScope: 'any', tier: 'A' }],
         },
         authorizedHubIds: [HUB],
       },
@@ -311,8 +334,11 @@ const decided = (): AuthorizedRequest =>
     idleMinutes: 30,
     judgedAt: new Date('2026-11-06T09:00:00.000Z'),
     permission: 'notification.read',
-    grant: { permission: 'notification.read', hubScope: 'own', ownershipScope: 'any', tier: 'A' },
-    scope: { hubScopeMode: 'SET', authorizedHubIds: [HUB] },
+    grant: { permission: 'notification.read', hubScope, ownershipScope: 'any', tier: 'A' },
+    scope:
+      hubScope === 'all'
+        ? { hubScopeMode: 'ALL', authorizedHubIds: [] }
+        : { hubScopeMode: 'SET', authorizedHubIds: [HUB] },
     activity: 'qualifying',
     stateChanging: false,
   }) as unknown as AuthorizedRequest;
@@ -345,20 +371,82 @@ describe('the statement of the message log, with a hub (task C3)', () => {
   // Break caught: a service (or a controller) that builds another authorization from the filter and hands that to the runner: a scope narrowed to the
   // hub named (the same pages, so that no test of the consequences sees it) or widened to every hub (a hub outside the session's hubs then reads
   // the messages of another, `GBT-GS14`). The hub is a parameter of the statement and never of the authorization, so the runner is handed the very
-  // object the guard decided (identity, not equality), whatever hub is named: one the session reaches, one it does not, and one that names no hub.
+  // object the guard decided (identity, not equality), whatever hub is named: one the session's grant holds and none; and, for a grant of every
+  // hub, one the session has never heard of and one that names no hub (a set-grant session is not handed to the runner for a hub outside its hubs
+  // at all: task A1, below).
   it.each([
-    ['no hub', {}],
-    ['a hub inside the session’s hubs', { hubId: HUB }],
+    ['no hub', 'own', {}],
+    ['a hub inside the session’s hubs', 'own', { hubId: HUB }],
+    ['a hub inside the session’s hubs, in capitals', 'own', { hubId: HUB.toUpperCase() }],
+    ['no hub, with a grant of every hub', 'all', {}],
+    ['a hub no hub-set reaches, with a grant of every hub', 'all', { hubId: OUTSIDE }],
+    ['the identifier of no hub, with a grant of every hub', 'all', { hubId: NOBODY }],
+  ] as const)(
+    'hands the runner the very authorization it was given, for %s',
+    async (_which, hubScope, filter) => {
+      const authorized = decided(hubScope);
+
+      const { received } = await listStatement(filter, authorized);
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toBe(authorized);
+    },
+  );
+
+  // Break caught (task A1, `AC-HUBF-05`, `GBT-GS14`): the hub filter run as a statement for a hub the staff session's grant does not reach, so that the
+  // database walks that hub's index (200,000 messages took 0.9 seconds) before row-level security discards every row, and the time tells a caller
+  // whether the hub exists and how much it holds; or the shortcut judged on the text of the identifier (a hub in capitals is the same hub). A hub
+  // outside the set, one that names no hub and the same in capitals never reach the runner, so no transaction is opened and no statement is given to
+  // the driver, and the answer is the empty page the statement would have returned.
+  it.each([
     ['a hub outside the session’s hubs', { hubId: OUTSIDE }],
+    ['a hub outside the session’s hubs, in capitals', { hubId: OUTSIDE.toUpperCase() }],
     ['the identifier of no hub', { hubId: NOBODY }],
-  ])('hands the runner the very authorization it was given, for %s', async (_which, filter) => {
-    const authorized = decided();
+    [
+      'a hub outside the hubs, beside every other filter',
+      {
+        hubId: OUTSIDE,
+        state: 'SUPPRESSED',
+        audience: 'AD_HOC_SENDER',
+        channel: 'SMS',
+        subjectId: '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e03',
+        pageSize: 7,
+        pageToken: encodePageToken({
+          createdAt: '2026-10-28 10:00:00+00',
+          id: '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e02',
+        }),
+      },
+    ],
+  ])(
+    'answers %s with the empty page, opening no transaction and running no statement',
+    async (_which, filter) => {
+      const { answer, statements, received } = await attempt(filter, decided('own'));
 
-    const { received } = await listStatement(filter, authorized);
+      expect(answer).toEqual({ items: [], next_page_token: null });
+      expect(received, 'the runner was not asked').toEqual([]);
+      expect(statements, 'no statement was given to the driver').toEqual([]);
+    },
+  );
 
-    expect(received).toHaveLength(1);
-    expect(received[0]).toBe(authorized);
-  });
+  // Break caught: a shortcut that answers a hub outside the set before the other filters are judged, so that a request the contract refuses is
+  // answered `200` with an empty page when its hub happens to be outside the grant, and the same request is a `400` for a hub inside it.
+  it.each([
+    ['a position that is not one', { hubId: OUTSIDE, pageToken: 'not-a-position' }, '/page_token'],
+    ['a state that is not one', { hubId: OUTSIDE, state: 'SENDING' }, '/state'],
+    ['a subject that is not an id', { hubId: OUTSIDE, subjectId: 'not-a-uuid' }, '/subject_id'],
+    ['a page size of zero', { hubId: OUTSIDE, pageSize: 0 }, '/page_size'],
+  ])(
+    'still refuses %s, beside a hub outside the session’s hubs, before it answers',
+    async (_what, filter, pointer) => {
+      const error = await attempt(filter, decided('own')).then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).details).toMatchObject({ violations: [{ pointer }] });
+    },
+  );
 
   // Break caught: the hub joined to the other filters by an `or` instead of an `and`, which keeps every message that the other filters admit, or
   // all of the hub's, and not the messages of the hub that the filters admit (`AC-HUBF-03`: "and" with state, audience, channel and subject).

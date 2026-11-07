@@ -2,7 +2,10 @@ import { sql } from 'drizzle-orm';
 
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  hubOutsideStaffGrant,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
@@ -68,6 +71,9 @@ const oneOf = (value: string, allowed: readonly string[]): boolean => allowed.in
  *   to when the act was done (`responsible_hub_id`, which a message keeps). It is one more condition of the statement, in the transaction the
  *   row-level security scopes and never in the security context, so a hub outside the session's grant, or that names no hub, is an empty page
  *   and never `HUB_SCOPE_VIOLATION`.
+ * - **A hub outside the session's set of hubs is answered with no transaction and no statement** (task A1, `AC-HUBF-05`): the database would walk
+ *   that hub's index before row-level security discarded every row, and the time that takes tells a caller whether the hub exists and how much
+ *   it holds. A hub inside the grant and an all-hub grant read as before.
  */
 export class NotificationLogService {
   readonly #options: NotificationLogServiceOptions;
@@ -104,6 +110,13 @@ export class NotificationLogService {
     const after = filter.pageToken === undefined ? undefined : decodePageToken(filter.pageToken);
     if (filter.pageToken !== undefined && after === undefined) {
       throw invalid('page_token', 'format');
+    }
+    // A hub the staff session's grant does not reach is an empty page and **no transaction, no statement** (task A1, `AC-HUBF-05`): the database
+    // would walk that hub's index and discard every row, and how long that takes says whether the hub exists and how much it holds. The answer is
+    // the one row-level security gives, since `authorized.scope` is the very set the transaction would run under; a hub that does not exist takes
+    // the same path, and so the same time. Judged after every validation, so a value that is not a hub is still refused first.
+    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+      return { items: [], next_page_token: null };
     }
 
     const state = filter.state ?? null;

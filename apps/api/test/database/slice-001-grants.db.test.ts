@@ -146,6 +146,37 @@ const grantsHeld = async (observer: Observer): Promise<string[]> =>
     .toSorted();
 const permissionCount = async (observer: Observer): Promise<number> => observer.count('permission');
 
+/**
+ * The event a widening writes (audit finding A3, `AC-SLICE-001-85`; migration 0078): the bundle-change primitive, as 0078 replaced it, records an
+ * addition. These migrations are applied here, one file at a time, to a database that already holds 0078, so the primitive is the new one and the
+ * events are its own. (What 0078 writes for a database that applied them under the old primitive is `platform-admin-widening-record.db.test.ts`.)
+ */
+const wideningsOf = (observer: Observer, bundleId: string, correlationId: string) =>
+  observer.rows<{
+    enhanced: boolean;
+    outcome: string;
+    actor_type: string;
+    actor_id: string | null;
+    object_type: string;
+    related_ids: unknown;
+    before_after: unknown;
+    detail: unknown;
+  }>(
+    `select enhanced, outcome, actor_type, actor_id, object_type, related_ids, before_after, detail from audit_event
+      where event_code = 'permission.bundle.widened' and object_id = $1 and correlation_id = $2`,
+    [bundleId, correlationId],
+  );
+/** A grant as the event writes it: permission_key|hub_scope|ownership_scope|tier. */
+const eventText = (grant: GrantSeed, hubScope: string): string =>
+  [grant.permissionKey, hubScope, grant.ownershipScope, grant.tier ?? '-'].join('|');
+/** The grants of the Platform Admin at their own hub as first written, by key: the 34 that 0075 and 0077 widened between them. */
+const PLATFORM_ADMIN_OWN: readonly GrantSeed[] = HISTORY.filter(
+  (grant) => grant.bundleId === BUNDLE_IDS.platformAdmin && grant.hubScope === 'own',
+).toSorted((left, right) => (left.permissionKey < right.permissionKey ? -1 : 1));
+const REREGISTER = 'staff.device.reregister';
+const LABEL_0075 = 'release-p1#platform-admin-every-hub';
+const LABEL_0077 = 'release-p1-1#platform-admin-device-replacement';
+
 describe('a database that has not been seeded', () => {
   let w: World;
   beforeAll(async () => {
@@ -552,6 +583,37 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
       expect(scopeOf(signedIn?.bundle_snapshot, 'staff.device.reregister')).toBe('own');
     });
 
+    // Break caught (audit finding A3, AC-SLICE-001-85): the widening left no event, because the primitive audited only a reduction; or an
+    // event that names other grants than the ones the migration widened, another label, a person for the actor, or the wrong revision.
+    it('puts the widening on record: one enhanced permission.bundle.widened, with the migration’s label and the 33 grants it widened as they were and as they are', async () => {
+      const widened = PLATFORM_ADMIN_OWN.filter((grant) => grant.permissionKey !== REREGISTER);
+      expect(widened).toHaveLength(33);
+
+      const events = await wideningsOf(w.observer, BUNDLE_IDS.platformAdmin, LABEL_0075);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+        actor_type: 'SYSTEM',
+        actor_id: null,
+        object_type: 'RoleBundle',
+      });
+      // The revision the migration raised the bundle to (the first three steps made it 2 and 3, this one 4).
+      expect(events[0]?.related_ids).toEqual({
+        bundle_id: BUNDLE_IDS.platformAdmin,
+        revision: 4,
+        reduction_floor: 1,
+      });
+      expect(events[0]?.before_after).toEqual({
+        grants: {
+          before: widened.map((grant) => eventText(grant, 'own')),
+          after: widened.map((grant) => eventText(grant, 'all')),
+        },
+      });
+      expect(events[0]?.detail).toEqual({ bundle_name: 'Platform Admin', added: 0, widened: 33 });
+    });
+
     // Break caught: a migration that cannot run twice, or that raises the revision again for a change it already made.
     it('may run again: the second run changes nothing', async () => {
       const bundlesBefore = await bundles(w.observer);
@@ -561,6 +623,8 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
 
       expect(await bundles(w.observer)).toEqual(bundlesBefore);
       expect(await grantsHeld(w.observer)).toEqual(grantsBefore);
+      // A change that changes nothing is on record nowhere: the second run adds no event to the one the first wrote.
+      expect(await wideningsOf(w.observer, BUNDLE_IDS.platformAdmin, LABEL_0075)).toHaveLength(1);
     });
   });
 
@@ -675,6 +739,38 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
       expect(scopeOf(signedIn?.bundle_snapshot, 'staff.device.reregister')).toBe('all');
     });
 
+    // Break caught (audit finding A3, AC-SLICE-001-85): the widening of the one grant left no event, or an event that names another grant or
+    // revision, or the label of the first widening.
+    it('puts the widening on record: one enhanced permission.bundle.widened for staff.device.reregister, from own to all', async () => {
+      const reregister = PLATFORM_ADMIN_OWN.filter((grant) => grant.permissionKey === REREGISTER);
+      expect(reregister).toHaveLength(1);
+
+      const events = await wideningsOf(w.observer, BUNDLE_IDS.platformAdmin, LABEL_0077);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+        actor_type: 'SYSTEM',
+        actor_id: null,
+        object_type: 'RoleBundle',
+      });
+      expect(events[0]?.related_ids).toEqual({
+        bundle_id: BUNDLE_IDS.platformAdmin,
+        revision: 5,
+        reduction_floor: 1,
+      });
+      expect(events[0]?.before_after).toEqual({
+        grants: {
+          before: reregister.map((grant) => eventText(grant, 'own')),
+          after: reregister.map((grant) => eventText(grant, 'all')),
+        },
+      });
+      expect(events[0]?.detail).toEqual({ bundle_name: 'Platform Admin', added: 0, widened: 1 });
+      // The first widening's event is the first's alone.
+      expect(await wideningsOf(w.observer, BUNDLE_IDS.platformAdmin, LABEL_0075)).toHaveLength(1);
+    });
+
     // Break caught: a migration that cannot run twice, or that raises the revision again for a change it already made.
     it('may run again: the second run changes nothing', async () => {
       const bundlesBefore = await bundles(w.observer);
@@ -684,6 +780,7 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
 
       expect(await bundles(w.observer)).toEqual(bundlesBefore);
       expect(await grantsHeld(w.observer)).toEqual(grantsBefore);
+      expect(await wideningsOf(w.observer, BUNDLE_IDS.platformAdmin, LABEL_0077)).toHaveLength(1);
     });
   });
 });

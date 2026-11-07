@@ -117,8 +117,9 @@ const json = (value: unknown): string | null =>
  *   schema (the intents' required members, the one identity source of an ad-hoc sender). Before the transaction, from the request alone:
  *   the idempotency key's form, the calendar (Monday to Saturday), the minimum of two packages (a vendor's; Ops may book one and ask for
  *   its exception), the payer arrangement. Then the transaction: **the idempotency of the command**, the sender (a vendor sees only its
- *   own organisation, and another's is answered as no sender; a suspended one is `SENDER_SUSPENDED`), the places, the declaration, the
- *   estimate, the insert.
+ *   own organisation, and another's is answered as no sender; **a staff member is told `HUB_SCOPE_VIOLATION` for an organisation of a hub
+ *   outside their grant as soon as the organisation is found, before anything else of it is judged**; a suspended one is `SENDER_SUSPENDED`),
+ *   the places, the declaration, the estimate, the insert.
  * - **The server derives everything that is not the client's to say**: the code, the hub (the vendor organisation's; or, for a walk-in, the
  *   hub the Ops member names when their grant reaches more than one, else their own: `hub_id`, task P1), the state (`PENDING`), the place the rider is sent (`resolved_pickup_location`, from the intent, never supplied), the sender's name, the
  *   estimate, the snapshot of the liability cap. The client sends an address and never a price.
@@ -206,7 +207,8 @@ export class PickupRequestCreation {
         throw new Error('An idempotency record of this command is stranded');
       }
 
-      // 1. Whose request it is, and in which hub.
+      // 1. Whose request it is, and in which hub. A registered vendor's organisation has been judged against the grant the moment it was found
+      // (`#sender`); the check below is the one a walk-in's own hub (the primary hub of the member's record) meets, and it holds for both.
       const sender = await this.#sender(handle, authorized, body);
       const hubId = sender.hubId;
       this.#requireHubInScope(authorized, hubId);
@@ -312,7 +314,8 @@ export class PickupRequestCreation {
 
   /**
    * The hub a booking belongs to, found without refusing anything (the transaction that books refuses, in the contract's order): the
-   * organisation's for a registered vendor's intents, the Ops member's own for a walk-in's. Absent where it cannot be found.
+   * organisation's for a registered vendor's intents, the Ops member's own for a walk-in's. Absent where it cannot be found, **and for a staff
+   * caller whose grant does not reach it**: the configuration of a hub is read for a booking that can be made there and for no other.
    */
   async #hubOf(
     handle: TransactionHandle,
@@ -325,7 +328,13 @@ export class PickupRequestCreation {
       const found = await tx.execute(
         sql`select responsible_hub_id from vendor_organization where id = ${body.vendor_organization_id}::uuid`,
       );
-      return (found.rows[0] as { responsible_hub_id: string } | undefined)?.responsible_hub_id;
+      const organisationHub = (found.rows[0] as { responsible_hub_id: string } | undefined)
+        ?.responsible_hub_id;
+      // A staff caller whose grant does not reach the organisation's hub finds nothing here, as for a walk-in below: no configuration is read for a hub
+      // that is never going to be booked, and the transaction that books answers `HUB_SCOPE_VIOLATION`, first (`#sender`).
+      return organisationHub !== undefined && this.#hubInScope(authorized, organisationHub)
+        ? organisationHub
+        : undefined;
     }
     // A walk-in's hub is the one the member names, when it exists and the grant reaches it; else their own, when the grant reaches one hub. A
     // grant of more than one hub with none named, an unknown hub and a hub outside the grant find nothing here: the transaction that books
@@ -404,6 +413,11 @@ export class PickupRequestCreation {
         }
         throw violation('/vendor_organization_id', 'enum');
       }
+      // **The scope is judged before anything else of the organisation** (the audit of 7 November 2026, A2). A staff context reads every organisation
+      // under a `pickup` key (`vendor_organization_pickup_read` has no hub in it), so the grant is judged here, on the hub the row states, and what an
+      // officer is told of an organisation of a hub outside their grant is the one answer whatever it is: neither its status (suspended, or not
+      // active) nor whether the hub the body names is its hub is judged, or told, before it. A vendor holds no hub scope: its organisation's is its own.
+      this.#requireHubInScope(authorized, org.responsible_hub_id);
       if (org.operational_status === 'SUSPENDED') {
         throw ApiException.of(ErrorCode.SenderSuspended, 'The sender is suspended');
       }

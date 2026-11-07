@@ -1,8 +1,11 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  hubOutsideStaffGrant,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
@@ -55,6 +58,21 @@ function invalid(name: string, rule: string): ApiException {
 }
 
 /**
+ * What a Vendor owns, **named in the statement** (task A1): `vendor_organization_id = melarc.current_vendor_organization_id()`, the very test its
+ * row-level-security policy applies. The policy is one `CASE` expression, which the planner cannot use as an index condition, so a statement that
+ * names a hub reads the hub's rows through `pickup_request_hub_idx` and lets the policy discard every one that is not the Vendor's: 0.4 seconds
+ * for a hub of 200,000 rows, and a Vendor that asks for a hub that holds none of its own can tell from the time that the hub exists and how much
+ * it holds. With the Vendor's organisation in the statement, the planner starts from `pickup_request_vendor_idx` (the Vendor's own rows, and the
+ * hub is a filter on them): 0.15 milliseconds for 500 requests at that scale, whatever the hub holds. It only restates the policy, which still
+ * decides; it can narrow and never widen. A staff session and a Rider add nothing (`true` is dropped by the planner).
+ */
+function ownedByCaller(authorized: AuthorizedRequest): SQL {
+  return authorized.session.principalType === 'VENDOR'
+    ? sql`vendor_organization_id = melarc.current_vendor_organization_id()`
+    : sql`true`;
+}
+
+/**
  * `getPickupRequest` and `listPickupRequests` (S1.13; `pickup.read`; `AC-SLICE-001-79`; domain-model.md section 6.2).
  *
  * - **The scope is row-level security and the scope probe, nothing the use case writes.** The reads run in the caller's own context with
@@ -86,6 +104,11 @@ function invalid(name: string, rule: string): ApiException {
  *   (never `HUB_SCOPE_VIOLATION`: lists do not probe, SECURITY_DESIGN 14.4b) and a Vendor with it reads its own organisation's requests of that
  *   hub. It is never put in the security context. A value that is not a UUID is `VALIDATION_FAILED` before anything is read. The audit of a
  *   crossing follows the rows of the page, so a page that is empty writes none.
+ * - **A hub outside a staff session's set of hubs is answered with no transaction and no statement** (task A1, `AC-HUBF-05`): the database
+ *   would walk that hub's index before row-level security discarded every row, and the time that takes tells a caller whether the hub exists
+ *   and how much it holds. A hub inside the grant and an all-hub grant read as before. A Vendor's statement **names its own organisation**
+ *   (`ownedByCaller`), so that the database starts from the Vendor's index and not the hub's and a foreign hub costs what the Vendor's own requests
+ *   cost; a Rider, who is shown no request, has the hub judged and not applied.
  */
 export class PickupRequestsService {
   readonly #options: PickupRequestsServiceOptions;
@@ -170,6 +193,20 @@ export class PickupRequestsService {
     if (filter.pageToken !== undefined && after === undefined)
       throw invalid('page_token', 'format');
 
+    // A hub the staff session's grant does not reach is an empty page and **no transaction, no statement** (task A1, `AC-HUBF-05`): the database
+    // would walk that hub's index and discard every row, and how long that takes says whether the hub exists and how much it holds. The answer is
+    // the one row-level security gives, since `authorized.scope` is the very set the transaction would run under; a hub that does not exist takes
+    // the same path, and so the same time. Judged after every validation, so a value that is not a hub is still refused first.
+    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+      return { items: [], next_page_token: null };
+    }
+
+    // A Rider is shown no request in any hub (the registry gives it none), so a hub could only narrow an empty page, and a statement that named
+    // it would walk the hub's index to discard every row: the time of that tells a Rider whether a hub exists and how much it holds (task A1).
+    // The value is judged above and then **not applied** for a Rider; the answer is the one the statement gives with or without it, and so does
+    // the time (the Product Owner's fallback of 7 November 2026: ignore `hub_id` where there are no owned rows to name in the statement instead).
+    const hubId = authorized.session.principalType === 'RIDER' ? null : (filter.hubId ?? null);
+
     // What the list contains is written once, in `pickupRequestCriteria`, which the counts of the queues call as well (task C1): the pool
     // (the confirmed requests that no manifest holds, less the ones awaiting the review of their cutoff, see above) is a rule of it.
     const criteria = pickupRequestCriteria({
@@ -178,8 +215,9 @@ export class PickupRequestsService {
       cutoffExceptionState: filter.cutoffExceptionState ?? null,
       serviceDate: filter.serviceDate ?? null,
       manifested: filter.manifested === undefined ? null : filter.manifested === 'true',
-      hubId: filter.hubId ?? null,
+      hubId,
     });
+    const owned = ownedByCaller(authorized);
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -189,6 +227,7 @@ export class PickupRequestsService {
         const result = await transactionOf(handle).execute(sql`
         select ${REQUEST_COLUMNS} from pickup_request
          where ${criteria}
+           and ${owned}
            and (${afterMoment}::timestamptz is null or (created_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
          order by created_at, id
          limit ${size + 1}`);

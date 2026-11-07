@@ -73,7 +73,7 @@ Gate C §52 asked for these by name, and **all three already existed**:
 
 | Authority| Key| Why it is not the rider|
 |---|---|---|
-| **Rider cash handover receiver**| `payment.cash.confirm`| A S P, own hub (Platform Admin: all hubs). Already **never held by a rider**: one actor supplying both compared figures is not a comparison|
+| **Rider cash handover receiver**| `payment.cash.confirm`| A S P, at the scope [permissions.md](../../contracts/permissions.md) gives it. Already **never held by a rider**: one actor supplying both compared figures is not a comparison|
 | **Hub cash reconciliation**| `payment.cash.reconcile_hub`| **New at Gate C.** `payment.cash.confirm` accepts *one rider's* handover; this closes the *hub's* position|
 | **Cash variance resolution**| `payment.variance.resolve`| S P with a mandatory reason. **A rider may never resolve their own shortage**, and ordinary Ops Staff may not close a financial discrepancy|
 

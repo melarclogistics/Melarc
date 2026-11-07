@@ -16,8 +16,9 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
  * - **A source asks one question of a query, and no other:** a code looks for the record that carries it (a kind with no code answers none), a phone
  *   typed in full looks for the records that carry that number (a kind with no phone searched answers none), and anything else is a word-prefix
  *   search of the names. A source that has no way to answer a query returns no hit.
- * - **Failure:** a source that cannot answer throws, and the whole read fails (`500`): the platform never answers with the kinds it has and without
- *   the one it has not.
+ * - **Failure:** a source that cannot answer throws, and the whole read fails (`500`; the platform's `503` when the database ended the statement
+ *   because it outlasted its bound of 3 seconds, which every statement of a lookup has, `AC-LOOKUP-15`): the platform never answers with the kinds
+ *   it has and without the one it has not, and no hub-crossing event is written for a read that failed.
  */
 
 /** The kinds of record a lookup can return, **in the order an answer lists them**: a closed list, the contract's `RecordLookupKind`. */

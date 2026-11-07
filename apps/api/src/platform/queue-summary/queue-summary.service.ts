@@ -2,6 +2,7 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 import {
   authorizationForKey,
   grantOfSession,
+  hubOutsideStaffGrant,
   type AuthorizedRequest,
 } from '../authorization/authorized-request.js';
 import type { OperationRunner } from '../authorization/operation-runner.js';
@@ -42,6 +43,9 @@ export interface QueueSummaryServiceOptions {
 /** The counts of one key are read in one `REPEATABLE READ` transaction: they are one picture of the data and agree with each other. */
 const ONE_SNAPSHOT = { isolation: 'REPEATABLE READ' } as const;
 
+/** What a queue holds when the hub asked for is none its key's grant reaches: nothing waits, so there is no oldest moment. */
+const NOTHING_WAITS: QueueCount = Object.freeze({ count: 0, oldestAt: null });
+
 /**
  * The longest a statement of the summary may run (`AC-QSUM-13`, the Product Owner's decision of 6 November 2026). The summary is read on every
  * page, so a count that runs long (the pool of confirmed requests reads the whole history until the marker of the plan's performance task) must
@@ -69,6 +73,9 @@ export const QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS = 3000;
  *   given is what it is without a hub, so a hub outside the grant of a queue's list key counts 0 in that queue (the entry is still there:
  *   the queue is the session's and nothing waits in that hub), a hub that does not exist counts 0 everywhere, and a queue the session may
  *   not read stays absent whatever the hub. A value that is not a UUID is refused before any transaction opens (`VALIDATION_FAILED`, 400).
+ * - **A hub that a key's grant does not reach is counted 0 without a transaction or a statement** (task A1, `AC-HUBF-05`): the group of that key
+ *   is answered at once with each of its queues at 0 (`hubOutsideStaffGrant`, decided key by key), so that a hub the session may not reach
+ *   and a hub that does not exist take the same, short time; a key whose grant holds the hub, and an all-hub grant, still count.
  * - **It writes nothing, not even an audit event.** It returns no record and no page of records, so the `auth.hub_boundary.crossed` of a
  *   list is not written for it (audit.md section 6 says nothing of an aggregate; recorded as a finding for the Product Owner).
  * - **The answer is in the order of `QueueId`**, whatever the order the counters were given in; the client orders what it shows.
@@ -123,6 +130,14 @@ export class QueueSummaryService {
       // A session whose bundle holds no grant of the list's key has none of these queues: they are not counted, and not shown as 0.
       const forKey = authorizationForKey(authorized, key);
       if (forKey === undefined) continue;
+      // A hub that this key's grant does not reach counts 0 in each of its queues **with no transaction and no statement** (task A1, `AC-HUBF-05`):
+      // the database would walk the hub's index and discard every row, and how long that takes says whether the hub exists and how much it holds.
+      // It is decided key by key, since a key's grant is what its counts run under: a key whose grant holds the hub still counts. The entries are
+      // the ones that would have been counted, so the answer is the one row-level security gives (the summary names no hub).
+      if (filter.hubId !== null && hubOutsideStaffGrant(forKey, filter.hubId)) {
+        for (const counter of group) counted.set(counter.queue, NOTHING_WAITS);
+        continue;
+      }
       const counts = await this.#runner.read(
         forKey,
         correlationId,

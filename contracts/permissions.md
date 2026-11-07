@@ -343,14 +343,14 @@ One key per domain. **Scope is on the grant, not the key**: `pickup.read` held w
 
 | Gate C authority| Existing key|
 |---|---|
-| Rider cash handover **receiver**| **`payment.cash.confirm`** — A S P, own hub. Already **never held by a rider**, because one actor supplying both compared figures is not a comparison|
-| Cash **variance** resolution| **`payment.variance.resolve`** — S P, own hub, mandatory reason. Already Senior Ops rather than Ops|
+| Rider cash handover **receiver**| **`payment.cash.confirm`** — A S P, own hub · P: all hubs. Already **never held by a rider**, because one actor supplying both compared figures is not a comparison|
+| Cash **variance** resolution| **`payment.variance.resolve`** — S P, own hub · P: all hubs, mandatory reason. Already Senior Ops rather than Ops|
 | **Reason catalogue** administration| **`settings.reason.manage`** — S P. Gate C widens the metadata it governs and adds no key: §35.9.2 already made reason metadata configuration|
 | Return Fee **waiver**| **`returns.waiver.request`** and **`returns.waiver.approve`**, approver ≠ requester (a Platform Admin excepted, §6)|
 | Rider **cash collection** at the door| **`payment.cash.collect`** — R only, assigned stop|
 | Rider **handover declaration**| **`payment.cash.handover`** — R only|
 | **Vendor operational eligibility** read| **`vendor.read`** — the projection is derived from records this key already reaches|
-| **OTP / verification fallback** authorisation| **`delivery.otp.override`** — S P, own hub. `MSC-DEC-326`'s supervised fallback **is** §25.1's extraordinary path with its review steps written down|
+| **OTP / verification fallback** authorisation| **`delivery.otp.override`** — S P, own hub · P: all hubs. `MSC-DEC-326`'s supervised fallback **is** §25.1's extraordinary path with its review steps written down|
 | **Single-package approval**| **`pickup.exception.approve`** — the maker-checker pair already existed. `MSC-DEC-333` **widens its holders** off `P only`; it does not add a key|
 
 **Adding a second key beside an existing one is how a catalogue stops being closed.** §11.6's closed list works only if the first question asked of a new authority is whether it already exists.

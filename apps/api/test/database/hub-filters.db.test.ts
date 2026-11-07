@@ -2126,6 +2126,57 @@ describe('AC-HUBF-05, GBT-GS14: a hub outside the grant, and a hub that does not
     },
   );
 
+  // Break caught (AC-HUBF-05, GBT-GS14, task A1): a hub outside the grant that is still read, so that the database walks the other hub's index and
+  // discards every row, and the time of that tells a caller whether the hub exists and how much it holds (0.7 to 0.9 seconds for 200,000 rows,
+  // against milliseconds for a hub that does not exist: `alone/hub-filter-timing.db.test.ts` measures it at that scale). What the application's
+  // login sent to the server is read as the driver was given it: for a hub outside the grant and for the identifier of no hub, nothing at all that
+  // reads the table (no list, no count); for the session's own hub the statement is there, so that an absence is the shortcut and not a trace that
+  // saw nothing.
+  it.each(ONE_HUB_ROLES)(
+    'for %s, a hub outside the grant and the identifier of no hub send the server no statement that reads the data, and the own hub does',
+    async (_label, role) => {
+      const actor = await role.become();
+      const reads = (statements: readonly string[], table: string): string[] =>
+        statements.filter((statement) => new RegExp(`\\bfrom ${table}\\b`).test(statement));
+      const asked = (path: string, hub: string) =>
+        routes.kit.trace(() => actor.client.get(`${path}${queryOf({ hub_id: hub })}`));
+
+      for (const [operation, path, table] of [
+        ['listPickupRequests', REQUESTS, 'pickup_request'],
+        ['listPickupManifests', RUNS, 'pickup_manifest'],
+        ['listNotifications', MESSAGES, 'notification'],
+      ] as const) {
+        for (const hub of [HUB_B, NO_HUB]) {
+          const traced = await asked(path, hub);
+          expect(traced.result.status, operation).toBe(200);
+          expect(reads(traced.statements, table), `${operation} for ${hub}`).toEqual([]);
+        }
+        const own = await asked(path, HUB_A);
+        expect(own.result.status, operation).toBe(200);
+        expect(reads(own.statements, table).length, `${operation} for the own hub`).toBeGreaterThan(
+          0,
+        );
+      }
+
+      // The summary: the queues are counted for the own hub and for no other (the statements of the counts are the only ones that name the `oldest`
+      // moment they return; the rate limiter counts too, and is none of this).
+      const counted = (statements: readonly string[]): string[] =>
+        statements.filter((statement) => /\bas oldest\b/.test(statement));
+      for (const hub of [HUB_B, NO_HUB]) {
+        const traced = await routes.kit.trace(() =>
+          actor.client.get(`${SUMMARY}${queryOf({ hub_id: hub })}`),
+        );
+        expect(traced.result.status).toBe(200);
+        expect(counted(traced.statements), `the summary for ${hub}`).toEqual([]);
+      }
+      const own = await routes.kit.trace(() =>
+        actor.client.get(`${SUMMARY}${queryOf({ hub_id: HUB_A })}`),
+      );
+      expect(own.result.status).toBe(200);
+      expect(counted(own.statements).length, 'the summary for the own hub').toBeGreaterThan(0);
+    },
+  );
+
   // Break caught (AC-HUBF-05, GBT-GS14): a Platform Admin, whose grant reaches every hub, refused or told something for a hub that holds nothing
   // or that does not exist; the identifier of no hub answered another way than a hub that exists with none of the records (an oracle on which
   // hubs exist).

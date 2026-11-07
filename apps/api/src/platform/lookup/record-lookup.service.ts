@@ -49,11 +49,25 @@ export interface RecordLookupServiceOptions {
     handle: TransactionHandle,
     hubIds: readonly string[],
   ) => Promise<ReadonlyMap<string, string>>;
+  /**
+   * Bounds every statement that follows it in the transaction it is given (the searches, and the commit) to at most `milliseconds` (a `SET LOCAL
+   * statement_timeout`, which ends with the transaction; the summary's own, `queue-summary/statement-limit.ts`), run before the first search of it.
+   * Required, so that no composition can leave a search unbounded.
+   */
+  readonly limitStatements: (handle: TransactionHandle, milliseconds: number) => Promise<void>;
 }
 
 /** The most of one kind in an answer, and of all kinds together. */
 export const LOOKUP_PER_KIND = 8;
 export const LOOKUP_IN_ALL = 20;
+
+/**
+ * The longest a statement of a lookup may run (`AC-LOOKUP-15`, the Product Owner's decision of 7 November 2026 on the audit, A5; the summary's
+ * counts have the same bound, `AC-QSUM-13`). A name search of the requests is a scan that no index can serve under row-level security, and it runs
+ * while the transaction holds the shared lock of the session's bundle, so a search that runs long must end as a failed read, which the Ops Portal
+ * draws as a failure with a way to try again, and not hold a connection and the lock for as long as the pool allows.
+ */
+export const RECORD_LOOKUP_STATEMENT_TIMEOUT_MS = 3000;
 
 interface Taken {
   readonly kind: RecordLookupKind;
@@ -74,9 +88,15 @@ interface Taken {
  * - **At most 8 results of a kind and 20 in all**, the kinds in their fixed order. Each source is asked for no more than the room that is left,
  *   and a kind for which none is left is not read for.
  * - **The hub crossings of the results are written as the lists write them** (audit.md section 5.4): one `auth.hub_boundary.crossed` for each hub
- *   other than the actor's own that the returned results represent, in the transaction that read the first of them, and none for a result the
- *   twenty left out (the work counts the room it has left before it audits).
- * - **A source that fails fails the read** (`500`): the answer never says "nothing found" for a kind it could not read.
+ *   other than the actor's own that the returned results represent, and none for a result the twenty left out (the work counts the room it has left
+ *   before it names a hub). **They are written together, in one transaction of their own, after every search has succeeded** (the audit of 7 November
+ *   2026, A4; `AC-LOOKUP-11`): a key's transaction reads the records and the hubs they represent and writes nothing, so that a lookup that fails
+ *   later has recorded no crossing for a result it never returned, and a ledger that cannot take the events fails the read.
+ * - **A source that fails fails the read** (`500`): the answer never says "nothing found" for a kind it could not read. A search that the database
+ *   ended because it outlasted its bound (below) is the failure of that statement and is not caught here: the platform answers it as a failed read.
+ * - **Every statement of a lookup is bounded at 3 seconds** (`RECORD_LOOKUP_STATEMENT_TIMEOUT_MS`, `AC-LOOKUP-15`), set at the start of each key's
+ *   transaction, before its first search. And the request is counted in the session's bucket of API requests (`rate_limit_authenticated_api`) by the
+ *   authentication step before this runs, as every operation of the session is: the lookup has no limiter of its own.
  * - **It is a POST that changes nothing** (the Product Owner's decision of 6 November 2026), **so each key's transaction runs through
  *   `OperationRunner.mutate`**: the runner treats every request of a method that is not safe as one that changes state, and the lock-free `read`
  *   refuses it (`stateChanging`). The platform has no other convention for a POST, so the lookup keeps it and adds no concept to the authorization step: the
@@ -88,11 +108,13 @@ interface Taken {
  *   2026). The shared lock is held until the transaction commits, and the search runs inside it, so a name search holds the lock for as long as it
  *   takes. A reduction of that bundle takes the lock exclusively and waits for the holders, and the requests of the bundle that arrive meanwhile
  *   queue behind the waiting reduction and are refused with the generic operational failure if the lock is not theirs within
- *   `DATABASE_LOCK_TIMEOUT_MS`. Each key also costs two transactions (the coordinator's discovery and the locked one). A door for a POST that
- *   changes nothing and takes no policy lock would remove it; that is a change to the authorization step, which this task does not make.
+ *   `DATABASE_LOCK_TIMEOUT_MS`. Each key also costs two transactions (the coordinator's discovery and the locked one), and so does the step that
+ *   writes the events, when there are any. A door for a POST that changes nothing and takes no policy lock would remove it; that is a change to the
+ *   authorization step, which this task does not make (a later performance task: global-lookup.md section 14).
  * - **The work given to the runner is restart-safe.** The coordinator runs a work again after a rollback if it asked for a stronger lock or the
- *   plan changed (neither can come from this work today). So the work reads `room` and `audited` and changes neither; what it used and what it
- *   audited are returned and taken into them after the transaction has committed, and a second run starts from the same state as the first.
+ *   plan changed (neither can come from this work today). So the work reads `room` and changes nothing of this read's memory; what it used and
+ *   which hubs it found foreign are returned and taken after the transaction has committed, and a second run starts from the same state as the
+ *   first. The step that writes the events reads only the hubs it is given.
  */
 export class RecordLookupService {
   readonly #options: RecordLookupServiceOptions;
@@ -141,7 +163,8 @@ export class RecordLookupService {
     }
 
     let room = LOOKUP_IN_ALL;
-    const audited = new Set<string>();
+    // The hubs other than the actor's own that the results represent, collected as the keys are searched and written down once, at the end.
+    const foreign = new Set<string>();
     const found: { readonly kind: RecordLookupKind; readonly result: RecordLookupResultView }[] =
       [];
 
@@ -155,6 +178,8 @@ export class RecordLookupService {
       const forKey = authorizationForKey(authorized, key);
       if (forKey === undefined) continue;
       const outcome = await this.#options.runner.mutate(forKey, correlationId, async (handle) => {
+        // Bounded before the first search: a statement that runs longer than the limit ends the read, which then fails as any failed read does.
+        await this.#options.limitStatements(handle, RECORD_LOOKUP_STATEMENT_TIMEOUT_MS);
         const mine: Taken[] = [];
         let left = room;
         for (const source of sources) {
@@ -164,7 +189,8 @@ export class RecordLookupService {
           left -= hits.length;
           for (const hit of hits) mine.push({ kind: source.kind, hit });
         }
-        const crossed = await this.#writeCrossings(handle, authorized, mine, audited);
+        // Which hubs these results are foreign to the actor, for the events to be written at the end; nothing is written here.
+        const crossed = await this.#foreignHubsOf(handle, authorized, mine);
         // The names of the hubs are read in the transaction that read the records they belong to, and for the results kept alone.
         const names = await this.#namesOfHubs(handle, mine);
         return {
@@ -173,11 +199,14 @@ export class RecordLookupService {
           results: mine.map(({ kind, hit }) => ({ kind, result: resultOf(kind, hit, names) })),
         };
       });
-      // Only now, with the transaction committed, does this read remember what it took and what it wrote.
+      // Only now, with the transaction committed, does this read remember what it took and what it found.
       room -= outcome.used;
-      for (const hubId of outcome.crossed) audited.add(hubId);
+      for (const hubId of outcome.crossed) foreign.add(hubId);
       found.push(...outcome.results);
     }
+
+    // Every search has succeeded and the answer is whole: only now are the crossings written down, together, before the answer is given.
+    await this.#writeCrossings(authorized, correlationId, foreign);
 
     const order = new Map(RECORD_LOOKUP_KINDS.map((kind, index) => [kind, index] as const));
     return {
@@ -199,37 +228,49 @@ export class RecordLookupService {
   }
 
   /**
-   * One event for each hub other than the actor's own that these results represent and that no earlier transaction of this read wrote: the
-   * baseline is the actor's primary hub, and a staff member with none crosses every hub it reads. A result with no hub crosses none. It returns
-   * the hubs it wrote for and remembers none: the caller does, once the transaction has committed (a work that is run again must not find that
-   * the hubs of a rolled-back run were written).
+   * The hubs other than the actor's own that these results represent: the baseline is the actor's primary hub, and a staff member with none crosses
+   * every hub it reads. A result with no hub crosses none. It reads the actor's hub in the transaction of the search when a result has a hub (as the
+   * lists do, in the transaction that read the page), writes nothing and remembers nothing: the caller takes the hubs once the transaction has
+   * committed (a work that is run again must not find that the hubs of a rolled-back run were taken).
    */
-  async #writeCrossings(
+  async #foreignHubsOf(
     handle: TransactionHandle,
     authorized: AuthorizedRequest,
     taken: readonly Taken[],
-    audited: ReadonlySet<string>,
   ): Promise<readonly string[]> {
     const hubs = new Set<string>();
-    for (const { hit } of taken) {
-      if (hit.hubId !== null && !audited.has(hit.hubId)) hubs.add(hit.hubId);
-    }
+    for (const { hit } of taken) if (hit.hubId !== null) hubs.add(hit.hubId);
     if (hubs.size === 0) return [];
     const baseline = await this.#options.primaryHubOf(handle, authorized.session.principalId);
-    const written: string[] = [];
-    for (const hubId of [...hubs].toSorted()) {
-      if (hubId === baseline) continue;
-      written.push(hubId);
-      await this.#options.audit.write(handle, {
-        code: 'auth.hub_boundary.crossed',
-        enhanced: true,
-        outcome: 'SUCCEEDED',
-        object: { type: 'HUB', id: hubId },
-        responsibleHubId: hubId,
-        relatedIds: { operation_id: 'lookupRecords' },
-      });
-    }
-    return written;
+    return [...hubs].filter((hubId) => hubId !== baseline);
+  }
+
+  /**
+   * One event for each hub other than the actor's own that the returned results represent, in the order of the hubs' ids, **in one transaction of
+   * its own and only after every search has succeeded** (the audit of 7 November 2026, A4): the transaction is the request's own authorization,
+   * which holds the grant of no key, because an event is the actor's own act and not a read of any kind. None when there is no hub to write: a
+   * lookup that reads the actor's own hub alone opens nothing. A ledger that cannot take an event fails the read, and the transaction takes the others
+   * back with it.
+   */
+  async #writeCrossings(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    hubs: ReadonlySet<string>,
+  ): Promise<void> {
+    if (hubs.size === 0) return;
+    const ordered = [...hubs].toSorted();
+    await this.#options.runner.mutate(authorized, correlationId, async (handle) => {
+      for (const hubId of ordered) {
+        await this.#options.audit.write(handle, {
+          code: 'auth.hub_boundary.crossed',
+          enhanced: true,
+          outcome: 'SUCCEEDED',
+          object: { type: 'HUB', id: hubId },
+          responsibleHubId: hubId,
+          relatedIds: { operation_id: 'lookupRecords' },
+        });
+      }
+    });
   }
 }
 

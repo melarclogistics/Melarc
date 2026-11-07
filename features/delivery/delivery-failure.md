@@ -165,7 +165,7 @@ After a qualifying failed physical `DOORSTEP` attempt the parcel **returns to th
 
 ## 8. Permissions — *pointer*
 
-[permissions.md](../../contracts/permissions.md) §7. **`delivery.stop.close`** — R only, assigned stop; **`settings.reason.read`** — R only, assigned stop or run; **`delivery.otp.override`** — S P, own hub; **`dispatch.run.create`** — Ops.
+[permissions.md](../../contracts/permissions.md) §7. **`delivery.stop.close`** — R only, assigned stop; **`settings.reason.read`** — R only, assigned stop or run; **`delivery.otp.override`** — S P, own hub · P: all hubs; **`dispatch.run.create`** — Ops.
 
 ## 9. Settings — *pointer*
 

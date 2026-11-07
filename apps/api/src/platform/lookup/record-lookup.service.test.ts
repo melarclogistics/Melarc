@@ -5,7 +5,9 @@ import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-s
 import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../authorization/authorized-request.js';
 import type { OperationWork } from '../authorization/operation-runner.js';
+import { DatabaseDeadlineError } from '../database/database-failures.js';
 import { ApiException } from '../http/api-exception.js';
+import { classifyFailure } from '../http/operational-failure.js';
 import {
   RECORD_LOOKUP_KINDS,
   type LookupHit,
@@ -13,7 +15,10 @@ import {
   type RecordLookupKind,
   type RecordLookupSource,
 } from '../domain-ports/record-lookup.port.js';
-import { RecordLookupService } from './record-lookup.service.js';
+import {
+  RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
+  RecordLookupService,
+} from './record-lookup.service.js';
 
 /**
  * `lookupRecords` on fakes (task C2; `features/operations/global-lookup.md`): which kinds a session is searched for, under which key and in
@@ -55,6 +60,8 @@ interface Reading {
   readonly key: string | undefined;
   readonly stateChanging: boolean;
   readonly handle: TransactionHandle;
+  /** The authorization the runner was handed: the key's (`authorizationForKey`) for a search, the request's own for the step that writes the events. */
+  readonly authorized: AuthorizedRequest;
 }
 
 /**
@@ -80,6 +87,7 @@ function runner(runs = 1) {
           key: authorized.permission,
           stateChanging: authorized.stateChanging,
           handle,
+          authorized,
         });
         answer = await work(handle, authorized);
       }
@@ -141,6 +149,13 @@ const many = (prefix: string, count: number, hubId: string | null = HUB_A): Look
     hit(`${prefix}-${String(index + 1).padStart(2, '0')}`, hubId),
   );
 
+/** The bound a transaction was given before its statements (`limitStatements`), and how many searches had been made when it was given. */
+interface Limit {
+  readonly handle: TransactionHandle;
+  readonly milliseconds: number;
+  readonly searchesBefore: number;
+}
+
 function build(options: {
   readonly sources: readonly RecordLookupSource[];
   readonly primaryHub?: string | null;
@@ -148,22 +163,39 @@ function build(options: {
   readonly hubNames?: ReadonlyMap<string, string>;
   /** How many times the runner runs each work (the coordinator may run it again after a rollback). */
   readonly runs?: number;
+  /** The searches the sources record into, for the tests that say when something happened in relation to them. */
+  readonly searches?: readonly Search[];
+  /** What setting the bound does; it sets nothing by default. */
+  readonly limitStatements?: (handle: TransactionHandle, milliseconds: number) => Promise<void>;
+  /** What writing an event does; it records the event by default. */
+  readonly failWriting?: Error;
 }) {
   const reads = runner(options.runs);
-  const events: { event: AuditEventInput; handle: TransactionHandle }[] = [];
+  const events: {
+    event: AuditEventInput;
+    handle: TransactionHandle;
+    /** How many searches had been made when the event was written. */
+    searchesBefore: number;
+  }[] = [];
   const nameReads: NameRead[] = [];
+  const baselineReads: TransactionHandle[] = [];
+  const limits: Limit[] = [];
   const names = options.hubNames ?? HUB_NAMES;
+  const searchesMade = (): number => options.searches?.length ?? 0;
   const service = new RecordLookupService({
     runner: reads,
     sources: options.sources,
     audit: {
       write: (handle: TransactionHandle, event: AuditEventInput) => {
-        events.push({ event, handle });
+        if (options.failWriting !== undefined) return Promise.reject(options.failWriting);
+        events.push({ event, handle, searchesBefore: searchesMade() });
         return Promise.resolve();
       },
     },
-    primaryHubOf: () =>
-      Promise.resolve(options.primaryHub === undefined ? HUB_A : options.primaryHub),
+    primaryHubOf: (handle: TransactionHandle) => {
+      baselineReads.push(handle);
+      return Promise.resolve(options.primaryHub === undefined ? HUB_A : options.primaryHub);
+    },
     hubNamesOf: (handle: TransactionHandle, hubIds: readonly string[]) => {
       nameReads.push({ handle, hubIds });
       return Promise.resolve(
@@ -172,8 +204,14 @@ function build(options: {
         ),
       );
     },
+    limitStatements: (handle: TransactionHandle, milliseconds: number) => {
+      limits.push({ handle, milliseconds, searchesBefore: searchesMade() });
+      return options.limitStatements === undefined
+        ? Promise.resolve()
+        : options.limitStatements(handle, milliseconds);
+    },
   });
-  return { service, reads, events, nameReads };
+  return { service, reads, events, nameReads, baselineReads, limits };
 }
 
 const ALL_KEYS = [
@@ -641,9 +679,138 @@ describe('the crossing of a hub', () => {
     // Twenty in all: eight requests, eight vendors and four riders, however many times each work ran.
     expect(single.items).toHaveLength(20);
     expect(restarted).toEqual(single);
-    // The hub of the foreign request is written once by each run of the work that read it: nothing was taken as written by a run that rolled back.
+    // The hub of the foreign request is written once by each run of the step that writes the events: nothing was taken as written by a run that rolled back.
     expect(once.events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_B]);
     expect(again.events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_B, HUB_B]);
+  });
+
+  // Break caught (the audit of 7 November 2026, A4): an event written in the transaction of the key that read the hub, which commits before the
+  // searches that follow it have succeeded, so that a lookup that fails later has recorded a crossing for a result it never returned. The events are
+  // written together, in one transaction of their own (the request's own authorization, which holds no key), after the last search.
+  it('writes the events together, in one transaction of their own, after the last search has succeeded', async () => {
+    const searches: Search[] = [];
+    const { service, reads, events, baselineReads } = build({
+      searches,
+      primaryHub: null,
+      sources: [
+        source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B), hit('r2', HUB_A)], searches),
+        source('VENDOR_ACCOUNT', 'vendor.read', [hit('v1', HUB_B)], searches),
+        source('RIDER', 'dispatch.read', [hit('d1', HUB_A)], searches),
+      ],
+    });
+    const asked = request(
+      [held('pickup.read', 'all'), held('vendor.read', 'all'), held('dispatch.read', 'all')],
+      [HUB_A, HUB_B],
+    );
+
+    await service.lookup(asked, 'corr', 'ama');
+
+    // One transaction for each key, and then one more, the request's own: the grant of no key.
+    expect(reads.readings.map((reading) => reading.key)).toEqual([
+      'pickup.read',
+      'vendor.read',
+      'dispatch.read',
+      undefined,
+    ]);
+    const last = reads.readings.at(-1);
+    expect(last?.authorized).toBe(asked);
+    expect(last?.stateChanging).toBe(true);
+    // Every event is written in that transaction, after all three searches. The actor's own hub is read where the records are, in each key's transaction,
+    // which keeps what it found to the hubs that are foreign to the actor; the step that writes the events asks nothing more.
+    expect(events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_A, HUB_B]);
+    for (const entry of events) {
+      expect(entry.handle).toBe(last?.handle);
+      expect(entry.searchesBefore).toBe(searches.length);
+    }
+    expect(baselineReads).toEqual(reads.readings.slice(0, 3).map((reading) => reading.handle));
+    expect(searches).toHaveLength(3);
+  });
+
+  // Break caught: a second transaction (and its two, the coordinator's) opened for every lookup that finds a record with a hub, which an officer who reads
+  // their own hub alone would pay on every search for events they will never write.
+  it('opens no transaction for the events of a lookup that has none to write', async () => {
+    const searches: Search[] = [];
+    const { service, reads, baselineReads, events } = build({
+      primaryHub: HUB_A,
+      sources: [source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_A)], searches)],
+    });
+
+    await service.lookup(request([held('pickup.read')]), 'corr', 'ama');
+
+    // The hub of the result is the actor's own, read in the transaction of the search: no crossing, and no second transaction.
+    expect(reads.readings.map((reading) => reading.key)).toEqual(['pickup.read']);
+    expect(baselineReads).toEqual([reads.readings[0]?.handle]);
+    expect(events).toEqual([]);
+  });
+
+  // Break caught (A4): a hub written down for a result the answer never carried, because a later search failed. The failure is the read's, whole: the
+  // earlier keys' findings are not answered and not recorded, and the error is the source's own (the platform answers it).
+  it('writes no event when a search fails after another has found a record of a foreign hub, and opens no transaction to write one', async () => {
+    const searches: Search[] = [];
+    const failing: RecordLookupSource = {
+      kind: 'RIDER',
+      readKey: 'dispatch.read',
+      answers: () => true,
+      search: () => Promise.reject(new Error('the read failed')),
+    };
+    const { service, reads, events } = build({
+      searches,
+      primaryHub: HUB_A,
+      sources: [
+        source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B)], searches),
+        source('VENDOR_ACCOUNT', 'vendor.read', [hit('v1', HUB_B)], searches),
+        failing,
+      ],
+    });
+
+    await expect(
+      service.lookup(
+        request(
+          [held('pickup.read', 'all'), held('vendor.read', 'all'), held('dispatch.read', 'all')],
+          [HUB_A, HUB_B],
+        ),
+        'corr',
+        'ama',
+      ),
+    ).rejects.toThrow('the read failed');
+
+    expect(searches.map((search) => search.kind)).toEqual(['PICKUP_REQUEST', 'VENDOR_ACCOUNT']);
+    expect(reads.readings.map((reading) => reading.key)).toEqual([
+      'pickup.read',
+      'vendor.read',
+      'dispatch.read',
+    ]);
+    expect(events).toEqual([]);
+
+    // The same lookup, once the search can be made, writes the event and answers.
+    const retry = build({
+      primaryHub: HUB_A,
+      sources: [
+        source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B)], []),
+        source('VENDOR_ACCOUNT', 'vendor.read', [hit('v1', HUB_B)], []),
+      ],
+    });
+    const answer = await retry.service.lookup(
+      request([held('pickup.read', 'all'), held('vendor.read', 'all')], [HUB_A, HUB_B]),
+      'corr',
+      'ama',
+    );
+    expect(answer.items).toHaveLength(2);
+    expect(retry.events.map((entry) => entry.event.responsibleHubId)).toEqual([HUB_B]);
+  });
+
+  // Break caught: events lost without a word, a lookup that answers although the ledger could not take what it owes.
+  it('fails the read when the events cannot be written, and answers nothing', async () => {
+    const searches: Search[] = [];
+    const { service } = build({
+      primaryHub: HUB_A,
+      failWriting: new Error('the ledger refused the event'),
+      sources: [source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B)], searches)],
+    });
+
+    await expect(
+      service.lookup(request([held('pickup.read', 'all')], [HUB_A, HUB_B]), 'corr', 'ama'),
+    ).rejects.toThrow('the ledger refused the event');
   });
 
   it('writes nothing for an answer with no result, and nothing for a hub whose result was cut from the twenty', async () => {
@@ -687,5 +854,96 @@ describe('the crossing of a hub', () => {
     await expect(service.lookup(request(ALL_KEYS), 'corr', 'ama')).rejects.toThrow(
       'the read failed',
     );
+  });
+});
+
+describe('the bound on a search (the audit of 7 November 2026, A5; AC-LOOKUP-15)', () => {
+  // Break caught: a search with no statement timeout of its own (a name scan that runs as long as the pool allows, holding the shared lock of the
+  // bundle), a limit set after the searches it is meant to bound, one set on another transaction than the searches run in, or one that is not three seconds.
+  it('limits the statements of each key’s transaction to three seconds, before any search of it, on the handle the searches use', async () => {
+    const searches: Search[] = [];
+    const { service, limits } = build({
+      searches,
+      sources: everyKind(searches),
+    });
+
+    await service.lookup(request(ALL_KEYS), 'corr', 'ama');
+
+    // One transaction for each key (pickup.read for two kinds, the others for one), each bounded at three seconds before its first search.
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([3000, 3000, 3000, 3000]);
+    expect(limits.map((limit) => limit.searchesBefore)).toEqual([0, 2, 3, 4]);
+    const handleOf = (kind: RecordLookupKind) =>
+      searches.find((search) => search.kind === kind)?.handle;
+    expect(limits.map((limit) => limit.handle)).toEqual([
+      handleOf('PICKUP_REQUEST'),
+      handleOf('VENDOR_ACCOUNT'),
+      handleOf('RIDER'),
+      handleOf('STAFF_IDENTITY'),
+    ]);
+    expect(RECORD_LOOKUP_STATEMENT_TIMEOUT_MS).toBe(3000);
+  });
+
+  // Break caught: a lookup that goes on without its bound because setting it failed (the search would then run unbounded).
+  it('fails the read, and searches nothing, when the limit cannot be set', async () => {
+    const searches: Search[] = [];
+    const { service } = build({
+      searches,
+      sources: everyKind(searches),
+      limitStatements: () => Promise.reject(new Error('the limit was not set')),
+    });
+
+    await expect(service.lookup(request(ALL_KEYS), 'corr', 'ama')).rejects.toThrow(
+      'the limit was not set',
+    );
+    expect(searches).toEqual([]);
+  });
+
+  // Break caught: a transaction opened (and bounded) for a session that is searched for nothing, or for a key none of whose kinds can answer the query.
+  it('sets no limit for a session that is searched for nothing', async () => {
+    const searches: Search[] = [];
+    const { service, limits, reads } = build({ searches, sources: everyKind(searches) });
+
+    expect(
+      (await service.lookup(request([held('notification.read')]), 'corr', 'ama')).items,
+    ).toEqual([]);
+    expect(limits).toEqual([]);
+    expect(reads.readings).toEqual([]);
+  });
+
+  // Break caught: a failure of the database's time that the service catches, rewords or turns into a refusal of its own, which the platform could then no
+  // longer read as what it is (the failed read, `503` with no code, as the summary's counts end: AC-QSUM-13). The service lets the source's error out as it
+  // is, and the platform reads it as operational.
+  it('lets the failure of a search that the database ended out as it is, which the platform answers as a failed read', async () => {
+    const ended = new DatabaseDeadlineError('statement', '57014', {
+      cause: new Error('canceling statement due to statement timeout'),
+    });
+    const searches: Search[] = [];
+    const slow: RecordLookupSource = {
+      kind: 'RIDER',
+      readKey: 'dispatch.read',
+      answers: () => true,
+      search: () => Promise.reject(ended),
+    };
+    const { service, events } = build({
+      searches,
+      primaryHub: null,
+      sources: [source('PICKUP_REQUEST', 'pickup.read', [hit('r1', HUB_B)], searches), slow],
+    });
+
+    const failure = await service
+      .lookup(
+        request([held('pickup.read', 'all'), held('dispatch.read', 'all')], [HUB_A, HUB_B]),
+        'corr',
+        'ama',
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    expect(failure).toBe(ended);
+    expect(classifyFailure(failure)).toEqual({ kind: 'operational' });
+    // ... and nothing is recorded for the hub the first key found.
+    expect(events).toEqual([]);
   });
 });
