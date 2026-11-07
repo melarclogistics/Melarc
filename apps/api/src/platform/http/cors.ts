@@ -30,8 +30,11 @@ import { writeFailure } from './all-exceptions.filter.js';
 /** What a configured origin may send. The `Cookie` is automatic and is not a header the page sets. */
 const ALLOWED_METHODS = 'GET, HEAD, POST, PUT, PATCH, DELETE';
 const ALLOWED_HEADERS = 'Content-Type, X-CSRF-Token, Idempotency-Key, If-Match';
-/** What a page may read of an answer besides the safelisted headers: the request id and the record version. */
-const EXPOSED_HEADERS = 'X-Request-Id, ETag';
+/**
+ * What a page may read of an answer besides the safelisted headers: the request id, the record version and `Retry-After`, the wait a `429` tells (A2 of the
+ * audit; `RETRY_AFTER` of the contract's headers): it is not a safelisted header, so a page of another configured origin could not read it without this.
+ */
+const EXPOSED_HEADERS = 'X-Request-Id, ETag, Retry-After';
 
 const isPreflight = (request: Request): boolean =>
   request.method === 'OPTIONS' && request.headers['access-control-request-method'] !== undefined;

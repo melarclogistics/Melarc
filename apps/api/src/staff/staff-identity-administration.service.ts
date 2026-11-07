@@ -15,6 +15,7 @@ import type {
   IssuedGrant,
 } from '../platform/auth/setup-grants/setup-grant-store.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import { scopeIncludesHub } from '../platform/authorization/effective-scope.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { meetsTier } from '../platform/authorization/tier-policy.js';
 import { serverErrorIn } from '../platform/database/database-failures.js';
@@ -397,10 +398,9 @@ export class StaffIdentityAdministration {
   }
 
   #requireHubInScope(authorized: AuthorizedRequest, hub: string | undefined): void {
-    const { hubScopeMode, authorizedHubIds } = authorized.scope;
-    if (hubScopeMode === 'ALL') return;
+    if (authorized.scope.hubScopeMode === 'ALL') return;
     if (hub === undefined) throw violation('/primary_hub_id', 'required');
-    if (!authorizedHubIds.some((each) => each.toLowerCase() === hub.toLowerCase())) {
+    if (!scopeIncludesHub(authorized.scope, hub)) {
       throw ApiException.of(ErrorCode.HubScopeViolation, 'The hub is outside your hubs');
     }
   }

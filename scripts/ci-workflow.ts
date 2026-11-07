@@ -48,6 +48,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
   'pnpm run build',
   'pnpm run contract:check',
   'pnpm --filter @melarc/api run db:check',
+  'node scripts/migration-immutability.ts',
   'pnpm run api-client:check',
   'pnpm run test:db',
   'pnpm run test:browser',

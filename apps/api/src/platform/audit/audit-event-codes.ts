@@ -177,6 +177,7 @@ export const AUDIT_EVENT_CODES = [
   'permission.bundle.assign_requested',
   'permission.bundle.assigned',
   'permission.bundle.widened',
+  'permission.fixed_policy.widened',
   'vendor.organization.created',
   'vendor.organization.approved',
   'vendor.organization.rejected',

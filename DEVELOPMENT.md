@@ -338,7 +338,7 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps) adds the end-to-end
    journeys for a task whose evidence names them.
 2. **After a change to a contract, a schema, a migration or a document, and before a task is handed over**, run
-   `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the generated client, formatting, types,
+   `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the migration files main has, the generated client, formatting, types,
    the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
    network, in parallel, with the content caches of the formatter and ESLint and turbo's
    task cache switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and

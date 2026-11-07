@@ -1,7 +1,12 @@
 -- Audit finding A3 (7 November 2026; the Product Owner's decision, contract change approved): the bundle-change primitive (0017) recorded a REDUCTION (by the sessions it ends) and recorded
 -- an ADDITION nowhere, so the widening of the Platform Admin's grants by 0075 and 0077 left no event. Applied as melarc_migration_elevated, a member of melarc_owner
--- (MIGRATION_AND_SEEDING.md section 5.1), in the one transaction of the migrator. Three steps, in this order.
+-- (MIGRATION_AND_SEEDING.md section 5.1), in the one transaction of the migrator. Four steps, in this order.
 --
+--   0. The policy locks come first. The ALTER TABLE of step 1 holds an ACCESS EXCLUSIVE lock on audit_event until the migrator's transaction ends, and the application's own transactions take
+--      the policy locks first and write audit_event after (SECURITY_DESIGN.md section 13.10a), so a migrator that took the table first and the bundle keys last could wait for a key held by a
+--      transaction that is itself waiting for the table, and neither would go on (the Product Owner's audit follow-up of 7 November 2026, A3.3). The six bundle keys are taken here, before
+--      anything else, in the canonical order of lock_policy_keys, and held to the end of the transaction, which is what step 3 needs of them too. (Adding the CHECK as NOT VALID and validating it
+--      afterwards would not shorten the hold: both would run in this one transaction.)
 --   1. The closed set of object types of the ledger gains RoleBundle (audit.md section 3; domain-model.md section 6.9). The CHECK is dropped and added again the way 0047 did it, as drizzle
 --      generates it from AUDIT_OBJECT_TYPES (src/platform/audit/audit-vocabulary.ts). The table is scanned once to validate the wider CHECK.
 --   2. melarc.change_role_bundle is replaced (CREATE OR REPLACE, so that its owner and its EXECUTE grant stay as 0017 left them; both are stated again below, which the lint requires of a
@@ -34,9 +39,9 @@
 --     a record that cannot be shown to be true is worse than a missing one that is reported. It never refuses to go on: this is a record and changes no authority.
 --   * When it happened. The moment of the widening was not recorded, so occurred_at is the moment this migration ran, and the two facts widened_by_migration and recorded_by_migration say what
 --     happened and when it was written down. The event is otherwise the one the primitive writes for the same change (a database test compares the two).
---   * The migration changes no revision, no floor, no grant and no session, and ends none. It takes the exclusive lock of every bundle first, in the canonical order of lock_policy_keys
---     (SECURITY_DESIGN.md section 13.10a), as 0075 and 0077 did, so the reads that follow cannot be overtaken by a sign-in or another change; the labels are the ones the primitive uses, and it
---     puts back what it found.
+--   * The migration changes no revision, no floor, no grant and no session, and ends none. It holds the exclusive lock of every bundle from step 0 on, taken in the canonical order of
+--     lock_policy_keys (SECURITY_DESIGN.md section 13.10a), as 0075 and 0077 did, so the reads that follow cannot be overtaken by a sign-in or another change; the labels are the ones the
+--     primitive uses, and it puts back what it found.
 --
 -- A database that applied 0043 or 0057 under the old primitive has no record of those additions either; the decision names the widenings of 0075 and 0077 and this migration records those.
 --
@@ -50,6 +55,23 @@
 -- ledger orders by `recorded_at`, then `id`). A database that applied an EARLIER TEXT of this file (it wrote the same two events under random identifiers, before the file had left the developer's machine) is
 -- refused by the history check of the runner until its journal row is corrected or it is reset (MIGRATION_AND_SEEDING.md section 5.5).
 
+DO $bundle_widening_audit_locks$
+BEGIN
+  -- Step 0: every bundle's policy key, in the canonical order, before the table lock of the next statement (see the header).
+  PERFORM melarc.lock_policy_keys(
+    ARRAY[
+      '5eed0001-0000-4000-8000-000000000001',
+      '5eed0001-0000-4000-8000-000000000002',
+      '5eed0001-0000-4000-8000-000000000003',
+      '5eed0001-0000-4000-8000-000000000004',
+      '5eed0001-0000-4000-8000-000000000005',
+      '5eed0001-0000-4000-8000-000000000006'
+    ]::uuid[],
+    ARRAY[]::text[]
+  );
+END
+$bundle_widening_audit_locks$;
+--> statement-breakpoint
 ALTER TABLE "audit_event" DROP CONSTRAINT "audit_event_object_type_closed";--> statement-breakpoint
 ALTER TABLE "audit_event" ADD CONSTRAINT "audit_event_object_type_closed" CHECK ("audit_event"."object_type" IN ('StaffIdentity', 'RiderIdentity', 'VendorAccount', 'VendorCredential', 'Session', 'MfaFactor', 'MfaChallenge', 'RiderSignInChallenge', 'SetupGrant', 'RecoveryRequest', 'RegisteredDevice', 'HUB', 'PickupRequest', 'AdHocSender', 'PickupManifest', 'PickupStop', 'CollectionRecord', 'CollectionHandshake', 'CollectionDispute', 'RunCustodyHandover', 'PickupIntake', 'Order', 'PayerCorrection', 'Evidence', 'RoleBundle'));--> statement-breakpoint
 -- The change of a bundle, as 0017 defined it, with the event of an ADDITION. `p_grants` is the complete new set of the bundle's grants as a JSON array of objects with exactly the keys
@@ -279,18 +301,7 @@ DECLARE
   after_grants text[];
   written integer;
 BEGIN
-  PERFORM melarc.lock_policy_keys(
-    ARRAY[
-      '5eed0001-0000-4000-8000-000000000001',
-      '5eed0001-0000-4000-8000-000000000002',
-      '5eed0001-0000-4000-8000-000000000003',
-      '5eed0001-0000-4000-8000-000000000004',
-      '5eed0001-0000-4000-8000-000000000005',
-      '5eed0001-0000-4000-8000-000000000006'
-    ]::uuid[],
-    ARRAY[]::text[]
-  );
-
+  -- The six bundle keys are held since step 0 (the first statement of the file), and until the transaction ends.
   PERFORM pg_catalog.set_config('melarc.principal_type', 'SYSTEM', true);
   PERFORM pg_catalog.set_config('melarc.task_capability', 'policy_change', true);
 

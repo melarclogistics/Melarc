@@ -6,6 +6,7 @@ import type { Clock } from '../platform/auth/ports/clock.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import { scopeIncludesHub } from '../platform/authorization/effective-scope.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
@@ -366,9 +367,7 @@ export class PickupRequestCreation {
   /** Whether a staff caller's grant reaches the hub; a vendor's hub is its organisation's and is not a scope it holds. */
   #hubInScope(authorized: AuthorizedRequest, hubId: string): boolean {
     if (authorized.session.principalType !== 'STAFF') return true;
-    const { hubScopeMode, authorizedHubIds } = authorized.scope;
-    if (hubScopeMode === 'ALL') return true;
-    return authorizedHubIds.some((each) => each.toLowerCase() === hubId.toLowerCase());
+    return scopeIncludesHub(authorized.scope, hubId);
   }
 
   /** A staff caller books only in a hub of its grant. */

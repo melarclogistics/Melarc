@@ -554,6 +554,13 @@
       "when": 1794036498097,
       "tag": "0078_bundle_widening_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794093380850,
+      "tag": "0079_fixed_policy_widening_audit",
+      "breakpoints": true
     }
   ]
 }

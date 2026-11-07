@@ -93,10 +93,10 @@ describe('the tier of each event is the catalogue’s, read from the document (G
 
   // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
   // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 80 enhanced, 5 that depend on the act, 116 ordinary, of 201', () => {
-    expect(ENHANCED_CODES).toHaveLength(80);
+  it('counts the tiers: 81 enhanced, 5 that depend on the act, 116 ordinary, of 202', () => {
+    expect(ENHANCED_CODES).toHaveLength(81);
     expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(201);
+    expect(AUDIT_EVENT_CODES).toHaveLength(202);
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
     expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(116);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
@@ -268,6 +268,51 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     expect(
       refusalOf(() =>
         build({ ...widened, object: { type: 'Bundle', id: OBJECT_ID } }, AUTHENTICATION),
+      ).field,
+    ).toBe('object.type');
+  });
+
+  // Break caught (task A3.4 of the audit follow-up): the widening of the Vendor's or the Rider's fixed policy recorded as an ordinary event, with no audience
+  // or revision, with no before and after of the revision, or as the act of a person (the primitive writes it as the system); or a policy given an
+  // identifier it does not have. The complete event, in the shape `melarc.change_fixed_policy` writes (migration 0079), is accepted.
+  it('holds permission.fixed_policy.widened to its tier and to the facts the catalogue names for it', () => {
+    const widened: AuditEventInput = {
+      code: 'permission.fixed_policy.widened',
+      enhanced: true,
+      outcome: 'SUCCEEDED',
+      object: { type: 'FixedPermissionPolicy', id: null },
+      relatedIds: { principal_type: 'VENDOR', revision: 3, minimum_revision: 1 },
+      beforeAfter: { revision: { before: 2, after: 3 } },
+    };
+    expect(tierOf('permission.fixed_policy.widened')).toBe('ENHANCED');
+    expect(build(widened, AUTHENTICATION).relatedIds).toEqual({
+      principal_type: 'VENDOR',
+      revision: 3,
+      minimum_revision: 1,
+    });
+    expect(refusalOf(() => build({ ...widened, enhanced: false }, AUTHENTICATION)).field).toBe(
+      'enhanced',
+    );
+    expect(
+      refusalOf(() => build({ ...widened, beforeAfter: undefined }, AUTHENTICATION)).field,
+    ).toBe('beforeAfter');
+    expect(refusalOf(() => build({ ...widened, relatedIds: {} }, AUTHENTICATION)).field).toBe(
+      'relatedIds',
+    );
+    expect(
+      refusalOf(() =>
+        build(
+          { ...widened, relatedIds: { principal_type: 'VENDOR', revision: 3 } },
+          AUTHENTICATION,
+        ),
+      ).field,
+    ).toBe('relatedIds');
+    // a person's act, never the system's
+    expect(refusalOf(() => build(widened, STAFF)).field).toBe('actor');
+    // the object is the policy, an object type of the closed set
+    expect(
+      refusalOf(() =>
+        build({ ...widened, object: { type: 'FixedPolicy', id: null } }, AUTHENTICATION),
       ).field,
     ).toBe('object.type');
   });

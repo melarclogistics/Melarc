@@ -8,9 +8,15 @@ import type { OperationRunner } from '../authorization/operation-runner.js';
 import {
   RECORD_LOOKUP_KINDS,
   type LookupHit,
+  type LookupQuery,
   type RecordLookupKind,
   type RecordLookupSource,
 } from '../domain-ports/record-lookup.port.js';
+import {
+  currentBudget,
+  runWithBudget,
+  type ExecutionBudget,
+} from '../execution/execution-budget.js';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import { lookupQueryOf, maskedPhone } from './lookup-query.js';
@@ -69,6 +75,16 @@ export const LOOKUP_IN_ALL = 20;
  */
 export const RECORD_LOOKUP_STATEMENT_TIMEOUT_MS = 3000;
 
+/**
+ * The longest the **whole** of one lookup may take, every key's transaction and the step that writes the events together (`AC-LOOKUP-17`, the Product Owner's
+ * decision of 7 November 2026, task A3.2). A statement is bounded at 3 seconds (above) and a lookup may need a transaction for each key it is searched under, so
+ * without one budget the worst case was 3 seconds for each key; with it the read ends, as a failed read, when the three seconds are gone, whoever used them.
+ */
+export const RECORD_LOOKUP_BUDGET_MS = 3000;
+
+/** What the refusal of a second lookup in flight tells: try again in a second (the Ops Portal's search aborts the text a newer one supersedes). */
+const RETRY_AFTER_SECONDS = 1;
+
 interface Taken {
   readonly kind: RecordLookupKind;
   readonly hit: LookupHit;
@@ -96,7 +112,10 @@ interface Taken {
  *   ended because it outlasted its bound (below) is the failure of that statement and is not caught here: the platform answers it as a failed read.
  * - **Every statement of a lookup is bounded at 3 seconds** (`RECORD_LOOKUP_STATEMENT_TIMEOUT_MS`, `AC-LOOKUP-15`), set at the start of each key's
  *   transaction, before its first search. And the request is counted in the session's bucket of API requests (`rate_limit_authenticated_api`) by the
- *   authentication step before this runs, as every operation of the session is: the lookup has no limiter of its own.
+ *   authentication step before this runs, as every operation of the session is. **Beyond that bucket, a session has one lookup in flight at a time**
+ *   (`AC-LOOKUP-16`: a second answers `429` `RATE_LIMITED` with `Retry-After: 1`, the slot is released when the first ends however it ends), **and the whole
+ *   lookup has one budget of 3 seconds** (`AC-LOOKUP-17`, `RECORD_LOOKUP_BUDGET_MS`): every key's transaction and the step that writes the events run under one
+ *   child of the request's budget, so the 3 seconds are not 3 seconds for each key.
  * - **It is a POST that changes nothing** (the Product Owner's decision of 6 November 2026), **so each key's transaction runs through
  *   `OperationRunner.mutate`**: the runner treats every request of a method that is not safe as one that changes state, and the lock-free `read`
  *   refuses it (`stateChanging`). The platform has no other convention for a POST, so the lookup keeps it and adds no concept to the authorization step: the
@@ -119,6 +138,13 @@ interface Taken {
 export class RecordLookupService {
   readonly #options: RecordLookupServiceOptions;
   readonly #groups: readonly (readonly [string, readonly RecordLookupSource[]])[];
+  /**
+   * The sessions that have a lookup running now, by session id (`AC-LOOKUP-16`). One process's memory: the platform holds no other state for a
+   * request in flight, and the database's try-locks are not allowed in application code (`architecture.test.ts`), so with several instances the bound
+   * is one lookup in flight for each session on each instance. A session's entry is made when its lookup starts and removed when it ends, by an
+   * answer or by a failure, so nothing here grows or leaks.
+   */
+  readonly #inFlight = new Set<string>();
 
   constructor(options: RecordLookupServiceOptions) {
     this.#options = options;
@@ -162,6 +188,38 @@ export class RecordLookupService {
       });
     }
 
+    // **One lookup in flight for a session** (`AC-LOOKUP-16`): a second request while the first runs is refused at once, `429` `RATE_LIMITED` with
+    // `Retry-After: 1`, and does nothing. The Ops Portal's search aborts the text a newer one supersedes, so what reaches this is a client that did not;
+    // without the refusal each of them would hold a connection and the session's policy lock for as long as a search takes. It comes after the
+    // validation (a request that is not valid is a `400` whatever else the session is doing) and before any work.
+    const session = authorized.session.id;
+    if (this.#inFlight.has(session)) throw ApiException.rateLimited(RETRY_AFTER_SECONDS);
+    this.#inFlight.add(session);
+    // **One budget for the whole lookup** (`AC-LOOKUP-17`): a child of the request's own, so that it also ends with the request's. Every key's transaction runs
+    // under it (the database layer runs a transaction under the budget that is current and cancels the statement that outlasts it), and so does the step
+    // that writes the events. There is no request budget where the application is composed without the pipeline that makes one (the describe composition
+    // has no database): then only the bound on each statement applies.
+    const budget = currentBudget()?.child('lookupRecords', RECORD_LOOKUP_BUDGET_MS);
+    try {
+      return budget === undefined
+        ? await this.#search(authorized, correlationId, query, undefined)
+        : await runWithBudget(budget, () => this.#search(authorized, correlationId, query, budget));
+    } finally {
+      budget?.finish();
+      this.#inFlight.delete(session);
+    }
+  }
+
+  /**
+   * The searches of one lookup, key by key, and the step that writes its events. What `lookup` ran before the slot and the budget were added, unchanged but
+   * for the bound of a statement (`statementBoundOf`) and the check, before each key, that the budget still has time.
+   */
+  async #search(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    query: LookupQuery,
+    budget: ExecutionBudget | undefined,
+  ): Promise<RecordLookupView> {
     let room = LOOKUP_IN_ALL;
     // The hubs other than the actor's own that the results represent, collected as the keys are searched and written down once, at the end.
     const foreign = new Set<string>();
@@ -177,9 +235,12 @@ export class RecordLookupService {
       // A session whose bundle holds no grant of the key is not searched for these kinds, and the answer does not say so.
       const forKey = authorizationForKey(authorized, key);
       if (forKey === undefined) continue;
+      // A key reached with the budget gone fails the read, and opens no transaction for it: the answer is never "nothing found" for a kind it did not search.
+      budget?.assertOpen();
       const outcome = await this.#options.runner.mutate(forKey, correlationId, async (handle) => {
-        // Bounded before the first search: a statement that runs longer than the limit ends the read, which then fails as any failed read does.
-        await this.#options.limitStatements(handle, RECORD_LOOKUP_STATEMENT_TIMEOUT_MS);
+        // Bounded before the first search: a statement that runs longer than the limit, or than what is left of the budget, ends the read, which then fails as
+        // any failed read does.
+        await this.#options.limitStatements(handle, statementBoundOf(budget));
         const mine: Taken[] = [];
         let left = room;
         for (const source of sources) {
@@ -206,6 +267,7 @@ export class RecordLookupService {
     }
 
     // Every search has succeeded and the answer is whole: only now are the crossings written down, together, before the answer is given.
+    if (foreign.size > 0) budget?.assertOpen();
     await this.#writeCrossings(authorized, correlationId, foreign);
 
     const order = new Map(RECORD_LOOKUP_KINDS.map((kind, index) => [kind, index] as const));
@@ -272,6 +334,18 @@ export class RecordLookupService {
       }
     });
   }
+}
+
+/**
+ * The bound of a statement of this lookup: the 3 seconds a statement may take, or what is left of the lookup's budget when that is less (never less than a
+ * millisecond: `set_config` takes a positive number of them, and a budget with nothing left has already been refused by `assertOpen`).
+ */
+function statementBoundOf(budget: ExecutionBudget | undefined): number {
+  if (budget === undefined) return RECORD_LOOKUP_STATEMENT_TIMEOUT_MS;
+  return Math.max(
+    1,
+    Math.min(RECORD_LOOKUP_STATEMENT_TIMEOUT_MS, Math.floor(budget.remainingMilliseconds())),
+  );
 }
 
 /**

@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.98.0
- *   SHA-256 53d3bb272839b24a514527616aa44b14f93cca57a80e20a5d5e3016106c2020f (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.99.0
+ *   SHA-256 763687c9dece8602ecdbad5f66acea76a84d842cc29d6e432227566d2eb91c86 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -45,7 +45,11 @@ export interface paths {
         };
         /**
          * List pickup requests
-         * @description Scoped server-side to the actor's vendor ownership and hub (§37.6). Filters are
+         * @description **Not served to a Rider** (task A3.1 of the audit follow-up, the Product Owner, 7 November 2026): a rider works from the manifest and never the request
+         *     (`surfaces/rider-android.md`, "Not a rider act"; the data-scope registry gives a Rider no pickup request), so this operation names the browser session
+         *     alone and a Rider's bearer credential is `SESSION_INVALID`, as on every staff read.
+         *
+         *     Scoped server-side to the actor's vendor ownership and hub (§37.6). Filters are
          *     authorization-checked, never trusted (§42.4). A page token is a position in the list and is used with the filters it was given: a client that
          *     changes `hub_id` starts again at the first page.
          */
@@ -117,6 +121,11 @@ export interface paths {
             };
             cookie?: never;
         };
+        /**
+         * @description **Not served to a Rider** (task A3.1 of the audit follow-up, the Product Owner, 7 November 2026): the request record behind a manifest stop is for Ops and
+         *     the Vendor, and the rider reads the stop (`surfaces/rider-android.md`, "Not a rider act"), so this operation names the browser session alone and a
+         *     Rider's bearer credential is `SESSION_INVALID`, as on every staff read.
+         */
         get: operations["getPickupRequest"];
         put?: never;
         post?: never;
@@ -2444,7 +2453,7 @@ export interface paths {
         /**
          * Find a record by its code, a name or a phone number typed in full
          * @description Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
-         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-15`), is
+         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-17`), is
          *     features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
          *
          *     **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
@@ -2494,6 +2503,14 @@ export interface paths {
          *     `RATE_LIMITED` (429), reads nothing and writes no event. **Every statement of the lookup is bounded at 3 seconds**
          *     (`AC-LOOKUP-15`, as a count of `getQueueSummary` is by `AC-QSUM-13`): a search that cannot finish in that time ends the whole read
          *     as the platform's failed read (`503`, no code, nothing of the answer), and a client shows its failure with a way to try again.
+         *
+         *     **A session has one lookup in flight, and the whole lookup has one budget** (Product Owner, 7 November 2026, A3.2 of the audit follow-up). A
+         *     second lookup sent while the session's first is still running is refused at once with `RATE_LIMITED` (429) and `Retry-After: 1`: it reads
+         *     nothing and writes no event, and a text that is not valid is still `VALIDATION_FAILED` first (`AC-LOOKUP-16`). The refusal is judged in the
+         *     memory of the API process, so with several instances a session may have one in flight on each. **All of the lookup, every key's
+         *     transaction and the step that writes the events, shares one budget of 3 seconds** (`AC-LOOKUP-17`), and the 3 seconds a statement may take
+         *     are what is left of it when that is less: the lookup is never 3 seconds for each key, and one that cannot finish in its budget is the
+         *     platform's failed read (`503`, no code).
          */
         post: operations["lookupRecords"];
         delete?: never;
@@ -12673,7 +12690,10 @@ export interface components {
          *     **`Retry-After` says when to try again**: whole seconds, from 1 to 60, the time until the
          *     limiter's 60-second window admits this session again, rounded up, never zero. It is sent on every
          *     such answer. A refused request changes nothing, so asking again early is refused again and does
-         *     not make the wait longer. The operations reached before a session exists declare
+         *     not make the wait longer. **Two operations have a window of another bucket, and their `Retry-After` is that bucket's**
+         *     (Product Owner, 7 November 2026, A3.8 of the audit follow-up): `requestAdditionalDeviceGrant`, which is limited per
+         *     authenticated vendor account in `rate_limit_recovery` (settings.md 7.7), and `lookupRecords`, whose second lookup in flight
+         *     for a session is refused with `Retry-After: 1` whatever the bucket says (`AC-LOOKUP-16`). The operations reached before a session exists declare
          *     `RateLimitedAnonymous` instead, whose answer carries no wait.
          */
         RateLimited: {
@@ -12969,13 +12989,13 @@ export interface operations {
             query?: {
                 state?: string;
                 service_date?: string;
-                /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop, a Rider no request) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
+                /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
                 manifested?: boolean;
                 /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **Only a pending request is in it** (a cancelled, a confirmed or a declined request is not): the exception of a request that is not `PENDING` can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work. Authorization-checked like every filter. */
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
                 /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
                 cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";
-                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. **A Rider is shown no request, with or without a hub, and its `hub_id` is judged as a UUID (a value that is not one is `VALIDATION_FAILED`, as for everyone) and then ignored** (the Product Owner, 7 November 2026): the page is the one it is given without it, whatever hub is named, so that the time of the answer does not tell a Rider whether a hub exists or what it holds. */
+                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. A Rider is not served this operation at all (see the description), so it has no `hub_id`. */
                 hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];

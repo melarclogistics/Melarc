@@ -2889,44 +2889,32 @@ describe('AC-HUBF-12: a Vendor’s and a Rider’s reads are narrowed inside wha
     expect(await auditEvents()).toBe(events);
   });
 
-  // Break caught: a request shown to a Rider because a hub is named (the staff's reading by hub taken for the rider's), or a refusal of the read
-  // that the filter changes: a Rider is served the list and is shown none of the requests (hub-filters.md section 3), so the answer is an empty
-  // page, with a hub as without one.
-  it('gives a Rider, for the requests, an empty page with a hub as without one: never a request', async () => {
+  // Break caught (task A3.1 of the audit follow-up, `AC-HUBF-15`): a pickup request read served to a Rider (the list, with a hub or without one, or the read of one
+  // request by its identifier): the surface says it is not a rider act, so the routes name the browser session alone and a Rider's bearer is `SESSION_INVALID`, as on
+  // every staff read. No statement of the application's login reads a request for it, and no event is written. (Until A3.1 the list answered a Rider an empty page and
+  // ignored its `hub_id`, which this file held with a statement test: the fallback of the Product Owner's rule of 7 November 2026, afternoon, that option (iii) of
+  // hub-filters.md section 14.3 replaced.)
+  it('refuses a Rider the list of requests, with a hub and without one, and the read of one request: SESSION_INVALID, and no statement reads a request for it', async () => {
     const events = await auditEvents();
-    const emptyPage = { items: [], next_page_token: null };
-    const without = await riderOne.client.get(REQUESTS);
-    expect([without.status, without.json()]).toEqual([200, emptyPage]);
+    const [anyRequest] = Object.values(requestIds);
+    expect(anyRequest, 'the arrangement holds requests').toBeDefined();
+    const targets = [
+      REQUESTS,
+      `${REQUESTS}${queryOf({ hub_id: HUB_A })}`,
+      `${REQUESTS}${queryOf({ hub_id: NO_HUB })}`,
+      `${REQUESTS}/${anyRequest ?? ''}`,
+    ];
 
-    for (const hub of [HUB_A, HUB_B, HUB_C, NO_HUB]) {
-      const answer = await riderOne.client.get(`${REQUESTS}${queryOf({ hub_id: hub })}`);
-      expect([answer.status, answer.json()], describeHub(hub)).toEqual([200, emptyPage]);
-      expect(shapeOf(answer), describeHub(hub)).toEqual(shapeOf(without));
-      for (const id of Object.values(requestIds)) expect(answer.text).not.toContain(id);
+    for (const target of targets) {
+      const traced = await routes.kit.trace(() => riderOne.client.get(target));
+      expect(traced.result.status, target).toBe(401);
+      expect((traced.result.json() as { code?: string }).code, target).toBe('SESSION_INVALID');
+      expect(
+        traced.statements.filter((statement) => /\bfrom pickup_request\b/.test(statement)),
+        `${target}: no statement reads a pickup request for a Rider`,
+      ).toEqual([]);
+      for (const id of Object.values(requestIds)) expect(traced.result.text).not.toContain(id);
     }
     expect(await auditEvents()).toBe(events);
-  });
-
-  // Break caught (task F, the Product Owner's rule of 7 November 2026: a Rider's `hub_id` is ignored where its own predicate cannot lead the statement): a hub
-  // applied to the statement of a Rider's list of requests, so that the database walks the named hub's index and the time of the answer tells a Rider whether the
-  // hub exists and what it holds (0.23 seconds for a hub of 200,000 requests, 0.013 for one that does not exist: hub-filters.md section 14.2). What the application's
-  // login sent is read as the driver was given it, values removed: for the Rider's own hub, for the other hub, for a hub that holds none of the records and for the
-  // identifier of no hub, the one statement it sends for none, so the page is the same page for the same reason.
-  it('sends the server one statement for a Rider’s list of requests, whatever hub it names and with none: the hub is judged and never applied', async () => {
-    const statementsFor = async (hub?: string): Promise<string[]> => {
-      const traced = await routes.kit.trace(() =>
-        riderOne.client.get(`${REQUESTS}${queryOf({ hub_id: hub })}`),
-      );
-      expect(traced.result.status, describeHub(hub ?? 'none')).toBe(200);
-      return traced.statements.filter((statement) => /\bfrom pickup_request\b/.test(statement));
-    };
-
-    const without = await statementsFor();
-    expect(without.length, 'the Rider’s list does read the table, as the control').toBeGreaterThan(
-      0,
-    );
-    for (const hub of [HUB_A, HUB_B, HUB_C, NO_HUB]) {
-      expect(await statementsFor(hub), describeHub(hub)).toEqual(without);
-    }
   });
 });

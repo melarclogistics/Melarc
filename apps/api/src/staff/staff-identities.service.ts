@@ -4,6 +4,7 @@ import { mfaPostureOf, type MfaPosture } from '../platform/auth/mfa/mfa-reset-st
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
 import {
+  hubOfTheSession,
   hubOutsideStaffGrant,
   type AuthorizedRequest,
 } from '../platform/authorization/authorized-request.js';
@@ -142,7 +143,15 @@ export class StaffIdentitiesService {
     // task C3 answer it, `AC-HUBF-05`): the database would walk that hub's index and discard every row, and the time that takes tells a caller whether the hub
     // exists and how much it holds. The answer is the one row-level security gives, since `authorized.scope` is the very set the transaction would run under; a hub
     // that does not exist takes the same path and so the same time. Judged after every validation, so a value that is not a hub is still refused first.
-    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+    // **One hub is not answered that way: the caller's own** (task A3.5, `AC-HUBF-14`). The table of staff profiles shows a profile's own row to its holder
+    // whatever the grant, so for a session whose grant of this key reaches no hub the list without a filter holds that one row, and the same list for its own
+    // hub must hold it too: the filter only ever narrows. The own hub is known from the session (`hubOfTheSession`, no statement), so every other hub, and a
+    // hub that does not exist, still take the short way.
+    if (
+      filter.hubId !== undefined &&
+      hubOutsideStaffGrant(authorized, filter.hubId) &&
+      !hubOfTheSession(authorized, filter.hubId)
+    ) {
       return { items: [], next_page_token: null };
     }
 

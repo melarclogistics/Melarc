@@ -294,16 +294,18 @@ describe('the real application', () => {
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
+      // Task A3.1 of the audit follow-up: the two reads of pickup requests are not served to a Rider (surfaces/rider-android.md: "Not a rider act"), so they name the Ops
+      // Portal and the Vendor app, and take a browser session's cookie alone: a Rider's bearer is not a credential these routes read.
       {
         method: 'GET',
         path: '/api/v1/pickup-requests',
         access: 'permission',
         permission: 'pickup.read',
         authenticated: {
-          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
           activity: 'qualifying',
         },
-        credentialModes: new Set(['COOKIE', 'BEARER']),
+        credentialModes: new Set(['COOKIE']),
       },
       {
         method: 'GET',
@@ -311,11 +313,11 @@ describe('the real application', () => {
         access: 'permission',
         permission: 'pickup.read',
         authenticated: {
-          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
           activity: 'qualifying',
           record: { entity: 'pickup_request', param: 'id' },
         },
-        credentialModes: new Set(['COOKIE', 'BEARER']),
+        credentialModes: new Set(['COOKIE']),
       },
       // S1.22: the read of one stop, the source of its `ETag`. Served like the manifest read, to staff by the hubs of the grant and to a rider by
       // assignment from dispatch, with the stop as the record the scope probe is asked about; a Vendor is not served (OB-S1-23).

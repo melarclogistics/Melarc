@@ -68,6 +68,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          # The whole history, for the migration check below: it asks Git for the merge base of the revision and main.
+          fetch-depth: 0
 
       - name: Set up the toolchain
         uses: ./.github/actions/setup
@@ -83,6 +85,13 @@ jobs:
 
       - name: Check the migration history
         run: pnpm --filter @melarc/api run db:check
+
+      # A migration that main has is never changed, renamed or removed (apps/api/CLAUDE.md, "Migrations only go forward"). A push to main is held to the revision it
+      # came from; every other run to the merge base of the revision and main (scripts/migration-immutability.ts says how it behaves while main lacks the files).
+      - name: Check that no migration main has was changed
+        env:
+          MELARC_MIGRATION_BASE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: node scripts/migration-immutability.ts
 
       - name: Check the generated API client is current
         run: pnpm run api-client:check

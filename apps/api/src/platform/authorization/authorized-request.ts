@@ -4,7 +4,12 @@ import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-s
 import { contextOfSession } from '../auth/sessions/session-context.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import type { ActivityPolicy } from '../routes/access-declaration.js';
-import { effectiveScope, scopeExcludesHub, type EffectiveScope } from './effective-scope.js';
+import {
+  effectiveScope,
+  scopeExcludesHub,
+  scopeIncludesHub,
+  type EffectiveScope,
+} from './effective-scope.js';
 
 /**
  * What the authorization step decided for one request, kept beside the request (S0.26): the session that acts, the grant that
@@ -80,6 +85,21 @@ export function authorizationForKey(
  */
 export function hubOutsideStaffGrant(authorized: AuthorizedRequest, hubId: string): boolean {
   return authorized.session.principalType === 'STAFF' && scopeExcludesHub(authorized.scope, hubId);
+}
+
+/**
+ * Whether `hubId` is a hub the session itself belongs to, whatever the grant of this operation reaches: `authority.authorizedHubIds`, which the
+ * session was issued with and which for a staff member is its primary hub (`postgres.staff-identity-directory.adapter.ts`; an effective assignment
+ * would add to it). It reads nothing from the database. It exists for the one staff list whose table shows a row to its holder whatever the grant
+ * (`listStaffIdentities`: a profile's own row), so that a `hub_id` that names the caller's own hub is not answered empty by `hubOutsideStaffGrant`
+ * and the filter only ever narrows what the same session sees without it (task A3.5, `AC-HUBF-14`). Every other hub is still answered without a
+ * statement, so a hub that exists and a hub that does not take the same short time.
+ */
+export function hubOfTheSession(authorized: AuthorizedRequest, hubId: string): boolean {
+  return scopeIncludesHub(
+    { hubScopeMode: 'SET', authorizedHubIds: authorized.session.authority.authorizedHubIds },
+    hubId,
+  );
 }
 
 const held = new WeakMap<object, AuthorizedRequest>();

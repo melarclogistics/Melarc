@@ -47,7 +47,7 @@ The server decides what the query is, in this order, and **asks only the questio
 
 **It is a read and only a read.** It writes nothing but the audit event of a hub crossing: **once for each hub other than the actor's own that the returned results represent** (the actor's own hub is its primary hub; a staff member with none, such as a Platform Admin without a hub, crosses every hub), as the lists write it; an answer with no result writes none. **The events are written together, in one step of their own, after every search has succeeded** (the audit of 7 November 2026, A4): each key is searched in a transaction of its own and writes nothing, the hubs the results represent are collected, and only a lookup that is going to answer writes its events, in one transaction, before it answers; a search that fails after another has found a hub writes none, and a ledger that cannot take them fails the read. It is `qualifying` activity (a typed search is the person's own act), `Cache-Control: no-store`, and the same query asked twice reads twice.
 
-**It is counted and it is bounded.** Every request of a session is counted in the session's one bucket of authenticated API requests (`rate_limit_authenticated_api`; the limit is that setting's, in [settings.md](../../contracts/settings.md) section 7.7, and is not restated here), by the authentication step before the CSRF check and before the operation runs, as it counts every operation the session may ask; the request past the limit is `RATE_LIMITED` (`429`), reads nothing and writes no event. The typed search asks as the person pauses, and each of its requests counts. And **every statement of a lookup is bounded at 3 seconds** (a `SET LOCAL statement_timeout` at the start of each key's transaction, which only ever lowers the bound the configuration set; `RECORD_LOOKUP_STATEMENT_TIMEOUT_MS`, the Product Owner's decision of 7 November 2026 on the audit, A5, as the summary's counts are bounded by `AC-QSUM-13`): a search that cannot finish in that time, the name search of [section 14](#14-unresolved-requirements) being the one that can, ends the whole read as the platform's failed read (`503`, no code), returns nothing of what the other keys found and writes no event, and the next lookup meets no leftover setting.
+**It is counted and it is bounded.** Every request of a session is counted in the session's one bucket of authenticated API requests (`rate_limit_authenticated_api`; the limit is that setting's, in [settings.md](../../contracts/settings.md) section 7.7, and is not restated here), by the authentication step before the CSRF check and before the operation runs, as it counts every operation the session may ask; the request past the limit is `RATE_LIMITED` (`429`), reads nothing and writes no event. The typed search asks as the person pauses, and each of its requests counts. And **every statement of a lookup is bounded at 3 seconds** (a `SET LOCAL statement_timeout` at the start of each key's transaction, which only ever lowers the bound the configuration set; `RECORD_LOOKUP_STATEMENT_TIMEOUT_MS`, the Product Owner's decision of 7 November 2026 on the audit, A5, as the summary's counts are bounded by `AC-QSUM-13`): a search that cannot finish in that time, the name search of [section 14](#14-unresolved-requirements) being the one that can, ends the whole read as the platform's failed read (`503`, no code), returns nothing of what the other keys found and writes no event, and the next lookup meets no leftover setting. **Two more bounds, from the audit follow-up of 7 November 2026 (A3.2).** A session has **one lookup in flight**: a second request sent while the first runs is refused at once with `RATE_LIMITED` (`429`, `Retry-After: 1`), reads nothing and writes no event, and a text that is not valid is still a `400` first (`AC-LOOKUP-16`); it is held in the memory of the API process, by session, so with several instances a session may have one in flight on each. And **the whole lookup has one budget of 3 seconds** (`RECORD_LOOKUP_BUDGET_MS`, a child of the request's own budget that every key's transaction and the step that writes the events run under): a statement is bounded by what is left of it when that is less than the 3 seconds a statement may take, a key reached after the budget is gone opens no transaction, and the read ends as the platform's failed read (`AC-LOOKUP-17`); the worst case was 3 seconds for each key.
 
 ## 6. Entities
 
@@ -261,7 +261,7 @@ And a request outside the window is not returned by the name through any other w
 Given a staff session that has asked for as many lookups in a minute as the setting rate_limit_authenticated_api allows,
 When it asks one more in that minute,
 Then the answer is RATE_LIMITED (429, with the Retry-After that AC-SLICE-000-131 gives every such answer), nothing is read and no event is written,
-And the lookups were counted in the session's one bucket, shared with every other operation the session asks (a lookup has no bucket of its own and no other limit),
+And the lookups were counted in the session's one bucket, shared with every other operation the session asks (a lookup has no bucket of its own; its one other limit is the one lookup in flight of `AC-LOOKUP-16`),
 And another session is not limited by it.
 ```
 
@@ -278,6 +278,31 @@ And the next lookup, which meets no leftover setting, answers whole and writes t
 ```
 
 **Governs:** this feature, section 5; `AC-QSUM-13` (the same bound on a count) · **Surface:** Melarc Ops · **Test level:** API and database tests (the bound itself, and a search held on a lock for longer than 3 seconds) · **Code:** none (the platform's `503`)
+
+### `AC-LOOKUP-16` — A session has one lookup in flight
+
+```text
+Given a staff session whose lookup is running (a search held on a lock, for the test),
+When the same session sends another lookup,
+Then the answer is RATE_LIMITED (429) with Retry-After: 1, at once, and nothing is read and no event is written for it,
+And the first lookup finishes as it would have, and the session may look up again as soon as it has ended, whether it ended by an answer or by a failure,
+And a lookup whose text is not valid is VALIDATION_FAILED whatever else the session is doing (the text is judged first),
+And another session is not held back by it.
+```
+
+**Why:** the Ops Portal aborts the text a newer one supersedes, so a second request in flight is a client that did not, or a loop; each would hold a connection and the shared lock of the session's bundle for as long as a search takes (section 14). **How it is held:** in the memory of the API process, by session (the platform has no other state for a request in flight, and the database's try-locks are not allowed in application code), so with more than one instance the bound is one lookup for each session on each instance. **Governs:** this feature, section 5; the audit follow-up of 7 November 2026, A3.2 · **Surface:** Melarc Ops · **Test level:** API (unit, with a search held in flight) and database test (the real route, a search held on a lock) · **Code:** `RATE_LIMITED`
+
+### `AC-LOOKUP-17` — The whole lookup has one budget of three seconds
+
+```text
+Given a staff session that holds the keys of three kinds, whose lookup finds nothing in the first and then spends most of 3 seconds in the second,
+When the lookup reaches the third key,
+Then the whole read has ended as the platform's failed read (503, no code, a body of the platform's own words and the request id alone) after about 3 seconds in all, and not after 3 seconds for each key,
+And no transaction was opened for the key reached after the budget was gone, and no auth.hub_boundary.crossed is written,
+And the statement of each key's transaction is bounded by what is left of the 3 seconds, when that is less than the 3 seconds a statement may take (AC-LOOKUP-15).
+```
+
+**Governs:** this feature, section 5; `AC-LOOKUP-15` (the bound of one statement) · **Surface:** Melarc Ops · **Test level:** API (unit, with a clock the test moves) and database test (the real route, a source that takes 1.2 seconds for each of three keys) · **Code:** none (the platform's `503`)
 
 ## 14. Unresolved requirements
 
@@ -303,3 +328,5 @@ Task C2 (6 November 2026): specified here; contracted as `lookupRecords`; built 
 Task C2.1 (6 November 2026, the Product Owner's decisions on the report of C2): the call became a POST that changes nothing, with the text in its body and never in a URL (`AC-LOOKUP-01`, `-11`); a pickup request's sender name joined its result (`AC-LOOKUP-10`); the name search of pickup requests was limited to current work (`AC-LOOKUP-13`, [section 5](#5-behavior) and [section 14](#14-unresolved-requirements)). Contract 5.93.0.
 
 The audit of 7 November 2026 (A4, A5, A6; the API fixes of that audit): the hub-crossing events are written together, after every search has succeeded, so that a lookup that fails writes none (`AC-LOOKUP-11`); the request is counted in the session's bucket of API requests and answers `RATE_LIMITED` past it (`AC-LOOKUP-14`), which `lookupRecords` now declares; every statement of a lookup is bounded at 3 seconds (`AC-LOOKUP-15`); and a Rider's bearer credential is `SESSION_INVALID` and not `PERMISSION_DENIED` (`AC-LOOKUP-07`, section 8), as the negative-access sweep always held.
+
+The audit follow-up of 7 November 2026 (A3.2; contract 5.99.0): one lookup in flight for a session (`AC-LOOKUP-16`) and one budget of 3 seconds for the whole lookup (`AC-LOOKUP-17`).

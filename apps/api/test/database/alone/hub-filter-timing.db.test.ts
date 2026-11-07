@@ -27,9 +27,8 @@ import {
  *   the time of the request's own guards.
  * - **A Vendor, the list of requests** and **a Rider, the list of runs**: the statement names what the caller owns (its organisation, its assignment) so
  *   that the planner starts from that index and not the hub's. The time depends on what the caller owns and not on what the hub holds.
- * - **A Rider, the list of requests**: a Rider is shown no request in any hub, so the hub is judged and not applied. Both answers cost what the list of
- *   a Rider costs without a hub (a scan of the table that finds nothing: a cost of that list as it was, recorded in features/operations/hub-filters.md
- *   section 14, item 5), so they are compared with each other and not with a bound.
+ * - **A Rider is not served the lists of requests** (task A3.1 of the audit follow-up: `listPickupRequests` and `getPickupRequest` name the browser session
+ *   alone), so there is no timing of a Rider's list of requests to take; its refusal is held by `hub-filters.db.test.ts` (`AC-HUBF-15`).
  *
  * A read is timed as the median of several, after one that is not counted, the two answers asked in turn. The bounds are generous (50 milliseconds for a
  * read that does no work of its own, or four times what the caller's own session read costs on a loaded machine, and a small multiple of the other
@@ -250,16 +249,11 @@ const withHub = (path: string, hub: string): string => `${path}?hub_id=${hub}`;
 
 /**
  * Times the read for the second hub (it exists, and holds the rows) and for an identifier that names no hub, and asserts what the audit asks: neither
- * answer is slow (`bounded`: when the read does no work of its own, it is within `FAST_MS` or four of the caller's own baseline, whichever is the
- * longer) and neither is more than a small multiple of the other. The two are asked in turn, so that a change in the machine's load between them
+ * answer is slow (each is within `FAST_MS` or four of the caller's own baseline, whichever is the longer) and neither is more than a small multiple of
+ * the other. The two are asked in turn, so that a change in the machine's load between them
  * falls on both; each is the median of `SAMPLES`, after one that is not counted.
  */
-async function indistinguishable(
-  label: string,
-  client: TestClient,
-  path: string,
-  bounded: boolean,
-): Promise<void> {
+async function indistinguishable(label: string, client: TestClient, path: string): Promise<void> {
   const baseline = await baselineOf(client);
   const existingPath = withHub(path, HUB_B);
   const missingPath = withHub(path, NO_HUB);
@@ -277,11 +271,9 @@ async function indistinguishable(
   console.info(
     `${label}: a hub of ${String(ROWS_SECOND_HUB)} rows ${existing.toFixed(1)} ms, a hub that does not exist ${missing.toFixed(1)} ms (the caller's own session: ${baseline.toFixed(1)} ms)`,
   );
-  if (bounded) {
-    const bound = Math.max(FAST_MS, 4 * baseline);
-    expect(existing, `${label}: a hub that exists, outside the grant`).toBeLessThan(bound);
-    expect(missing, `${label}: a hub that does not exist`).toBeLessThan(bound);
-  }
+  const bound = Math.max(FAST_MS, 4 * baseline);
+  expect(existing, `${label}: a hub that exists, outside the grant`).toBeLessThan(bound);
+  expect(missing, `${label}: a hub that does not exist`).toBeLessThan(bound);
   expect(existing, `${label}: the hub that exists against the one that does not`).toBeLessThan(
     MULTIPLE * missing + FLOOR_MS,
   );
@@ -330,7 +322,7 @@ describe('a staff session of the first hub (AC-HUBF-05, GBT-GS14)', () => {
     'answers %s for a hub that exists and for one that does not in the same short time',
     async (label, path) => {
       const timer = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
-      await indistinguishable(`staff, ${label}`, timer.client, path, true);
+      await indistinguishable(`staff, ${label}`, timer.client, path);
     },
     120_000,
   );
@@ -362,7 +354,7 @@ describe('a Vendor of the first hub (AC-HUBF-12; the audit of 7 November 2026)',
   // Break caught: the Vendor's own organisation left out of its statement, so that the database starts from the hub's index and lets row-level
   // security discard the rows of every other vendor (0.4 seconds at this size for a hub that exists, against microseconds for one that does not).
   it('answers the list of requests for a hub that exists, where it has no request, and for one that does not in the same short time', async () => {
-    await indistinguishable('vendor, the list of requests', browser, REQUESTS, true);
+    await indistinguishable('vendor, the list of requests', browser, REQUESTS);
   }, 120_000);
 
   // Break caught: a hub that narrows nothing for the Vendor, or an organisation named in a way that widens the list.
@@ -381,14 +373,7 @@ describe('a Rider of the first hub (AC-HUBF-12; the audit of 7 November 2026)', 
   // Break caught: the Rider's own assignment left out of its statement, so that the database starts from the hub's index and lets row-level security
   // discard the runs of every other rider (50 milliseconds at this size for a hub that exists, against microseconds for one that does not).
   it('answers the list of runs for a hub that exists, where it has no run, and for one that does not in the same short time', async () => {
-    await indistinguishable('rider, the list of runs', rider.client, RUNS, true);
-  }, 120_000);
-
-  // Break caught: a hub applied to the Rider's list of requests, which is empty for every hub and which a statement naming the hub would answer
-  // after walking that hub's index (0.4 seconds at this size, against milliseconds for a hub that does not exist). It costs what a Rider's list of
-  // requests costs without a hub, so it is compared with the other answer and not with a bound.
-  it('answers the list of requests, which is empty for every hub, for a hub that exists and for one that does not in the same time', async () => {
-    await indistinguishable('rider, the list of requests', rider.client, REQUESTS, false);
+    await indistinguishable('rider, the list of runs', rider.client, RUNS);
   }, 120_000);
 
   // Break caught: runs that are not the Rider's shown for a hub, or its own hidden by the statement that names it.

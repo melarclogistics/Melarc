@@ -48,16 +48,28 @@ interface List {
   list(authorized: AuthorizedRequest, correlationId: string, filter: Filter): Promise<unknown>;
 }
 
-/** What the guard decided for a staff session, in the little these tests need: who asks, and the scope of the grant of the list's key. */
-const staffWith = (scope: AuthorizedRequest['scope']): AuthorizedRequest =>
+/**
+ * What the guard decided for a staff session, in the little these tests need: who asks, the scope of the grant of the list's key, and the hubs the session
+ * itself was issued with (a staff member's primary hub: `session.authority.authorizedHubIds`).
+ */
+const staffWith = (
+  scope: AuthorizedRequest['scope'],
+  ownHubs: readonly string[] = [],
+): AuthorizedRequest =>
   ({
-    session: { principalType: 'STAFF', principalId: '11111111-1111-4111-8111-111111111111' },
+    session: {
+      principalType: 'STAFF',
+      principalId: '11111111-1111-4111-8111-111111111111',
+      authority: { authorizedHubIds: ownHubs },
+    },
     scope,
   }) as unknown as AuthorizedRequest;
 
-const ONE_HUB = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [HUB] });
+const ONE_HUB = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [HUB] }, [HUB]);
 const EVERY_HUB = staffWith({ hubScopeMode: 'ALL', authorizedHubIds: [] });
 const NO_HUB = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [] });
+/** A session with a hub of its own whose grant of the list's key reaches no hub at all (no seeded bundle is one; the table of profiles still shows it its own row). */
+const HOME_ONLY = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [] }, [HUB]);
 
 /** A runner that notes each authorization it is handed and answers an empty page, so that a read that went ahead is told from one that was not made. */
 function runnerOf(): {
@@ -175,3 +187,58 @@ describe.each(SERVICES)('%s, with a hub (AC-HUBF-13)', (_operation, make) => {
     expect(received).toEqual([]);
   });
 });
+
+const STAFF_LIST = SERVICES.filter(([operation]) => operation === 'listStaffIdentities');
+const SCOPED_BY_OWNERSHIP = SERVICES.filter(([operation]) => operation !== 'listStaffIdentities');
+
+/**
+ * Task A3.5 (`AC-HUBF-14`): the table of staff profiles shows a profile's own row to its holder whatever the grant, so the staff list is the one list whose
+ * answer for a hub outside the grant is not always empty. Without a filter, a session whose grant of `staff.read` reaches no hub is shown its own profile; with
+ * `hub_id` naming its own hub it must be shown that profile too, because the filter only ever narrows. The own hub is told from the session, with no statement
+ * (`hubOfTheSession`), so every other hub, and a hub that does not exist, is still the short answer.
+ */
+describe.each(STAFF_LIST)('%s, naming the caller’s own hub (AC-HUBF-14)', (_operation, make) => {
+  // Break caught: the own hub answered empty before the database is asked (the filter widening nothing and narrowing too much: A1.1 had this, and the profile
+  // of the session that asked disappeared from its own hub's list), or the session's hub compared on the text of its identifier.
+  it.each([
+    ['its own hub', HUB],
+    ['its own hub, in capitals', HUB.toUpperCase()],
+  ])('goes on to read for %s, outside the grant of the key', async (_which, hubId) => {
+    const { runner, received } = runnerOf();
+
+    await expect(make(runner).list(HOME_ONLY, 'correlation', { hubId })).resolves.toEqual(EMPTY);
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toBe(HOME_ONLY);
+  });
+
+  // Break caught: the exception widened to every hub (the short answer lost for all of them, so the time tells whether a hub exists), or to a hub the session
+  // does not belong to.
+  it.each([
+    ['another hub that exists', OUTSIDE],
+    ['the identifier of no hub', NOBODY],
+  ])('still answers %s with the empty page and no read', async (_which, hubId) => {
+    const { runner, received } = runnerOf();
+
+    await expect(make(runner).list(HOME_ONLY, 'correlation', { hubId })).resolves.toEqual(EMPTY);
+
+    expect(received).toEqual([]);
+  });
+});
+
+describe.each(SCOPED_BY_OWNERSHIP)(
+  '%s, naming the session’s own hub outside its grant (AC-HUBF-14)',
+  (_operation, make) => {
+    // Break caught: the exception copied to the lists whose tables have no own-row rule: a rider's and a vendor's rows are scoped by their own predicates, so for
+    // them a hub outside the grant is the short answer even when it is the hub of the session that asks.
+    it('is still the empty page and no read: only the staff list has an own-row rule', async () => {
+      const { runner, received } = runnerOf();
+
+      await expect(make(runner).list(HOME_ONLY, 'correlation', { hubId: HUB })).resolves.toEqual(
+        EMPTY,
+      );
+
+      expect(received).toEqual([]);
+    });
+  },
+);

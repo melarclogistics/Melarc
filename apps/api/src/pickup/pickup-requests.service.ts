@@ -64,7 +64,7 @@ function invalid(name: string, rule: string): ApiException {
  * for a hub of 200,000 rows, and a Vendor that asks for a hub that holds none of its own can tell from the time that the hub exists and how much
  * it holds. With the Vendor's organisation in the statement, the planner starts from `pickup_request_vendor_idx` (the Vendor's own rows, and the
  * hub is a filter on them): 0.15 milliseconds for 500 requests at that scale, whatever the hub holds. It only restates the policy, which still
- * decides; it can narrow and never widen. A staff session and a Rider add nothing (`true` is dropped by the planner).
+ * decides; it can narrow and never widen. A staff session adds nothing (`true` is dropped by the planner).
  */
 function ownedByCaller(authorized: AuthorizedRequest): SQL {
   return authorized.session.principalType === 'VENDOR'
@@ -73,11 +73,23 @@ function ownedByCaller(authorized: AuthorizedRequest): SQL {
 }
 
 /**
+ * A Rider is not served these two reads (task A3.1 of the audit follow-up, the Product Owner's decision of 7 November 2026; surfaces/rider-android.md:
+ * "Not a rider act: a rider works from the manifest, never the request"; the registry gives a Rider no pickup request). The routes do not take a Rider's
+ * credential, so a Rider's bearer is `SESSION_INVALID` before this runs, as it is for the other staff reads; a service that answers about records does
+ * not rely on that alone, and refuses the principal itself, as `lookupRecords` does, before it judges or reads anything.
+ */
+function refuseRider(authorized: AuthorizedRequest): void {
+  if (authorized.session.principalType === 'RIDER') {
+    throw new ApiException(ErrorCode.PermissionDenied, 403, 'Permission denied');
+  }
+}
+
+/**
  * `getPickupRequest` and `listPickupRequests` (S1.13; `pickup.read`; `AC-SLICE-001-79`; domain-model.md section 6.2).
  *
  * - **The scope is row-level security and the scope probe, nothing the use case writes.** The reads run in the caller's own context with
- *   the authorizing key: a staff member sees the requests of the hubs of the grant, a vendor its own organisation's and never by hub, a
- *   rider none. The record a route names is found or refused (`HUB_SCOPE_VIOLATION` by the scope probe for a staff caller on a request of
+ *   the authorizing key: a staff member sees the requests of the hubs of the grant, a vendor its own organisation's and never by hub, and a
+ *   rider is not served the reads at all (task A3.1: `refuseRider`). The record a route names is found or refused (`HUB_SCOPE_VIOLATION` by the scope probe for a staff caller on a request of
  *   another hub, `NOT_FOUND` for everyone else and for an id that matches nothing) by the guard before this runs, by one code path for a
  *   vendor and for an id that does not exist; a request that has gone since is `NOT_FOUND` here.
  * - **An authorised staff read outside the actor's own hub is audited, without contents** (audit.md sections 5.4 and 6), as the staff
@@ -90,7 +102,7 @@ function ownedByCaller(authorized: AuthorizedRequest): SQL {
  *   `false` the requests that have none. With `state=CONFIRMED` it is the pool the contract names, and **a request that is awaiting the
  *   review of its cutoff is not in the pool** until Ops decides it (the Product Owner, 29 to 30 October 2026): the plain list of confirmed
  *   requests still shows it, because an operational queue must not lose a request to the pool's rule. The filter reads the stops, which
- *   only staff read (a vendor reads none in this slice, OB-S1-23; a rider none of a request), so a caller who is not staff is told
+ *   only staff read (a vendor reads none in this slice, OB-S1-23, and a rider is not served the reads), so a caller who is not staff is told
  *   `PERMISSION_DENIED` ("authorization-checked like every filter") and never given what a caller who cannot see stops would get.
  * - **A request shows its exception** (S1.16): the one it carries (an approval travels with the booking into its clones) or the latest
  *   raised for it, in the representation of `getPickupRequest` and so in its ETag. The approver's queue is the list filtered by the state
@@ -108,7 +120,7 @@ function ownedByCaller(authorized: AuthorizedRequest): SQL {
  *   would walk that hub's index before row-level security discarded every row, and the time that takes tells a caller whether the hub exists
  *   and how much it holds. A hub inside the grant and an all-hub grant read as before. A Vendor's statement **names its own organisation**
  *   (`ownedByCaller`), so that the database starts from the Vendor's index and not the hub's and a foreign hub costs what the Vendor's own requests
- *   cost; a Rider, who is shown no request, has the hub judged and not applied.
+ *   cost. A Rider is not served these reads at all (task A3.1): the service refuses it before it judges anything.
  */
 export class PickupRequestsService {
   readonly #options: PickupRequestsServiceOptions;
@@ -122,6 +134,7 @@ export class PickupRequestsService {
     correlationId: string,
     id: string,
   ): Promise<{ readonly request: PickupRequestView; readonly etag: string }> {
+    refuseRider(authorized);
     return this.#options.runner.read(
       authorized,
       correlationId,
@@ -155,6 +168,7 @@ export class PickupRequestsService {
     readonly items: readonly PickupRequestView[];
     readonly next_page_token: string | null;
   }> {
+    refuseRider(authorized);
     // The authorization of a filter comes before the validation of its value, as the authorization of a route does.
     if (filter.manifested !== undefined && authorized.session.principalType !== 'STAFF') {
       throw ApiException.of(ErrorCode.PermissionDenied, 'Not permitted');
@@ -201,12 +215,6 @@ export class PickupRequestsService {
       return { items: [], next_page_token: null };
     }
 
-    // A Rider is shown no request in any hub (the registry gives it none), so a hub could only narrow an empty page, and a statement that named
-    // it would walk the hub's index to discard every row: the time of that tells a Rider whether a hub exists and how much it holds (task A1).
-    // The value is judged above and then **not applied** for a Rider; the answer is the one the statement gives with or without it, and so does
-    // the time (the Product Owner's fallback of 7 November 2026: ignore `hub_id` where there are no owned rows to name in the statement instead).
-    const hubId = authorized.session.principalType === 'RIDER' ? null : (filter.hubId ?? null);
-
     // What the list contains is written once, in `pickupRequestCriteria`, which the counts of the queues call as well (task C1): the pool
     // (the confirmed requests that no manifest holds, less the ones awaiting the review of their cutoff, see above) is a rule of it.
     const criteria = pickupRequestCriteria({
@@ -215,7 +223,7 @@ export class PickupRequestsService {
       cutoffExceptionState: filter.cutoffExceptionState ?? null,
       serviceDate: filter.serviceDate ?? null,
       manifested: filter.manifested === undefined ? null : filter.manifested === 'true',
-      hubId,
+      hubId: filter.hubId ?? null,
     });
     const owned = ownedByCaller(authorized);
     const afterMoment = after?.createdAt ?? null;

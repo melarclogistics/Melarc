@@ -1,11 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AuditEventInput } from '../auth/ports/audit-writer.port.js';
 import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-store.port.js';
 import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../authorization/authorized-request.js';
 import type { OperationWork } from '../authorization/operation-runner.js';
+import { ManualClock } from '../../test-support/manual-clock.js';
 import { DatabaseDeadlineError } from '../database/database-failures.js';
+import {
+  BudgetExpiredError,
+  ExecutionBudget,
+  currentBudget,
+  runWithBudget,
+} from '../execution/execution-budget.js';
 import { ApiException } from '../http/api-exception.js';
 import { classifyFailure } from '../http/operational-failure.js';
 import {
@@ -16,6 +23,7 @@ import {
   type RecordLookupSource,
 } from '../domain-ports/record-lookup.port.js';
 import {
+  RECORD_LOOKUP_BUDGET_MS,
   RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
   RecordLookupService,
 } from './record-lookup.service.js';
@@ -945,5 +953,227 @@ describe('the bound on a search (the audit of 7 November 2026, A5; AC-LOOKUP-15)
     expect(classifyFailure(failure)).toEqual({ kind: 'operational' });
     // ... and nothing is recorded for the hub the first key found.
     expect(events).toEqual([]);
+  });
+});
+
+/** A source that waits for the test to let it go, so that a lookup can be held in flight and a second one made beside it. */
+function heldSource(kind: RecordLookupKind = 'PICKUP_REQUEST', readKey = 'pickup.read') {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const searches: Search[] = [];
+  const held: RecordLookupSource = {
+    kind,
+    readKey,
+    answers: () => true,
+    search: async (handle, query, limit) => {
+      searches.push({ kind, query, limit, handle });
+      await gate;
+      return [];
+    },
+  };
+  return { source: held, release, searches };
+}
+
+const failureOf = (attempt: Promise<unknown>) =>
+  attempt.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+
+/** The request of the same staff session with another session id: another person's lookup. */
+const ofAnotherSession = (authorized: AuthorizedRequest): AuthorizedRequest => ({
+  ...authorized,
+  session: { ...authorized.session, id: '55555555-5555-4555-8555-555555555555' },
+});
+
+describe('one lookup in flight for a session (AC-LOOKUP-16, task A3.2 of the audit follow-up)', () => {
+  // Break caught: a second lookup of a session that runs beside the first (each holding a connection and the session's policy lock for as long as a search
+  // takes), or one that is refused with another answer than the wait the contract declares (`429` `RATE_LIMITED` with `Retry-After`), or one that still reads.
+  it('refuses a second lookup while the first runs: 429 RATE_LIMITED with Retry-After 1, and nothing is read for it', async () => {
+    const waiting = heldSource();
+    const { service, reads } = build({ sources: [waiting.source] });
+    const first = service.lookup(request(ALL_KEYS), 'corr-1', 'ACC-PR-7KQ2MZ');
+    await vi.waitFor(() => {
+      expect(waiting.searches).toHaveLength(1);
+    });
+
+    const refused = await failureOf(service.lookup(request(ALL_KEYS), 'corr-2', 'Kofi Mensah'));
+
+    expect(refused).toBeInstanceOf(ApiException);
+    expect((refused as ApiException).code).toBe('RATE_LIMITED');
+    expect((refused as ApiException).getStatus()).toBe(429);
+    expect((refused as ApiException).headers).toEqual({ 'Retry-After': '1' });
+    expect(reads.readings, 'no transaction was opened for the refused lookup').toHaveLength(1);
+    expect(waiting.searches, 'and no search was made for it').toHaveLength(1);
+    waiting.release();
+    await expect(first).resolves.toEqual({ items: [] });
+  });
+
+  // Break caught: a slot that is never given back (the session locked out of searching for the life of the process), or only on success.
+  it.each([
+    ['an answer', undefined],
+    ['a failure of a search', new Error('the search failed')],
+  ])('gives the session its slot back when the lookup ends by %s', async (_how, failing) => {
+    const sources: RecordLookupSource[] = [
+      {
+        kind: 'PICKUP_REQUEST',
+        readKey: 'pickup.read',
+        answers: () => true,
+        search: () => (failing === undefined ? Promise.resolve([]) : Promise.reject(failing)),
+      },
+    ];
+    const { service } = build({ sources });
+    const authorized = request(ALL_KEYS);
+
+    const first = await failureOf(service.lookup(authorized, 'corr-1', 'ACC-PR-7KQ2MZ'));
+    expect(first === undefined, 'the first lookup ended as the test arranged').toBe(
+      failing === undefined,
+    );
+
+    // A second one is not refused: it ends as the first did, and not with 429.
+    const second = await failureOf(service.lookup(authorized, 'corr-2', 'ACC-PR-7KQ2MZ'));
+    if (failing === undefined) expect(second).toBeUndefined();
+    else expect(second).toBe(failing);
+  });
+
+  // Break caught: one slot for every session (a person's search holding everyone else's back), or a slot keyed on the principal and not on the session.
+  it('does not hold another session back', async () => {
+    const waiting = heldSource();
+    const { service } = build({ sources: [waiting.source] });
+    const authorized = request(ALL_KEYS);
+    const first = service.lookup(authorized, 'corr-1', 'ACC-PR-7KQ2MZ');
+    await vi.waitFor(() => {
+      expect(waiting.searches).toHaveLength(1);
+    });
+
+    const other = service.lookup(ofAnotherSession(authorized), 'corr-2', 'Kofi Mensah');
+    await vi.waitFor(() => {
+      expect(waiting.searches).toHaveLength(2);
+    });
+
+    waiting.release();
+    await expect(Promise.all([first, other])).resolves.toEqual([{ items: [] }, { items: [] }]);
+  });
+
+  // Break caught: the refusal made before the text is judged, so that a request that is not valid is told to try again in a second when it should be told it is
+  // not valid, and the same request is a 400 when the session is idle.
+  it('judges the text before it looks at the slot: a text that is not valid is a 400 whatever else the session is doing', async () => {
+    const waiting = heldSource();
+    const { service } = build({ sources: [waiting.source] });
+    const authorized = request(ALL_KEYS);
+    const first = service.lookup(authorized, 'corr-1', 'ACC-PR-7KQ2MZ');
+    await vi.waitFor(() => {
+      expect(waiting.searches).toHaveLength(1);
+    });
+
+    const refused = await failureOf(service.lookup(authorized, 'corr-2', ' x '));
+
+    expect((refused as ApiException).code).toBe('VALIDATION_FAILED');
+    waiting.release();
+    await first;
+  });
+});
+
+describe('one budget for the whole lookup (AC-LOOKUP-17, task A3.2 of the audit follow-up)', () => {
+  /** A source of each key that notes the budget that is current while it searches, and moves the clock as the test says. */
+  function timed(
+    seen: (ExecutionBudget | undefined)[],
+    spend: (kind: RecordLookupKind) => number,
+    clock: ManualClock,
+  ) {
+    const keys: readonly [RecordLookupKind, string][] = [
+      ['PICKUP_REQUEST', 'pickup.read'],
+      ['VENDOR_ACCOUNT', 'vendor.read'],
+      ['RIDER', 'dispatch.read'],
+    ];
+    return keys.map(([kind, readKey]): RecordLookupSource => ({
+      kind,
+      readKey,
+      answers: () => true,
+      search: () => {
+        seen.push(currentBudget());
+        clock.advance(spend(kind));
+        return Promise.resolve([]);
+      },
+    }));
+  }
+
+  // Break caught: each key's transaction under the whole request's budget or under none (so that three keys may take three times the bound), a budget made for
+  // each key (so that the time is not shared), or one never finished (a timer left running for every lookup the process ever made).
+  it('runs every key under one child budget of three seconds, which is finished when the lookup ends', async () => {
+    const clock = new ManualClock();
+    const parent = new ExecutionBudget(clock, 'request', 10_000);
+    const seen: (ExecutionBudget | undefined)[] = [];
+    const { service } = build({ sources: timed(seen, () => 0, clock) });
+
+    await runWithBudget(parent, () => service.lookup(request(ALL_KEYS), 'corr', 'ACC-PR-7KQ2MZ'));
+
+    expect(seen).toHaveLength(3);
+    const [one] = seen;
+    expect(one?.label).toBe('lookupRecords');
+    expect(one?.budgetMilliseconds).toBe(RECORD_LOOKUP_BUDGET_MS);
+    expect(RECORD_LOOKUP_BUDGET_MS).toBe(3000);
+    expect(new Set(seen).size, 'the same budget for every key').toBe(1);
+    expect(one?.closed, 'finished when the lookup ended').toBe(true);
+    expect(parent.closed, 'the request’s own budget is its owner’s to finish').toBe(false);
+    parent.finish();
+  });
+
+  // Break caught: a statement given the whole three seconds whatever has been used (so the third key may run three seconds after two others took two), which is
+  // how the worst case was three seconds for each key.
+  it('bounds a statement by what is left of the budget', async () => {
+    const clock = new ManualClock();
+    const parent = new ExecutionBudget(clock, 'request', 10_000);
+    const seen: (ExecutionBudget | undefined)[] = [];
+    const { service, limits } = build({ sources: timed(seen, () => 1_000, clock) });
+
+    await runWithBudget(parent, () => service.lookup(request(ALL_KEYS), 'corr', 'ACC-PR-7KQ2MZ'));
+
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([
+      RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
+      2_000,
+      1_000,
+    ]);
+    parent.finish();
+  });
+
+  // Break caught: a key searched after the three seconds are gone (the lookup then takes as long as its slowest key plus the rest), or the missing kind left
+  // out of an answer that says nothing about it. The read fails, with the budget's own error, which the platform answers as a failed read, and writes nothing.
+  it('fails the read when the budget is gone before a key is reached, opens no transaction for that key and writes no event', async () => {
+    const clock = new ManualClock();
+    const parent = new ExecutionBudget(clock, 'request', 10_000);
+    const seen: (ExecutionBudget | undefined)[] = [];
+    const { service, reads, events } = build({
+      sources: timed(seen, () => RECORD_LOOKUP_BUDGET_MS, clock),
+    });
+
+    const failure = await failureOf(
+      runWithBudget(parent, () => service.lookup(request(ALL_KEYS), 'corr', 'ACC-PR-7KQ2MZ')),
+    );
+
+    expect(failure).toBeInstanceOf(BudgetExpiredError);
+    expect(seen, 'only the first key was searched').toHaveLength(1);
+    expect(reads.readings, 'and only its transaction was opened').toHaveLength(1);
+    expect(events).toEqual([]);
+    parent.finish();
+  });
+
+  // Break caught: a budget that is made when there is no request budget to be a child of (a thrown error for a composition without the pipeline), or a lookup
+  // that then has no bound at all: the bound of a statement is still the three seconds.
+  it('has no budget of its own to make when the request has none, and still bounds each statement', async () => {
+    const clock = new ManualClock();
+    const seen: (ExecutionBudget | undefined)[] = [];
+    const { service, limits } = build({ sources: timed(seen, () => 0, clock) });
+
+    await service.lookup(request(ALL_KEYS), 'corr', 'ACC-PR-7KQ2MZ');
+
+    expect(seen).toEqual([undefined, undefined, undefined]);
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([
+      RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
+      RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
+      RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
+    ]);
   });
 });

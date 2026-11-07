@@ -355,8 +355,10 @@ describe('the owner’s database: seeded before the decisions, then 0043, 0057, 
       applied = (await runMigrations({ url: world.built.target.urlFor(MIGRATION_ROLE) })).applied;
     });
 
-    it('is the one migration the history had left to apply', () => {
-      expect(applied).toBe(1);
+    // 0078, and the one after it (0079, the fixed policy's widening event: task A3.4 of the audit follow-up). The history stops before 0078, and the migrator
+    // applies every file the repository holds from there on.
+    it('are the two migrations the history had left to apply: 0078 and the one after it', () => {
+      expect(applied).toBe(2);
     });
 
     // Break caught (the finding): the widening of 0075 left no event, or an event that names other grants than the ones it widened, another

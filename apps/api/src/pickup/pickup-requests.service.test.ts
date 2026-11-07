@@ -109,38 +109,30 @@ describe('the request list refuses a hub that is not one, before it reads', () =
     });
   });
 
-  // Break caught: a hub that is refused to a vendor or a rider as `manifested` is (it reads the stops they may not see; the hub reads nothing they
-  // may not, `responsible_hub_id` being in every request they are shown), or ignored for them without a word: it narrows what they are shown.
-  it.each([
-    ['a vendor', 'VENDOR'],
-    ['a rider', 'RIDER'],
-  ] as const)('does not refuse a hub to %s, and reads', async (_who, principal) => {
+  // Break caught: a hub that is refused to a vendor as `manifested` is (it reads the stops it may not see; the hub reads nothing it may not,
+  // `responsible_hub_id` being in every request it is shown), or ignored for it without a word: it narrows what it is shown. (A rider is not served the
+  // reads at all since task A3.1: see the refusal tests at the end of this file.)
+  it('does not refuse a hub to a vendor, and reads', async () => {
     const { requests, reads } = service();
 
-    await expect(requests.list(asked(principal), 'correlation', { hubId: HUB })).resolves.toEqual({
+    await expect(requests.list(asked('VENDOR'), 'correlation', { hubId: HUB })).resolves.toEqual({
       items: [],
       next_page_token: null,
     });
     expect(reads()).toBe(1);
   });
 
-  // Break caught: the value of the hub judged for staff alone, so that a value that is not an identifier reaches the statement of a vendor or a
-  // rider: the answer is the same for everyone (only the staff-only filter is `PERMISSION_DENIED`, and before its value is judged).
-  it.each([
-    ['a vendor', 'VENDOR'],
-    ['a rider', 'RIDER'],
-  ] as const)(
-    'refuses a hub that is not one to %s as it does to staff',
-    async (_who, principal) => {
-      const error = await refusal({ hubId: 'not-a-uuid' }, principal);
+  // Break caught: the value of the hub judged for staff alone, so that a value that is not an identifier reaches the statement of a vendor: the answer is
+  // the same for everyone (only the staff-only filter is `PERMISSION_DENIED`, and before its value is judged).
+  it('refuses a hub that is not one to a vendor as it does to staff', async () => {
+    const error = await refusal({ hubId: 'not-a-uuid' }, 'VENDOR');
 
-      expect(error).toBeInstanceOf(ApiException);
-      expect((error as ApiException).code).toBe('VALIDATION_FAILED');
-      expect((error as ApiException).details).toEqual({
-        violations: [{ in: 'query', pointer: '/hub_id', rule: 'format' }],
-      });
-    },
-  );
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).code).toBe('VALIDATION_FAILED');
+    expect((error as ApiException).details).toEqual({
+      violations: [{ in: 'query', pointer: '/hub_id', rule: 'format' }],
+    });
+  });
 
   // Break caught: a refusal that is too wide, which would turn a hub that is one (in either case) into a 400, or lose the filters beside it.
   it.each([
@@ -365,21 +357,15 @@ describe('the statement of the request list, with a hub (task C3)', () => {
     },
   );
 
-  // Break caught: the shortcut taken for the callers it is not for (a Vendor's and a Rider's rows are scoped by what they own, and the hubs of their
-  // grant say nothing about them: here they reach none, and a read answered empty on that would hide their own requests), or a validation skipped
-  // for it (a value that is not a hub is still refused first, below, and so is every other filter).
-  it.each([
-    ['a vendor', 'VENDOR'],
-    ['a rider', 'RIDER'],
-  ] as const)(
-    'does not take the shortcut for %s, whose hubs say nothing of its rows',
-    async (_who, principal) => {
-      const { received, statements } = await attempt(principal, { hubId: OUTSIDE });
+  // Break caught: the shortcut taken for the caller it is not for (a Vendor's rows are scoped by what it owns, and the hubs of its grant say nothing about
+  // it: here they reach none, and a read answered empty on that would hide its own requests), or a validation skipped for it (a value that is not a hub is
+  // still refused first, below, and so is every other filter).
+  it('does not take the shortcut for a vendor, whose hubs say nothing of its rows', async () => {
+    const { received, statements } = await attempt('VENDOR', { hubId: OUTSIDE });
 
-      expect(received).toHaveLength(1);
-      expect(statements.length).toBeGreaterThan(0);
-    },
-  );
+    expect(received).toHaveLength(1);
+    expect(statements.length).toBeGreaterThan(0);
+  });
 
   // Break caught: a shortcut that answers a hub outside the set before the other filters are judged, so that a request the contract refuses (a hub
   // that is not one, a filter that is not one) is answered `200` with an empty page when its hub happens to be outside the grant, and the same
@@ -418,29 +404,13 @@ describe('the statement of the request list, with a hub (task C3)', () => {
     expect(boundTo(query, 'responsible_hub_id', 'uuid')).toEqual([HUB]);
   });
 
-  // Break caught (task A1): a hub applied to the statement of a Rider, which is shown no request in any hub: the statement would walk the hub's index
-  // to discard every row, and the time of that tells a Rider whether a hub exists and how much it holds. The value is judged (a hub that is not one is
-  // refused first, as it is for every caller: 'refuses a hub that is not one to a rider as it does to staff', above) and not applied, so the statement
-  // is the one a Rider's list without a hub runs, and takes the time that one takes for every hub.
-  it('does not apply the hub to the statement of a rider, whatever hub it names', async () => {
-    const without = await listStatement('RIDER', {});
-
-    for (const hubId of [HUB, OUTSIDE, NOBODY]) {
-      const query = await listStatement('RIDER', { hubId });
-      expect(boundTo(query, 'responsible_hub_id', 'uuid'), hubId).toEqual([]);
-      expect(query.sql, hubId).toBe(without.sql);
-      expect(query.params, hubId).toEqual(without.params);
-    }
-  });
-
   // Break caught (task A1): the Vendor's own organisation left out of its statement, so that the database starts from the hub's index and discards the
   // rows of every other vendor (0.4 seconds for a foreign hub of 200,000 requests, against microseconds for a hub that does not exist); or named for a
-  // caller whose rows are not a Vendor's (a staff session reads every request of its hubs, and `vendor_organization_id` means nothing to a Rider). The
+  // caller whose rows are not a Vendor's (a staff session reads every request of its hubs, and `vendor_organization_id` means nothing to it). The
   // organisation is the context's own function, the one the policy applies: nothing the request supplied is in it.
   it.each([
     ['a vendor', 'VENDOR', true],
     ['a staff session', 'STAFF', false],
-    ['a rider', 'RIDER', false],
   ] as const)(
     'names the organisation in the statement of %s only if it is a vendor',
     async (_who, principal, named) => {
@@ -511,5 +481,43 @@ describe('the statement of the request list, with a hub (task C3)', () => {
     const query = await listStatement('STAFF', { ...others, hubId: HUB });
 
     expect(boundTo(query, 'responsible_hub_id', 'uuid')).toEqual([HUB]);
+  });
+});
+
+describe('a Rider is not served the two reads (task A3.1 of the audit follow-up, AC-HUBF-15)', () => {
+  // Break caught: a Rider's authorization reaching the statement of the list (the routes refuse its bearer before this runs, and a service that answers about
+  // records does not rely on that alone), or judged first, so that what it asks decides the answer: whatever it asks, with a hub, with a hub that is not one,
+  // or with the filter that is staff's alone, the answer is the one refusal and nothing is read.
+  it.each([
+    ['no filter', {}],
+    ['a hub', { hubId: HUB }],
+    ['a hub that is not one', { hubId: 'not-a-uuid' }],
+    ['the filter that is staff’s alone', { manifested: 'false' }],
+  ])(
+    'refuses the list for a rider with %s, PERMISSION_DENIED, and reads nothing',
+    async (_what, filter) => {
+      const error = await refusal(filter, 'RIDER');
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).code).toBe('PERMISSION_DENIED');
+      expect((error as ApiException).getStatus()).toBe(403);
+    },
+  );
+
+  // Break caught: the read of one request answered for a Rider (the registry gives it no pickup request, so the database would answer `NOT_FOUND`, which is
+  // the answer of a record that is not there and not the refusal of a read it is not served).
+  it('refuses the read of one request for a rider, PERMISSION_DENIED, and reads nothing', async () => {
+    const { requests, reads } = service();
+
+    const error = await requests
+      .get(asked('RIDER'), 'correlation', '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e0c')
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+    expect(error).toBeInstanceOf(ApiException);
+    expect((error as ApiException).code).toBe('PERMISSION_DENIED');
+    expect(reads()).toBe(0);
   });
 });

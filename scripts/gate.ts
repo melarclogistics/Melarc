@@ -5,7 +5,7 @@
  * while it ran, costs the hour twice. This script holds the order and the conditions that avoid that, so that nobody has to remember them.
  *
  *   node scripts/gate.ts precheck [--uncached]
- *       The cheap checks of CI (migration journal, generated client, format, types, build, contract, lint) in parallel lanes, with the tool
+ *       The cheap checks of CI (migration journal, the migration files main has, generated client, format, types, build, contract, lint) in parallel lanes, with the tool
  *       caches on: prettier and ESLint cache by content below node_modules/.cache/melarc-precheck, and turbo's task cache is used. Warm it
  *       takes seconds when little changed, and cold a few minutes. **ESLint's cache is the one place it can say less than the gate**: a file
  *       it has already read is not read again, so a type changed elsewhere can hide a finding until the gate's uncached lint. Run it after
@@ -96,6 +96,8 @@ interface Check {
 /** Cheapest first. These are the commands of CI, word for word: the gate and the precheck add nothing to what they prove. */
 const CHECKS: readonly Check[] = [
   { name: 'dbcheck', command: 'pnpm --filter @melarc/api run db:check', lane: 'dbcheck' },
+  // A migration that main has is never changed (task A3.3 of the audit follow-up): the guard holds the working tree to the merge base with main.
+  { name: 'migrations', command: 'node scripts/migration-immutability.ts', lane: 'dbcheck' },
   { name: 'client', command: 'pnpm run api-client:check', lane: 'client' },
   {
     name: 'format',

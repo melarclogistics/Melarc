@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { insertPickupRequest, pickupRequestRow } from '../support/pickups.js';
 import { insertRider, riderRow } from '../support/riders.js';
 import { API, HUB_A, HUB_B, OPS, type Actor } from '../support/staff-routes.js';
+import { clientFor } from '../support/test-database.js';
 import { startVendorRoutes, type VendorRoutes } from '../support/vendor-routes.js';
 import { insertVendor, vendorRow } from '../support/vendors.js';
 
@@ -117,5 +118,102 @@ describe('a search that cannot finish', () => {
     const whole = await ask(admin, 'zuko');
     expect(whole.status).toBe(200);
     expect((await crossingsOf(admin)).map((row) => row.responsible_hub_id)).toEqual([HUB_A, HUB_B]);
+  }, 60_000);
+});
+
+const sleep = (milliseconds: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/** Waits until some statement of the test database is waiting on a lock: the lookup that the test holds has reached the table it holds. */
+async function waitForALockWait(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [waiting] = await routes.rows<{ waiting: number }>(
+      `select count(*)::int as waiting from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`,
+    );
+    if ((waiting?.waiting ?? 0) > 0) return;
+    await sleep(50);
+  }
+  throw new Error('no statement waited on the lock the test holds');
+}
+
+describe('a session has one lookup in flight (AC-LOOKUP-16, the audit follow-up of 7 November 2026, A3.2)', () => {
+  // Break caught: a second lookup of a session that runs beside the first (each holding a connection and the shared lock of the bundle for as long as a
+  // search takes), answered with something other than the documented wait (429 RATE_LIMITED, Retry-After: 1), made to wait for the first, or one that
+  // reads or writes anything; and a slot that the first lookup never gives back.
+  it('refuses a second lookup at once while the first waits on a lock, and the session asks again when the first has ended', async () => {
+    const admin = await routes.platformAdmin();
+    await routes.admin.query('begin');
+    let first: ReturnType<typeof ask> | undefined;
+    try {
+      await routes.admin.query('lock table pickup_request in access exclusive mode');
+      first = ask(admin, 'zuko');
+      await waitForALockWait();
+
+      const started = performance.now();
+      const second = await ask(admin, 'zuko');
+      const elapsed = performance.now() - started;
+
+      expect(second.status).toBe(429);
+      expect((second.json() as { code?: string }).code).toBe('RATE_LIMITED');
+      expect(second.header('retry-after')).toBe('1');
+      // At once: not after the three seconds of the first, and not after the wait for its lock.
+      expect(elapsed).toBeLessThan(1000);
+      expect(await crossingsOf(admin), 'nothing was written for either').toEqual([]);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+
+    // The first one was only waiting: with the lock released it ends whole, and the session may ask again.
+    expect((await first).status).toBe(200);
+    expect((await ask(admin, 'zuko')).status).toBe(200);
+  }, 60_000);
+});
+
+describe('the whole lookup has one budget of three seconds (AC-LOOKUP-17, the audit follow-up of 7 November 2026, A3.2)', () => {
+  // Break caught: a budget for each key, so that a lookup whose keys each take less than the bound of a statement ends only when all of them have (here the
+  // requests take 1.8 seconds, then the vendors wait until 4.2 seconds after the start: 4.2 seconds, and a whole answer, where the budget ends it at 3).
+  it('ends the read after about three seconds in all, though no statement of it took three', async () => {
+    const admin = await routes.platformAdmin();
+    const other = clientFor(routes.database.urlFor('postgres'));
+    await other.connect();
+    let release: NodeJS.Timeout | undefined;
+    try {
+      await routes.admin.query('begin');
+      await routes.admin.query('lock table pickup_request in access exclusive mode');
+      await other.query('begin');
+      await other.query('lock table vendor_account in access exclusive mode');
+
+      const started = performance.now();
+      // The vendors are free again 4.2 seconds after the start, whatever the lookup does.
+      release = setTimeout(() => {
+        void other.query('rollback').catch(() => undefined);
+      }, 4200);
+      const answered = ask(admin, 'zuko').then((answer) => ({ answer, at: performance.now() }));
+      await sleep(1800);
+      // The application's clock is the kit's manual one, which does not move with the wall clock: the test says that the 1.8 seconds have passed, so that
+      // what is left of the lookup's budget is 1.2 seconds when the vendors are reached (the database's own statement timeout runs on real time).
+      routes.kit.clock.advance(1800);
+      await routes.admin.query('rollback');
+      const { answer, at } = await answered;
+
+      expect(answer.status).toBe(503);
+      expect((answer.json() as { code?: string }).code).toBeUndefined();
+      expect(answer.text).not.toContain('items');
+      // About three seconds from the start: not the 4.2 at which the last key would have been free, as it was when each key had three seconds of its own.
+      expect(at - started).toBeGreaterThanOrEqual(2800);
+      expect(at - started).toBeLessThan(3800);
+      expect(await crossingsOf(admin)).toEqual([]);
+    } finally {
+      if (release !== undefined) clearTimeout(release);
+      await routes.admin.query('rollback').catch(() => undefined);
+      await other.query('rollback').catch(() => undefined);
+      await other.end();
+    }
+
+    // Nothing is left over: the next lookup is whole.
+    expect((await ask(admin, 'zuko')).status).toBe(200);
   }, 60_000);
 });

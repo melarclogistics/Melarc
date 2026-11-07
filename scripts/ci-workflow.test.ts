@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -187,6 +187,7 @@ function goodShared(): Json {
         run('pnpm run lint'),
         run('pnpm run typecheck'),
         run('pnpm --filter @melarc/api run db:check'),
+        run('node scripts/migration-immutability.ts'),
         run('pnpm run api-client:check'),
         REHEARSAL,
       ]),
@@ -2431,6 +2432,7 @@ describe('this repository', () => {
     for (const command of REQUIRED_COMMANDS) {
       const filtered = /^pnpm --filter @melarc\/api run (\S+)$/.exec(command);
       const plain = /^pnpm run (\S+)$/.exec(command);
+      const script = /^node (scripts\/\S+\.ts)$/.exec(command);
       if (filtered?.[1] !== undefined) {
         assert.ok(apiScripts.includes(filtered[1]), `${command}: no such script in apps/api`);
       } else if (plain?.[1] !== undefined) {
@@ -2438,6 +2440,8 @@ describe('this repository', () => {
           rootScripts.includes(plain[1]),
           `${command}: no such script in the root package.json`,
         );
+      } else if (script?.[1] !== undefined) {
+        assert.ok(existsSync(resolve(root, script[1])), `${command}: no such file in scripts/`);
       } else {
         assert.match(command, /^pnpm audit /);
       }

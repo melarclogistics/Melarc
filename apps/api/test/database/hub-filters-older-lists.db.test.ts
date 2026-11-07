@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { insertStaff, staffRow } from './support/identities.js';
+import { grant, newBundle, READ_STAFF } from './support/policy-fixtures.js';
 import { insertRider, riderRow } from './support/riders.js';
 import { API, HUB_A, HUB_B, outcomeOf, type Actor } from './support/staff-routes.js';
 import { startVendorRoutes, type VendorRoutes } from './support/vendor-routes.js';
@@ -287,5 +288,46 @@ describe('AC-HUBF-13: a hub outside the grant, and a hub that does not exist, ar
     }
 
     expect(await hubAuditEvents()).toBe(before);
+  });
+});
+
+describe('AC-HUBF-14: a staff session that names its own hub is shown its own row, whatever its grant reaches', () => {
+  // Break caught (task A3.5 of the audit follow-up): the short answer of AC-HUBF-13 given for the session's own hub as well, so that the one list whose table shows a
+  // profile's own row to its holder (whatever the grant) answers empty for the hub that holds that row, and a filter that should only narrow removes the one row the
+  // session is shown without it; or the exception widened to every hub (the short answer lost, and the time of a hub's walk back in the answer). No seeded bundle holds
+  // `staff.read` at no hub, so the session is one of a bundle this test makes.
+  it('gives a session whose grant of staff.read reaches no hub its own profile with no hub and with its own hub, and an empty page for any other', async () => {
+    const bundle = await newBundle(routes.admin, [grant(READ_STAFF, 'none', 'any', 'A')]);
+    const homebody = await routes.actor(bundle, HUB_A);
+    const own = homebody.identity.id;
+
+    const without = await read(homebody.client, LISTINGS.staff);
+    const named = await read(homebody.client, LISTINGS.staff, HUB_A);
+
+    expect(idsOf(without), 'the table shows the session its own row').toEqual([own]);
+    expect(idsOf(named), 'its own hub keeps that row: a filter only narrows').toEqual([own]);
+    expect(named.items).toEqual(without.items);
+    for (const hub of [HUB_B, NO_HUB]) {
+      expect(idsOf(await read(homebody.client, LISTINGS.staff, hub)), hub).toEqual([]);
+    }
+  });
+
+  // Break caught: the statement left out for another hub (the exception is the session's own hub alone): a hub that exists outside the grant and the identifier of
+  // no hub are answered with no statement that reads the table of profiles, as AC-HUBF-13 says, while the own hub reads it.
+  it('sends the server no statement that reads the profiles for another hub, and one for its own', async () => {
+    const bundle = await newBundle(routes.admin, [grant(READ_STAFF, 'none', 'any', 'A')]);
+    const homebody = await routes.actor(bundle, HUB_A);
+    const readsProfiles = async (hub: string): Promise<number> => {
+      const traced = await routes.kit.trace(() =>
+        homebody.client.get(withHub(LISTINGS.staff, hub)),
+      );
+      expect(traced.result.status, hub).toBe(200);
+      return traced.statements.filter((statement) => LISTINGS.staff.ordering.test(statement))
+        .length;
+    };
+
+    expect(await readsProfiles(HUB_A), 'its own hub').toBeGreaterThan(0);
+    expect(await readsProfiles(HUB_B), 'another hub that exists').toBe(0);
+    expect(await readsProfiles(NO_HUB), 'a hub that does not exist').toBe(0);
   });
 });
