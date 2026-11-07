@@ -27,7 +27,7 @@ const WAIT_HEADER = '#/components/headers/RetryAfter';
  */
 export const PRE_SESSION_WITHOUT_A_LIMITER: Readonly<Record<string, string>> = {
   receiveHubtelPaymentCallback:
-    'a callback of the payment provider, authenticated by its signature, not built; none of the six buckets covers it (the task that builds it decides)',
+    'a callback of the payment provider, authenticated by its signature, not built; none of the six buckets covers it (the requirements for the task that builds it, among them a generous per-source ceiling, are in features/delivery/doorstep-delivery.md section 5.6)',
 };
 
 function sharedResponses(contract: JsonObject): JsonObject {
