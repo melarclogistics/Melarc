@@ -51,7 +51,14 @@ interface Operation {
   readonly 'x-permission'?: string;
   readonly security?: readonly Record<string, unknown>[];
   readonly parameters?: readonly (
-    { readonly $ref?: string; readonly name?: string; readonly schema?: Schema } | undefined
+    | {
+        readonly $ref?: string;
+        readonly name?: string;
+        readonly in?: string;
+        readonly required?: boolean;
+        readonly schema?: Schema;
+      }
+    | undefined
   )[];
   readonly requestBody?: unknown;
   readonly responses?: Record<string, { content?: Record<string, { schema?: Schema }> }>;
@@ -276,13 +283,18 @@ describe('the operation the screen calls', () => {
 
   // Break caught: the screen asking for a filter the list does not have, or sending a value it does not take; and a filter by number, which the
   // list does not have and the screen must not invent.
-  it('has the filters the screen sends and no other', () => {
+  //
+  // The list is the screen's filters (the state, the audience, the channel, the subject) and `hub_id`, which task C3 (the Product Owner's decision
+  // D12 of 6 November 2026) gave the message log beside the other lists the hub switcher narrows: the screen sends it from step R4, when the
+  // switcher is built, and no screen does until then. Each of them is held here, and so is the absence of every other: a parameter the contract adds
+  // has to be decided on in this list before a screen can send it.
+  it('has the filters the screen sends or will send, and no other', () => {
     const named = (operation.parameters ?? []).flatMap((candidate) =>
       candidate?.name === undefined ? [candidate?.$ref?.split('/').at(-1) ?? ''] : [candidate.name],
     );
 
     expect(named.toSorted()).toEqual(
-      ['PageSize', 'PageToken', 'audience', 'channel', 'state', 'subject_id'].toSorted(),
+      ['PageSize', 'PageToken', 'audience', 'channel', 'hub_id', 'state', 'subject_id'].toSorted(),
     );
     expect(valuesOf(parameter('state')?.schema).toSorted()).toEqual(
       [...NOTIFICATION_STATES].toSorted(),
@@ -294,6 +306,29 @@ describe('the operation the screen calls', () => {
       [...NOTIFICATION_CHANNELS].toSorted(),
     );
     expect(parameter('subject_id')?.schema?.format).toBe('uuid');
+  });
+
+  // Break caught: the hub of the message log declared as something other than the optional identifier that the lists which already take a hub
+  // declare (a required parameter, a header or a path parameter, a pattern or an enumeration no other list has), or dropped while a screen is
+  // built to send it (step R4): it is the same parameter and type as on the staff, rider and vendor lists (task C3, `AC-HUBF-03`).
+  it('has an optional hub filter that is a uuid in the query, as the lists that already take a hub have', () => {
+    const hub = parameter('hub_id');
+
+    expect(hub).toMatchObject({
+      name: 'hub_id',
+      in: 'query',
+      schema: { type: 'string', format: 'uuid' },
+    });
+    expect(hub?.required ?? false).toBe(false);
+    expect(hub?.schema).toEqual({ type: 'string', format: 'uuid' });
+    for (const operationId of ['listStaffIdentities', 'listRiders', 'listVendorAccounts']) {
+      const other = Object.values(document.paths)
+        .flatMap((item) => Object.values(item))
+        .find((candidate) => candidate.operationId === operationId)
+        ?.parameters?.find((candidate) => candidate?.name === 'hub_id');
+      expect(other, operationId).toBeDefined();
+      expect(hub?.schema, operationId).toEqual(other?.schema);
+    }
   });
 
   it('answers with a list of entries and the token of the next page', () => {

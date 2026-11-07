@@ -29,6 +29,8 @@ export interface NotificationLogFilter {
   readonly audience?: string;
   readonly channel?: string;
   readonly subjectId?: string;
+  /** Only the messages of this hub (task C3, `AC-HUBF-03`): a filter that narrows what the caller may read and never widens it. */
+  readonly hubId?: string;
   readonly pageSize?: number;
   readonly pageToken?: string;
 }
@@ -62,6 +64,10 @@ const oneOf = (value: string, allowed: readonly string[]): boolean => allowed.in
  *   reads are: one `auth.hub_boundary.crossed` for each foreign hub the page represents.
  * - **The list is newest first, then by id**, so that a page does not move under a reader who is paging, and is paged by an opaque token
  *   that is only a position.
+ * - **`hub_id` is a filter that narrows and never widens** (task C3, `AC-HUBF-03`, `-06`): the hub of a message is the hub its record answered
+ *   to when the act was done (`responsible_hub_id`, which a message keeps). It is one more condition of the statement, in the transaction the
+ *   row-level security scopes and never in the security context, so a hub outside the session's grant, or that names no hub, is an empty page
+ *   and never `HUB_SCOPE_VIOLATION`.
  */
 export class NotificationLogService {
   readonly #options: NotificationLogServiceOptions;
@@ -94,6 +100,7 @@ export class NotificationLogService {
     if (filter.subjectId !== undefined && !isUuid(filter.subjectId)) {
       throw invalid('subject_id', 'format');
     }
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalid('hub_id', 'format');
     const after = filter.pageToken === undefined ? undefined : decodePageToken(filter.pageToken);
     if (filter.pageToken !== undefined && after === undefined) {
       throw invalid('page_token', 'format');
@@ -103,6 +110,7 @@ export class NotificationLogService {
     const audience = filter.audience ?? null;
     const channel = filter.channel ?? null;
     const subjectId = filter.subjectId ?? null;
+    const hubFilter = filter.hubId ?? null;
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -115,6 +123,7 @@ export class NotificationLogService {
            and (${audience}::text is null or audience = ${audience}::text)
            and (${channel}::text is null or channel = ${channel}::text)
            and (${subjectId}::uuid is null or subject_id = ${subjectId}::uuid)
+           and (${hubFilter}::uuid is null or responsible_hub_id = ${hubFilter}::uuid)
            and (${afterMoment}::timestamptz is null or (created_at, id) < (${afterMoment}::timestamptz, ${afterId}::uuid))
          order by created_at desc, id desc
          limit ${size + 1}`);

@@ -44,6 +44,7 @@ function filterOf(query: Record<string, unknown>): NotificationLogFilter {
   const audience = take('audience');
   const channel = take('channel');
   const subjectId = take('subject_id');
+  const hubId = take('hub_id');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
@@ -51,6 +52,7 @@ function filterOf(query: Record<string, unknown>): NotificationLogFilter {
     ...(audience === undefined ? {} : { audience }),
     ...(channel === undefined ? {} : { channel }),
     ...(subjectId === undefined ? {} : { subjectId }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
   };
@@ -87,6 +89,7 @@ export class NotificationLogController {
     schema: { type: 'string', enum: [...NOTIFICATION_CHANNELS] },
   })
   @ApiQuery({ name: 'subject_id', required: false, schema: { type: 'string', format: 'uuid' } })
+  @ApiQuery({ name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } })
   @ApiQuery({
     name: 'page_size',
     required: false,

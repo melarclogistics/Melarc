@@ -5,12 +5,17 @@ import {
   type AuthorizedRequest,
 } from '../authorization/authorized-request.js';
 import type { OperationRunner } from '../authorization/operation-runner.js';
+import { isUuid } from '../database/transaction-context.js';
 import {
+  ANY_HUB,
   QUEUE_IDS,
   type QueueCount,
   type QueueCounter,
+  type QueueFilter,
   type QueueId,
 } from '../domain-ports/queue-counter.port.js';
+import { ApiException } from '../http/api-exception.js';
+import { ErrorCode } from '../http/error-codes.js';
 
 /** One queue's entry in the answer: its identifier, how many records it holds, and the moment the oldest entered it (absent when none). */
 export interface QueueSummaryEntryView {
@@ -59,6 +64,11 @@ export const QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS = 3000;
  *   queues need (two at the most today: `pickup.read` and `staff.read`), because a transaction has one authorization key.
  * - **The count is the list's by construction**: each counter calls the same function for the filter as its list does
  *   (`pickupRequestCriteria` and the others), and row-level security does the scoping, as it does for the list.
+ * - **`hub_id` narrows and never widens** (task C3, `AC-HUBF-04`): it is the filter every queue's list is given, passed to every counter of
+ *   every key group as a statement parameter. **It is never part of the context a count is taken in**: the `AuthorizedRequest` the runner is
+ *   given is what it is without a hub, so a hub outside the grant of a queue's list key counts 0 in that queue (the entry is still there:
+ *   the queue is the session's and nothing waits in that hub), a hub that does not exist counts 0 everywhere, and a queue the session may
+ *   not read stays absent whatever the hub. A value that is not a UUID is refused before any transaction opens (`VALIDATION_FAILED`, 400).
  * - **It writes nothing, not even an audit event.** It returns no record and no page of records, so the `auth.hub_boundary.crossed` of a
  *   list is not written for it (audit.md section 6 says nothing of an aggregate; recorded as a finding for the Product Owner).
  * - **The answer is in the order of `QueueId`**, whatever the order the counters were given in; the client orders what it shows.
@@ -86,7 +96,17 @@ export class QueueSummaryService {
     );
   }
 
-  async read(authorized: AuthorizedRequest, correlationId: string): Promise<QueueSummaryView> {
+  async read(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    filter: QueueFilter = ANY_HUB,
+  ): Promise<QueueSummaryView> {
+    // A hub that is not a UUID is refused before anything is read: no transaction is opened for it, and no count of it is asked.
+    if (filter.hubId !== null && !isUuid(filter.hubId)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+        violations: [{ in: 'query', pointer: '/hub_id', rule: 'format' }],
+      });
+    }
     // The queues the session may read, grouped by the key of their list (the context a count is taken in).
     const byKey = new Map<string, QueueCounter[]>();
     for (const counter of this.#counters) {
@@ -110,7 +130,8 @@ export class QueueSummaryService {
           // Bounded before the first count: a statement that runs longer than the limit ends the read, which then fails as any failed read does.
           await this.#limitStatements(handle, QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS);
           const read: [QueueId, QueueCount][] = [];
-          for (const counter of group) read.push([counter.queue, await counter.count(handle)]);
+          for (const counter of group)
+            read.push([counter.queue, await counter.count(handle, filter)]);
           return read;
         },
         ONE_SNAPSHOT,

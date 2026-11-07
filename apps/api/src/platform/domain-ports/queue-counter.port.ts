@@ -10,9 +10,11 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
  * - **A counter counts what its queue's own list returns, by the same predicate.** The list and the counter call one function for the
  *   filter (`pickup/pickup-request-criteria.ts`, ...), so that the two cannot drift; the scope is not the counter's to write: it is
  *   the row-level security of the transaction the caller opens, under the context of `listKey`.
- * - **Inputs:** the caller's transaction handle, always. It is opened by the caller under the security context of `listKey` (the hub mode
+ * - **Inputs:** the caller's transaction handle, always, and the filter the list is given (`QueueFilter`, task C3: the hub the Portal's
+ *   switcher chose, or none). The transaction is opened by the caller under the security context of `listKey` (the hub mode
  *   and the hub set of the session's grant of that key, the key itself as the authorization key), and the counter reads on it: it opens
- *   no transaction, takes no connection of its own, sets no context and writes nothing.
+ *   no transaction, takes no connection of its own, sets no context and writes nothing. **The filter is a statement parameter and never
+ *   part of that context**: it narrows and never widens.
  * - **Transactional requirement:** the caller's own transaction, and no other. The counters of one key share one snapshot (`REPEATABLE
  *   READ`), so that the counts of one key agree with each other.
  * - **Locks:** none. A count is a read; nothing is locked.
@@ -43,6 +45,20 @@ export interface QueueCount {
   readonly oldestAt: Date | null;
 }
 
+/**
+ * What narrows a count beyond the session's own scope (task C3, `AC-HUBF-04`): **a filter and never a scope**. It is what the list of the
+ * queue is given as its own filter, so the count stays the list's: `hubId` is the list's `hub_id`. It is a statement parameter and never part
+ * of the security context the caller opens the transaction under, so a hub outside the session's grant counts as nothing and is never an
+ * error, and a hub that does not exist counts as nothing as well.
+ */
+export interface QueueFilter {
+  /** Only this hub's records, as the queue's list does with `hub_id`; `null`: every hub the session's grant of the list's key reaches. */
+  readonly hubId: string | null;
+}
+
+/** No filter: every hub the session's grant of the list's key reaches. */
+export const ANY_HUB: QueueFilter = Object.freeze({ hubId: null });
+
 export interface QueueCounter {
   readonly queue: QueueId;
   /**
@@ -55,7 +71,12 @@ export interface QueueCounter {
    * if it holds this key as well. It decides nothing about scope; the list's key does.
    */
   readonly decisionKey?: string;
-  count(handle: TransactionHandle): Promise<QueueCount>;
+  /**
+   * The count of the queue under the caller's transaction, narrowed by `filter` exactly as the queue's own list is narrowed by the same
+   * filter (by the same function, so the two cannot drift). A filter the counter's queue has no use for is not ignored by the counter: the
+   * caller gives every counter the same filter and each applies it to its own table (a hub is a column of every queue's records).
+   */
+  count(handle: TransactionHandle, filter: QueueFilter): Promise<QueueCount>;
 }
 
 /** The injection token of the counters of every queue, bound once, by the composition root. */

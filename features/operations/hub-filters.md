@@ -1,0 +1,299 @@
+# Hub filters of the Ops Portal's reads
+
+> **Status:** ACTIVE SPECIFICATION — implementation status is stated in section 16
+> **Owns:** the optional `hub_id` filter of the four reads the hub switcher of the Ops Portal narrows: the list of pickup requests, the list of pickup runs, the message log and the queue summary
+> **Slice:** none: a contract task of the Ops Portal redesign (task C3, the Product Owner's decision D12 of 6 November 2026), delivered between task P1.1 and the shell step R4
+
+## 1. Purpose and scope
+
+The hub switcher of the Ops Portal ([the Ops surface, section 3](../../surfaces/ops-portal.md#3-hub-visibility)) lets a person work one hub at a time, and a Platform Admin, whose grants reach every hub, browse "All hubs". Until this task only the built lists of staff, riders and vendors took a hub, so the pickup queues, the runs, the messages and the counts beside the menu could not follow the switcher: they showed every hub the session's grant reaches. This feature gives the four reads that make up those screens an **optional, additive `hub_id`**, in the one convention the three lists already follow, and owns what it means for each of them.
+
+**In scope:** the parameter `hub_id` on `listPickupRequests`, `listPickupManifests`, `listNotifications` (the message log) and `getQueueSummary`; what it does inside the scope the read already has; what it answers for a hub the session's grant does not reach and for a hub that does not exist; how a count and its list keep agreeing when it is given; what it does to the audit; what it does for the Vendor and the Rider who share two of the reads.
+
+**Out of scope:** the switcher itself and the way the Portal draws the answers (step R4: [the Ops surface](../../surfaces/ops-portal.md#4-navigation-model)); the lists that already take a hub (`listStaffIdentities`, `listRiders`, `listVendorAccounts`), which are not changed; the reads of one record by its identifier, whose `HUB_SCOPE_VIOLATION` is the scope probe's and does not change; `lookupRecords` ([global lookup](global-lookup.md): a search finds a record wherever the session may open it, and a code typed from a paper slip may belong to another hub); the other lists of built operations that take no hub (run custody handovers, sessions: the switcher does not narrow their screens); a filter by more than one hub; a breakdown of a count by hub; any change of a key, a scope, a state, an error code or an audit rule.
+
+## 2. Governing requirements
+
+- [Master specification](../../PROJECT_MASTER_SPECIFICATION.md) section 17.4 ("queue counts and filters that make pending work visible"), section 17.5 (the hubs each role sees), section 37.6 ("every query, export, notification, file, and API operation must enforce vendor ownership and hub/role scope with negative-access tests") and section 42.4 ("Filtering/search authorization").
+- [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) section 14.4b, item 4: **list endpoints never probe**; a list is filtered silently and says nothing about what it did not return.
+- The convention of the three built lists that already take `hub_id`. For the vendor list it is written as a criterion, [vendor authentication](../identity/vendor-authentication.md) `AC-SLICE-000-102` ("filtering the list by Hub A returns them an empty page and no refusal"), and in the contract's text on `listVendorAccounts` ([openapi.yaml](../../contracts/openapi.yaml)): "`hub_id` is a filter that can narrow what the caller may see and never widens it". For the staff and the rider lists, whose hub scope is [staff authentication](../identity/staff-authentication.md) `AC-SLICE-000-07`, [permission enforcement](../identity/permission-enforcement.md) `AC-SLICE-000-30` and [rider authentication](../identity/rider-authentication.md) `AC-SLICE-000-113`, the same behaviour of their `hub_id` is held by their database tests and is written as criteria only here: an empty page for a hub outside the grant by `staff-identity-routes.db.test.ts` and `rider-reads-routes.db.test.ts`, and the refusal of a value that is not an identifier, or of a repeated one, by `rider-reads-routes.db.test.ts` (the staff list's refusal is the contract validation's and has no test of its own: a finding).
+- [The reporting data dictionary, section 5.5](../reporting/reporting-data-dictionary.md#55-the-queue-counts-queue-what-they-have-in-common) and `AC-QSUM-02`, `-03` and `-05`: a count is what its list returns for the same session and the same filter, is scoped as its list is, and names no hub.
+- [permissions.md](../../contracts/permissions.md): no key is added, and the Platform Admin holds every key it holds at every hub ([the pickup request feature](../pickup/pickup-request.md), `AC-SLICE-001-83`).
+- [data-scope-registry.md](../../contracts/data-scope-registry.md) section 7.2: a count is scoped by the rows of the registry and by nothing else; a filter is not a scope.
+- [audit.md](../../contracts/audit.md) section 5.4 and `AC-SLICE-000-128`: a list writes one `auth.hub_boundary.crossed` for each foreign hub it represents.
+- The Product Owner's decision D12 of 6 November 2026: an optional, additive `hub_id` on the pickup request list, the pickup run list, the queue summary and the message log (the last only because messages are hub-scoped), "exactly the convention the staff, rider and vendor lists already use for hub_id, including what happens when the hub is outside the session's grant", acceptance criteria first, tests per role (Ops Staff, Senior Ops, Platform Admin with no hub, Platform Admin with a hub), and "for each queue and hub, the summary count with hub_id must equal the filtered list".
+
+## 3. Actors and surfaces
+
+A signed-in **Ops Portal staff session** of any bundle that holds the key of the read. `getQueueSummary` and `listNotifications` are the Ops Portal's alone: a Vendor session is `PERMISSION_DENIED` and a Rider's bearer credential, which these operations do not take, is `SESSION_INVALID`. `listPickupRequests` also serves a Vendor (its own organisation's requests) and a Rider (who is shown no request), and `listPickupManifests` a Rider (the runs assigned to it and dispatched): for them the filter narrows inside what they are shown ([section 5](#5-behavior)). The only code that sends the filter is the Ops Portal's, from step R4.
+
+## 4. Preconditions
+
+The key of the read: `pickup.read` for the requests and the runs, `notification.read` for the messages. The summary is `self`: no key admits the call, any signed-in Ops Portal staff session is answered, each queue by the key of its own list (`pickup.read`, `staff.read`) and, for the two approver's queues, the decision key as well, and a session that holds none of them gets an empty list ([AC-QSUM-01](../reporting/reporting-data-dictionary.md#13-acceptance-criteria)). A session that is refused a read is refused as it is without a `hub_id`.
+
+## 5. Behavior
+
+**The parameter.** `hub_id` is an optional query parameter, `{ type: string, format: uuid }`, on the four reads: the same parameter and type as on the three lists that already take a hub (each of the four carries a description of what it means for that read, which those three do not), and, on the summary, the `400 VALIDATION_FAILED` that those lists already declare. It is one value or none. A value that is not a UUID, an empty one, one written with spaces around it or as `urn:uuid:...`, and one given twice are `VALIDATION_FAILED` naming `hub_id`, as they are on those lists; a UUID in capitals is the same hub as in lower case.
+
+**What it means.** It is **a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted.** It adds one condition to the statement the read already runs, *the hub of the record is the one named*, and the scope is still decided where it always was: by the row-level security of the transaction the read runs in, under the grant of the read's own key (the hubs of the grant, or every hub where the grant is of all hubs), which nothing in the request can change. The hub of a record is the column that already scopes it: `responsible_hub_id` for a pickup request, a pickup run and a message, `primary_hub_id` for a staff profile. A message's hub is the hub the record answered to **when the act was done**: it is copied from the act's envelope and never changes, so a message about a record that later moves hub stays under the hub it was raised in.
+
+**One function for the filter.** The list and the count of a queue call one function for what they contain (`pickupRequestCriteria`, `pickupManifestCriteria`, `staffIdentityCriteria`), and the hub is one more of its conditions, so a queue's count with a hub is the number of records its list returns with that hub **by construction**. The hub never enters the security context (it is a parameter of the statement, never of the transaction: a context built from it would be a scope, and a scope comes from the grant alone).
+
+**A hub the session's grant does not reach, and a hub that does not exist.** Both are **an empty page** (status 200, no items, no next page token) on a list, and, on the summary, **every entry the session may read present with `count` 0 and no `oldest_at`**: never `HUB_SCOPE_VIOLATION`, never `NOT_FOUND`, never a refusal of any kind, never an absent entry. Row-level security has removed the rows, the filter has nothing left to keep, and no code asks whether the hub exists, because the two answers must be one: a caller learns nothing from the answer of whether a hub exists or of what it holds beyond its own grant (the time a read takes can differ at scale: [section 14](#14-unresolved-requirements), item 5). This is the convention of the staff, rider and vendor lists, and it is not that of the creation of a request, which names its hub in its body and is told informatively (`AC-SLICE-001-82`). **The read of one record by its identifier does not change**: a staff member's read of a record of a hub outside their grant is still `HUB_SCOPE_VIOLATION` by the scope probe ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) section 14.4b), and an identifier that matches nothing is still `NOT_FOUND`.
+
+**The queue summary.** `getQueueSummary` takes the same optional `hub_id` and runs each count **in the context of the grant of that queue's own list key**, as it does without it, with the hub as a condition of the count's statement. Which entries are present does not depend on the hub: a queue the session may not read is absent for every hub, an approver's queue is absent without its decision key whatever the hub, and no entry the session may read is ever absent because of the hub (an absent entry means "not yours", and a `0` means "read, and nothing waits", for any hub). An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, which is the earliest moment among **that hub's** records of the queue; the answer names no hub and holds nothing more ([AC-QSUM-05](../reporting/reporting-data-dictionary.md#13-acceptance-criteria)). Everything else about the read is as the data dictionary says and the filter does not change it (each key's counts are one snapshot, each count is bounded by `AC-QSUM-13`, the answer is `no-store`, the read writes no audit event and is `background` activity). **The staff approver's queue counts profiles by their primary hub**, as `listStaffIdentities` does with `hub_id`. A profile with no primary hub (the seeded Platform Admin has none, and so may any profile made without one) is therefore in the count without `hub_id` for a session whose `staff.read` grant is of every hub (a Senior Ops user, whose grant is its own hubs', sees it in no count) and in the count of **no** hub. The five pickup queues have a hub on every record. **Nobody adds the hubs' counts up to the all-hub count, neither the server nor a client**: for the pickup queues the sum happens to equal it, for the staff queue it does not.
+
+**Combination and paging.** `hub_id` combines with every other filter of the read as "and" (`state`, `service_date`, `manifested`, `one_package_exception_state` and `cutoff_exception_state` on the requests; `state` and `service_date` on the runs; `state`, `audience`, `channel` and `subject_id` on the messages). A list pages as it did: a page token is only a position in the list's order and is used with the filters it was given, so a client that changes the hub starts again at the first page. A list carries no `ETag`, and the summary none.
+
+**Audit.** The audit of a read does not change with the filter. A list writes one `auth.hub_boundary.crossed` for **each hub other than the actor's primary hub that the rows of the page it returns represent**, naming the hub and the operation and carrying no row ([audit.md](../../contracts/audit.md) section 5.4): a Platform Admin whose primary hub is the first, asking for the second, writes one for the second; asking for the first, none; a Platform Admin with no primary hub has no hub of its own, so the page of whichever hub it names writes one for that hub; an officer, who reaches its own hub alone, none. **A page with no row writes none, whatever hub was named**: a filter that matched nothing is not an attempt on a hub. The summary writes none, with or without a hub, because it returns no record.
+
+**The Vendor and the Rider.** The two reads they share are narrowed by the filter inside what row-level security shows them, and no further. A Vendor's list of requests is its own organisation's, across hubs; with `hub_id` it is those of that hub, never another vendor's and never another hub's (`responsible_hub_id` is in every representation of a request already, so the filter shows nothing new; today a request is made in its organisation's hub, `AC-SLICE-001-82`, and the reassignment of a request's hub is not built, so a Vendor has requests in two hubs only where the organisation has them, and the tests arrange them). A Rider is shown no request, with or without a hub, and its list of runs is the runs assigned to it and dispatched, with `hub_id` those of that hub. Neither crosses a hub, so neither writes an audit event.
+
+**What does not apply.** The filter is a read: it has no cancellation, no retry of its own, no idempotency key and no terminal state, and nothing is kept of it; a request is answered or refused, and asking again reads again. A count and a list are two reads at two moments (each key's counts of the summary are one snapshot, a list is another), so a count equals its list for the same records, and a record made between the two reads is in the later one only.
+
+**What does not change.** Without `hub_id` every read answers exactly as it did. No key, state, error code, setting or audit event is added; the scope of a read is the grant of its key and not a request's say; the staff, rider and vendor lists are not touched.
+
+## 6. Entities
+
+[domain-model.md](../../contracts/domain-model.md): `PickupRequest` (section 6.2), `PickupManifest` (6.3), `StaffIdentity` (6.8), and the `Notification` of [the registry](../../contracts/data-scope-registry.md). Nothing is added: the filter reads the hub column each already carries.
+
+## 7. States
+
+None of its own. A queue is still defined by its own state filter ([the data dictionary, section 5.5](../reporting/reporting-data-dictionary.md#55-the-queue-counts-queue-what-they-have-in-common)); the hub is a second condition and changes no state.
+
+## 8. Permissions and scope
+
+No permission is added and none admits the filter: each read keeps its own key and scope. [permissions.md](../../contracts/permissions.md); [data-scope-registry.md](../../contracts/data-scope-registry.md) section 7.2.
+
+| Read | Key | Scope (the grant of that key) | The column the filter reads |
+|---|---|---|---|
+| `listPickupRequests` | `pickup.read` | the hubs of the grant (Ops Staff and Senior Ops at their hub, Platform Admin at all hubs); a Vendor its organisation's; a Rider none | `responsible_hub_id` |
+| `listPickupManifests` | `pickup.read` | the hubs of the grant; a Rider the runs assigned to it and dispatched; a Vendor none (refused) | `responsible_hub_id` |
+| `listNotifications` | `notification.read`, and no other key | the hubs of the grant | `responsible_hub_id` |
+| `getQueueSummary` | none (`self`); each queue under the key of its own list (`pickup.read`, `staff.read`), the two approver's queues also the decision key | the grant of each queue's list key, never the widest grant the session holds | `responsible_hub_id` (requests, runs), `primary_hub_id` (staff profiles) |
+
+**Negative access:** a hub outside the grant is an empty page and a `0`, never a refusal and never a row; an all-hub grant held beside another key does not widen the key being exercised (`GBT-GS1`); a session whose grant reaches no hub reads nothing for any hub; on the three lists, a request with no session is `SESSION_INVALID` and a session without the key `PERMISSION_DENIED`, each before the value of `hub_id` is judged, so that a caller who may not use a read learns nothing of its schema; the summary, which no key admits, judges the value for any signed-in Ops Portal staff session ([section 5](#5-behavior)).
+
+## 9. Settings
+
+None. [settings.md](../../contracts/settings.md) has none for it and none is invented here.
+
+## 10. Errors
+
+[errors-and-enums.md](../../contracts/errors-and-enums.md): `VALIDATION_FAILED` (naming `hub_id`, for a value that is not one; the summary gains it, with its `400` and its place in `x-error-codes`), `PERMISSION_DENIED`, `SESSION_INVALID`. **`HUB_SCOPE_VIOLATION` is never the answer of these reads to a `hub_id`**: it stays the answer of the read of one record by its identifier and of the acts that name a hub. No code is added.
+
+## 11. Audit and side effects
+
+`auth.hub_boundary.crossed` ([audit.md](../../contracts/audit.md) section 5.4), enhanced, as the lists write it today, unchanged by the filter ([section 5](#5-behavior)); none for the summary. No notification, file or asynchronous effect.
+
+## 12. API operations
+
+In [openapi.yaml](../../contracts/openapi.yaml), each with the optional query parameter `hub_id` (`{ type: string, format: uuid }`): `listPickupRequests` (`GET /pickup-requests`), `listPickupManifests` (`GET /pickup-manifests`), `listNotifications` (`GET /notifications`: the Ops message log, which the decision of 6 November 2026 called `listMessages`), `getQueueSummary` (`GET /ops/queue-summary`). The queue summary also declares `400 VALIDATION_FAILED`.
+
+## 13. Acceptance criteria
+
+### `AC-HUBF-01` — The list of pickup requests narrows to one hub, and only narrows
+
+```text
+Given pickup requests of a first hub and of a second hub in several states, and sessions of an Ops Staff officer and a Senior Ops user of the first hub, a Platform Admin with no primary hub and a Platform Admin whose primary hub is the first,
+When each asks listPickupRequests with hub_id of the first hub, of the second hub and with none, alone and together with state, service_date, manifested, one_package_exception_state or cutoff_exception_state,
+Then the list with a hub holds exactly the requests of that hub that the same session and the same other filters are given without it, in the same order, read to its last page,
+And for the Platform Admin the lists of the two hubs together are the whole of the list without hub_id, with no request in both,
+And the officer and the Senior Ops user, naming their own hub, are given exactly the pages they are given without hub_id,
+And a page of a list with hub_id continues, with the next page token and the same hub_id, to the end of that list, each request once.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-HUBF-02` — The list of pickup runs narrows to one hub, and only narrows
+
+```text
+Given pickup runs of a first hub and of a second hub in several states and on several days, and the four sessions of AC-HUBF-01,
+When each asks listPickupManifests with hub_id of the first hub, of the second hub and with none, alone and together with state or service_date,
+Then the list with a hub holds exactly the runs of that hub that the same session and the same other filters are given without it, in the same order, read to its last page,
+And for the Platform Admin the lists of the two hubs together are the whole of the list without hub_id, with no run in both,
+And a list carries neither the stops nor an ETag, as without the filter.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-HUBF-03` — The message log narrows to one hub
+
+```text
+Given messages of a first hub and of a second hub in several states, audiences and channels, and the four sessions of AC-HUBF-01,
+When each asks listNotifications with hub_id of the first hub, of the second hub and with none, alone and together with state, audience, channel or subject_id,
+Then the list with a hub holds exactly the messages of that hub that the same session and the same other filters are given without it, newest first, read to its last page,
+And a message is in the hub the record it is about answered to when the act was done, whatever hub the record is in now,
+And a subject_id of a record of the second hub with hub_id of the first is an empty page (the two filters are "and", and the page says nothing of where the subject is),
+And no entry holds a destination in clear, a text or a code, as without the filter.
+```
+
+**Governs:** this feature, section 5; [permissions.md](../../contracts/permissions.md) (`notification.read`) · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-HUBF-04` — The queue summary counts one hub's work, entry by entry as it counts all of it
+
+```text
+Given records of two hubs for every queue (pending requests, late bookings, exceptions asked for, confirmed requests on no run, runs in progress, staff profiles waiting for approval, of which one has no primary hub), and the four sessions of AC-HUBF-01,
+When each asks getQueueSummary with hub_id of the first hub, of the second hub and with none,
+Then the entries present are exactly the entries the session is given with none (a queue it may not read is absent for every hub, an approver's queue without its decision key is absent for every hub, and no entry it may read is absent because of the hub),
+And each count is the number of that hub's records in that queue, and oldest_at is the earliest moment among them and is absent when the count is 0,
+And for a session that reads both hubs the pickup queues of the first hub and of the second hub add up to the pickup queues without hub_id, and the staff queue does not (the profile with no primary hub is in the count without hub_id and in no hub's, as in listStaffIdentities),
+And an entry holds queue, count and oldest_at and nothing else: the answer names no hub.
+```
+
+**Governs:** this feature, section 5; the data dictionary, section 5.5 and `AC-QSUM-01`, `-04`, `-05` · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-HUBF-05` — A hub outside the grant, and a hub that does not exist, are an empty page and a count of 0, and nothing else
+
+```text
+Given an Ops Staff officer and a Senior Ops user of the first hub, a Platform Admin, a second hub that exists and is outside the grant of the first two, and an identifier that names no hub,
+When the officer and the Senior Ops user ask each of the four reads with hub_id of the second hub, and every one of the four sessions asks each with the identifier of no hub,
+Then each list answers 200 with an empty page and no next page token, and the summary answers 200 with every entry the session may read present at count 0 and with no oldest_at,
+And, for the officer and the Senior Ops user, the answer for the second hub and the answer for the identifier of no hub are the same (status, body and headers, but for the request's own identifier and moment), so that a caller learns nothing from the answer of whether a hub exists or of what it holds beyond its grant (the time a read takes is section 14, item 5),
+And no read answers HUB_SCOPE_VIOLATION or NOT_FOUND for the filter, and no read writes an audit event,
+And the read of one record by its identifier is unchanged: a request of the second hub read by the officer is still HUB_SCOPE_VIOLATION, and an identifier that matches nothing is still NOT_FOUND.
+```
+
+**Governs:** this feature, section 5; `AC-SLICE-000-102`; `GBT-GS14` ([the matrix](../../standards/security-test-matrix.md)); [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) section 14.4b · **Surface:** Melarc Ops · **Test level:** API · **Code:** none (`HUB_SCOPE_VIOLATION` and `NOT_FOUND` for the read of one record, unchanged)
+
+### `AC-HUBF-06` — A count with a hub is what the list with that hub returns, for every queue, role and hub
+
+```text
+Given the records of AC-HUBF-04, and the four sessions of AC-HUBF-01 (and the bundles with every grant of the queues' lists at all hubs, and with the pickup keys at one hub and the staff key at all of them),
+When each reads the summary with hub_id of the first hub, of the second hub and of a hub that has none of the records, and reads the list of each queue to its last page, in pages of two, with the same hub_id and the filter that defines the queue (listPickupRequests with state=PENDING; with state=CONFIRMED and cutoff_exception_state=PENDING_OPS_REVIEW; with one_package_exception_state=REQUESTED; with state=CONFIRMED and manifested=false; listPickupManifests with state=IN_PROGRESS; listStaffIdentities with status=PENDING_APPROVAL),
+Then every count equals the number of items of its list, and oldest_at is the earliest of the moments of the data dictionary's fifth point among them,
+And the figures are also written out for the arranged data, so that a count and a list that were wrong in the same way (a hub condition lost from the one function both call) still fail.
+```
+
+**Governs:** this feature, section 5; `AC-QSUM-02`, `-03` · **Surface:** Melarc Ops · **Test level:** API and integration (the request criteria against a plain definition, in each scope, under the runtime role; the run and profile counts by the hand-written names and figures of the route tests) · **Code:** none
+
+### `AC-HUBF-07` — An identifier that is not an identifier is VALIDATION_FAILED naming hub_id, after the guards
+
+```text
+Given a session of each role, a session whose bundle holds none of the key of a list, a request with no session, a Vendor session on a read that is staff's alone and a Rider's bearer credential on the same,
+When a read is asked with a hub_id that is not a UUID, that is empty, that has spaces around it or is written urn:uuid:..., or that is given twice,
+Then a session that may use the read is answered VALIDATION_FAILED, status 400, naming the parameter hub_id, and nothing is read,
+And, on the three lists, a session without the key is PERMISSION_DENIED, a request with no session SESSION_INVALID, a Vendor on a staff-only read PERMISSION_DENIED and a Rider's bearer SESSION_INVALID, each before the value is judged, so that a caller who may not use a read learns nothing of its schema,
+And the summary, which no key admits (it is self), judges the value for any signed-in Ops Portal staff session, including one that holds none of the queue keys and is otherwise given an empty list (AC-QSUM-01); a request with no session is still SESSION_INVALID, a Vendor session PERMISSION_DENIED and a Rider's bearer SESSION_INVALID, each before the value is judged,
+And a hub_id that is a UUID in capitals is read as the same hub as in lower case.
+```
+
+**Governs:** this feature, sections 5 and 10 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`, `PERMISSION_DENIED`, `SESSION_INVALID`
+
+### `AC-HUBF-08` — The audit of a read does not change with the filter
+
+```text
+Given a Platform Admin with no primary hub, a Platform Admin whose primary hub is the first, an Ops Staff officer of the first hub, and records of both hubs,
+When each asks a list (pickup requests, pickup runs, messages) with hub_id of the first hub, of the second hub, of no hub and with none, and the summary with and without hub_id,
+Then a list writes one auth.hub_boundary.crossed for each hub other than the actor's primary hub that the rows of the page it returns represent, naming the hub and the operation and carrying no row, exactly as it does without hub_id: for the Platform Admin with the first hub, the page of the second hub writes one for the second hub and the page of the first hub none; for the Platform Admin with no hub, the page of each hub writes one for that hub; for the officer, none,
+And a page with no row writes none, whatever hub was named,
+And the summary writes no audit event, with or without hub_id.
+```
+
+**Governs:** this feature, sections 5 and 11; [audit.md](../../contracts/audit.md) section 5.4; `AC-SLICE-000-128` · **Surface:** Melarc Ops · **Test level:** API · **Code:** none
+
+### `AC-HUBF-09` — The Ops Portal sends hub_id for one chosen hub and nothing for All hubs
+
+```text
+Given the hub switcher of a signed-in Ops Portal (step R4), for a session whose grant reaches several hubs,
+When one hub is chosen, and when All hubs is chosen,
+Then the pickup request list, the run list, the message log and the queue summary are asked with hub_id of that hub, and with none for All hubs,
+And the counts beside the menu and My work are the summary's answer for that hub, never an addition of the answers of several hubs,
+And only the hubs the session lists are offered, so that a hub the session does not reach is never sent,
+And a change of hub starts the lists at their first page and asks the summary again for the new hub (step R4 adds this read to the list of reads in `AC-QSUM-09`).
+```
+
+**Governs:** this feature, section 5; [the Ops surface](../../surfaces/ops-portal.md#3-hub-visibility) · **Surface:** Melarc Ops · **Test level:** Portal component tests (built in step R4, not by this task) · **Code:** none
+
+### `AC-HUBF-10` — The filter is narrowed by the grant of the read's own key and never widened by another grant
+
+```text
+Given a bundle that holds pickup.read at its own hub, pickup.exception.approve at every hub, staff.read at every hub and staff.identity.approve at its own hub, a session of it at the first hub, and a Platform Admin,
+When the bundle's session asks getQueueSummary with hub_id of the second hub,
+Then the pickup queues are 0 (a queue is counted in the scope of the grant of its list's key, whatever other grant the session holds), the exception queue too (a decision key scopes nothing), and the staff queue is the second hub's count (staff.read reaches every hub),
+And the same session's lists agree with each count, queue by queue,
+And a session whose grant of the key reaches no hub reads nothing for any hub_id, and a session whose grant is of every hub reads the hub named and no other.
+```
+
+**Governs:** this feature, sections 5 and 8; `GBT-GS1`, `GBT-GS5`, `GBT-GS14` ([the matrix](../../standards/security-test-matrix.md)); `AC-QSUM-03` · **Surface:** Melarc Ops · **Test level:** API and integration · **Code:** none
+
+### `AC-HUBF-11` — Leaving the filter out changes nothing
+
+```text
+Given the data and the sessions of the criteria above,
+When each read is asked with no hub_id,
+Then its answer is what it was before this feature: the same items in the same order, the same page tokens, the same entries and counts,
+And a hub_id sent to a read changes the answer only by keeping the records of that hub: it never adds, reorders or reshapes anything.
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Ops · **Test level:** API (the existing suites of the four reads, unchanged, and the criteria of `AC-HUBF-01` to `-03`) · **Code:** none
+
+### `AC-HUBF-12` — A Vendor's and a Rider's reads are narrowed inside what they are shown
+
+```text
+Given a Vendor with requests in the first hub and in the second, a second Vendor with requests in both, and a Rider with a dispatched run in the first hub,
+When the Vendor asks listPickupRequests with hub_id of each hub and of a hub where it has no request, and the Rider asks listPickupManifests with hub_id of the first hub and of the second, and listPickupRequests with hub_id of the first,
+Then the Vendor is given its own requests of that hub and none of the second Vendor's and none of another hub's, an empty page for the hub where it has none, and the Rider its assigned and dispatched runs of that hub and, for the requests, the same answer as without the filter (never a request),
+And without hub_id each is given what it was given before,
+And neither answer writes an audit event (a Vendor and a Rider cross no hub).
+```
+
+**Governs:** this feature, section 5 · **Surface:** Melarc Vendor, Melarc Rider · **Test level:** API · **Code:** none
+
+## 14. Unresolved requirements
+
+The decision D12 of 6 November 2026 did not settle the points below. The Product Owner decided the first two the same evening. The others were built meanwhile the **conservative** way (the one that shows no more than the read already shows and changes nothing already built), are recorded as findings for the Product Owner, and cost what they say to change. None of them blocks the task.
+
+1. **Decided (Product Owner, 6 November 2026): a Vendor and a Rider may send `hub_id` to the two reads they share** (`listPickupRequests`, `listPickupManifests`), and it only narrows what they already see: nothing new is shown (`responsible_hub_id` is in every representation they already read) and no audit event is written for them. The alternative, to refuse a non-staff caller with `PERMISSION_DENIED`, is not taken.
+2. **Decided (Product Owner, 6 November 2026): a staff profile with no primary hub appears only in the count of a session whose `staff.read` grant is of every hub, when no hub is chosen, and never in a single hub's.** The count with a hub is by primary hub, as the staff list's own `hub_id` is, so the per-hub counts of the approver's queue are not expected to add up to the all-hub count: that is intended. The rule is owned by [the data dictionary, section 5.5.6](../reporting/reporting-data-dictionary.md#556-queuestaffawaitingapproval--staff-profiles-waiting-for-approval), where the queue is defined, and is written there. The Product Owner also asked for it in [the Ops surface, section 4](../../surfaces/ops-portal.md#4-navigation-model), beside the menu counts: step R4, which builds those counts, writes it there.
+3. **Does a message follow its record when the record changes hub?** Affects the hub filter of `listNotifications`. *Built meanwhile:* a message keeps the hub the record answered to when the act was done (it is copied from the act's envelope and never changes); the reassignment of a request's hub is not built, so the question has no case today. *Alternative:* a message answers to its record's current hub. *Cost:* a rule in the reassignment task and a change to the guards of the notification table. *Needed:* with the task that builds the reassignment.
+4. **Should the other built reads that take no hub get one?** `lookupRecords` (a search finds a record wherever the session may open it, and a code typed from a paper slip may belong to another hub), `listRunCustodyHandovers`, `listSessions` and the like are outside D12's four reads, so the switcher does not narrow those screens. *Alternative:* an optional `hub_id` on each, in this convention. *Cost:* the cost of this task again for each. *Needed:* when a screen of one of them is to follow the switcher (R6 and R7).
+5. **Does the time a read takes tell a caller whether a hub outside its grant exists, and how large it is?** Affects the four reads with a `hub_id` that the session's grant does not reach. *Built meanwhile:* the answer is the same (status, body and headers: `AC-HUBF-05`); the time is not, at scale: the index finds the other hub's rows and the policy removes every one, so a hub that holds 200,000 rows took 0.7 to 0.9 seconds in the measurement ([section 14.1](#141-measured-at-400000-requests)), while an identifier that names no hub finds nothing in the index and is expected to take milliseconds (not measured). A caller needs the hub's identifier to ask, and no read gives a session the identifier of a hub it does not reach. The mechanism is not new: the staff, rider and vendor lists filter by hub the same way, over tables of staff, riders and vendors that are small beside the request and message tables, where a difference of this size was not looked for. A Vendor and a Rider are in the same position by the same mechanism (the index finds the hub's rows and the policy of their organisation or of their runs removes them); that was not measured for them, since every measurement here is of a staff session. The alternative below does not reach them, because they hold no grant of hubs; for them the remedy would be the refusal that item 1 did not take, and [the security design](../../architecture/SECURITY_DESIGN.md) asks, for the read of one record, that the answers to a Vendor or a Rider be identical down to the timing class. *Alternative:* refuse to read when the hub is not among the hubs of the session's grant, before the table is touched, so that both answers take no time; that is a predicate of the operation on hubs, which [the data-scope registry](../../contracts/data-scope-registry.md) section 7.2 says the operation does not have, and a second place where scope is decided. *Cost:* that predicate in each of the four reads and in the three older lists, with its tests. *Needed:* if the Product Owner counts the existence or the size of a hub as something a staff session must not learn, and before any screen shows a session the identifier of a hub it does not reach.
+6. **Should the filter on `one_package_exception_state=APPROVED` or `REJECTED` be made to scale?** Affects `listPickupRequests`. *Built meanwhile:* the same function serves these two values as it serves `REQUESTED`, and the equivalence test covers all three, but with 100,000 approved exceptions a read takes about 1 to 6 seconds ([section 14.1](#141-measured-at-400000-requests)): the cost is the scan of the approved exceptions through the policy of the exceptions and the check of each candidate request, and both grow with the history of approved and refused exceptions, which grows without bound. No screen asks for these values and the queue summary does not count them. *Alternative:* a statement written for the history and measured at its volume, or no such value of the filter. *Cost:* a task with its own measurements. *Needed:* when a screen offers the filter.
+
+The performance of the filter at scale is measured in section 14.1.
+
+### 14.1 Measured at 400,000 requests
+
+Measured on 6 November 2026 on PostgreSQL 18.6 with the runtime role and the real security context (the policies of the tables, the grant of one hub or of every hub), for the statements the reads run: **400,000 pickup requests** in two hubs of 200,000 (about 180,000 confirmed in each hub, the rest cancelled or declined; 400 pending, 400 requested exceptions and 514 late bookings, all in the first hub), 5,000 approved exceptions, **400,000 messages** (200,000 in each hub) and **30,000 runs**, with no stop on any run.
+
+**How to read the figures.** Each is the execution time that `EXPLAIN ANALYZE` reports, the best of three after a warm-up (planning, 0.2 to 18 milliseconds, is not in it), in milliseconds, for a session of **one hub** (an Ops Staff or Senior Ops user) and for a **Platform Admin** (who reads both hubs). The list statements are rebuilt in the test from the criteria functions and the column lists the services use (the run list was measured selecting only the identifier, where the service selects the thirteen columns of a run: that difference was not measured). Because the pending requests, the requested exceptions and the late bookings are all in the first hub, the small counts of those three queues for the second hub measure an empty index range and not the policy removing rows (the runs in progress are in both hubs, 300 in each). The figures give the order of magnitude and the shape of each plan; a plan at the production volumes is what to read before relying on them.
+
+`uuid_eq` is leakproof on this server (`pg_proc.proleakproof`), so `responsible_hub_id = $1::uuid` is evaluated as an **index condition before the row-level-security filter**: that is why most of the reads below get faster with a hub. **No index and no migration were added.**
+
+| Read (one hub / Platform Admin) | with no `hub_id` | with the first hub | with the second hub (outside the one-hub session’s grant, inside the Platform Admin’s) |
+|---|---|---|---|
+| Message log, first page | 1,268 / 566 | **0.20 / 0.09** | 927 / 0.09 |
+| Message log, a late page | n/a | 0.17 / 0.23 | n/a |
+| Request list, first page | 1,435 / 754 | 806 / 417 | 676 / 452 |
+| Request list, a late page | n/a | 390 / 248 | n/a |
+| Request list, `state=CONFIRMED` | n/a | 831 / 455 | n/a |
+| Request list, the manifest pool | n/a | 742 / 491 | n/a |
+| Run list (30,000 runs), first page | n/a | 74 / 15 | n/a |
+| Count, requests awaiting confirmation | 1.5 / 0.9 | 1.3 / 1.0 | 0.04 / 0.04 |
+| Count, late bookings | 1.7 / 0.9 | 1.5 / 1.1 | 0.06 / 0.05 |
+| Count, runs in progress | 2.8 / 0.9 | 1.0 / 0.6 | 1.5 / 0.4 |
+| Count, the manifest pool | 1,327 / 476 | 541 / 206 | 790 / 182 |
+| Count, the approver’s queue (a later run, with the condition as it is now: see below) | 34 / 27 | 39 / 27 | 1.0 / 0.6 |
+
+**The pool's count against C1's figures.** The manifest pool here (1.3 seconds for a session of one hub that chooses no hub, 0.48 for a Platform Admin, at about 180,000 confirmed requests in a hub) costs less than the figures that [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign) quotes from task C1 for its threshold (2.3 seconds for one hub and 1.7 for all hubs, at about 190,000): the data sets were built by different harnesses and the two measurements were not reconciled. The plan's threshold keeps resting on its own, higher, figures.
+
+**A hub outside the grant** (the last column, the one-hub figures). The index condition finds the other hub’s rows and the policy then removes every one, so the read costs about what the other hub’s rows cost (0.7 to 0.9 seconds for the lists and the pool count at 200,000 rows a hub) and never more than the same session’s read without a hub; an identifier that names no hub finds nothing in the index (not measured). **The answer is the same; the time is not** (section 14, item 5). The switcher (step R4) offers only the hubs the session lists, so this is the case of a selection that went stale, or of a caller that is not the Portal.
+
+**The request list’s order is not served by the hub’s index.** The list is ordered by `created_at, id`; with a hub the statement reads the hub’s rows through `pickup_request_hub_idx` and sorts them (a first page in 0.8 seconds for a session of one hub, against 1.4 seconds without a hub, which scans the table), so the filter is not the cost. An index on `(responsible_hub_id, created_at, id)` is the candidate for the read with a hub, and one on `(created_at, id)` for the read without; both are predictions and neither was measured. It is recorded in [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign) beside the other performance tasks. The message log’s index (`notification_hub_recent_idx`) does serve its order.
+
+**The approver’s queue was unstable with a hub, and its condition was changed.** With the hub as a condition of the statement, the count of the requests waiting for an exception’s decision took **404 ms** in the first run (30 ms without a hub), **1,277 ms** (Platform Admin 891 ms; 36 ms without a hub) in the second and 635 ms (Platform Admin 469 ms; 25 ms without a hub) on a third data set with 100,000 approved exceptions beside the others; the three come from one generator and are not the same rows. The plan showed why: the hub’s 400 pending requests were estimated at one row, so the planner ran the condition that names the requests which can show an exception in the state (`id in (subquery)`) as a **nested loop semi join that reads the 400 requested exceptions again for each of them** (`loops=400`, the exception policy 80,200 times), where without a hub it hashes the set once and joins by key. Whether it does depends on the statistics and not on the query: with 1,600 pending requests in the first hub the same statement took 264 ms, and with 400 pending requests in each hub 23 ms. A plan that is 13 to 35 times slower than the same statement without a hub on some data, and not on other data, is the instability; by its shape (the inner set read once for each outer row) its cost grows with the product of the two sizes, which the plan showed and the runs did not measure as a function of the size.
+
+The condition is now `id = any (array(subquery))`, **read once whatever the planner estimates**: with a hub 39 ms (Platform Admin 27) on the second data set, 23 ms (19) on the third, 104 ms (60) with 1,600 pending requests and 22 ms (14) with pending requests in both hubs; without a hub 34 ms (27), 33 ms (27), 209 ms (58) and 21 ms (24). A fence (`offset 0`) did not help (1,063 ms). The meaning is the same: the old form and the new returned the same count, or a list of the same length, in every case measured, and `pickup-request-criteria.db.test.ts` compares the new form with the old one, kept in the test as text, the contents of the lists included, across the five scopes, the three hubs, the three states of an exception and 48 combinations of the other filters (the Product Owner’s condition for accepting the change).
+
+**The new form is not faster in every cell.** Of 60 pairs measured across the four data sets (the count and the list, with and without a hub, in both scopes, for the requested exceptions in all four and for the approved exceptions in the last) it was faster or equal in 45 and slower in 15. In 13 of the 15 the difference is under 30 milliseconds; the two larger are the count of the requested exceptions with no hub for a session of one hub with 1,600 pending requests (155 ms to 209 ms) and the count of the approved exceptions with no hub for a session of one hub with 100,000 approved (4.5 to 6.2 seconds). The approver’s queue is read with a hub by every session that chose one hub and without a hub by every session that did not, and both are now steady.
+
+**The approved and the refused exceptions.** The same function serves `one_package_exception_state=APPROVED` and `REJECTED`, which no screen asks for and which are history and not a queue. With 100,000 approved exceptions both forms take seconds, and the cost has two parts: in the plan printed for the count of the approved with the first hub (the new form), 0.94 of its 4.3 seconds are the candidates, which scan the approved exceptions and evaluate the policy of the exceptions for each (100,000 times in that plan), and the rest is the check of each of the 50,040 candidate requests. Over the twelve pairs measured (the three choices of hub, the two scopes, the count and the list), the count of the approved took 1.1 to 6.2 seconds with the old form and 1.1 to 6.2 with the new, and the list 1.3 to 4.9 seconds with the old and 0.9 to 3.7 with the new (the new form was faster or equal in ten of the twelve pairs; the two slower are the count with no hub for a session of one hub, 4.5 to 6.2 seconds, and the count for the second hub for the same session, 1.11 to 1.13 seconds). That is a scale limit of a filter on a history that grows without bound, recorded here and not introduced by this task; the queue summary does not count it.
+
+## 15. Related documents
+
+[The Ops surface](../../surfaces/ops-portal.md), [global lookup](global-lookup.md), [the reporting data dictionary](../reporting/reporting-data-dictionary.md), [permissions.md](../../contracts/permissions.md), [data-scope-registry.md](../../contracts/data-scope-registry.md), [audit.md](../../contracts/audit.md), [the security test matrix](../../standards/security-test-matrix.md), [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign).
+
+## 16. Implementation status
+
+Task C3 (6 November 2026): specified here; contracted as the optional `hub_id` of `listPickupRequests`, `listPickupManifests`, `listNotifications` and `getQueueSummary` (contract 5.95.0); **built in the API and tested**: the filter is one more condition of the criteria functions that the lists and the counts already share, the queue counters take a `QueueFilter`, and the hub is a statement parameter and never part of the security context. It is held by `test/database/hub-filters.db.test.ts` (over two hubs, for the four roles, the Vendor and the Rider: hand-written lists and figures, a partition, a sum, and for every queue and hub the count against its list), by `test/database/pickup-request-criteria.db.test.ts` (the request criteria against the plain definition in five scopes, with a hub, and the rewritten condition of the exception filter against the one it replaced), by unit tests of the criteria (the shape of the exception candidates included), of the statement of each queue, of the summary and of the three list services and their controllers (the runner is handed the very authorization the service was given), and by the Portal's contract tests. The production code and the contract were also mutated, one change at a time in an isolated copy by a script that restored each file and checked it (the hub lost from the shared function, from one counter or one controller, an `or` for an `and`, the parameter missing from the contract, the hub in the security context, the candidates read as a subquery again), and every mutation was caught by failing tests; the commit message of the task lists them. **Not built by this task:** the switcher that sends the parameter, and the Portal's reading of the answers (step R4, `AC-HUBF-09`); no screen sends `hub_id` to these four reads until then.

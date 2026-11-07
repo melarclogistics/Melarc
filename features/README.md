@@ -25,6 +25,7 @@ These are specifications, not claims that code has been built. Read only the fea
 | operations | [Exception ownership matrix](operations/exception-ownership-matrix.md) |
 | operations | [Hub daily operating cycle](operations/hub-daily-operating-cycle.md) |
 | operations | [Global record lookup](operations/global-lookup.md) |
+| operations | [Hub filters](operations/hub-filters.md) |
 | payments | [Accounting Export](payments/accounting-export.md) |
 | payments | [Financial Adjustment Resolution](payments/financial-adjustment-resolution.md) |
 | pickup | [Pickup Collection](pickup/pickup-collection.md) |

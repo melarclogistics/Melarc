@@ -256,6 +256,26 @@ describe('the filters of the manifest list (OB-S1-25) and the contract', () => {
     expect(day?.required ?? false).toBe(false);
   });
 
+  // Break caught: the hub of the run list declared as something other than the optional identifier that the lists which already take a hub
+  // declare (a required parameter, a header or a path parameter, a pattern or an enumeration no other list has), or dropped while a screen is
+  // built to send it (step R4): it is the same parameter and type as on the staff, rider and vendor lists (task C3, `AC-HUBF-02`).
+  it('has a hub filter that is an optional uuid in the query, sent as `hub_id`', () => {
+    const hub = parameter('hub_id');
+
+    expect(hub).toMatchObject({
+      name: 'hub_id',
+      in: 'query',
+      schema: { type: 'string', format: 'uuid' },
+    });
+    expect(hub?.required ?? false).toBe(false);
+    expect(hub?.schema).toEqual({ type: 'string', format: 'uuid' });
+    for (const operationId of ['listStaffIdentities', 'listRiders', 'listVendorAccounts']) {
+      const other = operationNamed(operationId).parameters?.find((each) => each?.name === 'hub_id');
+      expect(other, operationId).toBeDefined();
+      expect(hub?.schema, operationId).toEqual(other?.schema);
+    }
+  });
+
   // Break caught: the screen telling a refused filter in words the contract does not promise (it must be a 400 `VALIDATION_FAILED`).
   it('answers a value that is not one with a 400 VALIDATION_FAILED', () => {
     expect(list['x-error-codes']).toContain('VALIDATION_FAILED');

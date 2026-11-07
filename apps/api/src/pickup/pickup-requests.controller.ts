@@ -45,6 +45,7 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
   const manifested = take('manifested');
   const exceptionState = take('one_package_exception_state');
   const cutoffExceptionState = take('cutoff_exception_state');
+  const hubId = take('hub_id');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
@@ -53,6 +54,7 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
     ...(manifested === undefined ? {} : { manifested }),
     ...(exceptionState === undefined ? {} : { exceptionState }),
     ...(cutoffExceptionState === undefined ? {} : { cutoffExceptionState }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
   };
@@ -92,6 +94,7 @@ export class PickupRequestsController {
     required: false,
     schema: { type: 'string', enum: [...CUTOFF_EXCEPTION_STATES] },
   })
+  @ApiQuery({ name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } })
   @ApiQuery({
     name: 'page_size',
     required: false,

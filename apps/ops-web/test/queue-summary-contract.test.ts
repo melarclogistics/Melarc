@@ -36,7 +36,18 @@ interface Schema {
 interface Operation {
   readonly operationId?: string;
   readonly 'x-permission'?: string;
+  readonly 'x-error-codes'?: readonly string[];
   readonly security?: readonly Record<string, unknown>[];
+  readonly parameters?: readonly (
+    | {
+        readonly name?: string;
+        readonly in?: string;
+        readonly required?: boolean;
+        readonly schema?: Schema;
+      }
+    | undefined
+  )[];
+  readonly responses?: Record<string, unknown>;
 }
 
 const document = parse(readFileSync(CONTRACT, 'utf8')) as {
@@ -131,6 +142,42 @@ describe('the operation', () => {
     expect(operation?.operationId).toBe('getQueueSummary');
     expect(operation?.['x-permission']).toBe('self');
     expect(operation?.security).toEqual([{ browserSession: [] }]);
+  });
+
+  // Break caught: the hub of the summary declared as something other than the optional identifier that the lists which already take a hub
+  // declare (a required parameter, a header or a path parameter, a pattern or an enumeration no other list has), a second filter that no screen
+  // decided on, or the hub dropped while the counts beside the menu are built to send it (step R4): the summary takes the hub and nothing else
+  // (task C3, `AC-HUBF-04`).
+  it('takes one optional filter, the hub, as a uuid in the query, as the lists that already take a hub', () => {
+    const parameters = operation?.parameters ?? [];
+    const hub = parameters.find((parameter) => parameter?.name === 'hub_id');
+
+    expect(parameters.map((parameter) => parameter?.name)).toEqual(['hub_id']);
+    expect(hub).toMatchObject({
+      name: 'hub_id',
+      in: 'query',
+      schema: { type: 'string', format: 'uuid' },
+    });
+    expect(hub?.required ?? false).toBe(false);
+    expect(hub?.schema).toEqual({ type: 'string', format: 'uuid' });
+    for (const operationId of ['listStaffIdentities', 'listRiders', 'listVendorAccounts']) {
+      const other = Object.values(document.paths)
+        .flatMap((item) => Object.values(item))
+        .find((candidate) => candidate.operationId === operationId)
+        ?.parameters?.find((parameter) => parameter?.name === 'hub_id');
+      expect(other, operationId).toBeDefined();
+      expect(hub?.schema, operationId).toEqual(other?.schema);
+    }
+  });
+
+  // Break caught: the screen telling a refused hub in words the contract does not promise: a value that is not a UUID is a 400 `VALIDATION_FAILED`
+  // (the read had no 400 before the hub, and outside production an undeclared refusal is answered as a defect), declared as the other lists declare it.
+  it('answers a hub that is not one with a 400 VALIDATION_FAILED, declared', () => {
+    expect(operation?.['x-error-codes']).toContain('VALIDATION_FAILED');
+    expect(Object.keys(operation?.responses ?? {})).toContain('400');
+    expect(operation?.responses?.['400']).toEqual({
+      $ref: '#/components/responses/ValidationFailed',
+    });
   });
 });
 

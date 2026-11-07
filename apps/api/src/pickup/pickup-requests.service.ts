@@ -4,6 +4,7 @@ import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
@@ -33,6 +34,8 @@ export interface PickupListFilter {
   readonly manifested?: string;
   readonly exceptionState?: string;
   readonly cutoffExceptionState?: string;
+  /** Only the requests of this hub (task C3, `AC-HUBF-01`): a filter that narrows what the caller may read and never widens it. */
+  readonly hubId?: string;
   readonly pageSize?: number;
   readonly pageToken?: string;
 }
@@ -78,6 +81,11 @@ function invalid(name: string, rule: string): ApiException {
  *   be decided.
  * - **The late bookings are the list filtered by the cut-off state** (`cutoff_exception_state`, task C1.1, `AC-QSUM-10`): with
  *   `state=CONFIRMED` and `PENDING_OPS_REVIEW`, the requests waiting for Ops's cut-off decision, which `getQueueSummary` counts.
+ * - **`hub_id` is a filter that narrows and never widens** (task C3, `AC-HUBF-01`, `-06`, `-07`): it is one more condition of the statement, in
+ *   the same transaction the row-level security scopes, so a hub outside the session's grant, or that names no hub, returns an empty page
+ *   (never `HUB_SCOPE_VIOLATION`: lists do not probe, SECURITY_DESIGN 14.4b) and a Vendor with it reads its own organisation's requests of that
+ *   hub. It is never put in the security context. A value that is not a UUID is `VALIDATION_FAILED` before anything is read. The audit of a
+ *   crossing follows the rows of the page, so a page that is empty writes none.
  */
 export class PickupRequestsService {
   readonly #options: PickupRequestsServiceOptions;
@@ -157,6 +165,7 @@ export class PickupRequestsService {
     if (filter.state !== undefined && (filter.state === '' || filter.state.length > 32)) {
       throw invalid('state', 'format');
     }
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalid('hub_id', 'format');
     const after = filter.pageToken === undefined ? undefined : decodePageToken(filter.pageToken);
     if (filter.pageToken !== undefined && after === undefined)
       throw invalid('page_token', 'format');
@@ -169,6 +178,7 @@ export class PickupRequestsService {
       cutoffExceptionState: filter.cutoffExceptionState ?? null,
       serviceDate: filter.serviceDate ?? null,
       manifested: filter.manifested === undefined ? null : filter.manifested === 'true',
+      hubId: filter.hubId ?? null,
     });
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;

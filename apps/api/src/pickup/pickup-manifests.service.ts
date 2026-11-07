@@ -4,6 +4,7 @@ import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
@@ -40,6 +41,8 @@ export interface PickupManifestListFilter {
   readonly state?: string;
   /** Only the manifests worked on this day (OB-S1-25): `YYYY-MM-DD`, a day that exists. */
   readonly serviceDate?: string;
+  /** Only the manifests of this hub (task C3, `AC-HUBF-02`): a filter that narrows what the caller may read and never widens it. */
+  readonly hubId?: string;
 }
 
 export interface PickupManifestsServiceOptions {
@@ -187,10 +190,14 @@ export class PickupManifestsService {
     if (filter.serviceDate !== undefined && !isCalendarDay(filter.serviceDate)) {
       throw invalid('service_date', 'format');
     }
+    // The hub is a filter, as the others are: judged as it was sent, and added to the one statement. It is never put in the security context, so a
+    // hub outside the reader's grant (or none at all) is an empty page and never `HUB_SCOPE_VIOLATION` (task C3, `AC-HUBF-02`, `-06`).
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalid('hub_id', 'format');
     // What the list contains is written once, in `pickupManifestCriteria`, which the count of the runs in progress calls as well (task C1).
     const criteria = pickupManifestCriteria({
       state: filter.state ?? null,
       serviceDate: filter.serviceDate ?? null,
+      hubId: filter.hubId ?? null,
     });
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;

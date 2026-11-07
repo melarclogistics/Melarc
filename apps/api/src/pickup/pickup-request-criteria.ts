@@ -34,6 +34,12 @@ export interface PickupRequestCriteria {
   readonly serviceDate: string | null;
   /** `true`: only the requests that have a stop no one has released; `false`: only those that have none. */
   readonly manifested: boolean | null;
+  /**
+   * Only the requests of this hub: their `responsible_hub_id` (task C3, `AC-HUBF-01`). **A filter, never a scope**: it adds one condition to
+   * the statement and the row-level security of the transaction still decides which rows may be read at all, so a hub outside the session's
+   * grant matches nothing and a hub that does not exist matches nothing. It is never put in the security context.
+   */
+  readonly hubId: string | null;
 }
 
 /**
@@ -57,12 +63,19 @@ export function shownException(column: 'state' | 'requested_at'): SQL {
  * necessary condition and never a sufficient one: a request may be raised an exception in the state and show another (the one it
  * carries), and `shownException` decides. Its use is that it starts from the exceptions in the state, which are few and indexed
  * (`one_package_exception_state_idx`, `pickup_request_carried_exception_idx`), instead of from every request.
+ *
+ * **The candidates are read once, as an array** (`id = any (array(...))`), and not as `id in (subquery)` (task C3, measured at 400,000 requests,
+ * `features/operations/hub-filters.md` section 14.1). The planner turns an `in (subquery)` into a semi join and may run it as a nested loop that
+ * reads the candidates again for each request on its other side: with the hub as a condition of the same statement it started from the hub's
+ * pending requests and did, and the approver's queue took 1.3 seconds (30 milliseconds as a hash join, which the two plans' estimated costs
+ * hardly tell apart), growing with the product of the pending requests and the requested exceptions. An array is evaluated once whatever the
+ * planner estimates, and the same statement took 39 milliseconds. The meaning is the same; a fence (`offset 0`) did not help.
  */
 function requestsThatCanShowAnExceptionIn(state: string): SQL {
-  return sql`pickup_request.id in (
+  return sql`pickup_request.id = any (array(
             select x.pickup_request_id from one_package_exception x where x.state = ${state}::text
             union all
-            select r.id from pickup_request r join one_package_exception c on c.id = r.one_package_exception_id where c.state = ${state}::text)`;
+            select r.id from pickup_request r join one_package_exception c on c.id = r.one_package_exception_id where c.state = ${state}::text))`;
 }
 
 /**
@@ -73,9 +86,10 @@ function requestsThatCanShowAnExceptionIn(state: string): SQL {
  * `state=CONFIRMED` with `manifested=false` and to nothing else, so that an operational queue does not lose a request to the pool's rule.
  */
 export function pickupRequestCriteria(criteria: PickupRequestCriteria): SQL {
-  const { state, exceptionState, cutoffExceptionState, serviceDate, manifested } = criteria;
+  const { state, exceptionState, cutoffExceptionState, serviceDate, manifested, hubId } = criteria;
   const pool = manifested === false && state === 'CONFIRMED';
   const conditions: SQL[] = [sql`true`];
+  if (hubId !== null) conditions.push(sql`responsible_hub_id = ${hubId}::uuid`);
   if (state !== null) conditions.push(sql`state = ${state}::text`);
   if (exceptionState !== null) {
     conditions.push(
@@ -107,6 +121,7 @@ export const ANY_PICKUP_REQUEST: PickupRequestCriteria = Object.freeze({
   cutoffExceptionState: null,
   serviceDate: null,
   manifested: null,
+  hubId: null,
 });
 
 /**

@@ -12,10 +12,16 @@ export interface PickupManifestCriteria {
   readonly state: string | null;
   /** Only the manifests worked on this day (`YYYY-MM-DD`), or those of every day. */
   readonly serviceDate: string | null;
+  /**
+   * Only the manifests of this hub: their `responsible_hub_id` (task C3, `AC-HUBF-02`), or those of every hub the reader may read. A filter,
+   * never a scope: the row-level security of the transaction decides what may be read, and the hub is never put in the security context.
+   */
+  readonly hubId: string | null;
 }
 
 export function pickupManifestCriteria(criteria: PickupManifestCriteria): SQL {
-  const { state, serviceDate } = criteria;
+  const { state, serviceDate, hubId } = criteria;
   return sql`(${state}::text is null or state = ${state}::text)
-             and (${serviceDate}::date is null or service_date = ${serviceDate}::date)`;
+             and (${serviceDate}::date is null or service_date = ${serviceDate}::date)
+             and (${hubId}::uuid is null or responsible_hub_id = ${hubId}::uuid)`;
 }

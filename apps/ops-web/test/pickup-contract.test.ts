@@ -44,7 +44,13 @@ interface Operation {
 interface ListOperation {
   readonly operationId?: string;
   readonly parameters?: readonly (
-    { readonly name?: string; readonly schema?: Schema } | undefined
+    | {
+        readonly name?: string;
+        readonly in?: string;
+        readonly required?: boolean;
+        readonly schema?: Schema;
+      }
+    | undefined
   )[];
 }
 
@@ -163,6 +169,34 @@ describe('the values the screens offer and recognise', () => {
       (parameter) => parameter?.name === 'one_package_exception_state',
     );
     expect(valuesOf(filter?.schema)).toContain('REQUESTED');
+  });
+
+  // Break caught: the hub of the request list declared as something other than the optional identifier that the lists which already take a hub
+  // declare (a required parameter, a header or a path parameter, a pattern or an enumeration no other list has), or dropped while a screen is
+  // built to send it (step R4): it is the same parameter and type as on the staff, rider and vendor lists (task C3, `AC-HUBF-01`).
+  it('has an optional hub filter on the list that is a uuid in the query, as the lists that already take a hub have', () => {
+    const operation = (operationId: string) =>
+      Object.values(document.paths)
+        .flatMap((item) => Object.values(item))
+        .find(
+          (candidate) => (candidate as ListOperation | undefined)?.operationId === operationId,
+        ) as ListOperation | undefined;
+    const hubOf = (operationId: string) =>
+      operation(operationId)?.parameters?.find((parameter) => parameter?.name === 'hub_id');
+
+    const hub = hubOf('listPickupRequests');
+
+    expect(hub).toMatchObject({
+      name: 'hub_id',
+      in: 'query',
+      schema: { type: 'string', format: 'uuid' },
+    });
+    expect(hub?.required ?? false).toBe(false);
+    expect(hub?.schema).toEqual({ type: 'string', format: 'uuid' });
+    for (const operationId of ['listStaffIdentities', 'listRiders', 'listVendorAccounts']) {
+      expect(hubOf(operationId), operationId).toBeDefined();
+      expect(hub?.schema, operationId).toEqual(hubOf(operationId)?.schema);
+    }
   });
 
   it('has the page size the list guard assumes as its largest', () => {

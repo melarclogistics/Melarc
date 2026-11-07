@@ -6,11 +6,14 @@ import type { UnitOfWorkOptions } from '../auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../authorization/authorized-request.js';
 import type { OperationWork } from '../authorization/operation-runner.js';
 import {
+  ANY_HUB,
   QUEUE_IDS,
   type QueueCount,
   type QueueCounter,
+  type QueueFilter,
   type QueueId,
 } from '../domain-ports/queue-counter.port.js';
+import { ApiException } from '../http/api-exception.js';
 import {
   QUEUE_SUMMARY_STATEMENT_TIMEOUT_MS,
   QueueSummaryService,
@@ -80,6 +83,8 @@ function runner() {
 interface Call {
   readonly queue: QueueId;
   readonly handle: TransactionHandle;
+  /** The filter the counter was asked with (task C3); `undefined` is a count asked without one, which the port does not allow. */
+  readonly filter: QueueFilter | undefined;
 }
 
 function counters(
@@ -95,8 +100,8 @@ function counters(
     queue: spec.queue,
     listKey: spec.listKey,
     ...(spec.decisionKey === undefined ? {} : { decisionKey: spec.decisionKey }),
-    count: (handle) => {
-      calls.push({ queue: spec.queue, handle });
+    count: (handle, filter) => {
+      calls.push({ queue: spec.queue, handle, filter });
       return Promise.resolve(spec.result ?? { count: 0, oldestAt: null });
     },
   }));
@@ -461,5 +466,380 @@ describe('the bound on a count (AC-QSUM-13; the decision of 6 November 2026)', (
 
     expect((await service.read(request([held('notification.read')]), 'c1')).queues).toEqual([]);
     expect(limited).toBe(0);
+  });
+});
+
+/**
+ * The optional hub (`hub_id`) of the summary (task C3; `AC-HUBF-04`, `-07`, `-10`, `-11`; features/operations/hub-filters.md): **a filter that
+ * narrows and never widens**. What this proves, on fakes, is what the database tests cannot see from the outside: the filter reaches every
+ * counter of every key group (a count with a hub is the number of its list's records with that hub only if each counter is asked for it), it is
+ * never part of the context a count is taken in (a scope comes from the grant alone), a value that is not an identifier is refused before a
+ * transaction opens, the bound of three seconds holds with it, and a read with no filter is the read of before. The counts against the lists they
+ * must equal, in the real database and under the real policies, are `queue-summary.db.test.ts` and `hub-filters.db.test.ts`.
+ */
+describe('the hub filter (task C3)', () => {
+  /** A hub that is none of the session's own, so that wherever it turns up (a scope, a request, an answer) it was put there by the filter. */
+  const FILTER_HUB = '55555555-5555-4555-8555-555555555555';
+  /** An identifier with letters in it, so that its capitals are another text and the same hub. */
+  const LETTERED_HUB = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+
+  /** Every key the summary reads: pickup.read for five queues and staff.read for one, so that there are two groups of counters and two transactions. */
+  const EVERY_KEY = [
+    held('pickup.read'),
+    held('pickup.exception.approve'),
+    held('staff.read'),
+    held('staff.identity.approve'),
+  ];
+
+  // Break caught: the filter handed to the counters of the first key group alone (the staff queue is counted in a transaction of its own), to the
+  // first counter of a group, or to none of them: a count that ignores its hub says the work of every hub the grant reaches.
+  it('gives the filter to every counter of every key group, and asks no count without it', async () => {
+    const { made, calls } = counters(EVERY_QUEUE);
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
+
+    await service.read(request(EVERY_KEY), 'c3', { hubId: FILTER_HUB });
+
+    // The arrangement is what the test says: the six queues, each counted once, in two transactions (a group for each key).
+    expect(calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
+    expect(new Set(calls.map((call) => call.handle)).size).toBe(2);
+    expect(calls.map((call) => call.filter)).toEqual(QUEUE_IDS.map(() => ({ hubId: FILTER_HUB })));
+  });
+
+  /** One answer with something in each entry but one, so that a read that changes the shape, the order or a figure is seen. */
+  const SPECS = [
+    { ...EVERY_QUEUE[0], result: { count: 3, oldestAt: new Date('2026-11-02T09:15:30.123Z') } },
+    { ...EVERY_QUEUE[1], result: { count: 0, oldestAt: null } },
+    { ...EVERY_QUEUE[2], result: { count: 2, oldestAt: new Date('2026-11-03T08:00:00.000Z') } },
+    { ...EVERY_QUEUE[3], result: { count: 7, oldestAt: new Date('2026-10-30T12:30:00.000Z') } },
+    { ...EVERY_QUEUE[4], result: { count: 1, oldestAt: new Date('2026-11-05T07:45:00.000Z') } },
+    { ...EVERY_QUEUE[5], result: { count: 4, oldestAt: new Date('2026-11-01T10:10:10.010Z') } },
+  ];
+  /** What the counters above answer, as the read answers it: written out, in the order of the contract's queues, the 0 with no moment. */
+  const THE_ANSWER = {
+    queues: [
+      { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 3, oldest_at: '2026-11-02T09:15:30.123Z' },
+      { queue: 'PICKUP_CUTOFF_REVIEW', count: 0 },
+      { queue: 'PICKUP_EXCEPTION_APPROVAL', count: 2, oldest_at: '2026-11-03T08:00:00.000Z' },
+      { queue: 'PICKUP_UNMANIFESTED_POOL', count: 7, oldest_at: '2026-10-30T12:30:00.000Z' },
+      { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 1, oldest_at: '2026-11-05T07:45:00.000Z' },
+      { queue: 'STAFF_AWAITING_APPROVAL', count: 4, oldest_at: '2026-11-01T10:10:10.010Z' },
+    ],
+  };
+
+  // Break caught (AC-HUBF-11): a read with no filter that is not the read of before: a counter asked for a hub nobody named, or for no filter at
+  // all (so that it fails on `filter.hubId`), or an answer that changes its figures, its shape or its order for want of one.
+  it.each([
+    ['no filter at all', undefined],
+    ['the filter that names no hub', ANY_HUB],
+    ['a filter written as no hub', { hubId: null }],
+  ] as const)(
+    'asks every counter for no hub, and answers as it always did, given %s',
+    async (_how, filter) => {
+      const { made, calls } = counters(SPECS);
+      const service = new QueueSummaryService({
+        limitStatements: noLimit,
+        runner: runner(),
+        counters: made,
+      });
+
+      const answer = await service.read(request(EVERY_KEY), 'c3', filter);
+
+      expect(answer).toEqual(THE_ANSWER);
+      expect(calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
+      expect(calls.map((call) => call.filter)).toEqual(QUEUE_IDS.map(() => ({ hubId: null })));
+    },
+  );
+
+  // Break caught: a shared default that a caller can put a hub on, after which every read made with no filter is filtered by it.
+  it('has a default filter that names no hub and cannot be given one', () => {
+    expect(ANY_HUB).toEqual({ hubId: null });
+    expect(Object.isFrozen(ANY_HUB)).toBe(true);
+  });
+
+  // Break caught: the hub put into the context a count is taken in (a scope built from what the request says and not from the grant, which widens
+  // it, or narrows it to the hub), or left as a trace in what the runner is given: the hub is a parameter of the statement and never of the
+  // transaction (AC-HUBF-10, GBT-GS1, GBT-GS14).
+  it.each([
+    ['outside the grant', FILTER_HUB, false],
+    ['inside the grant', OTHER_HUB, true],
+  ])(
+    'gives the runner exactly what it is given without a hub, for a hub %s',
+    async (_where, hubId, inGrant) => {
+      // Pickup at its own hubs (two); the decision key of the exceptions at all hubs; the staff list at all hubs, its decision key at its own.
+      const grants = [
+        held('pickup.read', 'own'),
+        held('pickup.exception.approve', 'all'),
+        held('staff.read', 'all'),
+        held('staff.identity.approve', 'own'),
+      ];
+      const without = runner();
+      const withHub = runner();
+      for (const [reader, filter] of [
+        [without, undefined],
+        [withHub, { hubId }],
+      ] as const) {
+        const { made } = counters(EVERY_QUEUE);
+        const service = new QueueSummaryService({
+          limitStatements: noLimit,
+          runner: reader,
+          counters: made,
+        });
+        await service.read(request(grants, [HUB, OTHER_HUB]), 'c3', filter);
+      }
+
+      expect(withHub.readings.map((reading) => reading.authorized.permission)).toEqual([
+        'pickup.read',
+        'staff.read',
+      ]);
+      expect(withHub.readings.map((reading) => reading.authorized)).toEqual(
+        without.readings.map((reading) => reading.authorized),
+      );
+      expect(withHub.readings.map((reading) => reading.options)).toEqual(
+        without.readings.map((reading) => reading.options),
+      );
+      // ... which is the grant of each list's key as the session holds it, written out: neither widened to every hub, nor narrowed to the one named.
+      expect(withHub.readings.map((reading) => reading.authorized.scope)).toEqual([
+        { hubScopeMode: 'SET', authorizedHubIds: [HUB, OTHER_HUB] },
+        { hubScopeMode: 'ALL', authorizedHubIds: [] },
+      ]);
+      // The hub is in what the runner is given exactly when the grant itself holds it, and for no other reason.
+      expect(
+        JSON.stringify(withHub.readings.map((reading) => reading.authorized)).includes(hubId),
+      ).toBe(inGrant);
+    },
+  );
+
+  // Break caught (AC-HUBF-05, GBT-GS14): a probe in the service: a hub outside the session's hubs refused or answered as an error (`HUB_SCOPE_VIOLATION`,
+  // `NOT_FOUND`), or answered with fewer entries (an absent entry says "not yours", and a 0 says "read, and nothing waits"). Lists never probe
+  // (SECURITY_DESIGN 14.4b): the scope is the row-level security's, which has taken the rows away by the time a count reads them, so the counters
+  // are asked and each answers 0. For fakes a hub that exists outside the grant and an identifier that names no hub are one case: that the two are
+  // answered alike, down to the headers, is for the database to show (`hub-filters.db.test.ts`, AC-HUBF-05).
+  it('does not refuse a hub outside the session’s hubs, and answers every entry the session may read', async () => {
+    const { made, calls } = counters(EVERY_QUEUE);
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
+
+    // The session reaches the first hub alone, and every counter answers 0, as the database does for a hub the grant does not reach.
+    const answer = await service.read(request(EVERY_KEY, [HUB]), 'c3', { hubId: OTHER_HUB });
+
+    expect(answer.queues).toEqual(QUEUE_IDS.map((queue) => ({ queue, count: 0 })));
+    expect(calls.map((call) => call.filter)).toEqual(QUEUE_IDS.map(() => ({ hubId: OTHER_HUB })));
+  });
+
+  const NOT_A_HUB = [
+    ['text that is not an identifier', 'not-a-uuid'],
+    ['an empty value', ''],
+    ['a value of spaces alone', '   '],
+    ['an identifier with a space before it', ` ${HUB}`],
+    ['an identifier with a space after it', `${HUB} `],
+    ['an identifier with a line break after it', `${HUB}\n`],
+    ['an identifier written as a urn', `urn:uuid:${HUB}`],
+    ['an identifier in braces', `{${HUB}}`],
+    ['an identifier without its hyphens', HUB.replaceAll('-', '')],
+    ['an identifier with a letter that is not a digit of base sixteen', `g${HUB.slice(1)}`],
+  ] as const;
+
+  // Break caught: a hub taken on trust and handed to the statements (where `::uuid` fails as a defect, after a transaction was opened and a limit
+  // set), validation that comes after the first transaction opens, a check on truthiness (an empty value read as "no filter"), or an invalid hub
+  // turned into the whole of every hub's work. The refusal names the parameter, as it does on the other lists (AC-HUBF-07).
+  it.each(NOT_A_HUB)('refuses %s as a hub, before any transaction opens', async (_what, hubId) => {
+    const reader = runner();
+    const { made, calls } = counters(EVERY_QUEUE);
+    let limited = 0;
+    const service = new QueueSummaryService({
+      runner: reader,
+      counters: made,
+      limitStatements: () => {
+        limited += 1;
+        return Promise.resolve();
+      },
+    });
+
+    const error = await service.read(request(EVERY_KEY), 'c3', { hubId }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(ApiException);
+    const refused = error as ApiException;
+    expect(refused.code).toBe('VALIDATION_FAILED');
+    expect(refused.getStatus()).toBe(400);
+    expect(refused.details).toEqual({
+      violations: [{ in: 'query', pointer: '/hub_id', rule: 'format' }],
+    });
+    // Nothing was opened, bounded or counted for it: the session holds every key, so each would have been.
+    expect(reader.readings).toEqual([]);
+    expect(limited).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  // Break caught: the value judged only inside the loop over the keys the session holds, so that a session with none of them is answered `200`
+  // with no queues for a value the route refuses to every other session (the check is the first act of the read, not a side effect of opening one).
+  it('refuses a hub that is not one from a session that reads no queue as it does from any other', async () => {
+    const reader = runner();
+    const { made, calls } = counters(EVERY_QUEUE);
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: reader,
+      counters: made,
+    });
+
+    for (const hubId of ['not-a-uuid', '']) {
+      const error = await service.read(request([held('dispatch.read')]), 'c3', { hubId }).then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+      expect(error, JSON.stringify(hubId)).toBeInstanceOf(ApiException);
+      expect((error as ApiException).code).toBe('VALIDATION_FAILED');
+      expect((error as ApiException).details).toEqual({
+        violations: [{ in: 'query', pointer: '/hub_id', rule: 'format' }],
+      });
+    }
+    expect(reader.readings).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  // Break caught: an identifier in capitals refused as though it were not one (a pattern that knows lower case alone), or one that is not given on
+  // to the counters: a UUID is the same hub in either, and the statement's own `::uuid` reads both.
+  it.each([
+    ['in lower case', LETTERED_HUB],
+    ['in capitals', LETTERED_HUB.toUpperCase()],
+  ])('goes on to count, for every counter, with a hub written %s', async (_how, hubId) => {
+    expect(hubId.toLowerCase()).toBe(LETTERED_HUB);
+    const { made, calls } = counters(EVERY_QUEUE);
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
+
+    await service.read(request(EVERY_KEY), 'c3', { hubId });
+
+    expect(calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
+    expect(calls.map((call) => call.filter?.hubId?.toLowerCase())).toEqual(
+      QUEUE_IDS.map(() => LETTERED_HUB),
+    );
+  });
+
+  // Break caught: the bound of three seconds lost when a hub is named (a read with a filter that sets no limit, sets it after the counts, or sets it
+  // once for the two transactions): the hub is what makes a count cheap at scale, and the bound is what keeps a count that is not cheap from
+  // holding a connection (AC-QSUM-13).
+  it('limits the statements of each transaction to three seconds, before any count of it, when a hub is given', async () => {
+    const { made, calls } = counters(EVERY_QUEUE);
+    const limits: { handle: TransactionHandle; milliseconds: number; countsBefore: number }[] = [];
+    const service = new QueueSummaryService({
+      runner: runner(),
+      counters: made,
+      limitStatements: (handle, milliseconds) => {
+        limits.push({ handle, milliseconds, countsBefore: calls.length });
+        return Promise.resolve();
+      },
+    });
+
+    await service.read(request(EVERY_KEY), 'c3', { hubId: FILTER_HUB });
+
+    // One transaction for each key (pickup.read for five queues, staff.read for one), each bounded once, before its first count.
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([3000, 3000]);
+    expect(limits.map((limit) => limit.countsBefore)).toEqual([0, 5]);
+    expect(
+      calls.map((call) => [call.queue, call.handle === limits[0]?.handle ? 'first' : 'second']),
+    ).toEqual([
+      ['PICKUP_AWAITING_CONFIRMATION', 'first'],
+      ['PICKUP_CUTOFF_REVIEW', 'first'],
+      ['PICKUP_EXCEPTION_APPROVAL', 'first'],
+      ['PICKUP_UNMANIFESTED_POOL', 'first'],
+      ['PICKUP_RUNS_IN_PROGRESS', 'first'],
+      ['STAFF_AWAITING_APPROVAL', 'second'],
+    ]);
+    expect(calls.at(-1)?.handle).toBe(limits[1]?.handle);
+  });
+
+  /** The sessions of the tests of the entries, and the queues each is given (written out, in the order of the contract). */
+  const SESSIONS: readonly (readonly [
+    string,
+    readonly BundleGrantSnapshot[],
+    readonly QueueId[],
+  ])[] = [
+    [
+      'an officer of the pickup desk',
+      [held('pickup.read'), held('pickup.exception.approve')],
+      [
+        'PICKUP_AWAITING_CONFIRMATION',
+        'PICKUP_CUTOFF_REVIEW',
+        'PICKUP_EXCEPTION_APPROVAL',
+        'PICKUP_UNMANIFESTED_POOL',
+        'PICKUP_RUNS_IN_PROGRESS',
+      ],
+    ],
+    ['a session of every key', EVERY_KEY, [...QUEUE_IDS]],
+    [
+      'a session of the lists’ keys alone',
+      [held('pickup.read'), held('staff.read')],
+      [
+        'PICKUP_AWAITING_CONFIRMATION',
+        'PICKUP_CUTOFF_REVIEW',
+        'PICKUP_UNMANIFESTED_POOL',
+        'PICKUP_RUNS_IN_PROGRESS',
+      ],
+    ],
+    [
+      'a session of the decision keys alone',
+      [held('pickup.exception.approve'), held('staff.identity.approve')],
+      [],
+    ],
+  ];
+
+  // Break caught: an entry dropped because the hub has nothing in it (a 0 read as "absent", which says "not yours"), an entry for a queue the
+  // session may not read, an approver's queue shown for a hub without its decision key, or a queue counted that the session may not read
+  // (AC-HUBF-04: which entries are present does not depend on the hub).
+  it.each(SESSIONS)(
+    'answers %s with the entries it has without a hub, each at 0 when the hub has nothing',
+    async (_who, grants, expected) => {
+      const { made, calls } = counters(EVERY_QUEUE);
+      const service = new QueueSummaryService({
+        limitStatements: noLimit,
+        runner: runner(),
+        counters: made,
+      });
+
+      const unfiltered = await service.read(request(grants), 'c3');
+      calls.length = 0;
+      const filtered = await service.read(request(grants), 'c3', { hubId: FILTER_HUB });
+
+      expect(queueIdsOf(filtered)).toEqual(expected);
+      expect(queueIdsOf(filtered)).toEqual(queueIdsOf(unfiltered));
+      // Each is a 0 with no moment (the counters found nothing), and none of the others was so much as counted.
+      expect(filtered.queues).toEqual(expected.map((queue) => ({ queue, count: 0 })));
+      expect(calls.map((call) => call.queue)).toEqual(expected);
+    },
+  );
+
+  // Break caught: the answer naming the hub it was asked for (an echo that the contract's closed entry does not have), or an entry that carries
+  // more than the queue, the count and the moment because a hub was given (AC-HUBF-04: the answer names no hub and holds nothing more).
+  it('answers with the shape it always has, and names no hub, when a hub is given', async () => {
+    const { made } = counters(SPECS);
+    const service = new QueueSummaryService({
+      limitStatements: noLimit,
+      runner: runner(),
+      counters: made,
+    });
+
+    const answer = await service.read(request(EVERY_KEY), 'c3', { hubId: FILTER_HUB });
+
+    expect(answer).toEqual(THE_ANSWER);
+    expect(Object.keys(answer)).toEqual(['queues']);
+    for (const entry of answer.queues) {
+      expect(Object.keys(entry).every((key) => ['queue', 'count', 'oldest_at'].includes(key))).toBe(
+        true,
+      );
+    }
+    expect(JSON.stringify(answer)).not.toContain(FILTER_HUB);
   });
 });

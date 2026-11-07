@@ -68,11 +68,13 @@ function filterOf(query: Record<string, unknown>): PickupManifestListFilter {
   const pageToken = take('page_token');
   const state = take('state');
   const serviceDate = take('service_date');
+  const hubId = take('hub_id');
   return {
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
     ...(state === undefined ? {} : { state }),
     ...(serviceDate === undefined ? {} : { serviceDate }),
+    ...(hubId === undefined ? {} : { hubId }),
   };
 }
 
@@ -160,6 +162,7 @@ export class PickupManifestsController {
     description:
       "Only the manifests worked on this day: their `service_date`, a day of the hub's calendar (`YYYY-MM-DD`).",
   })
+  @ApiQuery({ name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } })
   @ApiResponse({ status: 200, schema: PICKUP_MANIFEST_PAGE_SCHEMA })
   @DescribeSecurity(['browserSession'], ['riderSession'])
   @DescribeErrors(ErrorCode.PermissionDenied, ErrorCode.SessionInvalid, ErrorCode.ValidationFailed)

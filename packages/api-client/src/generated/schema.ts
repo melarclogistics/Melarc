@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.94.0
- *   SHA-256 7fbb6cde89ea43a7bc41b73b039c9afd4883e697c1f6831588cae203e85d6fc3 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.95.0
+ *   SHA-256 e37a1e38941fd4411c6d010245581068f8c074ee814d4368401a166860f12e66 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -46,7 +46,8 @@ export interface paths {
         /**
          * List pickup requests
          * @description Scoped server-side to the actor's vendor ownership and hub (§37.6). Filters are
-         *     authorization-checked, never trusted (§42.4).
+         *     authorization-checked, never trusted (§42.4). A page token is a position in the list and is used with the filters it was given: a client that
+         *     changes `hub_id` starts again at the first page.
          */
         get: operations["listPickupRequests"];
         put?: never;
@@ -1304,9 +1305,9 @@ export interface paths {
          *     sees none.
          *
          *     Ordered by creation, oldest first, then by id, so that a page does not move under a
-         *     reader who is paging. **Two filters narrow what the reader is already shown and widen
-         *     nothing** (OB-S1-25, settled for the manifest screens): `state` and `service_date`, each
-         *     optional and each exact, combined as "and". A value that is not one (a state of another
+         *     reader who is paging. **Three filters narrow what the reader is already shown and widen
+         *     nothing** (OB-S1-25, settled for the manifest screens; `hub_id`, task C3): `state`,
+         *     `service_date` and `hub_id`, each optional and each exact, combined as "and". A value that is not one (a state of another
          *     case, an unknown state, a day that does not exist, an empty or repeated parameter) is
          *     `VALIDATION_FAILED` naming the parameter, and not an empty list. A page token is a
          *     position in this order and is used with the filters it was given. A list carries neither
@@ -2412,6 +2413,15 @@ export interface paths {
          *     at 3 seconds** (`AC-QSUM-13`, Product Owner, 6 November 2026): a count that cannot finish in that time ends the whole read as the
          *     platform's failed read (`503`, no code), and the client shows its failure with a way to try again; a queue that is missing from a
          *     failed read is never told as `0`. The answer is `Cache-Control: no-store`.
+         *
+         *     **`hub_id`** (optional; task C3, Product Owner, 6 November 2026) counts one hub's work: every count is the number of records that
+         *     the queue's own list returns for the same session and the same `hub_id`, in the context that list's key gives. It never widens: for a
+         *     hub outside the grant of a queue's list key, or that names no hub, every queue the session may read is present with `count` `0` and no
+         *     `oldest_at`, never absent and never an error, and a queue the session may not read stays absent whatever the hub. A value that is not
+         *     a UUID, or that is repeated, is `VALIDATION_FAILED` naming `hub_id`. The staff approver's queue counts profiles by their primary hub
+         *     (as `listStaffIdentities` does with `hub_id`), so a profile with no primary hub is in the count with no `hub_id` for a session whose `staff.read`
+         *     grant is of every hub, and in the count of no hub: the counts of the hubs are not added up to the count of all hubs, by the server or by a client. The answer has the same shape,
+         *     names no hub, and still writes no audit event (`features/operations/hub-filters.md`).
          */
         get: operations["getQueueSummary"];
         put?: never;
@@ -5277,7 +5287,10 @@ export interface paths {
          * @description `staff.device.reregister` - **Senior Ops** at the rider's hub, or a **Platform Admin** at any hub, **in person**. **The scope is the
          *     grant's** (Product decision, 6 November 2026, replacing that of 8 October 2026 for the Platform Admin): Senior Ops replace at their own
          *     hub and a Platform Admin at every hub, as `registerRiderDevice` does. The rider still attends in person and the identity is still
-         *     verified (`MSC-DEC-235`), and the reason, the verification note and the audit stay mandatory.
+         *     verified (`MSC-DEC-235`), and the reason, the verification note and the audit stay mandatory. **Attendance in person and the check of the
+         *     identity are the administrator's duty and an operating rule that the system cannot see** (the note is free text). What it enforces is the held key
+         *     and its scope, the mandatory reason and note, and an audit event that names the administrator, the rider and the rider's hub, so that a replacement
+         *     outside the administrator's own hub is a recorded act.
          *
          *     Split out of performOpsRecovery in R1, and connected to the cryptographic lifecycle it was
          *     never wired to: it issues a `RIDER_DEVICE_REREGISTRATION` grant which the NEW handset
@@ -12886,6 +12899,8 @@ export interface operations {
                 channel?: "SMS" | "FEED";
                 /** @description Only the messages raised about this record (the pickup request they announce). Authorization-checked like every filter: an id outside the caller's hubs matches nothing. */
                 subject_id?: string;
+                /** @description Only the messages of this hub: the hub the record answered to when the act was done, which a message keeps (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
@@ -12923,6 +12938,8 @@ export interface operations {
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
                 /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
                 cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";
+                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. */
+                hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
@@ -14553,6 +14570,8 @@ export interface operations {
                 state?: "DRAFT" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
                 /** @description Only the manifests worked on this day: their `service_date`, a day of the hub's calendar (`YYYY-MM-DD`). */
                 service_date?: string;
+                /** @description Only the manifests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It narrows what the reader is already shown and widens nothing; a hub outside the caller's grant, or that names no hub, is an empty page and never `HUB_SCOPE_VIOLATION`. A Rider is shown its assigned and dispatched manifests, and with `hub_id` those of that hub. */
+                hub_id?: string;
             };
             header?: never;
             path?: never;
@@ -15796,7 +15815,10 @@ export interface operations {
     };
     getQueueSummary: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only this hub's work (task C3): every count as the list of its queue gives it with this `hub_id`. Absent: every hub the session's grant of each queue's list key reaches, as before. */
+                hub_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15812,6 +15834,7 @@ export interface operations {
                     "application/json": components["schemas"]["QueueSummary"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };
