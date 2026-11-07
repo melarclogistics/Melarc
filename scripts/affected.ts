@@ -1235,12 +1235,14 @@ export function stepsFor(choice: Choice, root: string): RunStep[] {
 
 /**
  * The environment of every command: plain text, the bound on the parallel suites' workers (`MELARC_TEST_WORKERS`, which every Vitest
- * configuration reads), and no `VITEST_MAX_WORKERS`, which Vitest would apply to every project, the one-at-a-time ones included.
+ * configuration reads), and no `VITEST_MAX_WORKERS`, which Vitest would apply to every project, the one-at-a-time ones included, and
+ * no `MELARC_BROWSER_SHARD`, with which the Ops Portal's configuration would run only a part of the browser specs chosen.
  */
 export function childEnvironment(base: NodeJS.ProcessEnv, workers: number): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, NO_COLOR: '1' };
   delete env.FORCE_COLOR;
   delete env.VITEST_MAX_WORKERS;
+  delete env.MELARC_BROWSER_SHARD;
   env.MELARC_TEST_WORKERS = String(workers);
   return env;
 }

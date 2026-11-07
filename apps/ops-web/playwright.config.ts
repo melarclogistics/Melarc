@@ -22,8 +22,8 @@ type Engine = keyof typeof ENGINES;
 const isEngine = (name: string): name is Engine => Object.hasOwn(ENGINES, name);
 
 /**
- * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs all three
- * (the supported browsers of surfaces/ops-portal.md section 11, by their engines). Without the variable only Chromium
+ * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs all three, each in jobs
+ * of its own (the supported browsers of surfaces/ops-portal.md section 11, by their engines). Without the variable only Chromium
  * runs, so a machine that has installed only Chromium works; the others need `playwright install firefox webkit`.
  */
 function requestedEngines(value: string | undefined): Engine[] {
@@ -41,6 +41,25 @@ function requestedEngines(value: string | undefined): Engine[] {
     }
     return name;
   });
+}
+
+/**
+ * The part of the run to make: MELARC_BROWSER_SHARD, "current/total" counted from 1, which is Playwright's own `--shard`. CI runs each
+ * engine as several jobs, one shard each, and the shards of an engine together run every test of it once (scripts/browser-shards.test.ts
+ * proves that against this file and the workflow). Without the variable the whole run is made, which is what a developer and the gate
+ * want, so a value that is not a shard is refused and not read as "no shard".
+ */
+function requestedShard(value: string | undefined): { current: number; total: number } | null {
+  if (value === undefined || value.trim() === '') return null;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value.trim());
+  const current = Number(match?.[1]);
+  const total = Number(match?.[2]);
+  if (match === null || current > total) {
+    throw new Error(
+      `MELARC_BROWSER_SHARD is "${value}", which is not a shard. Use current/total counted from 1, for example 2/7.`,
+    );
+  }
+  return { current, total };
 }
 
 /**
@@ -88,6 +107,7 @@ export default defineConfig({
   // time: with many pages open at once it starves and the tests time out. Two workers keep it responsive. No timeout
   // was raised and no check was loosened.
   workers: 2,
+  shard: requestedShard(process.env.MELARC_BROWSER_SHARD),
   reporter: 'list',
   use: {
     // A trace keeps the requests and responses of a failed test. That is accepted here because every page these tests open is the

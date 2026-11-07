@@ -131,8 +131,8 @@ passes in full.**
   status comes from. Each run writes to an output directory of its own below `test-results` (`--output`), because Playwright clears the
   output directory of the projects it runs at the start of a run, and the failure artifact of CI keeps `e2e/test-results`; the recorders
   of the secret projects are unchanged. Where the system store may not be changed (anywhere but a GitHub-hosted runner) WebKit's run
-  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
-  installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
+  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (the `https` job, a job of its own beside the `integrated`
+  job that runs `pnpm run test:e2e`, with `libnss3-tools` installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.
 - **A smoke check in branded Chrome and Edge** is a person's, on a machine cleared for key material (a clean Linux machine or

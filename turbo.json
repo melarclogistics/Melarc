@@ -61,7 +61,7 @@
     },
     "test:browser": {
       "cache": false,
-      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS"]
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS", "MELARC_BROWSER_SHARD"]
     }
   }
 }

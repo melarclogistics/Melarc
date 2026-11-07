@@ -87,12 +87,14 @@ describe('turbo.json', () => {
   });
 
   // Break caught: the variables the browser tests need being dropped by Turborepo's strict environment, so CI
-  // sets MELARC_BROWSERS and the tests still run Chromium alone.
-  it('passes the browser selection and the browsers location through to the browser tests', () => {
+  // sets MELARC_BROWSERS and the tests still run Chromium alone, or sets MELARC_BROWSER_SHARD and every shard
+  // job runs the whole of its engine (the run is then as long as before the browser tests were split).
+  it('passes the browser selection, the shard and the browsers location through to the browser tests', () => {
     const task = turbo.tasks?.['test:browser'];
     assert.ok(task !== undefined, 'test:browser is a task');
     const passed = task.passThroughEnv ?? [];
     assert.ok(passed.includes('MELARC_BROWSERS'));
+    assert.ok(passed.includes('MELARC_BROWSER_SHARD'));
     assert.ok(passed.includes('PLAYWRIGHT_BROWSERS_PATH'));
     assert.equal(task.cache, false, 'a browser run is never replayed from the cache');
   });

@@ -1064,6 +1064,14 @@ describe('the commands it runs', () => {
     assert.equal(env.VITEST_MAX_WORKERS, undefined);
     assert.equal(env.MELARC_TEST_WORKERS, '3');
   });
+
+  // Break caught: a `MELARC_BROWSER_SHARD` left in the shell (from reproducing one job of CI) reaching the browser run, which the Ops
+  // Portal's configuration would then cut to one shard: a run that says "passed" for a part of the specs the change reaches.
+  it('passes no MELARC_BROWSER_SHARD, which would cut the browser run to a part of the specs chosen', () => {
+    const env = childEnvironment({ MELARC_BROWSER_SHARD: '2/7', MELARC_BROWSERS: 'firefox' }, 3);
+    assert.equal(env.MELARC_BROWSER_SHARD, undefined);
+    assert.equal(env.MELARC_BROWSERS, 'firefox', 'only the shard is taken out');
+  });
 });
 
 describe('what a run reports and records', () => {

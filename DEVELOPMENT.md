@@ -45,6 +45,21 @@ set MELARC_BROWSERS=chromium,firefox,webkit
 pnpm run test:browser
 ```
 
+One engine's whole run is longer than a CI job may last, so CI runs the browser tests as a matrix of jobs, one for each
+shard of each engine: `MELARC_BROWSER_SHARD=2/9` (`current/total`, counted from 1, Playwright's `--shard`) runs the second
+of nine parts of the engine's tests, and the shards of an engine together run every test of it once
+([ci.yml](.github/workflows/ci.yml); `scripts/browser-shards.test.ts` proves it from Playwright's own list of the tests).
+To reproduce one job of CI, name its engine and its shard, for example (the engine installed first, as above):
+
+```text
+set MELARC_BROWSERS=firefox
+set MELARC_BROWSER_SHARD=2/9
+pnpm run test:browser
+```
+
+The gate and the affected run never read `MELARC_BROWSER_SHARD`: they run every spec they choose whole, so a shard left in your
+shell does not make a run that passes for a part of its tests.
+
 The integrated run (`pnpm run test:e2e`) serves the Ops Portal over plain HTTP in Chromium only. The trusted HTTPS origin
 the identity slice needs, with Firefox and WebKit, is `pnpm run test:e2e:https`: it makes a disposable test CA, so it runs in CI
 and on a machine cleared for key material, and it refuses on this workstation (Windows has no disposable trust store for Chromium or
@@ -388,14 +403,16 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    is a diagnosis and not a gate: the parts that passed did so on another tree. Fix, run the precheck, run a new gate. A
    gate that ended `UNSETTLED`, was stopped or would not start has not run: say so, and run it again.
 8. **CI is the parallel gate.** [ci.yml](.github/workflows/ci.yml) runs the same commands as parallel jobs on clean
-   machines, the HTTPS run included, and is the quickest complete run. It needs a push, which the owner authorizes: do
-   not push to get a run unasked.
+   machines, the HTTPS run included (in a job of its own, and the browser tests in a job for each shard of each engine,
+   which together run every test once), and is the quickest complete run. It needs a push, which the owner authorizes:
+   do not push to get a run unasked.
 
 What looks like a saving and costs the proof: wrapping a gate, or any long run, in `timeout` (it can end the wrapper and
 leave what the wrapper started running, or kill a stage half way; either way test databases and temporary folders are
 left behind and nothing records it, where `pnpm run gate:stop` ends the whole stage and lists what it left); editing the
 tree, or starting another build, lint or test, while a gate runs; raising a timeout, adding a retry, skipping or
-sharding a test, or running the package suites side by side to finish sooner. On a machine of this size that last one is
+sharding a test (CI shards the browser tests across jobs that together run every one; a gate on one machine runs them
+whole), or running the package suites side by side to finish sooner. On a machine of this size that last one is
 how test workers fail to start, and the failure is then the machine's and not the code's. Two savings were measured and
 are not worth having: ESLint's `--concurrency` (no faster here, and it leaves the machine with almost no free memory)
 and a template database for the database tests (about a minute of the nineteen they take). And an affected run is

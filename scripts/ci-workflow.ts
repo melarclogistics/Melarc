@@ -9,8 +9,11 @@
  *     scripts/ci-aggregate.ts, so a branch rule can require that single check (GitHub counts a skipped required
  *     check as passed, which is why the aggregate must run even when a job it needs failed). It alone is named
  *     "CI result", the name the branch rule requires;
- *   - the browser tests run all three engines: the step sets MELARC_BROWSERS to chromium,firefox,webkit and an
- *     earlier step of the job installs exactly those three;
+ *   - the browser tests of the Ops Portal run as a matrix of jobs, so that no job holds them all (one engine's run alone
+ *     is longer than a job's limit): the matrix names every engine, each with its shards 1 to N once, and hands each
+ *     job its engine (MELARC_BROWSERS) and its shard (MELARC_BROWSER_SHARD) and installs that engine alone. That the
+ *     shards together hold every test of the configuration is proved by scripts/browser-shards.test.ts, from
+ *     Playwright's own listing. The HTTPS journeys, which run in all three engines, install all three;
  *   - every job runs on the one runner image the toolchain was tried on;
  *   - the workflow runs only on pushes, pull requests and by hand: not on events that give it a token that can
  *     write or secrets, and not on a schedule;
@@ -65,7 +68,10 @@ export type WorkflowProblemCode =
   | 'COMMAND_STEP_ALTERED'
   | 'DEFAULTS_RUN'
   | 'BROWSER_MATRIX_ENV'
+  | 'BROWSER_SHARD_ENV'
+  | 'BROWSER_SHARDS_DRIFT'
   | 'BROWSER_INSTALL_DRIFT'
+  | 'ARTIFACT_NOT_PER_SHARD'
   | 'AGGREGATE_MISSING'
   | 'AGGREGATE_NAME'
   | 'AGGREGATE_NOT_ALWAYS'
@@ -363,9 +369,14 @@ function hasDefaultRun(holder: unknown): boolean {
 }
 
 /** The engines of the supported browsers (surfaces/ops-portal.md section 11), all of which CI must run. */
-const BROWSERS: readonly string[] = ['chromium', 'firefox', 'webkit'];
-const BROWSER_LIST = BROWSERS.join(',');
+export const BROWSERS: readonly string[] = ['chromium', 'firefox', 'webkit'];
 const BROWSER_TESTS = 'pnpm run test:browser';
+const HTTPS_TESTS = 'pnpm run test:e2e:https';
+/** What the browser job's matrix hands each job: its engine, and its shard of that engine (Playwright's `current/total`). */
+export const MATRIX_ENGINE = '${{ matrix.engine }}';
+export const MATRIX_SHARD = '${{ matrix.shard }}/${{ matrix.shards }}';
+/** Stands for the matrix engine where an install script is read, so that the expression's spaces do not split it. */
+const ENGINE_WORD = '@engine@';
 /** The whole script of a step that downloads browsers: the options (`--with-deps`), then the engines. */
 const BROWSER_INSTALL = /^pnpm (?:--filter \S+ )?exec playwright install((?: [^\s&|;<>]+)*)$/;
 
@@ -373,40 +384,192 @@ const BROWSER_INSTALL = /^pnpm (?:--filter \S+ )?exec playwright install((?: [^\
 const namesEachEngineOnce = (engines: readonly string[]): boolean =>
   engines.toSorted().join(',') === BROWSERS.toSorted().join(',');
 
+/** Whether the list is the engine of the job's matrix entry, and nothing else. */
+const namesTheMatrixEngine = (engines: readonly string[]): boolean =>
+  engines.length === 1 && engines[0] === ENGINE_WORD;
+
 /** The engines a script installs when it is exactly an install command, or undefined when it is not one. */
 function installedEngines(script: string): string[] | undefined {
-  const match = BROWSER_INSTALL.exec(script.trim());
+  const match = BROWSER_INSTALL.exec(script.trim().replaceAll(MATRIX_ENGINE, ENGINE_WORD));
   if (match === null) return undefined;
   return (match[1] ?? '').split(' ').filter((word) => word !== '' && !word.startsWith('-'));
 }
 
+/** One job of the browser matrix: the engine it runs and which shard of it, counted from 1, out of how many. */
+export interface BrowserShard {
+  engine: string;
+  shard: number;
+  shards: number;
+}
+
+/** The shards a browser job's matrix lists, read as written, and everything wrong with how it lists them. */
+export interface BrowserMatrix {
+  shards: BrowserShard[];
+  faults: string[];
+}
+
+const SHARD_KEYS = ['engine', 'shard', 'shards'];
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1;
+const listed = (numbers: Iterable<number>): string =>
+  [...numbers].toSorted((a, b) => a - b).join(', ');
+
 /**
- * The browser tests run the engines MELARC_BROWSERS names (Chromium alone when it is not set). CI runs all
- * three, so the step that runs them must set the variable to exactly that list, and a step before it, in the same
- * job, must install exactly those three engines: a pipeline that stops setting the variable or installs fewer
- * stays green while an engine is never run.
+ * The matrix of a browser job, which must be a literal list of the shards (`include`, each entry an engine, a shard and
+ * the number of shards of that engine), so that this check, and the one that lists the tests, can read every job that
+ * will run. For every engine the shards are 1 to N, each once, with the same N in each entry: whatever Playwright cuts
+ * for the shard `current/total` then belongs to one job, and one job only. `fail-fast: false` lets every shard run to its
+ * end, so that one failure does not hide the others.
+ */
+export function browserMatrix(job: Record<string, unknown>): BrowserMatrix {
+  const faults: string[] = [];
+  const found: BrowserShard[] = [];
+  const strategy = job.strategy;
+  if (!isRecord(strategy)) {
+    return { shards: found, faults: ['the job has no strategy.matrix that lists the shards'] };
+  }
+  if (strategy['fail-fast'] !== false) {
+    faults.push(
+      'strategy.fail-fast must be false, or the first failed shard cancels the others and their failures are never seen',
+    );
+  }
+  const matrix = strategy.matrix;
+  if (!isRecord(matrix)) {
+    faults.push(
+      'strategy.matrix must be a literal mapping with an include list; a computed matrix cannot be checked',
+    );
+    return { shards: found, faults };
+  }
+  const other = Object.keys(matrix).filter((key) => key !== 'include');
+  if (other.length > 0) {
+    faults.push(
+      `strategy.matrix may hold only include, not ${other.join(', ')}: those keys add and remove jobs in ways this check does not follow`,
+    );
+  }
+  const include = matrix.include;
+  if (!Array.isArray(include) || include.length === 0) {
+    faults.push('strategy.matrix.include must list the shards, one entry for each job');
+    return { shards: found, faults };
+  }
+
+  for (const entry of include) {
+    const keys = isRecord(entry) ? Object.keys(entry).toSorted() : [];
+    if (!isRecord(entry) || keys.join() !== SHARD_KEYS.join()) {
+      faults.push(
+        `an include entry must hold ${SHARD_KEYS.join(', ')} and nothing else, not ${keys.length === 0 ? JSON.stringify(entry) : keys.join(', ')}`,
+      );
+      continue;
+    }
+    const { engine, shard, shards } = entry;
+    if (typeof engine !== 'string' || !BROWSERS.includes(engine)) {
+      faults.push(
+        `an include entry names the engine ${JSON.stringify(engine)}; the engines are ${BROWSERS.join(', ')}`,
+      );
+    } else if (!isCount(shard) || !isCount(shards) || shard > shards) {
+      faults.push(
+        `the entry of ${engine} has shard ${JSON.stringify(shard)} of ${JSON.stringify(shards)}; both are whole numbers from 1 and the shard is at most the number of shards`,
+      );
+    } else {
+      found.push({ engine, shard, shards });
+    }
+  }
+
+  for (const engine of BROWSERS) {
+    const own = found.filter((entry) => entry.engine === engine);
+    if (own.length === 0) {
+      faults.push(`no entry runs ${engine}, so its tests are never run`);
+      continue;
+    }
+    const totals = new Set(own.map((entry) => entry.shards));
+    if (totals.size > 1) {
+      faults.push(
+        `the entries of ${engine} disagree on the number of shards (${listed(totals)}), so their shards overlap or leave tests out`,
+      );
+      continue;
+    }
+    const total = own[0]?.shards ?? 0;
+    const counts = new Map<number, number>();
+    for (const entry of own) counts.set(entry.shard, (counts.get(entry.shard) ?? 0) + 1);
+    const missing = Array.from({ length: total }, (_, index) => index + 1).filter(
+      (shard) => !counts.has(shard),
+    );
+    const repeated = [...counts].filter(([, count]) => count > 1).map(([shard]) => shard);
+    if (missing.length > 0) {
+      faults.push(
+        `${engine} has no entry for shard ${listed(missing)} of ${String(total)}, so the tests of that shard are never run`,
+      );
+    }
+    if (repeated.length > 0) {
+      faults.push(`${engine} lists shard ${listed(repeated)} of ${String(total)} more than once`);
+    }
+  }
+  return { shards: found, faults };
+}
+
+/**
+ * The browser tests of the Ops Portal run as the jobs of a matrix, one for each shard of each engine: the step that runs
+ * them sets MELARC_BROWSERS to the entry's engine and MELARC_BROWSER_SHARD to its shard, a step before it installs that
+ * engine and no other, the matrix is complete (see `browserMatrix`) and an artifact of the job is named for its entry, or
+ * two entries that fail would upload under one name and one upload would be refused. A pipeline that stops setting a
+ * variable, installs the wrong browser or drops an entry stays green while tests are never run.
+ *
+ * The HTTPS journeys run in all three engines in the one job, so a step before them installs exactly those three.
  */
 function checkBrowsers(jobs: readonly Job[]): WorkflowProblem[] {
   const problems: WorkflowProblem[] = [];
-  for (const { id, steps } of jobs) {
+  for (const { id, body, steps } of jobs) {
     steps.forEach((step, index) => {
-      if (scriptOf(step).trim() !== BROWSER_TESTS) return;
-      const env = isRecord(step.env) ? step.env : {};
-      if (env.MELARC_BROWSERS !== BROWSER_LIST) {
-        problems.push({
-          code: 'BROWSER_MATRIX_ENV',
-          message: `Job ${id}: the step that runs ${BROWSER_TESTS} must set env MELARC_BROWSERS to exactly ${BROWSER_LIST}, or the tests run Chromium alone.`,
-        });
-      }
+      const script = scriptOf(step).trim();
+      if (script !== BROWSER_TESTS && script !== HTTPS_TESTS) return;
       const installs = steps
         .slice(0, index)
         .map((earlier) => installedEngines(scriptOf(earlier)))
         .filter((engines) => engines !== undefined);
-      if (!installs.some(namesEachEngineOnce)) {
+
+      if (script === HTTPS_TESTS) {
+        if (!installs.some(namesEachEngineOnce)) {
+          problems.push({
+            code: 'BROWSER_INSTALL_DRIFT',
+            message: `Job ${id}: a step before ${HTTPS_TESTS} must be exactly "pnpm --filter @melarc/e2e exec playwright install [--with-deps] ${BROWSERS.join(' ')}", naming each engine once: its proofs run in all three.`,
+          });
+        }
+        return;
+      }
+
+      const env = isRecord(step.env) ? step.env : {};
+      if (env.MELARC_BROWSERS !== MATRIX_ENGINE) {
+        problems.push({
+          code: 'BROWSER_MATRIX_ENV',
+          message: `Job ${id}: the step that runs ${BROWSER_TESTS} must set env MELARC_BROWSERS to exactly ${MATRIX_ENGINE}, or the tests run Chromium alone, or one engine in every job.`,
+        });
+      }
+      if (env.MELARC_BROWSER_SHARD !== MATRIX_SHARD) {
+        problems.push({
+          code: 'BROWSER_SHARD_ENV',
+          message: `Job ${id}: the step that runs ${BROWSER_TESTS} must set env MELARC_BROWSER_SHARD to exactly ${MATRIX_SHARD}, or every job runs the whole of its engine, or the same part of it.`,
+        });
+      }
+      if (!installs.some(namesTheMatrixEngine)) {
         problems.push({
           code: 'BROWSER_INSTALL_DRIFT',
-          message: `Job ${id}: a step before ${BROWSER_TESTS} must be exactly "pnpm --filter @melarc/e2e exec playwright install [--with-deps] ${BROWSERS.join(' ')}", naming each engine once.`,
+          message: `Job ${id}: a step before ${BROWSER_TESTS} must be exactly "pnpm --filter @melarc/e2e exec playwright install [--with-deps] ${MATRIX_ENGINE}": the engine of the entry, and no other.`,
         });
+      }
+      for (const fault of browserMatrix(body).faults) {
+        problems.push({ code: 'BROWSER_SHARDS_DRIFT', message: `Job ${id}: ${fault}.` });
+      }
+      for (const upload of steps.filter(isUpload)) {
+        const name = inputsOf(upload).name;
+        if (
+          typeof name !== 'string' ||
+          !name.includes(MATRIX_ENGINE) ||
+          !name.includes('${{ matrix.shard }}')
+        ) {
+          problems.push({
+            code: 'ARTIFACT_NOT_PER_SHARD',
+            message: `Job ${id}: artifact "${typeof upload.name === 'string' ? upload.name : '(unnamed upload)'}" must carry ${MATRIX_ENGINE} and \${{ matrix.shard }} in its name: two shards that fail would upload under one name.`,
+          });
+        }
       }
     });
   }
