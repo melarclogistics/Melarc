@@ -1,0 +1,11 @@
+/* Out of sight and still read (COMPONENT_PATTERNS, the kit's helper): the words stay in the page for assistive technology and for copy. */
+.ui-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -36,18 +36,6 @@ p {
   box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
 }
 
-/*
- * The one rule React Aria Components would insert into the page as a <style> of its own, which a policy without inline styles refuses. The
- * library skips the insertion when an element with the id `react-aria-pressable-style` exists (index.html has one), so the rule is here
- * instead, in the same unnamed layer. It keeps a pressable thing from waiting for a double tap on a touch screen.
- * src/components/ui/aria-wiring.test.tsx holds this rule to the one the installed library inserts, so an upgrade that changes it fails there.
- */
-@layer {
-  [data-react-aria-pressable] {
-    touch-action: pan-x pan-y pinch-zoom;
-  }
-}
-
 .skip-link {
   position: absolute;
   top: -4rem;

@@ -374,7 +374,7 @@ export function PickupRequestListPage() {
                     onClick={() => {
                       setTyped({ over: undefined, value: null });
                       change({ date: '' });
-                      focusFilter('.pickup-date-filter [role="spinbutton"]');
+                      focusFilter('.pickup-date-filter input');
                     }}
                   >
                     Every service date

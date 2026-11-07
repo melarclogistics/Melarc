@@ -1,0 +1,77 @@
+/*
+ * Panel and page card (design/COMPONENT_PATTERNS.md, *Panel and Card*; DESIGN_SYSTEM sections 7, 8 and 10): the default surface, the subtle border, 12px
+ * corners for a panel and 16px for a page card, 20px of padding (24px on a page card), and no shadow. These rules are in no layer, so they win over the
+ * Card primitive's own utilities without `!important`.
+ */
+.ui-panel {
+  gap: 0;
+  padding: 0;
+  border-color: var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.ui-panel[data-variant='page'] {
+  border-radius: var(--radius-xl);
+}
+
+.ui-panel__header {
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+.ui-panel[data-variant='page'] .ui-panel__header {
+  padding: var(--space-5) var(--space-6) 0;
+}
+
+.ui-panel__title {
+  font-size: var(--text-label-md-size);
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-panel__heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: var(--text-heading-sm-weight);
+  line-height: inherit;
+}
+
+.ui-panel__action {
+  align-self: center;
+}
+
+.ui-panel__body {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+.ui-panel[data-variant='page'] .ui-panel__body {
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+
+/* A panel with no header starts at the top of its padding. */
+.ui-panel:not(:has(.ui-panel__header)) .ui-panel__body {
+  padding-top: var(--space-5);
+}
+
+.ui-panel[data-variant='page']:not(:has(.ui-panel__header)) .ui-panel__body {
+  padding-top: var(--space-6);
+}
+
+/* Content that runs to the edges (a table) takes the panel's border as its own frame, and is cut to its rounded corners (a square corner of the table would be drawn over them). */
+.ui-panel[data-padding='none'] {
+  overflow: hidden;
+}
+
+.ui-panel[data-padding='none'] .ui-panel__body {
+  padding: 0;
+}
+
+.ui-panel[data-padding='none'] .ui-panel__header {
+  padding-bottom: var(--space-3);
+}
+
+@media (forced-colors: active) {
+  .ui-panel {
+    border-color: CanvasText;
+  }
+}

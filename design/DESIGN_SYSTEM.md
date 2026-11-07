@@ -1303,47 +1303,17 @@ the status pictures.
 
 ## 24a. Interaction primitives
 
-**Superseded for new components (Product Owner, 5 November 2026; redesign step R3).** A new component is composed from the shadcn/ui primitives, which are Radix UI under Tailwind CSS and the portal's tokens, through a door of the same kind ([§29.2](#292-the-component-foundation)). React Aria Components stays, unchanged, for what is built on it today (the date field) until that moves: nothing is removed now, no new component is built on it, and what moves, and in which step, is the table in [COMPONENT_PATTERNS §37](COMPONENT_PATTERNS.md#phasing-out-react-aria-components). The rest of this section is the policy of 28 October 2026, and it still governs the library's door.
+**Current policy (Product Owner, 5 November 2026; built in redesign steps R3 and R5).** Some behaviour has no native element that does it the same way in every browser: a calendar, a menu, a searchable list. For that, and for nothing a native element can do, a component of the Ops Portal is composed from the **shadcn/ui primitives** (Radix UI under Tailwind CSS and the portal's tokens), through a door of its own ([§29.2](#292-the-component-foundation)). They give **behaviour** (keys, focus, names for assistive technology, positioning) and no appearance: the look is the portal's alone. React Aria Components, which the date field was built on from 28 October 2026, was **removed on 6 November 2026** (redesign step R5), when the date field moved to the calendar and popover primitives: nothing imports it, and it is not a dependency.
 
-Some behaviour has no native element that does it the same way in every browser: a calendar, a menu, a searchable list. For that, and
-for nothing a native element can do, the portal uses **React Aria Components** (Adobe's `react-aria-components`, Apache-2.0, an exact
-pin). It gives **behaviour** (keys, focus, names for assistive technology, positioning) and **no appearance**: the look is the portal's
-alone.
+**Decided (Product Owner, 28 October 2026), and why no UI framework is adopted.** A library for behaviour was chosen after the same screen was built with React Aria Components, Ant Design 6 and Mantine 9 and run under the portal's content-security policy (no inline style). The other two bring a look and a token system of their own, which BRAND_FOUNDATION §14 does not let a library impose; under that policy Ant Design drew nothing of its theme (it needs a nonce on every response of a static front, and three violations remained even then) and Mantine lost the portal's colours. Material UI was considered and not built. The two builds were scratch work and are not kept in the repository; [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026) records what each did.
 
-**Decided (Product Owner, 28 October 2026).** It was chosen after the same screen was built with React Aria Components, Ant Design 6 and
-Mantine 9 and run under the portal's content-security policy (no inline style). The other two bring a look and a token system of their own,
-which BRAND_FOUNDATION §14 does not let a library impose; under that policy Ant Design drew nothing of its theme (it needs a nonce on every
-response of a static front, and three violations remained even then) and Mantine lost the portal's colours. Material UI was considered and
-not built. The two builds were scratch work and are not kept in the repository; [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026) records what each did.
-
-- **One door.** Only the components of `apps/ops-web/src/components/ui/` import the library, `react-aria`, `react-stately`, the
-  `@react-aria`, `@react-stately` and `@react-types` packages and `@internationalized/*` (a test and a lint rule say so). A page uses a
-  component of the portal, whose properties are the portal's own, and never a type, a date object or a styling hook of the library.
-- **Native first.** A native element is used wherever it does the job (button, input, select, `<dialog>`, table). The library is for what
-  none can do, and a component of it is built when a screen needs it (COMPONENT_PATTERNS §37), never as a catalogue.
-- **One look.** A component draws itself from `tokens.css` alone, as every component does (the token guard applies to it), takes the global
-  focus ring of `base.css` on every part that takes focus, keeps every part a pointer can press at least 24px (WCAG 2.2 target size; the
-  date field's buttons are 2rem, its parts 1.875rem) and its sizes in rem, and has forced-colours and reduced-motion rules of its own. The library's states reach the stylesheet as `data-*` attributes; the component's own states are classes.
-- **The pressable style.** The first time a pressable thing mounts, the library inserts one `<style>` into the page. It does not when an
-  element with its id exists: `index.html` has one, and the same rule is in `base.css`. The policy allowed no inline style when this was
-  decided; since 5 November 2026 it allows it (§29.4), and the workaround stays as it is until the library goes, so that the date field does
-  not change. A test holds the rule to the installed library's, and a browser test serves a production build of the showcase under the
-  strict policy and requires no violation.
-- **Licences.** The licence of the library and of each package it brings that carries one ships with the build, byte for byte
-  (`public/licenses/`, held by a build test), and a test holds the list of those packages to the lockfile. Two carry none and are named in
-  the test: `client-only` (an empty module) and `tslib` (0BSD, which asks for no notice). The shadcn/ui set is held the same way (§29.5).
-- **Dates.** A date crosses into and out of a component as the text `YYYY-MM-DD`, as the API carries a calendar date. It is entered and
-  shown day, month, year, with the week from Monday and English month names, **fixed by the portal and not taken from the browser**
-  (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and
-  03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
-- **TanStack Table and Motion (Product Owner, 5 November 2026).** **TanStack Table** is adopted, in redesign step R3 (§23, §29.5). **Motion** (motion.dev; animation, §9) stays approved in principle and is **not adopted**: it is not a dependency, and the primitives animate with `tw-animate-css` on the motion tokens (§29.3). If it is adopted it sits behind a Melarc component, through one door, with an exact pin and its licence shipped with the build, as this section says of a library.
-- **No framework migration.** React Aria Components is a source of behaviour behind the portal's components, not a step towards a component
-  framework. The web applications are not migrated project-wide to Ant Design, MUI or another UI framework (decided 1 November 2026): each
-  brings a look and a token system of its own, which BRAND_FOUNDATION §14 does not let a library impose. The semantic tokens control
-  appearance. Proposing one is a foundation change (§34) and is surfaced first
-  ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)). shadcn/ui is not that migration: its components are source in the repository, restyled to the tokens, and no theme of a library is adopted (§29.2).
-- **Web only.** This policy is for the web applications, the Ops Portal and, when it is built, the Vendor PWA. It does not prescribe
-  Android implementation libraries: the Rider app maps the same semantic foundations to native Android (§30).
+- **Native first.** A native element is used wherever it does the job (button, input, select, `<dialog>`, table). A primitive is for what none can do, and a component is built when a screen needs it (COMPONENT_PATTERNS §37), never as a catalogue.
+- **One door.** Radix UI, cmdk, vaul, sonner and react-day-picker are imported only by the primitives, and only the components of `apps/ops-web/src/components/ui/` import a primitive (§29.2; a test and a lint rule say so). A page uses a component of the portal, whose properties are the portal's own, and never a type, a date object or a styling hook of a library.
+- **One look.** A component draws itself from `tokens.css` alone, as every component does (the token guard applies to it), takes the global focus ring of `base.css` on every part that takes focus, keeps every part a pointer can press at least 24px (WCAG 2.2 target size) and its sizes in rem, and has forced-colours and reduced-motion rules of its own.
+- **Dates.** A date crosses into and out of a component as the text `YYYY-MM-DD`, as the API carries a calendar date. It is typed and shown day, month, year (`DD/MM/YYYY`), with the week from Monday and English month names, **fixed by the portal and not taken from the browser** (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and 03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
+- **TanStack Table and Motion (Product Owner, 5 and 6 November 2026).** **TanStack Table** is adopted (redesign step R3; §23, §29.5). **Motion** (motion.dev; animation, §9) is **adopted in redesign step R5**: an exact pin, its licences shipped with the build (§29.5). The components of `components/ui` import it through the one file `components/ui/motion/motion.ts`, and a page never does (an ESLint rule and `test/motion-door.test.ts`). It is for what a stylesheet cannot do: a layout that moves (the reordered list), something that comes and goes (the table's bar of acts, the side panel) and a number that counts (the stat tile). Its durations and easings are never written in a component: one hook reads them from the motion tokens of `tokens.css` (§9), and makes everything instant when `prefers-reduced-motion: reduce` is set. What a stylesheet can do on the same tokens (the tab underline, a changed row's highlight, a hover) is left to the stylesheet, where the reduced-motion rule is the token file's own.
+- **No framework migration.** The web applications are not migrated project-wide to Ant Design, MUI or another UI framework (decided 1 November 2026): each brings a look and a token system of its own, which BRAND_FOUNDATION §14 does not let a library impose. The semantic tokens control appearance. Proposing one is a foundation change (§34) and is surfaced first ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)). shadcn/ui is not that migration: its components are source in the repository, restyled to the tokens, and no theme of a library is adopted (§29.2).
+- **Web only.** This policy is for the web applications, the Ops Portal and, when it is built, the Vendor PWA. It does not prescribe Android implementation libraries: the Rider app maps the same semantic foundations to native Android (§30).
 
 ---
 
@@ -1471,6 +1441,8 @@ The redesign replaces the list of components that were deferred until real scree
 - EmptyState v2;
 - Skeleton v2.
 
+**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as BUILT):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion. The second half (StatusBadge, CountBadge, EmptyState and Skeleton v2, Avatar, and the Tooltip, Popover and Dialog wrappers) follows.
+
 A component that is not in the kit is added when a real screen needs it (§28).
 
 ---
@@ -1588,7 +1560,7 @@ Tailwind consumes the model and adds no colour, size or space of its own. `apps/
 - **The `dark` variant** follows the theme as the token file does (§31): by `data-theme="dark"`, or by the system's setting unless the root says `data-theme="light"`. A primitive seldom needs one, because the tokens switch themselves.
 - **Preflight is not imported.** `tailwind.css` takes Tailwind's theme and utilities and nothing of its base, with `source(none)` and explicit `@source` folders (`components/` and `showcase/`, no tests), so that a word in a comment is not made into a utility. Preflight resets headings, lists, links and form controls for the whole document, and the screens that exist, with `base.css`, rely on the browser's defaults for them. A reset scoped to what carries a `data-slot`, and to what is inside it, replaces the part the primitives need. *Kept:* the border colour of the border token, the neutral button and field (no border, fill or padding, the page's font and colour), the pointer on an enabled button, an opaque placeholder, a textarea that grows downward, no markers or margins on the lists and headings a primitive renders, the link that takes its text's colour, the collapsed table. *Dropped:* the reset of every element, the media rules (images and icons stay inline), the document's font and line height, and the rules for the form controls of particular browsers.
 - **Layers.** Tailwind's theme, base and utilities are CSS layers, and a rule in a layer always loses to a rule in none. `tokens.css`, `base.css` and the stylesheets of `components/ui` are in no layer, so they win over any utility: the token radius (8px) over Tailwind's own default, and the focus ring of `base.css` (an outline, which forced-colours mode keeps) over the `ring` utilities. A primitive takes the global focus ring and draws none of its own.
-- **Motion.** Animation is `tw-animate-css` on the motion tokens (§9): `motion.fast`, `normal` and `slow` (120, 200 and 280ms) and the enter and exit easings. Under `prefers-reduced-motion: reduce` every duration token is zero, so nothing moves, and `primitives.spec.ts` proves that every overlay still opens, and is gone after Escape, then.
+- **Motion.** The primitives animate with `tw-animate-css` on the motion tokens (§9): `motion.fast`, `normal` and `slow` (120, 200 and 280ms) and the enter and exit easings; what a stylesheet cannot do in the components of the kit is Motion's, reading the same tokens (§24a). Under `prefers-reduced-motion: reduce` every duration token is zero, so nothing moves, and `primitives.spec.ts` proves that every overlay still opens, and is gone after Escape, then.
 
 ### 29.4 The content-security policy
 
@@ -1604,7 +1576,7 @@ The policy is in `e2e/harness/https-front.ts` and `apps/ops-web/test/browser/sup
 
 ### 29.5 Dependencies and licences
 
-Redesign step R3 added these, each an exact pin as the dependency policy requires:
+Redesign steps R3 and R5 added these, each an exact pin as the dependency policy requires:
 
 | Package | Version | Licence | What it is for |
 |---|---:|---|---|
@@ -1619,6 +1591,9 @@ Redesign step R3 added these, each an exact pin as the dependency policy require
 | `tw-animate-css` | 1.4.0 | MIT | the animations |
 | `tailwindcss`, `@tailwindcss/vite` | 4.3.3 | MIT | the stylesheet, at build time |
 | `shadcn` | 4.22.1 | MIT | the CLI and its MCP server (a development dependency) |
+| `motion` | 14.4.0 | MIT | animation of what a stylesheet cannot do (§24a), added by redesign step R5; it brings `framer-motion` (MIT, Framer B.V.), `motion-dom` and `motion-utils` (MIT, Motion B.V.) |
+
+Motion's four packages ship their licences too: two texts, `Motion-MIT.txt` (Motion B.V., for `motion`, `motion-dom` and `motion-utils`) and `Framer-Motion-MIT.txt` (Framer B.V., for `framer-motion`), copied byte for byte; `apps/ops-web/test/motion-licences.test.ts` holds the list to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships. `react-aria-components` and `@internationalized/date`, which the date field was built on, left with it on 6 November 2026 (§24a), and their three licence files with them.
 
 Each ships with the build under its own licence (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does): 16 files were added to `apps/ops-web/public/licenses/`, copied byte for byte, and packages whose text is identical share one (the 61 packages of Radix UI are one file). The list is `apps/ops-web/test/support/third-party-licences.ts`; `apps/ops-web/test/shadcn-licences.test.ts` holds it to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships to the same. The licence of the registry's own source, which the primitives are, is the `shadcn` package's. Two packages have no licence file to ship, and are named in the list with the reason: `react-remove-scroll-bar` (MIT by its `package.json`, which holds none) and `tslib` (0BSD, which asks for no notice); the type-only packages put no code in the bundle. `date-fns`, which step R3 added as a direct dependency of the portal for the calendar, was removed from it in redesign step R4: the portal imports it nowhere, and `react-day-picker` depends on it, so it is installed and its licence is shipped all the same (the list names it as a package of the tree, and it is no longer a root of it).
 
@@ -1629,6 +1604,7 @@ Each is made in the file and says so there.
 - **sonner** reads the theme from `useResolvedTheme` (`src/platform/theme/`), not from `next-themes`, which the portal does not have and which would be a second owner of the theme; and it re-exports `toast`, so that the door above stays shut to every file but the primitives.
 - **command**: the hidden title and description are inside the panel, where the dialog names itself from them (the registry's leave a heading in the page while it is closed). `CommandDialog` forwards `onCloseAutoFocus`, because a palette opened by a button has no `DialogTrigger` to give focus back to. Its separator is `aria-hidden`, because a list box holds only options and groups (axe `aria-required-children`).
 - **calendar** is in English as written in the United Kingdom and starts its week on Monday by default, as the date field does (COMPONENT_PATTERNS §22a), not in the browser's language.
+- **popover** gains a `container` prop (the element the popover is drawn into, the body by default): a modal `<dialog>` is in the top layer and the page behind it is inert, so the date field's calendar, opened from inside one, is drawn into the dialog or it would open under it, unseen and out of reach.
 - **scroll-area**: the viewport is a stop of the keyboard, so that what scrolls can be reached without a pointer (WCAG 2.1.1; axe `scrollable-region-focusable`).
 - **button** has no `xs` sizes (they would be 24px targets, below the smallest control height) and gains the `brand` variant: the crimson of the New button, and nothing else. `destructive` is the outline Danger recipe of §4.6, since no filled Danger button is part of the system (§16.3).
 - **badge** gains the five status variants, `success`, `warning`, `danger`, `info` and `neutral`, from the pairs of §4.4.
@@ -1747,7 +1723,8 @@ This document does **not** approve:
 - CSS Modules;
 - CSS-in-JS;
 - ~~a library for behaviour a native element lacks~~ (decided on 28 October 2026: React Aria Components, §24a; Ant Design and Mantine were
-  built and run for it and Material UI was considered, and React Aria Components was chosen over them);
+  built and run for it and Material UI was considered, and React Aria Components was chosen over them; superseded on 5 November 2026 by the shadcn/ui
+  primitives, §29.2, and React Aria Components was removed on 6 November 2026);
 - ~~a specific icon library~~ (decided on 25 October 2026: Lucide, §24).
 
 Those should be selected based on the actual web implementation and project constraints.
@@ -1755,8 +1732,8 @@ Those should be selected based on the actual web implementation and project cons
 The selected technology must serve this design system, not redefine it.
 
 Since 1 November 2026 a project-wide move to Ant Design, MUI or another UI framework is outside the approved direction. Since 5 November 2026
-the component foundation of new components is shadcn/ui over Radix UI and Tailwind CSS (§29.2), TanStack Table is adopted (§23), Motion is approved
-in principle and not adopted (§24a), and a specialist grid is weighed against a concrete screen before advanced grid behavior is built by hand (§24a, §23).
+the component foundation of new components is shadcn/ui over Radix UI and Tailwind CSS (§29.2), TanStack Table is adopted (§23), Motion is adopted
+(§24a, since 6 November 2026), and a specialist grid is weighed against a concrete screen before advanced grid behavior is built by hand (§24a, §23).
 
 ---
 
@@ -1844,8 +1821,8 @@ Each pattern should eventually document:
 | The authenticated shell's navigation: a top band or a side menu (§13.1, §22) | **DECIDED** 25 October 2026 (Product Owner, with a reference screenshot): a collapsible **side menu** on Ink with an account card; the Ops Portal is an application, not a website |
 | Layout of the pre-sign-in screens (§13.1, §13.1a) | **DECIDED** 25 October 2026 (Product Owner): a **split screen**, photography beside the form; the photographs are theirs (`design/images`), their licence is theirs to confirm |
 | Icon family (§24) | **DECIDED** 25 October 2026 (Product Owner): **Lucide**, through one registry; IconButton is built |
-| Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field is its first component. **Superseded for new components** on 5 November 2026 by the shadcn/ui primitives (§29.2); what is built on it stays until it moves (COMPONENT_PATTERNS §37) |
-| Web library policy (§23, §24a) | **DECIDED** 1 November 2026 (Product Owner): native elements first; React Aria Components behind Melarc's components; the semantic tokens control appearance; **no project-wide migration** to Ant Design, MUI or another UI framework; a **specialist grid is weighed against a concrete screen's requirements** before advanced grid behavior is built by hand; a web policy that does not prescribe Android libraries. On 5 November 2026 **TanStack Table** was adopted, in redesign step R3, and **Motion** stays approved in principle and not adopted (§23, §24a); new components are composed from the shadcn/ui primitives (§29.2) |
+| Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field was its first component. **Superseded for new components** on 5 November 2026 by the shadcn/ui primitives (§29.2), and **removed** on 6 November 2026, when the date field moved to the calendar and popover primitives (COMPONENT_PATTERNS §37) |
+| Web library policy (§23, §24a) | **DECIDED** 1 November 2026 (Product Owner): native elements first; the semantic tokens control appearance; **no project-wide migration** to Ant Design, MUI or another UI framework; a **specialist grid is weighed against a concrete screen's requirements** before advanced grid behavior is built by hand; a web policy that does not prescribe Android libraries. On 5 November 2026 **TanStack Table** was adopted, in redesign step R3; **Motion** is adopted in redesign step R5 (6 November 2026; §24a, §29.5); new components are composed from the shadcn/ui primitives (§29.2) |
 | Date entry and display (§24a; COMPONENT_PATTERNS §22a) | **DECIDED** 28 October 2026 (Product Owner): day, month, year, week from Monday, English; fixed by the portal and not the browser's; "today" is Accra's |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **DONE** for Inter and JetBrains Mono (§5.1) |

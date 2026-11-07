@@ -34,9 +34,9 @@ export function reachableNames(page: Page, includeLinks: boolean): Promise<strin
           'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
         ),
       ]
-        // Not a stop: the hidden date input that React Aria Components keeps beside a date field for autofill, which is out of the Tab order and
-        // out of the accessibility tree (tabindex="-1" inside an aria-hidden container). A real control that regressed to tabindex="-1" is
-        // still listed, so that the walks that compare this list with the Tab order fail on it.
+        // Not a stop: the hidden input that a library keeps beside a control for the form's value (Radix's checkbox and select do), which is out of
+        // the Tab order and out of the accessibility tree (tabindex="-1" inside an aria-hidden container). A real control that regressed to
+        // tabindex="-1" is still listed, so that the walks that compare this list with the Tab order fail on it.
         .filter(
           (element) =>
             element.getAttribute('tabindex') !== '-1' ||

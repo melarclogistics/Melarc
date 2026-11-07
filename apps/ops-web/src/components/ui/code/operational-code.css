@@ -1,0 +1,11 @@
+/*
+ * An operational code (design/DESIGN_SYSTEM.md section 5.1; COMPONENT_PATTERNS section 24.1): JetBrains Mono, weight 600, taken from the one token and
+ * never named here. It does not wrap or truncate, because a person must be able to quote the whole of it, and it keeps the case and the punctuation it was given.
+ */
+.ui-code {
+  font-family: var(--font-family-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  white-space: nowrap;
+}

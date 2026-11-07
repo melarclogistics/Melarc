@@ -1,0 +1,62 @@
+/*
+ * RecordHeader (design/COMPONENT_PATTERNS.md, *RecordHeader and StageTracker*): the code at 26/32 in the monospaced face, its status beside it, one sentence of where
+ * the record stands, the actions at the end, and the stage tracker below. The actions wrap under the identity where there is no room. The title takes the face
+ * from the one token (`.ui-code`), and its size here.
+ */
+.ui-record-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.ui-record-header__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+
+.ui-record-header__identity {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.ui-record-header__titleline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* The code is the title: 26px on a 32px line, weight 600 by the code's own rule, tightened a little as the page title is. */
+.ui-record-header .page-heading,
+.ui-record-header__heading {
+  margin: 0;
+  font-size: 1.625rem;
+  line-height: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.ui-record-header__status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ui-record-header__sentence {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-record-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-record-header__stages {
+  min-width: 0;
+}

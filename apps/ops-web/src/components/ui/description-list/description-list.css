@@ -1,0 +1,87 @@
+/*
+ * DescriptionList (design/COMPONENT_PATTERNS.md, *DescriptionList*): a grid of label and value, the label column 110px (6.875rem, so that enlarged text
+ * grows it), labels muted, values in the primary text. The section label above is the small-capitals label of the redesign (11.5px, 0.06em, uppercase, muted).
+ * Under 24rem a label sits over its value. Every colour, size and space is a token or a rem.
+ */
+.ui-description-list__heading {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 0.71875rem;
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-caption-line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ui-description-list__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+/* Each pair is a row of the grid; the wrapper carries no meaning and no box of its own. */
+.ui-description-list__pair {
+  display: grid;
+  grid-template-columns: 6.875rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.ui-description-list__label {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-description-list__value {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+  overflow-wrap: anywhere;
+}
+
+/* What the server did not state is said in words, quietly. */
+.ui-description-list__missing {
+  color: var(--color-text-muted);
+}
+
+/* While the facts are read: a bar where each value will be, the width of a short value. */
+.ui-description-list__placeholder {
+  display: block;
+  width: 60%;
+  height: 0.875rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-border-default);
+}
+
+.ui-description-list__status {
+  margin: 0;
+}
+
+@media (max-width: 24rem) {
+  .ui-description-list__pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-description-list__placeholder {
+    animation: ui-description-list-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes ui-description-list-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-description-list__placeholder {
+    border: 1px solid CanvasText;
+  }
+}

@@ -1,0 +1,234 @@
+/* The development showcase of the kit only (design/COMPONENT_PATTERNS.md section 27). Not part of the production build. Every colour, size and space is a token. */
+.showcase-kit {
+  box-sizing: border-box;
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+/* The width of a phone is the width a component has there: the page keeps 16px at its sides (the page frame of the redesign), not the 24px of a desk. */
+@media (max-width: 48rem) {
+  .showcase-kit {
+    padding: var(--space-4);
+  }
+}
+
+.showcase-kit__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.showcase-kit__note {
+  max-width: 48rem;
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.showcase-kit__nav ul,
+.showcase-kit__index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-6);
+  padding: 0;
+  list-style: none;
+}
+
+.showcase-kit__nav a {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-sm-size);
+  text-decoration: none;
+}
+
+.showcase-kit__nav a[aria-current='page'] {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+}
+
+.showcase-kit__index {
+  flex-direction: column;
+}
+
+.showcase-kit__index span {
+  margin-inline-start: var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.showcase-kit__group {
+  margin: var(--space-6) 0 var(--space-4);
+  font-size: var(--text-heading-lg-size);
+  line-height: var(--text-heading-lg-line-height);
+}
+
+.showcase-kit-theme {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.showcase-kit-theme__choice {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.showcase-kit-theme__choice[aria-pressed='true'] {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+}
+
+.showcase-kit-section {
+  margin-bottom: var(--space-10);
+}
+
+.showcase-kit-section__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-heading-md-size);
+  line-height: var(--text-heading-md-line-height);
+}
+
+.showcase-kit-section__note {
+  max-width: 52rem;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.showcase-kit-section__specimens {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.showcase-kit-specimen {
+  min-width: 0;
+  margin: 0;
+}
+
+.showcase-kit-specimen__label {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.71875rem;
+  font-weight: var(--text-heading-sm-weight);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.showcase-kit-specimen__body {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+}
+
+.showcase-kit-specimen__body--flush {
+  padding: 0;
+}
+
+.showcase-kit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.showcase-kit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  gap: var(--space-5);
+}
+
+.showcase-kit-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 48rem) {
+  .showcase-kit-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The record page example: two columns that become one on a narrow screen. */
+.showcase-kit-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+@media (max-width: 64rem) {
+  .showcase-kit-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.showcase-kit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.showcase-kit-tablet {
+  width: 48rem;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-default);
+}
+
+/* The tablet's rows hold 56px controls: a row is as tall as its control and a little air above and below it, so that two rows are not one long target. */
+.showcase-kit-tablet .ui-data-table td {
+  padding-block: var(--space-1);
+}
+
+/* The steppers of the count: the sign is the button, so it is drawn at the size of a thing to press. */
+.showcase-kit-count__step {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.showcase-kit-count__field {
+  width: 7rem;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-heading-sm-size);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.showcase-kit-opened {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+}
+
+/* In the queue example the views sit inside the page card with its own padding, and the table runs to the card's edges. */
+.showcase-kit-card {
+  min-width: 0;
+}
+
+.showcase-kit-card .ui-view-tabs__scroll {
+  padding-inline: var(--space-4);
+}

@@ -1,0 +1,111 @@
+/*
+ * FilterBar (design/COMPONENT_PATTERNS.md, *FilterBar*; PRODUCT_DESIGN_DIRECTION section 6.1): a row of what is applied, the dashed Filter button, and the
+ * order at the end. Compact density: 32px chips and button, with a 24px remove target inside the chip (WCAG 2.2), in rem so that enlarged text grows them.
+ * It wraps where it cannot share a row, so nothing is clipped at 320px or at enlarged text.
+ */
+.ui-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.ui-filter-bar:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+}
+
+.ui-filter-bar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-filter-bar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-filter-bar__chip-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The remove control is a bare icon button at the end of the chip: 24px square at the least. */
+.ui-filter-bar__remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.ui-filter-bar__remove:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+}
+
+.ui-filter-bar__remove:active {
+  background: var(--button-pressed-background);
+}
+
+/* The Filter button is the primitive's outline button with a dashed boundary: an invitation to add, where the chips are what is already there. */
+.ui-filter-bar .ui-filter-bar__add {
+  min-height: var(--control-height-sm);
+  border-style: dashed;
+  border-color: var(--color-border-control);
+  color: var(--color-text-secondary);
+}
+
+.ui-filter-bar .ui-filter-bar__add:hover {
+  color: var(--color-text-primary);
+}
+
+.ui-filter-bar .ui-filter-bar__clear {
+  min-height: 1.5rem;
+  padding: 0 var(--space-1);
+  font-size: var(--text-body-sm-size);
+}
+
+.ui-filter-bar__sort {
+  margin: 0 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-filter-bar__panel {
+  width: min(24rem, calc(100vw - 2rem));
+}
+
+@media (forced-colors: active) {
+  .ui-filter-bar__chip {
+    border-color: CanvasText;
+  }
+
+  .ui-filter-bar .ui-filter-bar__add {
+    border-color: ButtonText;
+  }
+}

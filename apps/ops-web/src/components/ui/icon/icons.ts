@@ -15,9 +15,11 @@ import {
   CircleCheck,
   ClipboardList,
   ClipboardPlus,
+  Ellipsis,
   Eye,
   EyeOff,
   Funnel,
+  Info,
   LaptopMinimalCheck,
   ListChecks,
   LogOut,
@@ -56,6 +58,7 @@ export const ICONS = {
   // Status: they supplement the words, never replace them (DESIGN_SYSTEM section 24).
   warning: CircleAlert,
   success: CircleCheck,
+  info: Info,
   filter: Funnel,
 
   // Navigation and the shell.
@@ -96,6 +99,8 @@ export const ICONS = {
   previous: ChevronLeft,
   next: ChevronRight,
   calendar: Calendar,
+  // The kit (redesign step R5): the overflow menu of a record's acts. (The "+" of adding a filter is `plus`, the shell's.)
+  'more-actions': Ellipsis,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

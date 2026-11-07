@@ -193,29 +193,30 @@ describe('the production build', () => {
     expect(packaged).toContain('Cole Bemis');
   });
 
-  // Break caught: React Aria Components, or a package it brings that ends up in the bundle, shipped without its licence (Apache-2.0 asks that a
-  // copy of the licence travel with the work, MIT that the notice does), or with a text that is not the package's own. The list of packages
-  // is held to the lockfile by aria-licences.test.ts.
-  it('ships React Aria Components and what it brings with their licences, byte for byte', async () => {
-    const aria = packageDirectory(APP_ROOT, 'react-aria-components');
-    const reactAria = packageDirectory(aria, 'react-aria');
+  // Break caught: Motion, or a package it brings that ends up in the bundle, shipped without its licence (MIT asks that the notice travel with the work),
+  // or with a text that is not the package's own. Two texts are shipped: Motion's own (the three packages of Motion B.V.) and Framer's (framer-motion). The
+  // list of packages is held to the lockfile by motion-licences.test.ts.
+  it('ships Motion and what it brings with their licences, byte for byte', async () => {
+    const motion = packageDirectory(APP_ROOT, 'motion');
+    const framer = packageDirectory(motion, 'framer-motion');
     const wanted: readonly (readonly [string, string])[] = [
-      ['React-Aria-Apache-2.0.txt', aria],
-      ['swc-helpers-Apache-2.0.txt', packageDirectory(aria, '@swc/helpers')],
-      ['use-sync-external-store-MIT.txt', packageDirectory(aria, 'use-sync-external-store')],
-      ['clsx-MIT.txt', packageDirectory(reactAria, 'clsx')],
-      ['aria-hidden-MIT.txt', packageDirectory(reactAria, 'aria-hidden')],
+      ['Motion-MIT.txt', motion],
+      ['Motion-MIT.txt', packageDirectory(framer, 'motion-dom')],
+      ['Motion-MIT.txt', packageDirectory(framer, 'motion-utils')],
+      ['Framer-Motion-MIT.txt', framer],
     ];
 
     for (const [file, directory] of wanted) {
-      const licence = (await readdir(directory)).find((entry) => /^licen[cs]e$/i.test(entry));
+      const licence = (await readdir(directory)).find((entry) =>
+        /^licen[cs]e(?:\.md)?$/i.test(entry),
+      );
       expect(licence, directory).toBeDefined();
       const packaged = await readFile(join(directory, licence ?? ''), 'utf8');
-      expect(output.get(`licenses/${file}`), file).toBe(packaged);
+      expect(output.get(`licenses/${file}`), `${file} for ${directory}`).toBe(packaged);
     }
-    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Apache License');
-    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Version 2.0');
-    expect(output.get('licenses/clsx-MIT.txt')).toContain('MIT License');
+    expect(output.get('licenses/Motion-MIT.txt')).toContain('The MIT License');
+    expect(output.get('licenses/Motion-MIT.txt')).toContain('Motion');
+    expect(output.get('licenses/Framer-Motion-MIT.txt')).toContain('Framer B.V.');
   });
 
   // Break caught: a library of the shadcn/ui primitives (Radix UI and what it brings, cmdk, sonner, the calendar and its date library, the table,

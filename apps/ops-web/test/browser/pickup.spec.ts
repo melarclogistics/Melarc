@@ -69,10 +69,7 @@ async function fillBooking(page: Page): Promise<void> {
   await page.getByRole('searchbox', { name: /Search vendors/ }).fill('demo');
   await page.getByRole('searchbox', { name: /Search vendors/ }).press('Enter');
   await page.getByRole('button', { name: 'Choose: Demo Fabrics Ltd' }).click();
-  const day = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await day.click();
   await page.keyboard.type('03112026');
   await page.getByRole('textbox', { name: /Number of packages/ }).fill('3');

@@ -1,0 +1,136 @@
+import { useRef, type ReactNode } from 'react';
+
+import { Button } from '../../primitives/button';
+import { Popover, PopoverContent, PopoverTrigger } from '../../primitives/popover';
+import { Icon } from '../icon/Icon';
+import './filter-bar.css';
+
+/** One filter that is applied: the words of the choice, as they would be said ("Service date: this week"). */
+export interface FilterChip {
+  /** Tells the chip from the others; what `onRemove` gives back. Unique in a bar. */
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface FilterBarProps {
+  /** Names the group of filters: "Filters". */
+  readonly label: string;
+  /** The filters that are applied now, one chip each. The page holds them (usually in the address): the bar only asks for one to be removed. */
+  readonly chips: readonly FilterChip[];
+  readonly onRemove: (id: string) => void;
+  /** Takes every filter off at once. Offered only while two or more are applied. */
+  readonly onClearAll?: () => void;
+  /**
+   * The page's own fields (a Select, a DateField), drawn in the popover that the "Filter" button opens. Without it there is no button: a queue with
+   * nothing to choose from has no filter to add.
+   */
+  readonly filterPanel?: ReactNode;
+  /** What the button and its popover are called. Default "Filter". */
+  readonly filterLabel?: string;
+  /** How the rows are ordered, in words ("Sorted by oldest first"), at the end of the bar. The bar sorts nothing: the screen does, and says so here. */
+  readonly sortLabel?: string;
+}
+
+/**
+ * The filters of a queue (PRODUCT_DESIGN_DIRECTION section 6.1; COMPONENT_PATTERNS, *FilterBar*): what is applied is visible as a chip that can be removed
+ * on its own, a dashed "+ Filter" button opens a popover with the page's fields, and the order the rows are in is told at the end. It filters nothing
+ * itself and holds no filter: the screen does, and the server answers. Removing a chip moves focus to the next chip's remove button (or the
+ * previous one, or the Filter button), so a keyboard user is never left on a control that is gone.
+ */
+export function FilterBar({
+  label,
+  chips,
+  onRemove,
+  onClearAll,
+  filterPanel,
+  filterLabel = 'Filter',
+  sortLabel,
+}: FilterBarProps) {
+  const root = useRef<HTMLDivElement>(null);
+  const removers = useRef(new Map<string, HTMLButtonElement>());
+  const adder = useRef<HTMLButtonElement>(null);
+
+  const duplicate = chips.find(
+    (chip, index) => chips.findIndex((other) => other.id === chip.id) !== index,
+  );
+  if (duplicate !== undefined) {
+    throw new Error(`Two filters of "${label}" have the id "${duplicate.id}".`);
+  }
+
+  function remove(index: number): void {
+    const chip = chips[index];
+    if (chip === undefined) return;
+    // Focus goes to what stays: the next chip's remove button, else the previous one, else the Filter button, else the bar itself.
+    const next = chips[index + 1] ?? chips[index - 1];
+    const target =
+      (next === undefined ? undefined : removers.current.get(next.id)) ??
+      adder.current ??
+      root.current;
+    target?.focus();
+    onRemove(chip.id);
+  }
+
+  return (
+    <div ref={root} role="group" aria-label={label} tabIndex={-1} className="ui-filter-bar">
+      {chips.length === 0 ? null : (
+        // `role="list"` outright: Safari drops the list from one whose markers a style removes.
+        <ul className="ui-filter-bar__chips" role="list" aria-label="Applied filters">
+          {chips.map((chip, index) => (
+            <li key={chip.id} className="ui-filter-bar__chip">
+              <span className="ui-filter-bar__chip-label">{chip.label}</span>
+              <button
+                type="button"
+                className="ui-filter-bar__remove"
+                aria-label={`Remove filter: ${chip.label}`}
+                ref={(node) => {
+                  if (node === null) removers.current.delete(chip.id);
+                  else removers.current.set(chip.id, node);
+                }}
+                onClick={() => {
+                  remove(index);
+                }}
+              >
+                <Icon name="close" size="sm" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {filterPanel === undefined ? null : (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              ref={adder}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ui-filter-bar__add"
+            >
+              <Icon name="plus" size="sm" />
+              {filterLabel}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" aria-label={filterLabel} className="ui-filter-bar__panel">
+            {filterPanel}
+          </PopoverContent>
+        </Popover>
+      )}
+      {onClearAll !== undefined && chips.length >= 2 ? (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="ui-filter-bar__clear"
+          onClick={() => {
+            onClearAll();
+            // Every chip is gone: focus goes to the Filter button, which stays.
+            (adder.current ?? root.current)?.focus();
+          }}
+        >
+          Clear all
+        </Button>
+      ) : null}
+      {sortLabel === undefined ? null : <p className="ui-filter-bar__sort">{sortLabel}</p>}
+    </div>
+  );
+}

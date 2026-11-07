@@ -1,8 +1,8 @@
 /*
- * DatePicker (design/COMPONENT_PATTERNS.md section 22a): React Aria Components' behaviour in the portal's look. The control is the Input's
- * recipe (DESIGN_SYSTEM section 4.6): its boundary is border.control, 3:1 on every light surface, and its height is a minimum in rem so
- * enlarged text grows it. Every colour, size, space and time comes from tokens.css. Focus is the global ring of base.css, on each part that
- * takes it: a segment, the calendar button and a day.
+ * DatePicker (design/COMPONENT_PATTERNS.md section 22a): one text field for DD/MM/YYYY and a calendar button, in the portal's look, with the calendar of the
+ * shadcn/ui primitives in a popover. The control is the Input's recipe (DESIGN_SYSTEM section 4.6): its boundary is border.control, 3:1 on every light surface,
+ * and its height is a minimum in rem so enlarged text grows it. Every colour, size, space and time comes from tokens.css. Focus is the global ring of base.css, on
+ * each part that takes it: the field, the calendar button and a day.
  */
 .ui-date-picker {
   display: block;
@@ -31,7 +31,7 @@
 
 /*
  * The states below share a specificity, so their order is their precedence: hover, then read-only, then invalid, then disabled. An invalid
- * read-only date still shows its danger border, and the Field adds the icon and the message, so the red is never alone.
+ * read-only date still shows its danger border, and the Field adds the icon and the message (and the control its own, below), so the red is never alone.
  */
 .ui-date-picker--readonly .ui-date-picker__control {
   border-color: var(--color-border-strong);
@@ -51,48 +51,43 @@
   cursor: not-allowed;
 }
 
+/*
+ * The field itself: no boundary of its own (the control has it), the text in tabular figures so that the digits do not shift as they are typed. Its natural
+ * width is ten characters (a date written whole), not the twenty of a text field, so that a row of filters that sizes the control by its content gives it
+ * what a date needs and no more; it grows into the room it is given. (A width, not only a flex basis: a basis does not change the width a text field
+ * contributes to the size of what contains it.)
+ */
 .ui-date-picker__input {
-  display: flex;
-  flex: 1;
-  align-items: center;
+  flex: 1 1 auto;
+  width: 10ch;
   min-width: 0;
-  white-space: nowrap;
-}
-
-/* A part of the date: at least 24px tall (WCAG 2.2 target size) even where the line is shorter. */
-.ui-date-picker__segment {
-  padding: var(--space-1);
+  min-height: 1.875rem;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: 0;
   border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-variant-numeric: tabular-nums;
 }
 
-.ui-date-picker__segment[data-type='literal'] {
-  padding-inline: 0;
-}
-
-.ui-date-picker__segment[data-placeholder] {
+/* The muted text colour is for the default surface only (DESIGN_SYSTEM section 4.6); a read-only date is on the subtle one, where the secondary text reads. */
+.ui-date-picker__input::placeholder {
   color: var(--color-text-muted);
+  opacity: 1;
 }
 
-/* The part that has focus is also filled, as a native date is; the ring itself is the global one of base.css. */
-.ui-date-picker__segment[data-focused] {
-  background: var(--color-surface-selected);
-}
-
-/*
- * The muted text colour is for the default surface only (DESIGN_SYSTEM section 4.6): on the selected surface it is 4.32:1, and on the subtle
- * one it passes by a hundredth. An empty part that has focus is on the first, and an empty read-only date is on the second.
- */
-.ui-date-picker__segment[data-placeholder][data-focused],
-.ui-date-picker--readonly .ui-date-picker__segment[data-placeholder] {
+.ui-date-picker--readonly .ui-date-picker__input::placeholder {
   color: var(--color-text-secondary);
 }
 
-.ui-date-picker--disabled .ui-date-picker__segment {
+.ui-date-picker--disabled .ui-date-picker__input {
   color: var(--color-text-disabled);
+  cursor: not-allowed;
 }
 
-/* The calendar button and the two that turn the months: a bare icon button, as IconButton is (section 22), at least 2rem square. */
+/* The calendar button: a bare icon button, as IconButton is (section 22), at least 2rem square. */
 .ui-date-picker__button {
   display: inline-flex;
   flex: none;
@@ -127,15 +122,49 @@
   cursor: not-allowed;
 }
 
-/* The calendar opens over the page, under the control, and scrolls inside itself rather than push the page sideways at 320px or 200% text. */
+/* A text that is not a date says so in words, under the control, with the icon of the Field's own errors: the red border is never alone. */
+.ui-date-picker__problem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--color-status-danger-foreground);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-date-picker__problem svg {
+  flex: none;
+  margin-top: 0.125rem;
+}
+
+/*
+ * The calendar opens over the page, under the control, and scrolls inside itself rather than push the page sideways at 320px or 200% text. The popover primitive
+ * brings its own width and padding; the calendar inside it brings both, so neither is the popover's here.
+ */
 .ui-date-picker__popover {
+  width: auto;
   max-width: calc(100vw - 1.5rem);
+  padding: 0;
   overflow: auto;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-default);
-  color: var(--color-text-primary);
-  box-shadow: var(--shadow-floating);
+}
+
+/*
+ * The primitive sizes a day so that seven of them and the calendar's padding fill 100vw less 3rem. The popover has a border of 1px on each side, which that
+ * leaves out, so on the narrowest screen the calendar was 2px wider than the room inside the border and the popover scrolled. Two pixels (in rem, so that
+ * enlarged text keeps them) come off the room.
+ */
+.ui-date-picker__popover [data-slot='calendar'] {
+  --cell-size: min(var(--control-height-md), calc((100vw - 3rem - 0.125rem) / 7));
+}
+
+/*
+ * A day of the calendar has the names of the earlier calendar's days (ui-date-picker__day, its today class and the marks data-selected and data-outside-month, set in
+ * DatePicker.tsx), and its look is the primitive's. A day that is not in the month is not drawn: its square stays, so that the weeks keep their shape, and it is out of the
+ * keyboard's way and the screen reader's (hidden, not removed).
+ */
+.ui-date-picker__day[data-outside-month] {
+  visibility: hidden;
 }
 
 /*
@@ -146,127 +175,17 @@
   overflow: visible;
 }
 
-.ui-date-picker__popover[data-entering] {
-  animation: ui-date-picker-open var(--motion-normal) ease-out;
-}
-
-.ui-date-picker__popover[data-exiting] {
-  animation: ui-date-picker-open var(--motion-fast) ease-in reverse;
-}
-
-@keyframes ui-date-picker-open {
-  from {
-    opacity: 0;
-    transform: translateY(-0.25rem);
+/* Under reduced motion nothing moves, and nothing is animating at all: the popover primitive's animation is switched off, not only shortened to nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .ui-date-picker__popover {
+    animation: none;
   }
-}
-
-.ui-date-picker__dialog {
-  padding: var(--space-2);
-}
-
-.ui-date-picker__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-.ui-date-picker__month {
-  margin: 0;
-  font-size: var(--text-heading-sm-size);
-  line-height: var(--text-heading-sm-line-height);
-  font-weight: var(--text-heading-sm-weight);
-}
-
-.ui-date-picker__grid {
-  border-collapse: collapse;
-}
-
-/* A day is a square that is 2.5rem and shrinks, down from there, to seven across the screen, so the week fits at 320px. */
-.ui-date-picker__grid th {
-  width: min(var(--control-height-md), calc((100vw - 3rem) / 7));
-  padding: 0 0 var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--text-label-sm-size);
-  line-height: var(--text-label-sm-line-height);
-  font-weight: var(--text-label-sm-weight);
-  text-align: center;
-}
-
-.ui-date-picker__day {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: min(var(--control-height-md), calc((100vw - 3rem) / 7));
-  aspect-ratio: 1;
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background-color var(--motion-fast);
-}
-
-.ui-date-picker__day[data-outside-month] {
-  visibility: hidden;
-}
-
-.ui-date-picker__day[data-hovered] {
-  background: var(--color-surface-subtle);
-}
-
-.ui-date-picker__day[data-pressed] {
-  background: var(--button-pressed-background);
 }
 
 /*
- * Today is told by more than colour: a bar under the number, which is the number's colour, so it reads on the selected day too. The bar is a
- * border and not a fill: a fill is dropped where the system forces its colours, and a border is drawn in the text's colour.
+ * Forced colours: the system draws a control by its border, and a chosen day by the system's own highlight, since a fill is dropped (the hover rule is named so that it does not
+ * win with the brand colour under the system's highlight text).
  */
-.ui-date-picker__day--today {
-  font-weight: var(--text-label-md-weight);
-}
-
-.ui-date-picker__day--today::after {
-  content: '';
-  position: absolute;
-  bottom: var(--space-1);
-  width: var(--space-4);
-  height: 0;
-  border-bottom: 0.125rem solid currentcolor;
-  border-radius: var(--radius-full);
-}
-
-.ui-date-picker__day[data-selected] {
-  background: var(--color-action-primary);
-  color: var(--color-action-primary-text);
-  font-weight: var(--text-heading-sm-weight);
-}
-
-.ui-date-picker__day[data-selected][data-hovered] {
-  background: var(--color-action-primary-hover);
-}
-
-.ui-date-picker__day[data-disabled],
-.ui-date-picker__day[data-unavailable] {
-  color: var(--color-text-disabled);
-  cursor: not-allowed;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ui-date-picker__popover[data-entering],
-  .ui-date-picker__popover[data-exiting] {
-    animation: none;
-  }
-
-  .ui-date-picker__button,
-  .ui-date-picker__day {
-    transition: none;
-  }
-}
-
-/* Forced colours: the system draws a control by its border, and a chosen day by the system's own highlight, since a fill is dropped. */
 @media (forced-colors: active) {
   .ui-date-picker__control {
     border-color: ButtonText;
@@ -277,19 +196,14 @@
     color: GrayText;
   }
 
-  .ui-date-picker__popover {
-    border-color: CanvasText;
-  }
-
   .ui-date-picker__day[data-selected],
-  .ui-date-picker__day[data-selected][data-hovered] {
+  .ui-date-picker__day[data-selected]:hover {
     forced-color-adjust: none;
     background: Highlight;
     color: HighlightText;
   }
 
-  .ui-date-picker__day[data-disabled],
-  .ui-date-picker__day[data-unavailable] {
+  .ui-date-picker__day[aria-disabled='true'] {
     color: GrayText;
   }
 }

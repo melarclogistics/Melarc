@@ -429,8 +429,7 @@ async function buildRun(page: Page): Promise<void> {
   }
   await page
     .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first()
+    .getByRole('textbox')
     .click();
   await page.keyboard.type(DAY_DIGITS, { delay: PACE.key });
   await pause(page, PACE.step);

@@ -284,10 +284,8 @@ describe('the manifests: filtering', () => {
     const { user, router } = open(undefined, READER, '/manifests?state=DRAFT');
     await table();
     const group = screen.getByRole('group', { name: 'Service date' });
-    const [day] = within(group).getAllByRole('spinbutton');
-    if (day === undefined) throw new Error('no day');
 
-    await user.click(day);
+    await user.click(within(group).getByRole('textbox'));
     await user.keyboard('04112026');
 
     await waitFor(() => {
@@ -325,11 +323,9 @@ describe('the manifests: filtering', () => {
     await user.selectOptions(choose, 'DISPATCHED');
     await user.selectOptions(choose, '');
     await user.selectOptions(choose, 'COMPLETED');
-    const [day] = within(screen.getByRole('group', { name: 'Service date' })).getAllByRole(
-      'spinbutton',
+    await user.click(
+      within(screen.getByRole('group', { name: 'Service date' })).getByRole('textbox'),
     );
-    if (day === undefined) throw new Error('no day');
-    await user.click(day);
     await user.keyboard('04112026');
     await waitFor(() => {
       expect(queryOf().get('service_date')).toBe('2026-11-04');
@@ -390,12 +386,10 @@ describe('the manifests: paging under a filter', () => {
     await table();
     await user.click(screen.getByRole('button', { name: /Next page/ }));
     await screen.findByText(/on page 2/);
-    const [day] = within(screen.getByRole('group', { name: 'Service date' })).getAllByRole(
-      'spinbutton',
-    );
-    if (day === undefined) throw new Error('no day');
 
-    await user.click(day);
+    await user.click(
+      within(screen.getByRole('group', { name: 'Service date' })).getByRole('textbox'),
+    );
     await user.keyboard('04112026');
 
     await waitFor(() => {

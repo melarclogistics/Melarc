@@ -96,6 +96,8 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *   my-work     My work, the landing (R4), the same two ways: its frame, its cards and each state of the read of the summary.
  *   request-rate the requests of a heavy officer's session (audit follow-up of 7 November 2026, B13) against the production build: a session of three
  *               minutes at a person's pace, counted by operation. It is skipped unless MELARC_MEASURE=1 (it takes about three and a half minutes).
+ *   kit         the Melarc component kit of the showcase (`/__showcase/kit/<group>`, redesign step R5): WCAG 2.2 in both themes, sizes and looks, the keyboard,
+ *               and what moves, against the development server; and, in a project of its own, the same pages built for production under the strict policy.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -316,6 +318,19 @@ export default defineConfig({
       name: `my-work-dev-${engine}`,
       testMatch: 'my-work.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The Melarc component kit of the showcase (redesign step R5): WCAG 2.2 in both themes, the sizes and looks only the stylesheet gives, the keyboard
+      // and what moves under Motion and under reduced motion, against the development server.
+      name: `kit-${engine}`,
+      testMatch: 'kit.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The same pages built for production under the strict content-security policy: Motion and the libraries raise no violation in any engine.
+      name: `kit-policy-${engine}`,
+      testMatch: 'kit-policy.spec.ts',
+      use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
     },
   ]),
   webServer: [

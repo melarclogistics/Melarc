@@ -96,10 +96,7 @@ const poolCards = (page: Page) =>
   page.getByRole('list', { name: 'Confirmed pickups waiting for a manifest' });
 
 async function typeDate(page: Page, digits: string): Promise<void> {
-  const day = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await day.click();
   await page.keyboard.type(digits);
 }
@@ -578,7 +575,7 @@ const listRequests = (api: ManifestApi) =>
 
 test.describe('filtering the list', () => {
   async function typeFilterDate(page: Page, digits: string): Promise<void> {
-    const day = page.getByRole('group', { name: 'Service date' }).getByRole('spinbutton').first();
+    const day = page.getByRole('group', { name: 'Service date' }).getByRole('textbox');
     await day.click();
     await page.keyboard.type(digits);
   }

@@ -47,6 +47,14 @@ function showcaseRoutes(): RouteObject[] {
         return { Component: ShellShowcasePage };
       },
     },
+    {
+      // The Melarc component kit (redesign step R5), one page for each group of components and for the composed examples: the same gate.
+      path: '__showcase/kit/:group?',
+      lazy: async () => {
+        const { KitShowcasePage } = await import('../showcase/kit/KitShowcase');
+        return { Component: KitShowcasePage };
+      },
+    },
   ];
 }
 

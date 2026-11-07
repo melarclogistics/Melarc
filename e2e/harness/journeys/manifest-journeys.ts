@@ -45,13 +45,10 @@ function hubToday(): string {
   }).format(new Date());
 }
 
-/** The service date field takes the day first: `DDMMYYYY` typed into the day segment moves on by itself. */
+/** The service date field takes the day first: `DDMMYYYY` typed into the field has its slashes put in for it. */
 async function typeServiceDate(page: Page, day: string): Promise<void> {
   const [year = '', month = '', date = ''] = day.split('-');
-  const first = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const first = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await first.click();
   await page.keyboard.type(`${date}${month}${year}`);
 }

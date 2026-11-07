@@ -14,15 +14,20 @@ function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimiti
 /*
  * A popover floats, so it takes the one soft shadow (design/DESIGN_SYSTEM.md section 8), the raised surface and the default border. It opens in
  * `motion.normal`, entering on the enter easing and leaving on the exit easing (section 9); under reduced motion the durations are zero.
+ *
+ * `container` is not in the registry's source (design/DESIGN_SYSTEM.md section 29.6): the element the popover is drawn into, the body unless one is given.
+ * A modal `<dialog>` is in the top layer and the page behind it is inert, so a popover opened from inside one (the date field's calendar) is drawn into
+ * the dialog, or it would open under it, unseen and out of reach.
  */
 function PopoverContent({
   className,
   align = 'center',
   sideOffset = 4,
+  container,
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+}: React.ComponentProps<typeof PopoverPrimitive.Content> & { container?: HTMLElement | null }) {
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={container}>
       <PopoverPrimitive.Content
         data-slot="popover-content"
         align={align}

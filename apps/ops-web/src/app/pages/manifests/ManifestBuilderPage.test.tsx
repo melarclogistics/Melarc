@@ -125,9 +125,7 @@ const box = async (code: string) =>
 
 async function typeDate(user: User, digits: string): Promise<void> {
   const group = screen.getByRole('group', { name: /Service date/ });
-  const [day] = within(group).getAllByRole('spinbutton');
-  if (day === undefined) throw new Error('no day');
-  await user.click(day);
+  await user.click(within(group).getByRole('textbox'));
   await user.keyboard(digits);
 }
 

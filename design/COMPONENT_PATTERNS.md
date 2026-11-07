@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE IMPLEMENTATION BASELINE — approved by the Product Owner on 6 October 2026; document only patterns that exist or are immediately being implemented  
 > **Version:** 1.2  
-> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4, §9, §12, §24, §33, §36, §40, §42), and on 5 November 2026 for the planned kit of the Ops Portal redesign (§1, §3, §12.6, §21, §22f, §37, §38, §40), and again that day in redesign step R2 for the heights, the side menu's current item, the Toast's actions, the table's rows and the token file's description (§4, §12.6, §21, §22, §42)  
+> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4, §9, §12, §24, §33, §36, §40, §42), and on 5 November 2026 for the planned kit of the Ops Portal redesign (§1, §3, §12.6, §21, §22f, §37, §38, §40), and again that day in redesign step R2 for the heights, the side menu's current item, the Toast's actions, the table's rows and the token file's description (§4, §12.6, §21, §22, §42), and on 6 November 2026 in redesign step R5 for the first half of the component kit, Motion and the date field's new anatomy (§3, §11, §21, §22a, §22g, §27, §37, §40)  
 > **Repository path:** `design/COMPONENT_PATTERNS.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`, `design/DESIGN_SYSTEM.md`  
 > **Owns:** implemented or immediately planned UI component patterns, their anatomy, variants, states, accessibility expectations, density behavior, and usage rules  
@@ -97,10 +97,11 @@ Every reusable component must:
 9. document any important density or responsive behavior;
 10. avoid product-specific business logic unless the component is explicitly a domain pattern;
 11. take behaviour that no native element gives (a calendar, a menu, a searchable list) from the shadcn/ui primitives (Radix UI), through a
-    component of `components/ui`, and never from a hand-built widget or a second library (DESIGN_SYSTEM §29.2). React Aria Components stays
-    behind the components already built on it until they move (§37), and no new component is built on it (DESIGN_SYSTEM §24a).
+    component of `components/ui`, and never from a hand-built widget or a second library (DESIGN_SYSTEM §29.2). React Aria Components has been
+    removed (§37).
     TanStack Table (the data model of the queue table) sits behind a component of `components/ui` on the terms of DESIGN_SYSTEM §23;
-    Motion (animation) is not adopted.
+    Motion (animation) is adopted, behind the one door of `components/ui/motion/`, on the motion tokens and off under reduced motion
+    (DESIGN_SYSTEM §24a; §37).
 
 ---
 
@@ -669,6 +670,8 @@ rather than only an unlabeled spinner.
 
 PageHeader establishes page-level hierarchy.
 
+*The redesign's PageHeader* (a count, a freshness line, a breadcrumb and the 24/30 title) is a separate component, `components/ui/page-header/`, built in step R5 (§37, *the kit as built*). This initial one stays ACTIVE, and the screens that import it unchanged, until steps R6 and R7 move them.
+
 ### 11.2 Anatomy
 
 ```text
@@ -1198,15 +1201,16 @@ there is none teaches people to ignore it.
 
 ## 21. Toast
 
-> **Status:** PROPOSED (the planned kit of §37; it was DEFERRED until the redesign of 5 November 2026)
+> **Status:** BUILT (redesign step R5, first half, 6 November 2026; the component is described in §37, *the kit as built*; ACTIVE when a screen uses it and the Product Owner accepts it)  
+> **Code:** `apps/ops-web/src/components/ui/toast/`
 
-The Product Owner decided one workflow on 5 November 2026: the success of a task lands as a toast with "Open" and "Do another" ([PRODUCT_DESIGN_DIRECTION §6.3](PRODUCT_DESIGN_DIRECTION.md#63-task-form)). **A toast that carries actions does not time out** (approved the same day, so that a person has the time to use the action, WCAG 2.2.1): it stays until an action is taken or it is dismissed. Before the toast is built (redesign step R5) it still has to establish:
+The Product Owner decided one workflow on 5 November 2026: the success of a task lands as a toast ([PRODUCT_DESIGN_DIRECTION §6.3](PRODUCT_DESIGN_DIRECTION.md#63-task-form)). **A toast that carries an action does not time out** (approved the same day, so that a person has the time to use the action, WCAG 2.2.1): it stays until the action is taken or it is dismissed. The three things this section had to establish before the toast was built are settled by the component:
 
-- what other messages are transient;
-- which messages must remain persistent;
-- accessibility/live-region behavior.
+- **Which messages are transient.** A toast with no action goes after six seconds: it acknowledges what the page already shows.
+- **Which must remain.** A toast with an action stays until dismissed. **Important business outcomes never exist only in a disappearing toast:** the state reached is also the page's own (a changed row, a state told on the page), and the toast is the acknowledgement, never the record.
+- **Live-region behaviour.** The toaster is a polite live region that the keyboard can reach (Alt+T); a toast appears without taking focus; its action and its dismiss control are real buttons; the message is read once (the tone's icon is decoration); its motion stops under reduced motion.
 
-Important business outcomes must not exist only in disappearing toast messages.
+**One action, and two words.** The toast takes **at most one action, and the type allows only "Open" or "Undo"** (the Product Owner's brief for step R5, 6 November 2026): "Undo" only where the server allows undoing that act, "Open" where the act made something to open. The task form's success of §6.3 of the direction names two ("Open" and "Do another"); the built toast cannot carry both, so a page that needs "Do another" draws it as its own control beside the toast's "Open" until the two statements are reconciled (an open item for the Product Owner).
 
 ---
 
@@ -1233,68 +1237,42 @@ A native `<button>` named by a required `label` and drawn with one icon of the f
 
 ## 22a. DatePicker
 
-> **Status:** IMPLEMENTING (28 October 2026: built and proven in the showcase, and reviewed the same day, with the runs recorded in [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026); ACTIVE when a screen first uses it and the Product Owner accepts its look)  
+> **Status:** IMPLEMENTING (28 October 2026: built and proven in the showcase, and reviewed the same day, with the runs recorded in [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026); **rebuilt on 6 November 2026** (redesign step R5) on the calendar and popover primitives, behind the same public API, with one typed field in place of three parts; ACTIVE when a screen first uses it and the Product Owner accepts its look)
 > **Code:** `apps/ops-web/src/components/ui/date-picker/`
 
-One calendar date, typed by its day, month and year or chosen from a calendar that opens under the control. Its behaviour is React Aria
-Components' (DESIGN_SYSTEM §24a); its properties and its look are the portal's. It is the one component still built on that library, and
-the plan for it is the phase-out table of §37.
+One calendar date, typed as DD/MM/YYYY into one field or chosen from a calendar that opens under it. Its behaviour is the shadcn/ui calendar's (react-day-picker) and popover's (Radix UI) under a text field that reads strictly (DESIGN_SYSTEM §24a); its properties and its look are the portal's. It was the one component built on React Aria Components, which left with it (§37).
 
 ### 22a.1 Anatomy
 
 ```text
 DatePicker (inside a Field)
-├── group    named by the Field's label, described by its help and error
-│   ├── day, month, year    three editable parts, each its own stop for Tab
+├── group    named by the Field's label, described by its help and error (and by its own message, below)
+│   ├── field    one text field typed as DD/MM/YYYY: the Field's label is a real label for it
 │   └── calendar button
-└── calendar    a popover holding a dialog: the month, previous and next, the days
+├── message  only when the text is not a date: in words, with the Field's own icon
+└── calendar    a popover holding a dialog ("Choose a date"): the month, previous and next, the days
 ```
 
 ### 22a.2 Rules
 
-- **The value is text.** `value` and `onChange` are `YYYY-MM-DD` or `null`; `minValue` and `maxValue` are `YYYY-MM-DD` or left out. A page never
-  sees a date object of the library. Text that is not a date of the calendar (`2026-02-30`) is drawn as no date, never as another one.
-- **When the page hears.** `onChange` gives a date once it is whole and real, and `null` when every part is cleared. While a date is typed
-  the page hears each whole date on the way (the year 2, then 20, then 202, then 2026), so what it holds is checked and never trusted. A
-  person who clears one part of a whole date and leaves the control would leave the page holding the date it last heard of and the control
-  blank in a place, and would submit it: on leaving, the control tells the page `null` and starts again from none. Moving between the parts,
-  to the calendar button or into the calendar is not leaving, and neither is the window losing focus (another window, the address bar): focus comes back to a control as it was left. A read-only or disabled control, and a value that is not a date, are never reconciled. A year typed in two digits is that year (26 is the year 26, shown as 26):
-  nothing guesses a century, and the page's check refuses it. A date that does not exist (30 February) is moved to the nearest real one when
-  the person leaves, and that is given.
-- **`minValue` and `maxValue`** draw the days outside them as unavailable in the calendar, where they cannot be chosen; a date typed outside
-  them is still given. They are hints about what is worth choosing, never a rule: the page checks what it can and the server decides
-  (sections 24 and 25). Which days a pickup can be booked for (Monday to Saturday, the cut-off, the zone's days) is the page's question and
-  the server's answer, not this component's.
-- **Language and day.** Day, month, year; the week starts on Monday; English month names; fixed by the portal and not the browser's
-  (DESIGN_SYSTEM §24a). Today is the day in Accra and is told by more than colour: bold, with a bar under the number. (A screen reader's word
-  "today" is the library's and follows the machine's zone: a known edge for a machine outside Ghana.)
-- **Inside a Field** it is named by the Field's label (`aria-labelledby`, because the control is not one labelable element; the Field
-  exposes its label's id), described by its help and error, invalid when the Field has an error (a 2px danger border, with the Field's icon
-  and message, so the red is never alone) and required when the Field says so. On its own it needs `aria-label`.
-- **States.** Empty (it shows `dd`, `mm` and `yyyy`), filled, focused (the global ring, on the part, the button or the day that has focus),
-  invalid, read-only (legible and focusable, no calendar: its parts are not styled as disabled, and its calendar button is, since it does nothing) and disabled (not focusable, no calendar). A day is today,
-  selected (the fill of Primary and bold, so not by colour alone; the system's highlight under forced colours), hovered or unavailable.
-- **Keys** (the library's): Tab walks the parts and the button; digits type and move to the next part; the arrows step a part; Backspace
-  takes a digit; Enter or Space on the button opens the calendar, which opens on the date, or on today; the arrows move by day and by week,
-  Page Up and Page Down by month; Enter chooses and closes and focus returns to the button; Escape closes and changes nothing.
-- **In a modal dialog** the calendar is drawn into the dialog (the page behind a modal dialog is inert, and the top layer is above the body): `Dialog` gives its element to what it holds, and the dialog lets an open calendar overhang its edge. The library marks the prop that sets the container deprecated; the use of it is the one noted in the code.
-- **A label** that is not one element's (a date is three parts) leads to the first part when it is clicked, as a label leads to an input.
-- **Size and reflow.** The control is at least `control.height.md` tall; the calendar button and the two month buttons are at least 2rem
-  square; a day is a square of 2.5rem that shrinks, if it must, until seven fit across the screen, so that the week fits at 320px;
-  everything is in rem, so enlarged text grows it; the calendar scrolls inside itself and never pushes the page sideways (WCAG 1.4.4 and
-  1.4.10).
-- **Motion.** The calendar fades in over `motion.normal`; under reduced motion nothing moves.
-- **Not here:** a range of dates, a time of day, a date with a time (section 37), and a native `<input type="date">` anywhere in the
-  application (a test fails on one).
+- **The value is text.** `value` and `onChange` are `YYYY-MM-DD` or `null`; `minValue` and `maxValue` are `YYYY-MM-DD` or left out. A page never sees a date object. Text that is not a date of the calendar (`2026-02-30`) is drawn as no date, never as another one.
+- **Reading is strict** (`day-first.ts`). Only `DD/MM/YYYY` is a date: two digits, a slash, two digits, a slash, four digits, and a day that is on the calendar. Nothing is guessed and nothing is corrected: not a year of fewer than four digits taken as a year (26 is not the year 26, nor 2026), not a day that its month does not have moved to one that it does (30 February is not the 28th), not a day and a month the wrong way round, not a separator that is not a slash. **Typing is helped, reading is not:** while digits are typed the slashes are put in (`28102026` is `28/10/2026`; a slash typed after one digit pads it, `3/` is `03/`; deleting leaves the text exactly as it was left, so that a part that is cleared stays cleared and the others stay where they were: `/10/2026`), and only digits and slashes are taken. A paste that holds anything else (`2026-10-28`, `28.10.2026`) is kept as it was pasted, so that the reading says what is wrong with it instead of the mask turning it into another date.
+- **An impossible date is refused, and the year is required in full** (the Product Owner's decision of 7 November 2026). A **day that its month does not have** (the 29th to the 31st) is refused in words that name it, *There is no 30 February* (the same for 31 April, 31 June, 31 September, 31 November, and for 29 February in a year that is not a leap year: *There is no 29 February*), and is never moved to a day that exists. A **year typed in fewer than four digits** is refused with *Enter the year in full, for example 2026*, and is never taken as the year 26 or as 2026. Both are refused the same way as any other text that is not a date: the field keeps what was typed, is invalid, says the words, and gives the page nothing. **The alternative that was rejected:** the previous field's two silent corrections, which this field carried from 6 to 7 November 2026 under the Product Owner's first decision on its tests (a year typed as 26 became the year 26, given as `0026-10-28`, and `30/02/2026` became `28/02/2026`, shown and given, in both cases without a word on leaving), because they let a person confirm a date they did not write.
+- **Clear errors.** A text that is not a date says so in plain words, under the control, with the Field's icon (so the red is never alone) and the control `aria-invalid` with a 2px danger border: *Write the date as DD/MM/YYYY, for example 28/10/2026.* for a text that is not written so (or is still missing a part), *Enter the year in full, for example 2026* for a date written whole but for a year of fewer than four digits, *There is no 30 February* for a day that its month does not have, and *That day is not on the calendar. Check the day and the month.* for a day, month or year that is not on the calendar at all (a month 13, a day 0 or 45, the year 0). The words come at once for a text that is as long as a date (`30/02/2026`, `10/28/2026`, a paste in another form), and when the person leaves the control (the field and its calendar button are one control) for one that is still being typed (a year of two digits, a month and no year; not "yet" any more); going from the field to the calendar button, or opening the calendar to finish a date, is not leaving. An empty field is no mistake. If the page held a date and the person took a part of it out (a text with a part missing), there is no message: leaving gives the page none and clears the field; a date that is written whole and refused stays as it was typed, with its words.
+- **When the page hears.** The page is given a date when the text is a whole, real date, and `null` when the field is emptied; a text that is only part typed is never given (the page is not told of the year 2, then 20, then 202). **While the person is in the control the page keeps the date it held**, as the previous field's did (the Product Owner's decision of 6 November 2026): taking a digit or a part off the date does not tell the page; **leaving** the control with a part cleared, or with a refused date, tells it `null` (the part-cleared text is also cleared from the field; the refused date stays, with its words). The cost, the same as before: Enter inside the field can submit the date the page still holds. A value the page changes (a "today" button, a clear button) replaces what was typed; a value the control itself just gave does not. The field keeps what is half typed when the page renders again with the value it has.
+- **`minValue` and `maxValue`** draw the days outside them as unavailable in the calendar, where they cannot be chosen; a date typed outside them is still given and is not marked invalid. They are hints about what is worth choosing, never a rule: the page checks what it can and the server decides (sections 24 and 25). Which days a pickup can be booked for (Monday to Saturday, the cut-off, the zone's days) is the page's question and the server's answer, not this component's.
+- **Language and day.** Day, month, year; the week starts on Monday; English month names; fixed by the portal and not the browser's (DESIGN_SYSTEM §24a). Today is the day in Accra and is told by more than colour: bold, with a bar under the number. A day is named for a screen reader as `Thursday, 8 October 2026`, with `Today, ` before today's and ` selected` after the chosen one; the head of a column is the first letter of its weekday (M T W T F S S); a day that is not in the month is not drawn (its square stays).
+- **Inside a Field** it is named by the Field's label (a real `<label for>` leads to the field; the group takes the label's name, `aria-labelledby`, as before), described by its help and error, invalid when the Field has an error and required when the Field says so. On its own it needs `aria-label` (or `aria-labelledby`). The calendar button is named "Calendar" and the label ("Calendar, Service date").
+- **States.** Empty (it shows `dd/mm/yyyy`), filled, focused (the global ring, on the field, the button or the day that has focus), invalid (the Field's error, or the control's own message), read-only (legible, focusable and selectable, no calendar: it is not styled as disabled, and its calendar button is, since it does nothing) and disabled (not focusable, no calendar). A day is today, selected (the fill of Primary, with a border that forced colours keep), hovered or unavailable.
+- **Keys.** Typing; the up and down arrows step the day, the month or the year that the caret is in, for a whole date (the day goes round within its month, the month round the year, and the date is given); Tab goes from the field to the calendar button; Enter or Space on the button opens the calendar, with focus on the date, or on today; the arrows move by day and by week, Page Up and Page Down by month; Enter or Space chooses and closes, and focus returns to the button; Escape closes and changes nothing.
+- **In a modal dialog** the calendar is drawn into the dialog (the page behind a modal dialog is inert, and the top layer is above the body): `Dialog` gives its element to what it holds (the popover primitive takes a `container`, [DESIGN_SYSTEM §29.6](DESIGN_SYSTEM.md#296-deviations-from-the-registry-source)), and the dialog lets an open calendar overhang its edge.
+- **Size and reflow.** The control is at least `control.height.md` tall; its field is ten characters wide by nature (a date written whole) and grows into the room it is given, so a row of filters sizes it by what a date needs; the calendar button is at least 2rem square; a day is a square of 2.75rem that shrinks, if it must, until seven fit across the screen less the popover's border, so that the week fits at 320px; everything is in rem, so enlarged text grows it; the calendar scrolls inside itself and never pushes the page sideways (WCAG 1.4.4 and 1.4.10).
+- **Motion.** The calendar opens over `motion.normal` (the popover primitive's animation on the token); under reduced motion nothing moves.
+- **Not here:** a range of dates, a time of day, a date with a time (section 37), and a native `<input type="date">` anywhere in the application (a test fails on one).
 
 ### 22a.3 Proof
 
-`DatePicker.test.tsx` (the keys the section names, but for Home and End, and each state, in jsdom), `test/browser/date-picker.spec.ts` (the keyboard,
-the focus ring on each stop, WCAG 2.2 with the calendar closed and open and with an empty part focused, the looks that only the stylesheet
-gives, the calendar inside a modal dialog, 320px, 200% text, forced colours and reduced motion, in three engines; forced colours in Chromium
-and Firefox only, since Playwright cannot emulate them in WebKit) and
-`test/browser/date-picker-policy.spec.ts` (a production build of the showcase under the strict content-security policy: no violation). The
-recorded keyboard-only and screen-reader passes, as for every component, are not part of this.
+`DatePicker.test.tsx` (what a person sees, the Field's wiring, typing, the calendar's keys, the range, read-only and disabled, in jsdom: the previous field's tests with every assertion as it was written, only the way a test enters a date or finds the control changed, then what the one field adds), `day-first.test.ts` (the strict reading and the typing mask, table-driven, at the boundaries), `date-value.test.ts` (the text of a date, and today in Accra whatever the machine's zone), `test/browser/date-picker.spec.ts` (the keyboard, the focus ring on each stop, WCAG 2.2 in both themes with the calendar closed and open and with a mistake showing, the looks that only the stylesheet gives, the calendar inside a modal dialog, 320px, 200% text, forced colours and reduced motion, in three engines; forced colours in Chromium and Firefox only, since Playwright cannot emulate them in WebKit) and `test/browser/date-picker-policy.spec.ts` (a production build of the showcase under the strict content-security policy: no violation). The recorded keyboard-only and screen-reader passes, as for every component, are not part of this.
 
 ---
 
@@ -1507,7 +1485,9 @@ and `queue-return.test.ts`, and in the pickup spec (Chromium, Firefox and WebKit
 
 The stop-reordering control: an ordered list whose items each carry two buttons, to move the item up and to move it down, so the order is
 changed from the keyboard and with a pointer alike. It is **controlled**: it keeps no order of its own and gives the caller the complete order
-(every item once, as ids) after every move, because a sequence is sent whole and never as a change.
+(every item once, as ids) after every move, because a sequence is sent whole and never as a change. **A move glides** (redesign step R5, 6 November
+2026): the items that change place slide to it with Motion's layout animation, position only, over `motion.normal` on the enter easing, instead of
+jumping; nothing moves under reduced motion, and the order, the focus and the announcement are the same either way (§37, *Motion*).
 
 - **Two buttons are the whole of the control.** Drag and drop is not offered: nothing is lost for want of a pointer gesture, and the buttons are
   `IconButton`s (§22) named for the item and the act ("Move ACC-PR-7KQ2MZ up"), with their own focus ring and target.
@@ -1643,7 +1623,7 @@ Rules:
 - never use realistic production-looking customer data;
 - do not let the showcase become a second component specification.
 
-What it holds since redesign step R4 (7 November 2026): three pages, and the production build contains none of them (`test/build.test.ts`). `/__showcase` draws the components of `components/ui`. `/__showcase/primitives` draws every installed shadcn/ui primitive (DESIGN_SYSTEM §29.2) in the words a Melarc screen would use, with synthetic data, in both themes: a switch of the theme sits in its header and is held in memory, never stored (the Portal's own stored choice is DESIGN_SYSTEM §31's, and this switch does not write it). `/__showcase/shell` draws the parts of the shell (the sidebar expanded and as the rail, the top bar with its menus, and the command palette in each state of its search) over made-up entries, hubs and counts, on a page of its own so that the page-wide keyboard and reflow checks of `/__showcase` are not run over a second top bar. A primitive is added to its page in the change that installs it, and a part of the shell in the change that builds it.
+What it holds since redesign step R5 (7 November 2026): four pages (the fourth is the kit's family of pages), and the production build contains none of them (`test/build.test.ts`). `/__showcase` draws the components of `components/ui`. `/__showcase/primitives` draws every installed shadcn/ui primitive (DESIGN_SYSTEM §29.2) in the words a Melarc screen would use, with synthetic data, in both themes: a switch of the theme sits in its header and is held in memory, never stored (the Portal's own stored choice is DESIGN_SYSTEM §31's, and this switch does not write it). `/__showcase/shell` draws the parts of the shell (the sidebar expanded and as the rail, the top bar with its menus, and the command palette in each state of its search) over made-up entries, hubs and counts, on a page of its own so that the page-wide keyboard and reflow checks of `/__showcase` are not run over a second top bar. **The kit has pages of its own since redesign step R5 (6 November 2026):** `/__showcase/kit` lists the groups, and `/__showcase/kit/<group>` draws one with every variant and every state of its components, in real Melarc words and both themes (`header`, `data`, `panels`, `menus`, `forms` and `lists` in the first half), and three composed examples (`example-queue`, the queue workspace on the generated client's pickup-request shape; `example-record`, the record page; `example-count`, the tablet blind count at 768px with 56px targets). They are showcase pages and not routes of the application; whatever stands for data on them is labelled "Sample"; they have the same gate (`test/build.test.ts` proves the production build holds no trace of them), and `kit.spec.ts` and `kit-policy.spec.ts` drive them in a real browser. A primitive is added to its page in the change that installs it, and a part of the shell in the change that builds it.
 
 ---
 
@@ -1969,7 +1949,7 @@ Before accepting the initial UI-foundation implementation:
 
 ### The planned kit
 
-**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. **Each pattern has one status (§2), and it is the one its row gives:** redesign step R4 built the five of the shell (AppShell v2, CommandPalette, NewMenu, AccountMenu and HubSwitcher) and task C1 built CountBadge, and those six are **IMPLEMENTING**; every other row is **PROPOSED**, and is built in redesign step R5. The register of §40 holds the same statuses. All are composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
+**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. **Each pattern has one status (§2), and it is the one its row gives:** redesign step R4 built the five of the shell (AppShell v2, CommandPalette, NewMenu, AccountMenu and HubSwitcher) and task C1 built CountBadge, and those six are **IMPLEMENTING**; redesign step R5 (first half, 6 November 2026) built Tabs with counts (`ViewTabs`), FilterBar, DataTable, SidePanel (with its sheet), RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, and the PageHeader of the redesign (which this table does not list), and those are **IMPLEMENTING** too (built, no screen uses them yet, not yet accepted); every other row (Tooltip and Popover, EmptyState v2 and Skeleton v2, StatusBadge v2, CountBadge's variants, Avatar) is **PROPOSED**, and is built in the second half of redesign step R5. The register of §40 holds the same statuses. All are composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
 
 | Pattern | What it is for |
 |---|---|
@@ -1994,20 +1974,165 @@ Before accepting the initial UI-foundation implementation:
 
 A count or a figure on these components is the server's: the component draws what it is given and works nothing out (§24, §25).
 
+### The kit as built (redesign step R5, first half, 6 November 2026)
+
+The first half of step R5 built the components below, in `components/ui`, each composed from the shadcn/ui primitives of step R3 and from nothing else (a page imports the component; the primitive and the libraries under it stay behind their door: [DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)). Each is **BUILT**: it is in the lifecycle of §2 as IMPLEMENTING, and ACTIVE once a screen uses it and the Product Owner has accepted it. No screen uses one yet (steps R6 and R7 move the screens). The second half (StatusBadge, CountBadge, EmptyState and Skeleton v2, Avatar, and the Tooltip, Popover and Dialog wrappers) is still PROPOSED.
+
+**Rules every one of them keeps** (and its tests say so): it draws from the tokens alone; it covers the interface states that apply to it (§33.1); it is fully operable from the keyboard and shows the global focus ring; it passes axe (WCAG 2.2 A and AA) in both themes, in jsdom where that is meaningful and in Chromium on every showcase page; it moves only on the motion tokens, and not at all under `prefers-reduced-motion: reduce`; it **draws what it is given and works nothing out** (a count, a total, a state, a time: §24, §25), so a figure that was not given is not drawn, and a missing figure is never `0`; it takes **slots, not other kit components** (`ReactNode` for a status badge or a menu), so that the second half changes the callers and not the kit; and it is in the showcase (§27) with real Melarc words, every variant and every state, the sample data labelled "Sample". Words of the components are plain and short; none names a permission key or a role.
+
+**Not built, and why.** A "select all" in the DataTable (the rule of §22f stands: a choice of the whole page is a decision the screen has not been asked for). Sorting, filtering and paging inside any component (the server's). A tooltip for a disabled item (the reason is in the item itself, see ActionMenu below; the Tooltip wrapper is the second half's).
+
+**Two small helpers the kit uses** and a page may: `OperationalCode` (`components/ui/code/`: a code in the monospaced face at weight 600, never wrapped or shortened, §24.1) and `VisuallyHidden` (`components/ui/visually-hidden/`: words for whoever hears the page, kept out of the way of the eye).
+
+#### PageHeader (the kit's)
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/page-header/`
+
+The header of a page of the redesign: the title (the page's one level-one heading, through the existing `PageHeading`, which takes focus after a navigation), how many there are where the server stated a count, how fresh the results are and the way to refresh them, the pages above, and the page's actions. The initial PageHeader of §11 (`src/components/PageHeader.tsx`) stays ACTIVE, and the twenty pages that import it are unchanged, until steps R6 and R7 move them.
+
+- **Props.** `title`; `description?`; `count?` (`{ value, noun }`: the number the server stated and what it counts, "pickup requests", said to assistive technology with the number); `freshness?` (`{ state?: 'idle' | 'refreshing' | 'failed', updatedAt?, onRefresh }`; `updatedAt` is the time already written the way the portal writes one); `breadcrumb?` (`{ label, to }[]`, the pages above, not the page itself); `actions?`.
+- **States.** *Loading*: leave `count` out (it is never drawn as `0`) and show `refreshing`. *Error*: `failed` says "Refresh failed. Last successful check: 09:42" (or "Refresh failed." when none ever worked) and Refresh is the retry. *Stale*: the last good time stays. A page never read has no freshness line. Empty, validation and permission-restricted do not apply: the header draws no refusal, and an act the person cannot take is not passed in.
+- **Keys.** Tab through the trail, Refresh and the actions. Refresh stays focusable and says it is busy (`aria-busy`) and ignores a press while a read is under way: one read at a time.
+- **Do** pass the count only when stated, and a `0` that was read (it is drawn quietly); keep one primary action in `actions`. **Do not** pass `0` for a count still loading; put a refresh button of your own beside it; use it where the old PageHeader is still imported (the two are not mixed on a page).
+
+#### ViewTabs
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/view-tabs/`
+
+The views of one queue as tabs with counts ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)): the Tabs primitive (Radix UI), with the current view's count as an Ink pill and a 2px underline that grows in over `motion.normal` (a transition of the stylesheet on the token, so it is instant under reduced motion).
+
+- **Props.** `label` (names the list), `tabs` (`{ id, label, count?, disabled? }[]`), `value`, `onValueChange`, `children` (the current view's content: the tab panel, tied to its tab).
+- **States.** *Loading*: a tab with no `count` draws no pill. A `0` that was read is drawn quiet. A view the person may not use is not passed in (hiding is presentation); `disabled` is for a view that cannot be chosen now. Two views with one id, or a current view that is not in the list, throw (a defect of the page).
+- **Keys.** Tab enters the list at the current view and leaves it in one stop; the arrows move and choose (automatic activation); Home and End go to the ends; a disabled tab is skipped. The list scrolls inside its own box on a narrow screen.
+- **Do** keep the current view in the address; give the counts the server stated. **Do not** compute a count from the rows on the page, or draw `0` while a count is being read.
+
+#### FilterBar
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/filter-bar/`
+
+What a queue is filtered by: each applied choice a chip that can be removed on its own, a dashed "+ Filter" button that opens the page's fields in a popover (the Popover primitive), and the order of the rows told at the end.
+
+- **Props.** `label`, `chips` (`{ id, label }[]`: "Service date: this week"), `onRemove(id)`, `onClearAll?` (offered from the second chip on), `filterPanel?` (the page's fields; without it there is no button), `filterLabel?`, `sortLabel?` ("Sorted by oldest first").
+- **States.** None applied (only the button); one or many (they wrap); the popover open; a chip removed. It holds no filter and filters nothing: the page holds them (in the address) and the server answers. The fields in the popover carry their own validation.
+- **Keys.** Tab through the remove buttons and the Filter button. After a removal focus goes to the next chip's remove button, else the previous one, else the Filter button, so it is never lost. Enter or Space opens the popover with focus inside; Escape closes it and gives focus back to the button.
+- **Do** write a chip as the choice would be said. **Do not** put a filter here that the server does not take, or use the bar to sort (it only says how the rows are ordered).
+
+#### DataTable
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/data-table/`
+
+The queue table: TanStack Table's model (columns, row model, selection, manual sorting) over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It builds on Table and QueueTable (§19, §22f), which stay ACTIVE until step R7 moves the pickup queue.
+
+- **Rows.** 36px single-line, 52px where a cell holds a code over a name (`RowTitle`), 56px for the hub-floor tablet (`density: 'single' | 'two-line' | 'touch'`), each with its 1px separator inside it, or as tall as its tallest control (a touch row that holds a 56px control is 57px, or 65px where the page puts air around it); a cell is one line, and what does not fit is reached by scrolling the box sideways, not by wrapping into a taller row; codes in the monospaced face at weight 600. **The whole row opens its record through a real button in the code cell, stretched over the row** by its pseudo-element (no handler on a row or a div); the controls of other cells stay above it.
+- **Props.** `label`, `columns` (`{ id, header, cell, rowHeader?, align?, width?, sortable? }`; the row-header column holds the code), `rows` and `rowId` (in the order the server gave), `density?`, `onOpen?` with `openLabel` ("Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd", which contains the visible words), `selection?` (`selectedIds`, `onChange`, `selectLabel`, `isSelectable?`, `bulkActions?`), `rowAction?` (`label`, `ariaLabel?`, `onRun`, `isAvailable?`), `changedIds?`, `sort?` and `onSortChange?`, `status?`, `loadingRows?` and `loadingLabel?`, `error?`, `emptyState?`, `stale?`, `footer?`, `maxHeight?`, `initialScroll?` and `onScrollChange?`, `focusRowId?`.
+- **Selection.** A checkbox for each row named "Select CODE"; the page holds the ids (they may include rows of other pages). A bar slides in over `motion.normal` (Motion) with "2 selected", the acts (the first marked `primary` in Ink: "Confirm 2") and Clear; it comes after the table and floats over the last rows, so it never pushes one. It announces the count once, in words. Bulk acts are only for acts that are safe and atomic ([surfaces/ops-portal.md §10](../surfaces/ops-portal.md#10-what-this-surface-must-never-do)). Selected rows take `surface.selected`.
+- **The inline act** of a row shows on hover, on focus and when the row is chosen (always on a touch screen), and is always in the page and the keyboard order.
+- **A changed row** (`changedIds`) takes a tint that fades over `motion.highlight` (900ms; a stylesheet on the token, so it is not seen under reduced motion). It is a cue for the eye only: the row also says "Updated" to assistive technology, and the page says it in words where it matters.
+- **Header and box.** The header is sticky within the table's own box, which scrolls both ways (and takes focus, named by the label), so a wide table never scrolls the page. `maxHeight` bounds the box so that the header can stay while the rows move.
+- **States.** *Loading*: skeleton rows of the table's own shape, the table `aria-busy`, a status in words, never a number. *Empty* and *filtered to nothing*: the page's `EmptyState`, which tells them apart (§16). *Error*: the page's words (mapped from the code, never the diagnostic message) with Retry. *Stale*: the last rows stay under a line that says so and offers the read again. *Success*: a changed row. It never draws a total it was not given.
+- **Returning.** The table holds no state of its own that a return must keep: selection is the page's; `initialScroll` and `onScrollChange` let the page keep the box's place in memory (never in the address or a storage), and `focusRowId` puts focus back on the row the person came from. Filters are the FilterBar's, the page's.
+- **Keys.** Only one row's controls are in the Tab order, so Tab crosses the table in a few stops; the up and down arrows, Home and End move between rows; **Enter opens the record; Space chooses the row and does not open it**; a field in a cell keeps its arrows. The keys are described to assistive technology.
+- **Do** order, filter and page on the server and pass the rows as they came. **Do not** add a select-all, a total, a sort of the rows in the browser, or an act that is not safe in bulk, and do not put the muted text on a chosen row (it is 4.2 to 1 on the selected tint: the name under the code takes the secondary text there).
+
+#### SidePanel
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/side-panel/`
+
+A record beside its list ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)): 360 to 420px wide, 12px corners, the floating shadow (the panel floats), sliding in 18px with a fade over `motion.slow` (Motion; it appears at once under reduced motion). At 768px and below it is a **full-screen sheet** (a modal dialog on the sheet primitive).
+
+- **Props.** `open`, `onClose`, `code` (the record's code: its name and heading), `status?` (a slot for the StatusBadge), `fullPage?` (`{ to }`: "Open full page"), `children` (the page's summary, with its own loading, failure and refusal), `returnFocusTo?`.
+- **States.** The header shows at once with the code; *loading*, *error*, *retry*, *stale* and *permission-restricted* are what the page puts inside (a `ReadState`, a `DescriptionList` with `loading`). Opening another record replaces the content and moves focus to the new heading.
+- **Focus.** It moves into the panel (the heading) when it opens, and **back to the row** (the control that was focused when it opened, or what `returnFocusTo` names) when it closes, in the docked panel and in the sheet. Escape closes it; an Escape that something inside it (a menu, a popover) has already taken does not. The docked panel is a non-modal `dialog` named by its code; the list beside it stays in reach. The sheet is modal and keeps the page out of reach.
+- **Do** put the page's own summary inside, and keep the filters, the scroll and the selection of the list alive behind it. **Do not** make the panel the only place an act can be taken, or draw an act the person cannot take.
+
+#### RecordHeader and StageTracker
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/record-header/`
+
+The top of a record ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)): the code in the monospaced face at 26/32 (the page's heading through `PageHeading`, or a level-two heading when it is in a panel: `level`), the status (a slot), one sentence in plain words of where the record stands and what can be done next, the stage tracker, **one primary action in Ink**, other actions and the menu.
+
+- **Props.** `code`, `level?`, `status?`, `sentence?`, `stages?` (`StageTrackerProps`), `primaryAction?`, `secondaryActions?`, `menu?` (an ActionMenu). `StageTracker`: `label`, `stages` (`{ id, label }[]`), `currentId`.
+- **StageTracker.** Segmented bars with labels: the stages before the current one in the secondary text colour, the current one in the brand crimson with a small crimson square beside its label, the ones after it in the border colour (their label in the muted text, since a border colour is not legible as text). The state is also told in words ("Done", "Current stage", "Not reached") and `aria-current="step"` marks the current one, so colour is never alone. The stage is the server's fact, passed as given; a current stage that is not one of the stages throws. The stages stack when the room the tracker is in is narrow (a container query, 30rem), not only when the window is: a tracker in a column beside a list is as narrow as one on a phone.
+- **States.** *Loading*: the code is known; leave the status and the tracker out until they are (they are never guessed). *Stale* or *conflict* is the page's banner above the header. An act the person cannot take is not passed in (hiding is presentation; the server decides).
+- **Do** keep to one primary; say what stands in the way in the sentence. **Do not** draw a tracker for a record that has no such way (a cancelled one), or colour a stage the server did not put there.
+
+#### ActionMenu
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/action-menu/`
+
+The overflow menu of a record's acts behind a "⋯" button: the Dropdown Menu primitive (Radix UI).
+
+- **Props.** `label` (names the button: "More actions for ACC-PR-7KQ2MZ"), `items` (`{ id, label, icon?, onSelect, disabled?: { reason } }`, and for a destructive one `destructive: true` with `confirm: { title, description, confirmLabel }`).
+- **Destructive acts are last, in vermilion, and always confirmed.** The component puts them last (a caller cannot place one among the others), draws them in the danger colour behind a separator, and the type refuses a destructive item without its confirmation. Choosing one closes the menu and opens an `AlertDialog` with Cancel focused first; the act runs only when it is confirmed, and focus goes back to the button either way.
+- **An act that cannot be taken** stays in the menu and in the keyboard order, and **says why in plain words** (never a key or a role) on hover, on focus and when it is chosen (a touch screen has no hover); the reason is also its description for assistive technology. It does nothing and the menu stays open.
+- **Keys.** Enter, Space or the down arrow opens; the arrows, Home, End and typing move; Enter chooses; Escape closes and gives focus back.
+- **Do** keep it to the rarer and heavier acts; the primary act is a button beside it. **Do not** put an act here that is not offered to the person at all, or write a reason that names a role.
+
+#### DescriptionList
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/description-list/`
+
+The facts of a record, grouped and labelled ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)): a `<dl>` with a **110px label column**, muted labels, and values that may hold codes (`code: true` sets a text value in `OperationalCode`).
+
+- **Props.** `items` (`{ label, value?, code? }[]`), `heading?` (a section label: 11.5px, capitals, muted) and `headingLevel?`, `loading?`, `missingText?` (default "Not recorded").
+- **States.** *Loading*: the labels stay and every value is a bar; none is drawn before it arrives. A value the server did not state says "Not recorded" in words, never a blank, a dash or a `0`. Under 24rem a label sits over its value.
+- **Do** group the facts by meaning under section labels. **Do not** invent a value, or draw a placeholder as a result.
+
+#### Panel and Card
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/panel/`
+
+The surfaces of the queue and record templates: the Card primitive on the default surface with the subtle border and **12px corners**, no shadow (it sits on the page); `variant="page"` is the **page card** at 16px.
+
+- **Props.** `title?` and `headingLevel?`, `action?` (needs a title; one throws without), `variant?: 'panel' | 'page'`, `padding?: 'default' | 'none'` (`none` for a table that runs to the edges), `children`.
+- **States.** None of its own: the content shows its loading, failure and refusal. A panel with no title has no header.
+- **Padding `none`** is for content that runs to the edges (a table): the panel cuts it to its rounded corners (`overflow: hidden`), so what is inside draws its focus ring inside itself (the DataTable's scrolling box does).
+- **Do** use the panel for a group of facts or acts on a record and the page card for the one card that holds a queue; choose the heading level from the page's outline. **Do not** add a shadow (a panel is on the page, it does not float), nest a panel in a panel, or give the page card to a small group.
+
+#### StatTile
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/stat-tile/`
+
+A figure the server states: an 11.5px label in muted capitals (0.06em), a 22px figure in weight 700 and tabular numbers, and a caption.
+
+- **Props.** `label`, `value?` (a number, grouped as the portal writes figures, or text the page formatted), `caption?`, `loading?`, `countUp?`.
+- **States.** *Ready*; *loading*: a bar, never a number; *not available* (no value given): a dash and the words "Not available", **never `0`**; a `0` that the server stated is drawn. `countUp` counts the figure from 0 over `motion.highlight` **once**, the first time it is shown (Motion); a later figure is shown at once; under reduced motion the figure is there at once. While it counts, assistive technology reads the final figure and not the numbers on the way.
+- **Do** pass a figure the server stated. **Do not** pass a sample as a result, or a stand-in for a figure that failed to load.
+
+#### Toast
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/toast/` · See §21 for the rules it implements.
+
+A message at the bottom right on the Sonner primitive: a 22px disc of the tone's status pair with its icon, the message, **at most one action** and, when it has one, a way to dismiss it.
+
+- **API.** `showToast({ tone, message, action? })` (`tone`: `success`, `info`, `warning` or `danger`; `action: { label: 'Open' | 'Undo', onClick }`: **the type allows no other word and no second action**), `dismissToast(id?)`, and `<Toaster />`, mounted once in the application's frame. The state is the server's: say what was reached, not that a request returned. The `message` is text, or text with an `OperationalCode` in it, so that a code is kept whole on one line and not broken like a word.
+- **A toast with an action stays until it is dismissed** (WCAG 2.2.1); one without goes after six seconds. **Undo only where the server allows undoing that act**; Open where the act made something to open. An important outcome is never only a toast: it is the page's too.
+- **Keys.** The toast appears without taking focus; Alt+T (Sonner's hotkey) moves the keyboard to the toasts; Tab reaches the action and the dismiss button; focus returns. It is announced politely.
+- **Do** raise it for what already happened and is also shown on the page; mount `<Toaster />` once, in the frame. **Do not** put the only record of an outcome, an error that needs a decision, or a second action in a toast, and do not raise one from a page except through `showToast`.
+
+#### Motion
+
+> **Status:** BUILT · **Code:** `apps/ops-web/src/components/ui/motion/` · [DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)
+
+The animation library (`motion`, an exact pin, its licences shipped) behind one door, `components/ui/motion/motion.ts`: only the components of `components/ui` import it, a page never does. A component never writes a duration or an easing: `useMotion()` reads them from the motion tokens of `tokens.css` (120, 200, 280 and 900ms, the enter and exit easings) and gives every transition as instant when the person asked the system for less motion (the same preference that sets the tokens to zero for the stylesheet).
+
+- **Used for what a stylesheet cannot do:** the reordered list's layout glide (`ReorderList`), what comes and goes (the DataTable's bar of acts, the docked `SidePanel`), and a number that counts (`StatTile`).
+- **Left to the stylesheet, on the same tokens:** the tab underline growing in, a changed row's highlight, the inline act's appearance, hover and press. They are off under reduced motion because the tokens are zero, with no script.
+- **Proof.** `test/motion-door.test.ts` (one door, and no duration or easing outside the tokens), `test/motion-tokens.test.ts` (the fallback numbers equal the token file), `test/motion-licences.test.ts`, the component tests (instant under reduced motion) and `kit.spec.ts` and `kit-policy.spec.ts` (what moves in a browser, and that the strict policy raises no violation).
+
+
 ### The primitives of redesign step R3
 
 Step R3 (5 November 2026) installed 24 shadcn/ui primitives in `apps/ops-web/src/components/primitives/` ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toaster), table, tabs, textarea and tooltip. They are **not Melarc components**: no page imports one, and none is a pattern of this file until a component of `components/ui` composes it, a screen uses that component and the Product Owner accepts it (§2). Each is drawn in the showcase (§27), in both themes, with its overlays driven from the keyboard in a real browser. The components of the kit above are composed from them: those of the shell in redesign step R4 (seven primitives: `badge`, `button`, `command`, `dialog`, `dropdown-menu`, `sheet` and `tooltip`), the rest in step R5. The native components that are ACTIVE (Button, Input, Textarea, Checkbox, Select, Table, Dialog, AlertDialog, Skeleton and StatusBadge) are not replaced by their primitives now: an active pattern is not silently replaced (§2), and whether step R5 recomposes any of them is decided there and recorded here.
 
 ### Phasing out React Aria Components
 
-**Product Owner, 5 November 2026 (redesign step R3).** React Aria Components was the library for behaviour that no native element gives ([DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)); the shadcn/ui primitives replace it for new components. **Nothing is removed now.** The library, its packages and their licences stay, and so do the `react-aria-pressable-style` meta of `index.html` and the rule of `base.css` that stand in for the style the library inserts, until the last component built on it has moved. The table is derived from the code: apart from tests, the files of `apps/ops-web/src/components/ui/` that import `react-aria-components`, `react-aria`, `react-stately` or `@internationalized/*` are `date-picker/DatePicker.tsx` and `date-picker/date-value.ts`, and no others. The steps are those of [the plan](../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign): R3 adopted the foundation, R5 builds the kit, and R7 moves the screens onto it.
+**Done (Product Owner's decision of 6 November 2026, redesign step R5).** React Aria Components was the library for behaviour that no native element gives ([DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)); on 5 November 2026 the shadcn/ui primitives replaced it for new components, and the two components still built on it moved on 6 November 2026. **It is removed**: nothing imports it, and the packages `react-aria-components` and `@internationalized/date` (and what they brought: `react-aria`, `react-stately`, the `@react-aria`, `@react-stately`, `@react-types` and `@internationalized` families, `@swc/helpers`, `use-sync-external-store` and `client-only`) are no longer dependencies. What left with them, as the plan of 5 November listed: their door (the React Aria lines of `eslint.config.mjs`, which now hold the Motion door, and `test/aria-door.test.ts`); `test/aria-licences.test.ts` and the three licence files only they needed (`React-Aria-Apache-2.0.txt`, `swc-helpers-Apache-2.0.txt` and `use-sync-external-store-MIT.txt`; `clsx-MIT.txt` and `aria-hidden-MIT.txt` are the shadcn/ui set's too, and stay); the `react-aria-pressable-style` meta of `index.html`, its rule in `base.css` and `src/components/ui/aria-wiring.test.tsx`. The date field keeps its public API and is on the calendar and popover primitives (§22a).
 
-| Melarc component today | React Aria parts it is built on | Replaced by | Step that moves it |
+| Melarc component | React Aria parts it was built on | Replaced by | Done |
 |---|---|---|---|
-| DatePicker (§22a): the calendar that opens under the field | `Calendar`, `CalendarGrid`, `CalendarCell`, `Heading`, `Popover`, `Dialog` and `Button` (`date-picker/DatePicker.tsx`) | the `calendar` primitive (react-day-picker, which already starts the week on Monday in English as written in the United Kingdom) in a `popover`, with `button` | R5, with the kit (**proposed**: the plan names no step for it) |
-| DatePicker (§22a): the typed day, month and year | `DateInput`, `DateSegment`, `Group` and `I18nProvider` (`date-picker/DatePicker.tsx`); `@internationalized/date` (`date-picker/date-value.ts`) | **none**: the registry has no entry of a date as three typed parts | **open**: R5 puts it to the Product Owner, because it decides whether the library stays for this part |
-
-No other component of `components/ui` is built on the library. What leaves with the last one, and not before: the packages `react-aria-components`, `react-aria`, `react-stately` and `@internationalized/date` and what they bring; their door (the React Aria lines of `eslint.config.mjs` and `test/aria-door.test.ts`); `test/aria-licences.test.ts` and the three licence files only they need (`React-Aria-Apache-2.0.txt`, `swc-helpers-Apache-2.0.txt` and `use-sync-external-store-MIT.txt`; `clsx-MIT.txt` and `aria-hidden-MIT.txt` are the shadcn/ui set's too, and stay); the `react-aria-pressable-style` meta of `index.html`, its rule in `base.css` and `src/components/ui/aria-wiring.test.tsx`.
+| DatePicker (§22a): the calendar that opens under the field | `Calendar`, `CalendarGrid`, `CalendarCell`, `Heading`, `Popover`, `Dialog` and `Button` | the `calendar` primitive (react-day-picker, which starts the week on Monday in English as written in the United Kingdom) in a `popover` | **DONE**, 6 November 2026 |
+| DatePicker (§22a): the typed day, month and year | `DateInput`, `DateSegment`, `Group` and `I18nProvider`; `@internationalized/date` | **one text field typed as DD/MM/YYYY, read strictly** (`date-picker/day-first.ts`), the Product Owner's decision of 6 November 2026 on the question this table left open: the registry has no entry of a date as three typed parts | **DONE**, 6 November 2026 |
 
 ### The deferred register
 
@@ -2077,7 +2202,7 @@ Do not use this file to override a product contract.
 | AuthenticatedOpsShell, Sidebar and TopBar | IMPLEMENTING | The first form was ACTIVE (S0.42); the sidebar and the top bar of redesign step R4 (7 November 2026) replaced it and are built, in the showcase (`/__showcase/shell`) and drawn by every signed-in screen. ACTIVE once the Product Owner accepts them (§2). The components §37 lists with them have the next row |
 | CommandPalette and SearchButton, NewMenu, AccountMenu, HubSwitcher | IMPLEMENTING | Redesign step R4 (7 November 2026): built (`components/ui/app-shell/`), drawn by every signed-in screen, and awaiting the Product Owner's acceptance with the shell (§2) |
 | Icon, IconButton | ACTIVE | 25 October 2026 |
-| DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); the pickup screens use it since S1.19 (29 October 2026), and its look awaits the Product Owner |
+| DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); the pickup screens use it since S1.19 (29 October 2026), and its look awaits the Product Owner. **Rebuilt on 6 November 2026** (redesign step R5) on the calendar and popover primitives behind the same public API, as one field typed DD/MM/YYYY and read strictly: a day that its month does not have and a year in fewer than four digits are refused in words, and nothing is corrected (the Product Owner's decision of 7 November 2026; the previous field's silent corrections were the alternative rejected, §22a); React Aria Components is removed (§22a, §37) |
 | RadioGroup, Picker, MoneyAmount, Timeline, QueueTable | IMPLEMENTING | Pickup intake (S1.19, 29 October 2026): built, in the showcase, used by the pickup screens (§22b to §22f) |
 | QueueTable row selection, ReorderList, RiderPicker | IMPLEMENTING | Manifests and runs (S1.25, 3 November 2026): built, in the showcase (the rider picker as the Picker over demo riders), used by the manifest screens (§22f, §22g, §22h) |
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
@@ -2090,7 +2215,8 @@ Do not use this file to override a product contract.
 | FormPage, the five pre-sign-in screens | ACTIVE | Identity implementation (S0.43) |
 | ButtonLink, ConfirmationDialog, the six signed-in identity screens | ACTIVE | Identity implementation (S0.44) |
 | The shadcn/ui primitives of `components/primitives` (24, DESIGN_SYSTEM §29.2) | IMPLEMENTING | Redesign step R3 (5 November 2026): installed and restyled, drawn in the showcase and driven from the keyboard in a browser. Seven are composed by components of redesign step R4 (`badge`, `button`, `command`, `dialog`, `dropdown-menu`, `sheet` and `tooltip`, in `components/ui/app-shell/` and `components/ui/count-badge/`), so every signed-in screen draws them; no screen imports one directly, and the Product Owner has not yet accepted them |
-| The rest of the planned kit of §37 (DataTable, Toast and the others its table does not mark built) | PROPOSED | No: built in redesign step R5 |
+| PageHeader (the redesign's), ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile, Toast (§37, *the kit as built*), and Motion | IMPLEMENTING | Redesign step R5, first half (6 November 2026): in `components/ui`, in the showcase (`/__showcase/kit`) with every variant and state in both themes, proven in jsdom and in a browser (WCAG 2.2 in both themes, the keyboard, reduced motion, the strict policy). No screen uses one yet and the Product Owner has not yet accepted them, so none is ACTIVE |
+| The rest of the planned kit of §37 (Tooltip and Popover; EmptyState v2 and Skeleton v2; StatusBadge v2; CountBadge's variants; Avatar) | PROPOSED | No: built in the second half of redesign step R5 |
 
 ---
 

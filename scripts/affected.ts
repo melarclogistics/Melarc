@@ -355,6 +355,9 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
   // The shadcn/ui primitives are drawn by the showcase, so a change to a primitive reaches these two through its imports.
   'primitives.spec.ts': ['apps/ops-web/src/showcase/'],
   'primitives-policy.spec.ts': ['apps/ops-web/src/showcase/'],
+  // The component kit is drawn by the showcase too: a change to a component of the kit reaches these two through the showcase's imports.
+  'kit.spec.ts': ['apps/ops-web/src/showcase/'],
+  'kit-policy.spec.ts': ['apps/ops-web/src/showcase/'],
   'pre-sign-in.spec.ts': ['apps/ops-web/src/app/pages/pre-sign-in/'],
   'logo.spec.ts': ['apps/ops-web/src/app/pages/pre-sign-in/'],
   'recovery.spec.ts': [

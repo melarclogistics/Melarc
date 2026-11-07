@@ -5,9 +5,8 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 // What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry (and the shadcn/ui
-// primitives, which are generated source that imports its icons) the door to the icon library, `components/ui/` the one door to React Aria
-// Components and the date library it uses, and `components/primitives/` the one door to Radix UI and the libraries beside it (DESIGN_SYSTEM
-// section 24a).
+// primitives, which are generated source that imports its icons) the door to the icon library, `components/ui/` the one door to Motion, and
+// `components/primitives/` the one door to Radix UI and the libraries beside it (DESIGN_SYSTEM section 24a).
 const API_RESTRICTED_PATHS = [
   'axios',
   'ky',
@@ -57,34 +56,36 @@ const PRIMITIVE_FILES_PATTERNS = [
   },
 ];
 
-const ARIA_MESSAGE =
-  'Behaviour a native element does not give (a calendar, a menu, a combobox) comes from React Aria Components through the components of components/ui only (DESIGN_SYSTEM section 24a): use or add a component there, and take a date as text from <DatePicker>.';
-const ARIA_PATHS = ['react-aria-components', 'react-aria', 'react-stately'].map((name) => ({
+// Motion (the `motion` package: layout, presence and counted numbers) is imported by the components of `components/ui/` and nowhere else, through
+// `components/ui/motion/motion.ts`, so that a duration and an easing are always the motion tokens and nothing moves under reduced motion
+// (DESIGN_SYSTEM section 9 and 24a).
+const MOTION_MESSAGE =
+  'Motion is imported by the components of components/ui only, through components/ui/motion/motion.ts (DESIGN_SYSTEM section 24a): a page names a component, and a duration or an easing is a motion token.';
+const MOTION_PATHS = ['motion', 'framer-motion', 'motion-dom', 'motion-utils'].map((name) => ({
   name,
-  message: ARIA_MESSAGE,
+  message: MOTION_MESSAGE,
 }));
+const MOTION_PATTERNS = [
+  {
+    group: ['motion/*', 'framer-motion/*', 'motion-dom/*', 'motion-utils/*'],
+    message: MOTION_MESSAGE,
+  },
+];
 // The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
 // (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
 const DOOR_PACKAGES =
-  '^(react-aria-components|react-aria|react-stately|@react-aria|@react-stately|@react-types|@internationalized|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker)(\\x2f|$)';
+  '^(motion|framer-motion|motion-dom|motion-utils|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker)(\\x2f|$)';
 const DATE_HELPERS_MESSAGE =
-  'The date helpers of the DatePicker hand out objects of the date library. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
-const ARIA_PATTERNS = [
-  {
-    group: ['**/date-picker/date-value', '**/date-picker/date-value.ts'],
-    message: DATE_HELPERS_MESSAGE,
-  },
+  'The date helpers of the DatePicker read and write the date as the control types it. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
+const DATE_PATTERNS = [
   {
     group: [
-      'react-aria-components/*',
-      'react-aria/*',
-      'react-stately/*',
-      '@react-aria/*',
-      '@react-stately/*',
-      '@react-types/*',
-      '@internationalized/*',
+      '**/date-picker/date-value',
+      '**/date-picker/date-value.ts',
+      '**/date-picker/day-first',
+      '**/date-picker/day-first.ts',
     ],
-    message: ARIA_MESSAGE,
+    message: DATE_HELPERS_MESSAGE,
   },
 ];
 
@@ -223,8 +224,13 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
-          paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
-          patterns: [...ARIA_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS, ...PRIMITIVE_FILES_PATTERNS],
+          paths: [...OPS_RESTRICTED_PATHS, ...MOTION_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: [
+            ...DATE_PATTERNS,
+            ...MOTION_PATTERNS,
+            ...PRIMITIVE_LIBRARY_PATTERNS,
+            ...PRIMITIVE_FILES_PATTERNS,
+          ],
         },
       ],
       'no-restricted-syntax': [
@@ -245,11 +251,11 @@ export default defineConfig(
         {
           // `no-restricted-imports` looks at import declarations only; a dynamic import is a door of its own.
           selector: `ImportExpression[source.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
         },
         {
           selector: `CallExpression[callee.name='require'][arguments.0.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
         },
       ],
       'no-eval': 'error',
@@ -276,8 +282,8 @@ export default defineConfig(
     },
   },
   {
-    // The one place that may import React Aria Components and the date library: the components of the design system, which give a page a
-    // calendar, a menu or a combobox in the portal's own look and API. Everything else above still applies to them.
+    // The one place that may import Motion: the components of the design system, which give a page a panel, a list or a figure that moves in the
+    // portal's own times and easings. Everything else above still applies to them.
     files: ['apps/ops-web/src/components/ui/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
     rules: {
@@ -299,8 +305,8 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
-          paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
-          patterns: [...ARIA_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS],
+          paths: [...OPS_RESTRICTED_PATHS, ...MOTION_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: [...DATE_PATTERNS, ...MOTION_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS],
         },
       ],
     },
@@ -308,13 +314,13 @@ export default defineConfig(
   {
     // The one place that may import Radix UI and the libraries beside it (cmdk, vaul, sonner, react-day-picker): the shadcn/ui primitives, which
     // are generated source from the official registry, restyled through the tokens. They import their icons from the icon library directly
-    // (the generated code does), which no other file may; React Aria and the API client stay out of them.
+    // (the generated code does), which no other file may; Motion and the API client stay out of them.
     files: ['apps/ops-web/src/components/primitives/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
-        { paths: [...API_RESTRICTED_PATHS, ...ARIA_PATHS], patterns: ARIA_PATTERNS },
+        { paths: [...API_RESTRICTED_PATHS, ...MOTION_PATHS], patterns: MOTION_PATTERNS },
       ],
     },
   },

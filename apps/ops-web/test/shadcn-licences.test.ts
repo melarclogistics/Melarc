@@ -18,8 +18,8 @@ import {
 /*
  * The licences of what the shadcn/ui primitives bring (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does).
  * The build test (build.test.ts) holds each shipped file to the package's own, byte for byte; this one holds the list of packages to the
- * lockfile, so that an upgrade that brings a new package, or drops one, is noticed here and not in an audit. aria-licences.test.ts does the same
- * for React Aria Components.
+ * lockfile, so that an upgrade that brings a new package, or drops one, is noticed here and not in an audit. motion-licences.test.ts does the same
+ * for Motion.
  */
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const LICENCES = join(APP_ROOT, 'public/licenses');

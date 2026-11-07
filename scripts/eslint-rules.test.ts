@@ -116,19 +116,17 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     }
   });
 
-  // Break caught: a second door to React Aria Components, so that a page draws a library's widget in the library's own terms (its types, its
-  // date objects, its styling hooks) and the one look and the one API of the design system drift (DESIGN_SYSTEM section 24a). The components
-  // of components/ui are the one place that may import it, and the date library it uses.
-  it('lets only the components of the design system import React Aria Components and its date library', () => {
-    const component = 'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx';
+  // Break caught: a second door to Motion, so that a page animates in the library's own terms (a duration of its own, an easing of its own, a
+  // motion that ignores the person's wish for less) and the motion tokens stop being the one source (DESIGN_SYSTEM section 9 and 24a). The
+  // components of components/ui are the one place that may import it.
+  it('lets only the components of the design system import Motion', () => {
+    const component = 'apps/ops-web/src/components/ui/side-panel/SidePanel.tsx';
     for (const code of [
-      "import { Calendar } from 'react-aria-components';",
-      "import { Button } from 'react-aria-components/Button';",
-      "import { useDatePicker } from 'react-aria';",
-      "import { useCalendarState } from 'react-stately';",
-      "import { parseDate } from '@internationalized/date';",
-      "import type { DateValue } from '@react-types/shared';",
-      "import { useButton } from '@react-aria/button';",
+      "import { motion } from 'motion/react';",
+      "import { animate } from 'motion';",
+      "import { m } from 'framer-motion';",
+      "import { frame } from 'motion-dom';",
+      "import { easeOut } from 'motion-utils';",
     ]) {
       assert.deepEqual(
         messagesFor(component, code),
@@ -140,13 +138,24 @@ describe('the Ops Portal reaches the API through the generated client only', () 
         'apps/ops-web/src/components/Probe.tsx',
         'apps/ops-web/src/platform/Probe.ts',
         'apps/ops-web/src/showcase/Probe.tsx',
+        'apps/ops-web/src/components/primitives/sheet.tsx',
       ]) {
         assert.match(
           messagesFor(path, code).join('\n'),
-          /React Aria Components/,
+          /Motion is imported by the components of components\/ui only/,
           `${path} was not refused: ${code}`,
         );
       }
+    }
+    for (const code of [
+      "import { motion } from 'motion/react/client';",
+      "import { x } from 'motion/dom';",
+    ]) {
+      assert.match(
+        messagesFor(OPS, code).join('\n'),
+        /Motion is imported/,
+        `${code} was not refused in a page`,
+      );
     }
   });
 
@@ -215,12 +224,12 @@ describe('the Ops Portal reaches the API through the generated client only', () 
   });
 
   // Break caught: the primitives being a second door to the icon library for everyone, or to what the rest of the code may not reach. The
-  // generated source imports its own icons from the library, which is the one exception; it stays out of React Aria and out of the API.
-  it('lets the primitives import the icon library and still keeps React Aria and the API out of them', () => {
+  // generated source imports its own icons from the library, which is the one exception; it stays out of Motion and out of the API.
+  it('lets the primitives import the icon library and still keeps Motion and the API out of them', () => {
     const primitive = 'apps/ops-web/src/components/primitives/select.tsx';
     assert.deepEqual(messagesFor(primitive, "import { CheckIcon } from 'lucide-react';"), []);
     for (const code of [
-      "import { Calendar } from 'react-aria-components';",
+      "import { motion } from 'motion/react';",
       "import axios from 'axios';",
       "const response = fetch('/api/v1/x');",
     ]) {
@@ -238,9 +247,9 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     }
   });
 
-  // Break caught: a door `no-restricted-imports` does not watch (it reads import declarations only): a dynamic import or a require of the
-  // library, of its date library or of the icon library, which a page could use to draw a widget in the library's terms.
-  it('refuses the library and the icon library by a dynamic import or a require, wherever it is written', () => {
+  // Break caught: a door `no-restricted-imports` does not watch (it reads import declarations only): a dynamic import or a require of Motion,
+  // of the libraries under the primitives or of the icon library, which a page could use to animate or draw a widget in the library's terms.
+  it('refuses the libraries and the icon library by a dynamic import or a require, wherever it is written', () => {
     for (const path of [
       OPS,
       'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx',
@@ -248,12 +257,11 @@ describe('the Ops Portal reaches the API through the generated client only', () 
       'apps/ops-web/src/showcase/Probe.tsx',
     ]) {
       for (const code of [
-        "const library = await import('react-aria-components');",
-        "const state = await import('react-stately/useCalendarState');",
-        "const dates = await import('@internationalized/date');",
+        "const library = await import('motion/react');",
+        "const library = await import('framer-motion');",
+        "const dom = await import('motion-dom');",
+        "const library = require('motion');",
         "const icons = await import('lucide-react');",
-        "const library = require('react-aria');",
-        "const types = require('@react-types/shared');",
         "const radix = await import('radix-ui');",
         "const dialog = await import('@radix-ui/react-dialog');",
         "const palette = await import('cmdk');",
@@ -276,18 +284,25 @@ describe('the Ops Portal reaches the API through the generated client only', () 
   it('lets an unrelated dynamic import or require through', () => {
     for (const code of [
       "const view = await import('./Other');",
-      "const aria = await import('react-ariana');",
+      "const unrelated = await import('motionless');",
       "const fs = require('node:fs');",
     ]) {
       assert.deepEqual(messagesFor(OPS, code), [], code);
     }
   });
 
-  // Break caught: the helpers of the DatePicker (which hand out the date library's objects) imported by a page, so that a page holds a date as
-  // an object of a library it is not to know.
+  // Break caught: the helpers of the DatePicker (which read and write the date as the control types it) imported by a page, so that a page holds a
+  // date as something other than the text the API carries.
   it('keeps the date helpers of the DatePicker inside the components of the design system', () => {
     const helpers = "import { dateFromText } from '../components/ui/date-picker/date-value';";
     assert.match(messagesFor(OPS, helpers).join('\n'), /holds a date as text/);
+    assert.match(
+      messagesFor(
+        OPS,
+        "import { readDayFirst } from '../components/ui/date-picker/day-first';",
+      ).join('\n'),
+      /holds a date as text/,
+    );
     assert.deepEqual(
       messagesFor(
         'apps/ops-web/src/components/ui/date-picker/DatePicker.tsx',

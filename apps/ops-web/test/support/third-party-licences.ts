@@ -6,8 +6,8 @@ import { parse } from 'yaml';
 /*
  * What the shadcn/ui primitives (src/components/primitives/) bring with them, and the licence that covers each package. Held to the lockfile by
  * shadcn-licences.test.ts and to the build's output by build.test.ts, so that a package an upgrade brings, or drops, is noticed there and not in
- * an audit (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does). React Aria Components has the same
- * arrangement in aria-licences.test.ts.
+ * an audit (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does). Motion has the same arrangement in
+ * motion-licences.test.ts.
  */
 const LOCKFILE = resolve(import.meta.dirname, '../../../../pnpm-lock.yaml');
 

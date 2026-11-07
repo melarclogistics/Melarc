@@ -1,0 +1,361 @@
+/*
+ * DataTable (design/COMPONENT_PATTERNS.md, *DataTable*; DESIGN_SYSTEM sections 10 and 23): TanStack Table's model over the table primitive. Rows are 36px
+ * (`density.row.compact`), 52px where a cell holds a code over a name, or 56px (`density.row.touch`) on a tablet, set by the one custom property below, in rem so
+ * that enlarged text grows them. The box the rows are in scrolls on its own, both ways, so a wide table never makes the page scroll sideways and the header can stay
+ * while the rows move. The whole row opens its record through the real button in the code cell, stretched over the row by its pseudo-element: the row is the
+ * positioned box it is stretched to, and the controls that are not that button sit above it. Every colour, size and time is a token or a rem; the one shadow of the
+ * system is not used here, because a table does not float.
+ */
+.ui-data-table {
+  --ui-data-table-row: var(--density-row-compact);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-data-table[data-density='two-line'] {
+  --ui-data-table-row: 3.25rem;
+}
+
+.ui-data-table[data-density='touch'] {
+  --ui-data-table-row: var(--density-row-touch);
+}
+
+/* The primitive wraps its table in a box that scrolls sideways; here the box is `.ui-data-table__scroller`, which scrolls both ways, so the primitive's does not. */
+.ui-data-table [data-slot='table-container'] {
+  overflow: visible;
+}
+
+.ui-data-table__scroller {
+  overflow: auto;
+  background: var(--color-surface-default);
+}
+
+/* The box that scrolls takes focus (so that the rows off to the side can be reached). Its ring is drawn inside it: a card that cuts what runs to its edges to its
+   rounded corners (Panel, padding none) would cut a ring drawn outside. */
+.ui-data-table__scroller:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* Separate borders, not collapsed ones: a collapsed border belongs to the table and does not stay with a sticky header. */
+.ui-data-table__table {
+  min-width: 36rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-data-table__table th,
+.ui-data-table__table td {
+  height: var(--ui-data-table-row);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  text-align: start;
+  vertical-align: middle;
+}
+
+/* A row is one line (or two, a code over a name): what does not fit is reached by scrolling the box sideways, not by wrapping into a taller row. */
+.ui-data-table__table tbody td {
+  white-space: nowrap;
+}
+
+.ui-data-table__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: var(--density-row-compact);
+  border-bottom-color: var(--color-border-default);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-sm-line-height);
+  white-space: nowrap;
+}
+
+.ui-data-table__table tbody tr:last-child th,
+.ui-data-table__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ui-data-table__table [data-align='end'] {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- The row ---- */
+
+/* The row is the box the code button is stretched to. */
+.ui-data-table__row {
+  position: relative;
+}
+
+/* The row header holds the record's name and the button that opens it. It is not a heading of the table's: it reads as a cell. */
+.ui-data-table__table tbody th.ui-data-table__code {
+  background: transparent;
+  color: var(--color-text-primary);
+  font-weight: var(--text-label-md-weight);
+  white-space: normal;
+}
+
+.ui-data-table__open {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  /* The cell's own bottom border is part of the row's height, so the button is a pixel shorter than the row: a row is exactly the height of its density. */
+  min-height: calc(var(--ui-data-table-row) - 1px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* The stretch: the button's whole reach is the row, with no handler on a row or a div. */
+.ui-data-table__open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* What is drawn over the row for the pointer is not the button: the box, the row action and any link or button of another cell keep their own reach above it. */
+.ui-data-table__select > *,
+.ui-data-table__actions > *,
+.ui-data-table__table td a,
+.ui-data-table__table td button {
+  position: relative;
+  z-index: 1;
+}
+
+/* The row the keyboard is on is tinted like the row the pointer is on (the ring of the control inside it is the global focus ring). */
+.ui-data-table__row:hover,
+.ui-data-table__row:focus-within {
+  background: var(--color-surface-subtle);
+}
+
+.ui-data-table__row[data-state='selected'],
+.ui-data-table__row[data-state='selected']:hover {
+  background: var(--color-surface-selected);
+}
+
+.ui-data-table__select {
+  width: 2.75rem;
+  padding-inline-end: 0;
+}
+
+.ui-data-table__actions {
+  text-align: end;
+  white-space: nowrap;
+}
+
+/* The usual next act: shown when the row is hovered, a control in it has focus or the row is chosen, and always where there is no hover to show it. It stays in the page and in the keyboard order. */
+.ui-data-table__action {
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+}
+
+.ui-data-table__row:hover .ui-data-table__action,
+.ui-data-table__row:focus-within .ui-data-table__action,
+.ui-data-table__row[data-state='selected'] .ui-data-table__action {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ui-data-table__action {
+    opacity: 1;
+  }
+}
+
+/* The code over a name: the code in the monospaced face (its own rule), the name quieter below it. */
+.ui-data-table__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-data-table__title .ui-code {
+  font-size: var(--text-body-sm-size);
+  line-height: 1.125rem;
+}
+
+.ui-data-table__name {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-caption-size);
+  font-weight: var(--text-caption-weight);
+  line-height: var(--text-caption-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The muted text is for the default surface only (DESIGN_SYSTEM section 4.6): on the tint of a chosen row it is 4.2 to 1, under the 4.5 to 1 that text needs, so the name takes the secondary text there (found by the axe scan of the table with rows chosen). */
+.ui-data-table__row[data-state='selected'] .ui-data-table__name {
+  color: var(--color-text-secondary);
+}
+
+/* A row that changed: it takes a tint and gives it back over `motion.highlight`. Its time is a token, which is 0 under reduced motion, so the highlight is then not seen. */
+.ui-data-table__row[data-changed='true'] {
+  animation: ui-data-table-changed var(--motion-highlight) var(--motion-ease-exit) backwards;
+}
+
+@keyframes ui-data-table-changed {
+  from {
+    background-color: var(--color-status-info-background);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+/* ---- The header's sort button ---- */
+
+.ui-data-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1.5rem;
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-data-table__sort:hover {
+  background: var(--button-pressed-background);
+}
+
+/* ---- The states of the table ---- */
+
+.ui-data-table__skeleton-row {
+  pointer-events: none;
+}
+
+.ui-data-table__skeleton {
+  display: block;
+  height: 0.875rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-border-default);
+}
+
+.ui-data-table__table tbody .ui-data-table__message-row td {
+  height: auto;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.ui-data-table__table tbody .ui-data-table__message-row:hover {
+  background: transparent;
+}
+
+.ui-data-table__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+
+.ui-data-table__notice p {
+  margin: 0;
+}
+
+.ui-data-table__notice[data-kind='error'] svg {
+  color: var(--color-status-danger-foreground);
+}
+
+/* Stale rows: the rows that were read last stay, under a line that says so and offers the read again. */
+.ui-data-table__stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-data-table__stale p {
+  margin: 0;
+}
+
+/* ---- The bar of acts on the chosen rows ---- */
+
+/* It stays at the foot of the box as the rows scroll and floats over the last rows, and it comes after the table, so that it never pushes a row. No shadow: a bar is not a menu. */
+.ui-data-table__bulk {
+  position: sticky;
+  bottom: var(--space-3);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+}
+
+.ui-data-table__bulk-count {
+  margin: 0 var(--space-2) 0 0;
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-body-sm-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-data-table__footer {
+  border-top: 1px solid var(--color-border-subtle);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* On a touch screen the box of a row is a bigger target. */
+.ui-data-table[data-density='touch'] .ui-data-table__select [role='checkbox'] {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-data-table__skeleton {
+    animation: ui-data-table-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes ui-data-table-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-data-table__table thead th {
+    border-bottom-color: CanvasText;
+  }
+
+  .ui-data-table__row[data-state='selected'] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .ui-data-table__bulk,
+  .ui-data-table__skeleton {
+    border: 1px solid CanvasText;
+  }
+}

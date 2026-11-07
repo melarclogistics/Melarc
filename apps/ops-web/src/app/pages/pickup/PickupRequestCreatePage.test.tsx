@@ -103,12 +103,10 @@ async function chooseVendor(user: User): Promise<void> {
   await user.click(await screen.findByRole('button', { name: 'Choose: Asante Fabrics Ltd' }));
 }
 
-/** Types a date into the date field, part by part: day, month and year. */
+/** Types a date into the date field: the digits of day, month and year, which the field puts its slashes into. */
 async function typeDate(user: User, digits: string): Promise<void> {
   const group = screen.getByRole('group', { name: /Service date/ });
-  const [day] = within(group).getAllByRole('spinbutton');
-  if (day === undefined) throw new Error('no day');
-  await user.click(day);
+  await user.click(within(group).getByRole('textbox'));
   await user.keyboard(digits);
 }
 
@@ -797,7 +795,7 @@ describeInterfaceStates('The booking', {
       expect(
         await screen.findByText('Pickups run from Monday to Saturday. Choose another date.'),
       ).toBeVisible();
-      expect(date.getAllByRole('spinbutton')[0]).toHaveAttribute('aria-invalid', 'true');
+      expect(date.getByRole('textbox')).toHaveAttribute('aria-invalid', 'true');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },

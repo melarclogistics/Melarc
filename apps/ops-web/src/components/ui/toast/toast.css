@@ -1,0 +1,124 @@
+/*
+ * Toast (design/COMPONENT_PATTERNS.md section 21, *Toast*; brief section 8): a raised surface with the one floating shadow (a toast floats), the default border
+ * and 12px corners. A disc of 22px carries the tone's pair and its icon, the message is the primary text, and the one action is a text button; the dismiss
+ * control is a 24px icon button. Sonner places and stacks the toasts and handles swiping, the hotkey and the live region; this draws what is inside one.
+ * Sonner's own animations stop under reduced motion in its stylesheet.
+ */
+.ui-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  /* Sonner gives each toast its own width (356px, and the screen's width less its offsets on a phone): the toast fills it. */
+  width: 100%;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-floating);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-toast__disc {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin-top: 0.0625rem;
+  border: 1px solid;
+  border-radius: var(--radius-full);
+}
+
+.ui-toast__disc[data-tone='success'] {
+  border-color: var(--color-status-success-border);
+  background: var(--color-status-success-background);
+  color: var(--color-status-success-foreground);
+}
+
+.ui-toast__disc[data-tone='info'] {
+  border-color: var(--color-status-info-border);
+  background: var(--color-status-info-background);
+  color: var(--color-status-info-foreground);
+}
+
+.ui-toast__disc[data-tone='warning'] {
+  border-color: var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-toast__disc[data-tone='danger'] {
+  border-color: var(--color-status-danger-border);
+  background: var(--color-status-danger-background);
+  color: var(--color-status-danger-foreground);
+}
+
+/* The icon of the disc is a small one: it sits inside the 22px circle with room around it. */
+.ui-toast__disc svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+.ui-toast__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The one action: a text button in the link colours, as tall as a dense control. */
+.ui-toast__action {
+  flex: none;
+  min-height: var(--control-height-sm);
+  margin: calc(-1 * var(--space-2)) 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-link);
+  font: inherit;
+  font-weight: var(--text-label-md-weight);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ui-toast__action:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-link-hover);
+}
+
+.ui-toast__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: -0.0625rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.ui-toast__close:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+}
+
+@media (forced-colors: active) {
+  .ui-toast {
+    border-color: CanvasText;
+  }
+
+  .ui-toast__disc {
+    border-color: CanvasText;
+  }
+}

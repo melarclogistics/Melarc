@@ -627,7 +627,7 @@ describe('the queue: filtering', () => {
 
     await waitFor(() => {
       expect(
-        within(screen.getByRole('group', { name: 'Service date' })).getAllByRole('spinbutton')[0],
+        within(screen.getByRole('group', { name: 'Service date' })).getByRole('textbox'),
       ).toHaveFocus();
     });
   });
@@ -658,10 +658,8 @@ describe('the queue: filtering', () => {
     const { user, router } = open(undefined, READER, '/pickup-requests?state=PENDING');
     await screen.findByRole('table', { name: 'Pickup requests' });
     const group = screen.getByRole('group', { name: 'Service date' });
-    const [day] = within(group).getAllByRole('spinbutton');
-    if (day === undefined) throw new Error('no day');
 
-    await user.click(day);
+    await user.click(within(group).getByRole('textbox'));
     await user.keyboard('04112026');
 
     await waitFor(() => {
