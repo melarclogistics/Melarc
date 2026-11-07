@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { reachableNames, watchPage, wcagViolations } from './support/page';
+import { expectShellAround, openAccountMenu, primaryNav } from './support/shell';
 import {
   ama,
   IDS,
@@ -80,31 +81,37 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('the menu offers what the keys allow and marks where the person is', async ({ page }) => {
+  test('the sidebar offers what the keys allow and marks where the person is; the New menu and the account menu offer the rest', async ({
+    page,
+  }) => {
     await open(page, '/admin/staff');
 
-    const menu = page.getByRole('navigation', { name: 'Primary' });
-    // The names of the entries (what each is called; the count beside one is the server's, and is asserted on the line below).
-    await expect(menu.locator('.ui-primary-nav__label')).toHaveText([
-      'Overview',
-      'Staff',
-      'Add a staff profile',
-      'Sessions',
-      'Trusted browsers',
-    ]);
+    const menu = primaryNav(page);
+    // The names of the entries (what each is called; the count beside one is the server's, and is asserted on the line below). The page that adds a
+    // staff profile is an action of the New menu, and the person's own trusted browsers a page of the account menu: neither is an entry here.
+    await expect(menu.locator('.ui-sidebar__label')).toHaveText(['My work', 'Staff', 'Sessions']);
     await expect(menu.getByRole('link', { name: /^Staff(?: |$)/ })).toHaveAttribute(
       'aria-current',
       'page',
     );
+    await expect(menu.locator('[aria-current="page"]')).toHaveCount(1);
     // The one profile that waits is counted beside the entry of the queue it is in (task C1).
     await expect(menu.getByRole('link', { name: 'Staff 1 waiting for approval' })).toBeVisible();
-    // "Add a staff profile" lies under "Staff": at its own page it alone is current.
-    await page
-      .getByRole('navigation', { name: 'Primary' })
-      .getByRole('link', { name: 'Add a staff profile' })
-      .click();
+
+    await page.getByRole('button', { name: 'New' }).click();
+    await expect(page.getByRole('menuitem')).toHaveText(['Add a staff profile']);
+    await page.getByRole('menuitem', { name: 'Add a staff profile' }).click();
     await expect(page).toHaveURL('/admin/staff/new');
-    await expect(menu.locator('[aria-current="page"]')).toHaveText(['Add a staff profile']);
+    await focusedIs(page, 'Add a staff profile');
+    // The page lies under "Staff": it is the entry that stays current while the person is there.
+    await expect(menu.getByRole('link', { name: /^Staff(?: |$)/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    const account = await openAccountMenu(page);
+    await expect(account.getByRole('menuitem')).toHaveText(['Trusted browsers', 'Sign out']);
+    await expect(account.getByRole('menuitemradio')).toHaveText(['System', 'Light', 'Dark']);
   });
 
   // Break caught: a screen that exists but that nothing in the menu leads to (found on the real stack: the sessions page could be
@@ -114,7 +121,7 @@ test.describe('moving through the screens', () => {
   }) => {
     await open(page, '/admin/staff');
 
-    const menu = page.getByRole('navigation', { name: 'Primary' });
+    const menu = primaryNav(page);
     await menu.getByRole('link', { name: 'Sessions' }).click();
 
     await expect(page).toHaveURL('/admin/sessions');
@@ -433,14 +440,12 @@ test.describe('ending a session', () => {
 test.describe('the trusted browsers (staff-authentication.md section 5.8)', () => {
   // Break caught: a page that exists and that nothing leads to, one that draws a credential it was sent, or a removal that asks for no
   // confirmation or reads the list no more.
-  test('the menu leads to the person’s own browsers, which are removed after a confirmation and are shown with no credential', async ({
+  test('the account menu leads to the person’s own browsers, which are removed after a confirmation and are shown with no credential', async ({
     page,
   }) => {
     const { api } = await open(page, '/');
-    await page
-      .getByRole('navigation', { name: 'Primary' })
-      .getByRole('link', { name: 'Trusted browsers' })
-      .click();
+    const account = await openAccountMenu(page);
+    await account.getByRole('menuitem', { name: 'Trusted browsers' }).click();
     await expect(page).toHaveURL('/account/trusted-browsers');
     await focusedIs(page, 'Trusted browsers');
     const table = page.getByRole('table', { name: 'Your trusted browsers' });
@@ -630,17 +635,10 @@ test.describe('every screen and state, at the verified widths', () => {
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
-        // The shell is around the screen, in the form its width gives it: docked at the side on a wide screen, and on a narrow one behind its
-        // button, in a bar, out of sight and out of the tab order. (By layout, not by role: a modal dialog makes the rest of the page inert.)
-        const navigation = page.getByRole('navigation', { name: 'Primary', includeHidden: true });
-        await expect(navigation).toHaveCount(1);
-        if (width >= 768) {
-          await expect(page.locator('.ui-side-menu__panel')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__bar')).toBeHidden();
-        } else {
-          await expect(page.locator('.ui-side-menu__bar')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__panel')).toBeHidden();
-        }
+        // The shell is around the screen, in the form its width gives it: the top bar always, and the sidebar docked at the side from 768 px, and on a
+        // narrow screen behind the bar's button, out of the document until it is opened. (By layout, not by role: a modal dialog makes the rest of the
+        // page inert.)
+        await expectShellAround(page, width);
       });
     }
   }

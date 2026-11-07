@@ -12,6 +12,7 @@ import {
   type World,
 } from './support/manifest-api';
 import { watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
 
 /**
  * The manifest screens (S1.25) in a real browser: the list, the builder, one run and the Ops skip of a stop. What jsdom cannot show is here: the
@@ -109,7 +110,7 @@ test.describe('moving through the screens', () => {
     page,
   }) => {
     const { api, watch } = await open(page, '/');
-    await page.getByRole('link', { name: 'Manifests' }).first().click();
+    await menuEntry(page, 'Pickup runs').click();
     await expect(page.getByRole('heading', { level: 1, name: 'Manifests' })).toBeFocused();
 
     await page.getByRole('link', { name: 'ACC-MF-Q92422' }).first().click();
@@ -122,7 +123,7 @@ test.describe('moving through the screens', () => {
     await open(page, '/manifests', { permissions: ['staff.read'] });
 
     await expect(page.getByText('pickup.read')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Manifests' })).toHaveCount(0);
+    await expect(menuEntry(page, 'Pickup runs')).toHaveCount(0);
   });
 
   test('the list tells that it is oldest first, and moves by the server’s token', async ({
@@ -865,7 +866,7 @@ test.describe('the manifests: coming back from a manifest', () => {
     await page.getByRole('button', { name: 'Next page' }).click();
     await page.getByRole('link', { name: opened }).click();
     await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
-    await page.getByRole('link', { name: 'Manifests' }).first().click();
+    await menuEntry(page, 'Pickup runs').click();
     await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
 

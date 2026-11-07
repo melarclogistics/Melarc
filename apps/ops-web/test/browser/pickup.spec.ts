@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
 import { tabReachesLinks, watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
 import {
   IDS,
   PLANTED_PRICE_TEXT,
@@ -84,7 +85,7 @@ test.describe('moving through the screens', () => {
     page,
   }) => {
     const { api, watch } = await open(page, '/');
-    await page.getByRole('link', { name: 'Pickup requests' }).first().click();
+    await menuEntry(page, 'Requests').click();
     await expect(page.getByRole('heading', { level: 1, name: 'Pickup requests' })).toBeFocused();
 
     await page.getByRole('link', { name: 'ACC-PR-7KQ2MZ' }).click();
@@ -97,7 +98,7 @@ test.describe('moving through the screens', () => {
     await open(page, '/pickup-requests', { permissions: ['staff.read'] });
 
     await expect(page.getByText('pickup.read')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Pickup requests' })).toHaveCount(0);
+    await expect(menuEntry(page, 'Requests')).toHaveCount(0);
   });
 });
 
@@ -995,7 +996,7 @@ test.describe('the queue: coming back from a request', () => {
     await page.getByRole('button', { name: 'Next page' }).click();
     await page.getByRole('link', { name: opened }).click();
     await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
-    await page.getByRole('link', { name: 'Pickup requests' }).first().click();
+    await menuEntry(page, 'Requests').click();
     await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
 
@@ -1531,7 +1532,7 @@ test.describe('the approver’s queue', () => {
     await open(page, '/approvals', { permissions: ['pickup.read'] });
 
     await expect(page.getByText('pickup.exception.approve')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Exceptions to approve' })).toHaveCount(0);
+    await expect(menuEntry(page, 'Decisions')).toHaveCount(0);
   });
 
   test('says when no exception waits', async ({ page }) => {

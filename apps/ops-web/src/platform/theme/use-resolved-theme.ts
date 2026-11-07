@@ -10,7 +10,7 @@ const canAskTheSystem = (): boolean => typeof window.matchMedia === 'function';
 /**
  * The theme the way tokens.css decides it: the root's `data-theme` when a person has chosen one, and otherwise the operating system's
  * setting. A component whose look is all tokens never needs this (the tokens switch themselves); it is for a library that has to be
- * told the theme in a prop, such as the toaster. It reads nothing from storage: the choice, once the toggle exists (redesign step R4), is
+ * told the theme in a prop, such as the toaster. It reads nothing from storage: the person's choice (`theme-choice.ts`, redesign step R4) is
  * written to the root's attribute, and this follows the attribute.
  */
 export function resolveTheme(): ResolvedTheme {

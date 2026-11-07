@@ -298,7 +298,7 @@ And the next lookup, which meets no leftover setting, answers whole and writes t
 
 ## 16. Implementation status
 
-Task C2 (6 November 2026): specified here; contracted as `lookupRecords`; built in the API and as the hook `useRecordLookup`. The palette and the top bar that ask it are not this task's but step R4's: [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign) says where that step stands.
+Task C2 (6 November 2026): specified here; contracted as `lookupRecords`; built in the API and as the hook `useRecordLookup`. The palette and the top bar's search were redesign step R4's work and are built there (`components/ui/app-shell/CommandPalette.tsx` and the search button of the top bar); this task did not build them.
 
 Task C2.1 (6 November 2026, the Product Owner's decisions on the report of C2): the call became a POST that changes nothing, with the text in its body and never in a URL (`AC-LOOKUP-01`, `-11`); a pickup request's sender name joined its result (`AC-LOOKUP-10`); the name search of pickup requests was limited to current work (`AC-LOOKUP-13`, [section 5](#5-behavior) and [section 14](#14-unresolved-requirements)). Contract 5.93.0.
 

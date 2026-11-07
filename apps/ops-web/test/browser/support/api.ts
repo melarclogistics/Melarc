@@ -31,7 +31,13 @@ export type SessionAnswer =
 
 /** How `DELETE /auth/session` (sign-out) is answered. The default is that nobody signs out, and a sign-out is then an unexpected request. */
 export type SignOutAnswer =
-  'ok' | 'session-invalid' | 'csrf-refused' | 'fault' | 'no-connection' | 'fault-then-ok';
+  | 'ok'
+  | 'held-ok'
+  | 'session-invalid'
+  | 'csrf-refused'
+  | 'fault'
+  | 'no-connection'
+  | 'fault-then-ok';
 
 export interface StubbedApi {
   /** The requests to `/api` that were made, as `METHOD path`. */
@@ -40,6 +46,8 @@ export interface StubbedApi {
   readonly unexpected: string[];
   /** The `X-CSRF-Token` header of each sign-out request, in order (null for none). */
   readonly signOutTokens: (string | null)[];
+  /** Lets a `held-ok` sign-out finish: the test looks at the sign-out that is under way for as long as it needs, and releases it when it has. */
+  readonly releaseSignOut: () => void;
 }
 
 export interface StubOptions {
@@ -70,10 +78,19 @@ function answer(
   }
 }
 
-function signOutAnswer(route: Route, kind: SignOutAnswer, attempt: number): Promise<void> {
+function signOutAnswer(
+  route: Route,
+  kind: SignOutAnswer,
+  attempt: number,
+  held: Promise<void>,
+): Promise<void> {
   switch (kind) {
     case 'ok':
       return route.fulfill({ status: 204, headers: { 'cache-control': 'no-store' } });
+    case 'held-ok':
+      // Answered when the test says so (`releaseSignOut`) and not after a pause: a pause is a race with the steps the test takes while the sign-out is
+      // under way, and on a slow machine the sign-out finished first (review of 7 November 2026).
+      return held.then(() => signOutAnswer(route, 'ok', attempt, held));
     case 'session-invalid':
       return route.fulfill({
         status: 401,
@@ -100,8 +117,8 @@ function signOutAnswer(route: Route, kind: SignOutAnswer, attempt: number): Prom
       return route.abort('connectionreset');
     case 'fault-then-ok':
       return attempt === 1
-        ? signOutAnswer(route, 'fault', attempt)
-        : signOutAnswer(route, 'ok', attempt);
+        ? signOutAnswer(route, 'fault', attempt, held)
+        : signOutAnswer(route, 'ok', attempt, held);
   }
 }
 
@@ -111,7 +128,18 @@ export async function stubApi(
   session: SessionAnswer = 'signed-in',
   options: StubOptions = {},
 ): Promise<StubbedApi> {
-  const stubbed: StubbedApi = { requests: [], unexpected: [], signOutTokens: [] };
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const stubbed: StubbedApi = {
+    requests: [],
+    unexpected: [],
+    signOutTokens: [],
+    releaseSignOut: () => {
+      release();
+    },
+  };
   let reads = 0;
   let signOuts = 0;
   await page.route('**/api/v1/**', async (route) => {
@@ -122,7 +150,7 @@ export async function stubApi(
     if (line === `DELETE ${SESSION_PATH}` && options.signOut !== undefined) {
       signOuts += 1;
       stubbed.signOutTokens.push(route.request().headers()['x-csrf-token'] ?? null);
-      await signOutAnswer(route, options.signOut, signOuts);
+      await signOutAnswer(route, options.signOut, signOuts, held);
       return;
     }
     if (line !== `GET ${SESSION_PATH}`) {

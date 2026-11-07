@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { useSessionStore } from '../platform/session/session-context';
@@ -46,7 +47,7 @@ const REGISTRY: readonly SignedInRoute[] = [
     path: '/',
     element: <Holder />,
     access: ANY_SIGNED_IN_SESSION,
-    menu: { label: 'Home', icon: 'staff', area: 'overview', order: 0 },
+    menu: { place: 'sidebar', group: 'today', label: 'Home', icon: 'staff', order: 0 },
   },
 ];
 
@@ -64,7 +65,13 @@ function open(handlers: Record<string, (request: Request) => Response | Promise<
   return renderApp('/', signInStandIn, REGISTRY);
 }
 
-const signOutButton = () => screen.findByRole('button', { name: 'Sign out' });
+/** The sign-out is an item of the account menu, which every signed-in screen carries in its top bar: opening the menu is the first half of it. */
+const accountMenu = () =>
+  within(screen.getByRole('banner')).getByRole('button', { name: 'Account menu' });
+async function signOutItem(user: UserEvent) {
+  await user.click(accountMenu());
+  return screen.findByRole('menuitem', { name: /^Sign(ing)? out/ });
+}
 const calls = () => api.requests.filter((request) => request.method === 'DELETE');
 
 /** The person is gone: the screen, the cache and the store hold nothing of them. */
@@ -87,7 +94,7 @@ describe('signing out: it is done', () => {
       expect(client?.getQueryData(SENTINEL_KEY)).toBe(SENTINEL);
     });
 
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
 
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     expect(router.state.location.pathname).toBe('/sign-in');
@@ -95,7 +102,7 @@ describe('signing out: it is done', () => {
     expect(calls()[0]?.url).toMatch(/\/api\/v1\/auth\/session$/);
     expectNobodyLeft();
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
   });
 
   // Break caught: "the session had already ended" shown to the person as a failure of signing out. They wanted to be out, and they are
@@ -106,7 +113,7 @@ describe('signing out: it is done', () => {
       const { user } = open({ [`DELETE ${SIGN_OUT}`]: () => errorResponse(401, code) });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
       expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
       expectNobodyLeft();
@@ -127,7 +134,7 @@ describe('signing out: it is done', () => {
     const visited: string[] = [];
     router.subscribe((state) => visited.push(state.location.pathname));
 
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
     await screen.findByRole('heading', { name: 'Sign-in stand-in' });
 
     expect(visited.at(-1)).toBe('/sign-in');
@@ -148,7 +155,7 @@ describe('signing out: it did not finish', () => {
       const { user } = open({ [`DELETE ${SIGN_OUT}`]: answer });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
       const alert = await screen.findByRole('alert');
       expect(alert).toHaveTextContent('Sign-out did not finish, so you are still signed in.');
@@ -174,7 +181,7 @@ describe('signing out: it did not finish', () => {
       },
     });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
     await user.click(await screen.findByRole('button', { name: 'Try again' }));
 
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
@@ -193,24 +200,33 @@ describe('signing out: it did not finish', () => {
       },
     });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
     await screen.findByRole('alert');
 
-    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    // The menu is closed again, with the notice at the top of the page: the second try is made from the menu, as the first was.
+    await user.click(await signOutItem(user));
 
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
   });
 
-  it('keeps focus on the control, so a keyboard user is not dropped', async () => {
+  // Break caught: a keyboard user dropped at the top of the document when the menu closes over the notice of a sign-out that did not finish: focus
+  // goes back to the control that opened the menu, so that Enter opens it again.
+  it('puts focus back on the account button when the sign-out did not finish, so a keyboard user is not dropped', async () => {
     const { user } = open({ [`DELETE ${SIGN_OUT}`]: () => errorResponse(500, 'INTERNAL_ERROR') });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    const button = await signOutButton();
-    button.focus();
+    const account = accountMenu();
+    account.focus();
 
+    await user.keyboard('{Enter}');
+    const item = await screen.findByRole('menuitem', { name: 'Sign out' });
+    item.focus();
     await user.keyboard('{Enter}');
     await screen.findByRole('alert');
 
-    expect(button).toHaveFocus();
+    await waitFor(() => {
+      expect(account).toHaveFocus();
+    });
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });
 
@@ -229,12 +245,14 @@ describe('signing out: once', () => {
       },
     });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    const button = await signOutButton();
+    const item = await signOutItem(user);
 
-    await user.dblClick(button);
-    await user.click(button);
+    await user.dblClick(item);
+    await user.click(item);
 
-    expect(button).toHaveAttribute('aria-busy', 'true');
+    // The menu stays open on the act and says it is under way: the item is busy, and no second request is sent.
+    expect(item).toHaveAttribute('aria-busy', 'true');
+    expect(item).toHaveTextContent('Signing out…');
     expect(calls()).toHaveLength(1);
     await act(async () => {
       release();
@@ -258,7 +276,7 @@ describe('signing out: once', () => {
       },
     });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
 
     act(() => {
       store?.end();
@@ -291,7 +309,7 @@ describe('signing out: accessibility', () => {
       },
     });
     await screen.findByText(`Signed in as ${SENTINEL}.`);
-    await user.click(await signOutButton());
+    await user.click(await signOutItem(user));
     expect(await wcagViolations(container)).toEqual([]);
 
     await act(async () => {
@@ -311,9 +329,12 @@ describeInterfaceStates('The sign-out control', {
       });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
-      expect(screen.getByRole('button', { name: 'Sign out' })).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByRole('menuitem', { name: /Signing out/ })).toHaveAttribute(
+        'aria-busy',
+        'true',
+      );
     },
   },
   empty: { inapplicable: 'A button has no list to be empty; it is a single act.' },
@@ -325,7 +346,7 @@ describeInterfaceStates('The sign-out control', {
       const { user } = open({ [`DELETE ${SIGN_OUT}`]: () => errorResponse(500, 'INTERNAL_ERROR') });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(/did not finish/);
     },
@@ -335,7 +356,7 @@ describeInterfaceStates('The sign-out control', {
       const { user } = open({ [`DELETE ${SIGN_OUT}`]: () => errorResponse(500, 'INTERNAL_ERROR') });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
       expect(await screen.findByRole('button', { name: 'Try again' })).toBeVisible();
     },
@@ -350,7 +371,7 @@ describeInterfaceStates('The sign-out control', {
       const { user } = open({ [`DELETE ${SIGN_OUT}`]: () => new Response(null, { status: 204 }) });
       await screen.findByText(`Signed in as ${SENTINEL}.`);
 
-      await user.click(await signOutButton());
+      await user.click(await signOutItem(user));
 
       expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     },

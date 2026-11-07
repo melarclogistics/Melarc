@@ -3,14 +3,25 @@ import { describe, expect, it } from 'vitest';
 
 import { QUEUE_IDS, type QueueName } from '../../platform/queue-summary/queue-summary-shape';
 import { QUEUE_WORDS, queueLink } from './queue-places';
+import { navigationFor, registryProblems } from './navigation-model';
 import {
   ANY_SIGNED_IN_SESSION,
-  queueOfEntries,
-  registryProblems,
   SIGNED_IN_ROUTES,
   signedInRouteObjects,
   type SignedInRoute,
 } from './route-registry';
+
+/** The queue each entry of the sidebar draws a count of, by the address of the entry, for a session that holds every key (a count is drawn only beside an entry the session has). */
+function queueOfEntries(): Map<string, QueueName> {
+  const everyKey = SIGNED_IN_ROUTES.flatMap((route) =>
+    route.access === ANY_SIGNED_IN_SESSION ? [] : [route.access.permission],
+  );
+  return new Map(
+    navigationFor(everyKey, SIGNED_IN_ROUTES)
+      .groups.flatMap((group) => group.entries)
+      .flatMap((entry) => (entry.queue === undefined ? [] : [[entry.to, entry.queue] as const])),
+  );
+}
 
 /**
  * The queues of the summary and the places they lead to (task C1). The words are plain and exist for every queue; every link leads to a route
@@ -106,23 +117,24 @@ describe('where each queue leads', () => {
 
 describe('the registry and the queues', () => {
   // Break caught: a queue drawn beside the wrong entry, or an entry that lost its count.
-  it('draws the count of each queue that has an entry beside that entry, and the late bookings beside none', () => {
+  it('draws the count of each queue that has an entry beside that entry, and the late bookings and the pool beside none', () => {
     const queues = queueOfEntries();
 
     expect(Object.fromEntries(queues)).toEqual({
       '/pickup-requests': 'PICKUP_AWAITING_CONFIRMATION',
       '/approvals': 'PICKUP_EXCEPTION_APPROVAL',
       '/manifests': 'PICKUP_RUNS_IN_PROGRESS',
-      '/manifests/new': 'PICKUP_UNMANIFESTED_POOL',
       '/admin/staff': 'STAFF_AWAITING_APPROVAL',
     });
+    // The late bookings have no entry, and the pool's entry (the run builder) is an action of the New menu, which draws no count: both show on My work.
     expect([...queues.values()]).not.toContain('PICKUP_CUTOFF_REVIEW');
+    expect([...queues.values()]).not.toContain('PICKUP_UNMANIFESTED_POOL');
   });
 
   // Break caught: the count of one queue drawn beside two entries, which would say the same thing twice with different meanings.
   it('refuses a registry that draws one queue beside two entries', () => {
     const twice: SignedInRoute[] = SIGNED_IN_ROUTES.map((route) =>
-      route.path === '/messages' && route.menu !== null
+      route.path === '/messages' && route.menu?.place === 'sidebar'
         ? { ...route, menu: { ...route.menu, queue: 'PICKUP_AWAITING_CONFIRMATION' } }
         : route,
     );

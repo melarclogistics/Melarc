@@ -4,6 +4,7 @@ import { SIGNED_IN_SESSION } from './support/api';
 import { decodePainted } from './support/painted';
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 import { errorAnswer, stubPreSignInApi, type PreSignInApi } from './support/pre-sign-in-api';
+import { accountButton } from './support/shell';
 
 /**
  * The five pre-sign-in screens in a real browser (S0.43): `/sign-in`, `/sign-in/mfa`, `/setup/credential`, `/setup/mfa` and `/setup/mfa/complete`.
@@ -181,7 +182,7 @@ test.describe('a link page: the grant in the fragment (GBT-W16, the page’s hal
 
 test.describe('the sign-in in a browser', () => {
   // Break caught: a sign-in that does not reach the landing, that needs a second read, or that leaves the form's password behind.
-  test('signs an ordinary employee in with the keyboard and lands on the landing, with the shell’s side menu', async ({
+  test('signs an ordinary employee in with the keyboard and lands on My work, with the shell’s sidebar and top bar', async ({
     page,
   }) => {
     const api = await stubPreSignInApi(page, { signIn: { status: 200, json: SIGNED_IN_SESSION } });
@@ -196,7 +197,7 @@ test.describe('the sign-in in a browser', () => {
     await expect(page).toHaveURL('/');
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
     await expect(page.getByRole('navigation')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+    await expect(accountButton(page)).toBeVisible();
     expect(api.requests.map((request) => request.operation)).toEqual(['signIn']);
     expect(api.requests[0]?.body).toEqual({ email: EMAIL, password: PASSWORD });
     expect(api.requests[0]?.origin).toBeDefined();
@@ -225,7 +226,7 @@ test.describe('the sign-in in a browser', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Enter your code' })).toBeVisible();
     await expect(page).toHaveURL('/sign-in/mfa');
     await expect(page.getByRole('navigation')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(accountButton(page)).toHaveCount(0);
     expect(page.url()).not.toContain(CHALLENGE.challenge_id);
 
     await field(page, 'Authenticator code (required)').fill(CODE);
@@ -831,7 +832,7 @@ test.describe('every screen and state, at the verified widths', () => {
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
         await expect(page.getByRole('navigation')).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+        await expect(accountButton(page)).toHaveCount(0);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }

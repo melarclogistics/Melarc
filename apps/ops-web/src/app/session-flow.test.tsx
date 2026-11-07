@@ -56,7 +56,7 @@ describe('a visit to the landing with nobody signed in', () => {
     const { router } = renderApp('/', signInStandIn);
 
     expect(screen.getByRole('status')).toHaveTextContent('Checking your session…');
-    expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
 
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Sign-in stand-in' }),
@@ -97,7 +97,7 @@ describe('a visit to the landing with nobody signed in', () => {
 
 describe('a visit to the landing with somebody signed in', () => {
   // Break caught: a landing that does not say who is signed in and where, the one thing the specification gives it.
-  it('shows who is signed in, their hubs, and that nothing is waiting', async () => {
+  it('shows who is signed in, where they act, and that nothing is waiting', async () => {
     api = installFakeApi(
       signedInApi(
         sessionFixture({
@@ -111,26 +111,23 @@ describe('a visit to the landing with somebody signed in', () => {
     );
     renderApp('/');
 
-    const heading = await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'My work' });
     expect(heading).toBeVisible();
-    expect(document.title).toBe('Melarc Ops Portal');
-    // The page says who is signed in, and so does the account card of the menu: the page's words are the ones this is about.
-    expect(within(screen.getByRole('main')).getByText('Ama Mensah')).toBeVisible();
-    const hubs = screen.getByRole('list', { name: 'Your hubs' });
-    expect(
-      within(hubs)
-        .getAllByRole('listitem')
-        .map((item) => item.textContent),
-    ).toEqual(['Accra Central', 'Tema']);
-    // What is waiting, and the success message of a summary with nothing in it (surfaces/ops-portal.md section 8), are `LandingPage.test.tsx`'s.
-    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    expect(document.title).toBe('My work · Melarc Ops Portal');
+    // The page says who is signed in and where they act (the hub's name, or how many hubs), and so does the foot of the sidebar: the page's words
+    // are the ones this is about. The names of the hubs are the hub switcher's, in the top bar.
+    const main = screen.getByRole('main');
+    expect(within(main).getByText('Ama Mensah')).toBeVisible();
+    expect(within(main).getByText(/2 hubs/)).toBeVisible();
+    // What is waiting, and the success message of a summary with nothing in it (surfaces/ops-portal.md section 8), are `MyWorkPage.test.tsx`'s.
+    expect(screen.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
   });
 
   // Break caught: a landing that implies working functionality, or fabricated figures, in a build that has none.
   it('shows no table, no form and no number the session did not give', async () => {
     api = installFakeApi(signedInApi(sessionFixture()));
     renderApp('/');
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
@@ -144,10 +141,11 @@ describe('a visit to the landing with somebody signed in', () => {
     );
     renderApp('/');
 
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
     expect(document.body.textContent).not.toMatch(/null|undefined/);
     expect(screen.getByText('You are signed in.')).toBeVisible();
-    expect(screen.getByText('No hub is listed for your session.')).toBeVisible();
+    // A session that lists no hub is told nothing about hubs: the page prints no empty place and no word for one.
+    expect(within(screen.getByRole('main')).queryByText(/hub/i)).toBeNull();
   });
 
   // Break caught: names from the API being treated as markup. A hub or person's name is the server's text.
@@ -156,7 +154,7 @@ describe('a visit to the landing with somebody signed in', () => {
     api = installFakeApi(signedInApi(sessionFixture({ principal_display_name: hostile })));
     const { container } = renderApp('/');
 
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
     // Twice, as text each time: in the page, and in the account card of the menu.
     const shown = screen.getAllByText(hostile);
     expect(shown).toHaveLength(2);
@@ -171,7 +169,7 @@ describe('a visit to the landing with somebody signed in', () => {
     try {
       api = installFakeApi(signedInApi(sessionFixture()));
       renderApp('/');
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
 
       await act(async () => {
         window.dispatchEvent(new Event('focus'));
@@ -193,7 +191,7 @@ describe('a visit to the landing with somebody signed in', () => {
   it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine', async () => {
     api = installFakeApi(signedInApi(sessionFixture()));
     const { container } = renderApp('/');
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     expect(await wcagViolations(container)).toEqual([]);
   });
@@ -221,14 +219,12 @@ describe('a 200 that is not a session (U05 of 23 October 2026)', () => {
         await screen.findByRole('heading', { level: 1, name: 'We could not check your session' }),
       ).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
-      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
       expect(screen.queryByText('Synthetic Officer')).toBeNull();
 
       await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(within(screen.getByRole('main')).getByText('Synthetic Officer')).toBeVisible();
       expect(requestsTo(api, '/auth/session')).toHaveLength(2);
     },
@@ -253,9 +249,7 @@ describe('a visit when the session cannot be checked', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-    ).toBeVisible();
+    expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     expect(requestsTo(api, '/auth/session')).toHaveLength(2);
   });
 
@@ -360,7 +354,7 @@ describe('focus when a guard holds the page back', () => {
       await router.navigate('/');
     });
 
-    const heading = await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'My work' });
     await waitFor(() => {
       expect(heading).toHaveFocus();
     });
@@ -391,7 +385,7 @@ describe('focus when a guard holds the page back', () => {
       release();
       await gate;
     });
-    const heading = await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     expect(heading).not.toHaveFocus();
     expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveFocus();
@@ -402,7 +396,7 @@ describe('the signed-in landing and the neutral frame', () => {
   it('keeps the frame’s skip link first and moves focus to the heading when the page changes', async () => {
     api = installFakeApi(signedInApi(sessionFixture()));
     const { router } = renderApp('/', signInStandIn);
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     await act(async () => {
       await router.navigate('/sign-in');

@@ -9,6 +9,34 @@ afterEach(() => {
 });
 
 /*
+ * What the shadcn/ui primitives (Radix UI and cmdk) need of a browser that jsdom does not have, as no-ops: a ResizeObserver (a menu, a tooltip and the
+ * palette's list measure themselves), scrollIntoView (the palette scrolls the option that Enter would choose into view) and the pointer-capture methods
+ * (a menu's items). A component test of a menu, a sheet or the palette can then drive it the way a person does, and what only a real browser can show
+ * (where it opens, what is under it, what is focused when it closes in a real engine) is proved in the browser tests.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe(): void {
+      // Nothing is laid out in jsdom, so nothing is measured.
+    }
+    unobserve(): void {
+      // As above.
+    }
+    disconnect(): void {
+      // As above.
+    }
+  };
+}
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = (): void => undefined;
+}
+for (const method of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture'] as const) {
+  if (typeof Element.prototype[method] !== 'function') {
+    Element.prototype[method] = (): boolean => false;
+  }
+}
+
+/*
  * jsdom has an HTMLDialogElement and its `open` attribute, and nothing a dialog does: no showModal(), show(), close() or returnValue.
  * A real browser does these things; this does enough of them for a component test to drive a modal dialog the way a person does:
  * the open state, the `cancel` event that Escape fires (and the close that follows if nobody prevents it), the `close` event

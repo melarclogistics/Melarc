@@ -248,9 +248,10 @@ async function opsStaffSetUpAndSignIn({ page, context, stack }: JourneyContext):
   const bola = world.person('bola');
   const kofi = introduce(world, 'kofi.ops', 'Kofi Ops');
 
-  // The maker: Ada signs in and adds a profile.
+  // The maker: Ada signs in and adds a profile, from the New menu of the top bar.
   await signInAs(page, ada);
-  await page.getByRole('link', { name: 'Add a staff profile' }).first().click();
+  await page.getByRole('button', { name: 'New' }).click();
+  await page.getByRole('menuitem', { name: 'Add a staff profile' }).click();
   await expectHeading(page, 'Add a staff profile');
 
   // AC-SLICE-000-115: the role field offers exactly the roles the operation returns, by name, and none of its own.
@@ -643,7 +644,7 @@ async function endOfSessions({ page, context, stack }: JourneyContext): Promise<
   const sessionsOf = async () =>
     observe<{ live: boolean; reason: string | null }>(database, 'sessions', email);
 
-  // Sign out through the control every signed-in screen carries.
+  // Sign out through the control every signed-in screen carries: the account menu of the top bar.
   await signInAs(page, kofi);
   const saved = await context.cookies();
   const ending = page.waitForResponse(
@@ -651,7 +652,8 @@ async function endOfSessions({ page, context, stack }: JourneyContext): Promise<
       new URL(response.url()).pathname === '/api/v1/auth/session' &&
       response.request().method() === 'DELETE',
   );
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   const answer = await ending;
   expect(answer.status()).toBe(204);
   await expect(page).toHaveURL(/\/sign-in$/);

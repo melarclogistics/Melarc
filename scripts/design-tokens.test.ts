@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { contrastRatio } from './design-contrast.ts';
 import {
   checkTokenFile,
   documentedTokens,
@@ -136,9 +137,23 @@ describe('the token file against DESIGN_SYSTEM', () => {
       '--font-family-mono', // the same for operational codes, set in JetBrains Mono (section 5.1)
       '--button-pressed-background', // the pressed fill of the Secondary and Danger recipes, section 4.6; themed, checked below
       '--layout-content-width', // the width the frame has always given the main landmark
-      // The two widths of the side menu, which are layout and not a design-system token (section 13.2).
+      // The two widths of the sidebar and the height of the top bar: layout and not design-system tokens (section 13.2).
       '--sidebar-width',
       '--sidebar-width-collapsed',
+      '--topbar-height',
+      // The pill of a count on the crimson current entry: white at 18% (at 22% the white figure is 4.32:1, below the 4.5:1 of section 14).
+      '--shell-active-badge',
+      // The sizes the signed-in shell sets outside the type and spacing scales (the Product Owner's brief of 6 November 2026, recorded in section 5.2 and
+      // decided on 7 November 2026 to be tokens): component tokens (section 3.3), each used by the one component it is named for, in rem.
+      '--text-nav-entry-size',
+      '--text-group-label-size',
+      '--text-group-label-line-height',
+      '--text-section-label-size',
+      '--text-section-label-line-height',
+      '--sidebar-icon-size',
+      '--sidebar-heading-space-before',
+      '--sidebar-heading-space-after',
+      '--hub-mark-size',
       // The three sizes of an icon (section 24), in rem so that enlarged text enlarges them.
       '--icon-size-sm',
       '--icon-size-md',
@@ -418,6 +433,15 @@ const PAIRINGS: Pairing[] = [
     background: surface('inverse'),
     threshold: 4.5,
   },
+  {
+    // The initials in the avatar of the account button of the top bar, when the button is hovered (`.ui-account:hover .ui-account__avatar` fills it
+    // with `color.border.default`; at rest the fill is the selected surface, which the secondary text on `selected` above holds): 5.10 in the light
+    // theme and 5.12 in the dark (review of 7 November 2026: the pairing was in no list).
+    use: 'the initials of the account avatar when its button is hovered',
+    foreground: property('color.text.secondary'),
+    background: property('color.border.default'),
+    threshold: 4.5,
+  },
   ...(['success', 'warning', 'danger', 'info', 'neutral'] as const).map((status) => ({
     use: `${status} alert`,
     foreground: property(`color.status.${status}.foreground`),
@@ -565,6 +589,46 @@ describe('the pairings the components use', () => {
       tokenCss,
     );
     assert.match(problems.join('\n'), /--no-such is not defined/);
+  });
+});
+
+describe('the pill of a count on the current entry of the sidebar', () => {
+  /** White at `alpha` laid over an opaque hex `fill`, as the browser composites it. */
+  const whiteOver = (fill: string, alpha: number): string =>
+    `#${[1, 3, 5]
+      .map((at) => {
+        const channel = Number.parseInt(fill.slice(at, at + 2), 16);
+        return Math.round(255 * alpha + channel * (1 - alpha))
+          .toString(16)
+          .padStart(2, '0');
+      })
+      .join('')}`;
+
+  // Break caught: the pill raised to the 22% of white that the first brief named. The white figure then measures 4.32:1 on the crimson, below the
+  // 4.5:1 that text of that size needs (DESIGN_SYSTEM section 14), and axe fails it in a browser; the pill is the strongest white that passes.
+  for (const theme of THEMES) {
+    it(`keeps its white figure at 4.5:1 on both fills of the current entry (${theme} theme)`, () => {
+      const properties = parseThemes(tokenCss)[theme];
+      const pill = resolveProperty('--shell-active-badge', properties) ?? '';
+      const alpha = Number(/\/\s*([\d.]+)\s*\)/.exec(pill)?.[1]);
+      assert.ok(alpha > 0 && alpha < 1, `the pill is a white with an opacity: ${pill}`);
+      const figure = resolveProperty('--shell-active-text', properties) ?? '';
+      for (const fill of ['--shell-active', '--shell-active-hover']) {
+        const ground = resolveProperty(fill, properties) ?? '';
+        const ratio = contrastRatio(figure, whiteOver(ground, alpha));
+        assert.ok(ratio >= 4.5, `${fill} with the pill is ${ratio.toFixed(2)}:1, below 4.5:1`);
+      }
+    });
+  }
+
+  // The reason for the deviation, kept where it can be checked: if the crimson ever changes so that 22% passes, this fails and the decision of
+  // 6 November 2026 is to be looked at again.
+  it('would not keep it at 22%, the opacity the first brief named', () => {
+    const properties = parseThemes(tokenCss).light;
+    const ground = resolveProperty('--shell-active', properties) ?? '';
+    const figure = resolveProperty('--shell-active-text', properties) ?? '';
+
+    assert.ok(contrastRatio(figure, whiteOver(ground, 0.22)) < 4.5);
   });
 });
 

@@ -21,6 +21,7 @@ import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
+import { useActiveHub } from '../../../platform/hub/active-hub';
 import {
   createPickupRequest,
   type NewPickupRequest,
@@ -716,11 +717,13 @@ function SenderPicker({
 function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestView) => void }) {
   const client = useApiClient();
   const me = useSignedInSession();
-  // The hubs the session lists are the hubs its grant reaches: a person who acts in one hub books into it without choosing, anyone else chooses.
+  // The hubs the session lists are the hubs its grant reaches: a person who acts in one hub books into it without choosing, anyone else starts with the
+  // hub they chose in the switcher of the top bar, and nothing when they chose All hubs (the form is the request's own: they choose).
   const hubs = me?.session.authorized_hubs ?? [];
+  const activeHub = useActiveHub();
   const [values, setValues] = useState<Values>(() => ({
     ...EMPTY,
-    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : '',
+    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : (activeHub ?? ''),
   }));
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);

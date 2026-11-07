@@ -88,7 +88,7 @@ describe('the sign-in screen', () => {
 
     await signIn(user, { email: ` ${EMAIL} `, password: ` ${PASSWORD}  ` });
 
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
     // The sign-in is the one request of the person's own; the shell then reads the queue summary for the menu (task C1).
     expect(exceptSummary(api.requests)).toHaveLength(1);
     const request = api.requests[0];
@@ -119,7 +119,7 @@ describe('the sign-in screen', () => {
       const { user, router } = open(() => json(200, sessionFixture()));
 
       await signIn(user);
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
 
       expect(router.state.historyAction).toBe('REPLACE');
     });
@@ -182,7 +182,7 @@ describe('the sign-in screen', () => {
       expect(router.state.location.pathname).toBe('/sign-in/mfa');
       expect(screen.queryByRole('navigation')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
       expect(api.requests).toHaveLength(1);
     });
 
@@ -414,7 +414,7 @@ describe('the sign-in screen', () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     });
 
     // Break caught: a lost answer worded as a refusal of the password, which sends a person to mistrust a password that may be right.
@@ -434,9 +434,7 @@ describe('the sign-in screen', () => {
       expect(screen.getByLabelText('Work email (required)')).toHaveValue(EMAIL);
       await user.type(screen.getByLabelText('Password (required)'), PASSWORD);
       await user.click(screen.getByRole('button', { name: 'Sign in' }));
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(attempts).toBe(2);
     });
 
@@ -485,13 +483,13 @@ describeInterfaceStates('The sign-in screen', {
       await signIn(user);
 
       expect(screen.getByRole('button', { name: 'Sign in' })).toHaveAttribute('aria-busy', 'true');
-      expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
+      expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
 
       await act(async () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     },
   },
   empty: {
@@ -534,9 +532,7 @@ describeInterfaceStates('The sign-in screen', {
       await user.type(screen.getByLabelText('Password (required)'), PASSWORD);
       await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(attempts).toBe(2);
     },
   },
@@ -550,9 +546,7 @@ describeInterfaceStates('The sign-in screen', {
       const { user, router } = open(() => json(200, sessionFixture()));
       await signIn(user);
 
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(router.state.location.pathname).toBe('/');
     },
   },

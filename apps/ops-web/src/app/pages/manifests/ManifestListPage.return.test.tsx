@@ -389,7 +389,7 @@ describe('the manifests, coming to the list any other way', () => {
 
     await view.user.click(
       within(screen.getByRole('complementary', { name: 'Main menu' })).getByRole('link', {
-        name: 'Manifests',
+        name: 'Pickup runs',
       }),
     );
 

@@ -646,8 +646,11 @@ describe('choosing the browser specs of the Ops Portal', () => {
     const choice = browser([`${pages}/riders/RiderPage.tsx`]);
     assert.deepEqual(choice.tests, ['apps/ops-web/test/browser/riders.spec.ts']);
     assert.deepEqual(choice.projects, ['riders-chromium', 'riders-dev-chromium']);
+    // A component the staff and the rider pages import reaches the specs of both folders; the shell spec is one of them for the staff folder, since it
+    // follows the Sessions entry to a page there (review of 7 November 2026).
     assert.deepEqual(browser(['apps/ops-web/src/components/ui/Dialog.tsx']).tests, [
       'apps/ops-web/test/browser/riders.spec.ts',
+      'apps/ops-web/test/browser/shell.spec.ts',
       'apps/ops-web/test/browser/staff.spec.ts',
     ]);
     assert.deepEqual(browser(['apps/ops-web/test/browser/support/rider-api.ts']).tests, [
@@ -786,6 +789,39 @@ describe('the targets of this repository', () => {
       assert.ok((SPEC_AREAS[spec] ?? []).includes('apps/ops-web/src/app/pages/pre-sign-in/'), spec);
     }
     for (const test of VERIFIER_RUNS.tests) assert.ok(files.has(test), test);
+  });
+
+  // Break caught (review of 7 November 2026): My work moved into its own folder and the specs that open on it left out of that folder's claims, so a
+  // change to the landing selected fewer specs than before it moved (the selector must run more, never less); or the shell spec, which follows the
+  // Sessions entry of the sheet, left out of the claims of the staff pages. A spec whose text opens "/" must name the folder of My work, whichever
+  // spec it is: a new one is held to it too.
+  it('tie My work to every spec that opens the landing, and the staff pages to the shell spec that follows Sessions', () => {
+    const folder = join(root, 'apps/ops-web/test/browser');
+    const opening = readdirSync(folder).filter(
+      (name) =>
+        name.endsWith('.spec.ts') &&
+        /goto\('\/'\)|path = '\/'/.test(readFileSync(join(folder, name), 'utf8')),
+    );
+    assert.deepEqual(
+      opening.toSorted(),
+      [
+        'my-work.spec.ts',
+        'palette.spec.ts',
+        'queue-summary.spec.ts',
+        'request-rate.spec.ts',
+        'shell.spec.ts',
+        'top-bar.spec.ts',
+      ],
+      'the specs that open on the landing (a new one is added here, with its claim)',
+    );
+    for (const spec of opening) {
+      assert.ok((SPEC_AREAS[spec] ?? []).includes('apps/ops-web/src/app/pages/my-work/'), spec);
+    }
+    assert.ok(
+      (SPEC_AREAS['shell.spec.ts'] ?? []).includes('apps/ops-web/src/app/pages/staff/'),
+      'shell.spec.ts visits the Sessions page',
+    );
+    assert.ok(readFileSync(join(folder, 'shell.spec.ts'), 'utf8').includes("'/admin/sessions'"));
   });
 
   // Break caught: the input lists naming folders that moved, so the rules they carry fire for nothing.

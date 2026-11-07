@@ -37,6 +37,8 @@ const NOT_KEPT = { ...READ_ONCE, gcTime: 0 } as const;
 
 export interface StaffListParams {
   readonly status?: StaffStatus;
+  /** Only the people of this hub: the one the person narrowed the screens to in the switcher of the top bar (none for All hubs). */
+  readonly hubId?: string;
   /** Matches name or work email. Blank is no search. */
   readonly q?: string;
   /** The token of the page asked for; none is the first page. */
@@ -47,10 +49,10 @@ export interface StaffListParams {
 /** `listStaffIdentities`: a page of the people the session may see, scoped to its hubs by the server. */
 export function useStaffList(params: StaffListParams): UseQueryResult<StaffIdentityPageView> {
   const client = useApiClient();
-  const { status, q, pageToken, enabled = true } = params;
+  const { status, hubId, q, pageToken, enabled = true } = params;
   const search = q?.trim() ?? '';
   return useQuery({
-    queryKey: ['staff', 'list', status ?? null, search, pageToken ?? null],
+    queryKey: ['staff', 'list', status ?? null, hubId ?? null, search, pageToken ?? null],
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -59,6 +61,7 @@ export function useStaffList(params: StaffListParams): UseQueryResult<StaffIdent
           params: {
             query: {
               ...(status === undefined ? {} : { status }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(search === '' ? {} : { q: search }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },

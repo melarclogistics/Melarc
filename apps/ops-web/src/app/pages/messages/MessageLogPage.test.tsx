@@ -444,7 +444,7 @@ describe('the log: what it shows', () => {
 
     expect(
       within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', {
-        name: 'Messages',
+        name: 'Message log',
       }),
     ).toHaveAttribute('aria-current', 'page');
   });
@@ -1143,7 +1143,7 @@ describeInterfaceStates('The message log', {
       // No entry in the menu either, although hiding it is not what keeps the page shut.
       expect(
         within(screen.getByRole('navigation', { name: 'Primary' })).queryByRole('link', {
-          name: 'Messages',
+          name: 'Message log',
         }),
       ).toBeNull();
       expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance/);

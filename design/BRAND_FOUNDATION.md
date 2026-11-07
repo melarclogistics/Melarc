@@ -39,7 +39,7 @@ The following choices are approved product/design direction:
 - **Brand/logo principle:** preserve the existing Melarc logo identity rather than redesigning it for the application.
 - **Cross-platform principle:** share brand identity and semantic foundations while allowing platform-appropriate interaction density and native behavior.
 - **Color roles (Product Owner, 5 November 2026):** Ink carries the work, crimson carries the brand. The primary action is Ink; crimson is for the brand mark, the "New" button and the active sidebar item; danger is a separate vermilion; links are Ink. This replaced crimson as the primary-action color (§5.4, §5.5). The values are [DESIGN_SYSTEM §4.3 and §4.4](DESIGN_SYSTEM.md#43-core-semantic-color-tokens), in force since redesign step R2, and the roles are [§4.7](DESIGN_SYSTEM.md#47-colour-roles).
-- **Themes (Product Owner, 5 November 2026):** a light and a dark theme are both in Version 1. Both are implemented as tokens (step R2); the portal follows the system's setting, and the toggle arrives in step R4 ([DESIGN_SYSTEM §31](DESIGN_SYSTEM.md#31-dark-mode)).
+- **Themes (Product Owner, 5 November 2026):** a light and a dark theme are both in Version 1. Both are implemented as tokens (step R2); the portal follows the system's setting unless a person chooses, and the toggle and its stored choice were built in step R4 ([DESIGN_SYSTEM §31](DESIGN_SYSTEM.md#31-dark-mode)).
 - **The logo on dark grounds and in the Ops Portal (Product Owner, 5 November 2026):** §4.7.
 
 ### 2.2 Provisional implementation values
@@ -63,7 +63,7 @@ The following remain open:
 
 - original vector logo artwork, preferably SVG;
 - authoritative source color values from the vector artwork;
-- approved symbol-only logo variant for any use beyond the Ops Portal's browser-tab icon (approved for that alone on 25 October 2026; its provisional use as the mark of the side menu and the split screen waits for confirmation);
+- approved symbol-only logo variant for any use beyond the Ops Portal's browser-tab icon (approved for that alone on 25 October 2026; its provisional use as the mark of the sidebar's rail and the split screen waits for confirmation);
 - official minimum logo size based on vector artwork;
 - exact logo clear-space rule based on the source geometry;
 - final product UI typeface approval.
@@ -186,7 +186,7 @@ Do not:
 - **On the Ink sidebar and on any dark ground:** the all-white version, `design/assets/Transparent White  Logo.svg` (two spaces in the supplied name), filed as `exports/melarc-logo-dark.svg`.
 - **On light grounds:** the full-color version, `design/assets/Transparent Logo.svg`, filed as `master/melarc-logo-primary.svg`.
 
-The vector masters already exist; [the brand README](assets/brand/README.md) records where each came from. The artwork is used as supplied and never redrawn, recolored or traced (§4.3, §4.6). Since redesign step R3 the banner of the portal's frame (the sign-in screens and the neutral pages) draws the all-white version whenever the dark theme applies, and the full-color version otherwise. The Ink sidebar draws the lockup from redesign step R4: until then the side menu is as built, with the symbol as its mark (§22).
+The vector masters already exist; [the brand README](assets/brand/README.md) records where each came from. The artwork is used as supplied and never redrawn, recolored or traced (§4.3, §4.6). Since redesign step R3 the banner of the portal's frame (the sign-in screens and the neutral pages) draws the all-white version whenever the dark theme applies, and the full-color version otherwise. The Ink sidebar draws the lockup at its head, in both themes, since redesign step R4; as the 64px rail it has no room for it and draws the symbol on a white tile (§22).
 
 ---
 
@@ -736,8 +736,8 @@ files); this list only says what is missing:
 
 - `melarc-logo-primary.svg`, the approved vector master (`master/`);
 - `melarc-logo-primary.png`, the approved high-resolution transparent export (`exports/`);
-- ~~`melarc-symbol.svg`~~, supplied and approved on 25 October 2026 for the Ops Portal's browser-tab icon alone (`exports/`); its use as the mark of the side menu and the split screen is provisional, owner to confirm;
-- ~~`melarc-logo-dark.svg`~~, supplied and approved on 5 November 2026 as the logo for the Ink sidebar and any dark ground (§4.7; `exports/`); the Ops Portal's frame draws it in its banner on a dark ground since redesign step R3, and the Ink sidebar will in step R4.
+- ~~`melarc-symbol.svg`~~, supplied and approved on 25 October 2026 for the Ops Portal's browser-tab icon alone (`exports/`); its use as the mark of the sidebar's rail and the split screen is provisional, owner to confirm;
+- ~~`melarc-logo-dark.svg`~~, supplied and approved on 5 November 2026 as the logo for the Ink sidebar and any dark ground (§4.7; `exports/`); the Ops Portal's frame draws it in its banner on a dark ground since redesign step R3, and the Ink sidebar does since step R4.
 
 Do not create placeholder production logos using generated text or traced artwork.
 
@@ -806,8 +806,8 @@ Do not duplicate the same rule across all four documents when one document clear
 | Tailwind | **NOT DECIDED HERE** |
 | Radix | **NOT DECIDED HERE** |
 | Original SVG/vector logo | **SUPPLIED BY THE PRODUCT OWNER, 23 October 2026** — filed as `design/assets/brand/master/melarc-logo-primary.svg` and used in the Ops frame; the owner confirms it as the approved master ([the brand README](assets/brand/README.md)) |
-| Symbol-only production logo | **APPROVED 25 October 2026 as the Ops Portal's browser-tab icon (favicon) only** — filed as `exports/melarc-symbol.svg` and used as `apps/ops-web/public/favicon.svg`; no other use is approved, though the symbol is in provisional use as the mark of the side menu and the split screen (`BrandLockup`), from the owner's reference screenshot of 25 October 2026, **owner to confirm** ([the brand README](assets/brand/README.md)) |
-| Dark-background logo | **APPROVED 5 November 2026** for the Ink sidebar and any dark ground (§4.7) — filed as `exports/melarc-logo-dark.svg`; drawn in the banner of the Ops Portal's frame on a dark ground since redesign step R3, and in the Ink sidebar from step R4 |
+| Symbol-only production logo | **APPROVED 25 October 2026 as the Ops Portal's browser-tab icon (favicon) only** — filed as `exports/melarc-symbol.svg` and used as `apps/ops-web/public/favicon.svg`; no other use is approved, though the symbol is in provisional use as the mark of the sidebar's rail and the split screen (`BrandLockup`), from the owner's reference screenshot of 25 October 2026, **owner to confirm** ([the brand README](assets/brand/README.md)) |
+| Dark-background logo | **APPROVED 5 November 2026** for the Ink sidebar and any dark ground (§4.7) — filed as `exports/melarc-logo-dark.svg`; drawn in the banner of the Ops Portal's frame on a dark ground since redesign step R3, and in the Ink sidebar since step R4 |
 
 ---
 

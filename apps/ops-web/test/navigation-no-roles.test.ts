@@ -24,13 +24,17 @@ const BUNDLE_NAMES = [
   'Warehouse Supervisor',
 ];
 
-/** What decides what a person may see: the registry, the shell, the navigation, and the guards of the session. */
+/**
+ * What decides what a person may see: the registry and the model of the navigation, the shell and its chrome (the sidebar, the top bar, the menus and
+ * the palette), the choice of hub, and the guards of the session.
+ */
 const DECIDERS = [
   'app/navigation',
   'app/AuthenticatedOpsShell.tsx',
   'app/routes.tsx',
-  'components/PrimaryNavigation.tsx',
-  'components/side-menu',
+  'app/shell',
+  'components/ui/app-shell',
+  'platform/hub',
   'platform/session',
 ];
 
@@ -66,7 +70,9 @@ describe('navigation and guards name no role', () => {
       expect.arrayContaining([
         'app/AuthenticatedOpsShell.tsx',
         'app/navigation/route-registry.tsx',
-        'components/PrimaryNavigation.tsx',
+        'app/navigation/navigation-model.ts',
+        'app/shell/ShellChrome.tsx',
+        'components/ui/app-shell/Sidebar.tsx',
         'platform/session/RequirePermission.tsx',
       ]),
     );

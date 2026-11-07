@@ -702,7 +702,7 @@ Operational content below it may be compact.
 
 ## 12. Application Frame
 
-> **Status:** the neutral frame is ACTIVE (`apps/ops-web/src/app/AppFrame.tsx`); the authenticated Ops shell is ACTIVE (S0.42, §12.6; its navigation is a side menu since 25 October 2026); the split screen of the
+> **Status:** the neutral frame is ACTIVE (`apps/ops-web/src/app/AppFrame.tsx`); the authenticated Ops shell is IMPLEMENTING (§2: S0.42 built its first form as ACTIVE; the sidebar and the top bar of redesign step R4, built on 7 November 2026 and described in §12.6, replaced it, and the ACTIVE status returns once the Product Owner accepts them); the split screen of the
 > pre-sign-in pages is ACTIVE (§12.7)  
 > **Initial implementation priority:** the neutral frame is Required (it exists); the authenticated Ops shell was not part of the UI foundation gate
 
@@ -728,10 +728,12 @@ SplitScreen (AppFrame, layout `split`: the five pre-sign-in screens, §12.7)
 ├── Banner                        (the frame's: the logo, above the form)
 └── MainContent                   (the frame's; focus moves to the new page's heading)
 
-AuthenticatedOpsShell (AppFrame, layout `sidebar`: S0.42, a side menu since 25 October 2026)
+AuthenticatedOpsShell (AppFrame, layout `sidebar`: S0.42; the sidebar and the top bar since redesign step R4)
 ├── SkipLink                      (the frame's)
-├── SideMenu                      the mark and the name, PrimaryNavigation (an icon and a label for each entry from the registry),
-│                                 the account card with the sign-out control; collapses to a rail, slides in on a narrow screen
+├── Sidebar                       the lockup, the entries in groups from the registry (an icon, a label and, where the server counted a queue, a
+│                                 count), the person at the foot; the rail below 1280px, a sheet under 768px
+├── TopBar                        the banner: HubSwitcher, Search, ThemeMenu, NewMenu, AccountMenu (and, on a narrow screen, the button that opens the sheet)
+├── CommandPalette                a dialog, opened by the search and by Ctrl or ⌘ K
 └── MainContent                   (the frame's; focus moves to the new page's heading)
 ```
 
@@ -745,9 +747,10 @@ pre-sign-in pages (§12.7) is the same frame with photography beside the form: t
 photograph, which is decoration, and it carries no navigation and no signed-in affordance.
 
 Authenticated Ops shell: an application's frame and not a website's, so its navigation is a menu at the side and not a band
-at the top (Product Owner, 25 October 2026):
+at the top (Product Owner, 25 October 2026), with a top bar over the page (Product Owner, 5 November 2026):
 
-- an Ink side menu, full height, that collapses to a rail of icons and slides in on a narrow screen;
+- an Ink sidebar, full height, that is a rail of icons below 1280px and when asked, and a sheet on a narrow screen, and over the page a
+  56px top bar for the hub, the search, the theme, the New menu and the account;
 - neutral working surface;
 - the current item a solid crimson fill with white bold text (`shell.active`, DESIGN_SYSTEM §4.3 and §4.6);
 - spacious shell;
@@ -786,58 +789,27 @@ The initial shell must not:
 
 Development-only showcase data must be obviously non-production.
 
-### 12.6 The authenticated Ops shell as built (S0.42; a side menu since 25 October 2026)
+### 12.6 The authenticated Ops shell as built (S0.42; the sidebar and the top bar since redesign step R4)
 
-> **Code:** `apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx`, `components/side-menu/`, `components/PrimaryNavigation.tsx`, `components/brand/BrandLockup.tsx`, `app/frame-chrome.ts`
+> **Code:** `apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/shell/` (`ShellChrome`, `ShellPalette`, `record-line.ts`, `use-palette.ts`, `focus-return.ts`), `app/navigation/` (`route-registry.tsx`, `navigation-model.ts`), `components/ui/app-shell/` (`Sidebar`, `MobileSidebar`, `TopBar`, `SearchButton`, `HubSwitcher`, `NewMenu`, `ThemeMenu`, `AccountMenu`, `CommandPalette`), `platform/hub/`, `platform/theme/`, `components/brand/BrandLockup.tsx`, `app/frame-chrome.ts`
 
-**Shell v2 (PROPOSED, §37).** The approved redesign (Product Owner, 5 November 2026) gives the signed-in shell a top bar and a sidebar of seven groups ([surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)), built in redesign step R4. This section records the shell as built until then.
+The Ops Portal is an application and not a website, so its navigation is a menu at the side and not a band at the top (Product Owner, 25 October 2026, with a reference screenshot of a dark menu with icons, a red current item and an account card). The approved redesign (Product Owner, 5 and 6 November 2026; [surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)) gave it a top bar over the page and a sidebar of seven groups; this section records what redesign step R4 built. Each component named in §37 for it (AppShell v2, CommandPalette, NewMenu, AccountMenu, HubSwitcher) is the one of `components/ui/app-shell/`, which presents what it is given and knows nothing of sessions, permissions or routes: `app/shell/` decides what to give it.
 
-The Ops Portal is an application and not a website, so its navigation is a menu at the side and not a band at the top (Product
-Owner, 25 October 2026, with a reference screenshot of a dark menu with icons, a red current item and an account card).
-
-- **A layout route between the session guard and the signed-in routes**, and around nothing else: it is drawn only for a session the
-  API has said is there and only for the routes of the registry. The neutral frame is not changed: an address that matches no route
-  uses the frame with no menu, even for a person who is signed in.
-- **The menu is drawn into the frame**, in the place AppFrame keeps beside the main content, and the route tree asks the frame for its
-  sidebar layout (`useFrameLayout`): the frame then draws no banner above the page, because the menu carries the product's name. The
-  order of the page is skip link, menu, main content. The menu is a landmark of its own (an `aside` named "Main menu", holding the
-  `nav` named "Primary"), never inside the main content, and the skip link passes it. The frame's landmarks, skip link and move of
-  focus are the frame's and are not copied.
-- **One route registry** (`SIGNED_IN_ROUTES`) is where the signed-in routes and their menu entries are written, and the route tree and
-  the menu are both derived from it: a route cannot exist without a decision about its menu entry (an entry, with its icon, or `null`
-  for a screen reached from another) and about the key it needs (a permission, or any signed-in session); an entry cannot link a screen
-  that does not exist, because nothing but a route makes one. A later task adds its screens there and nowhere else.
-- **The menu is the entries of the routes whose key the session holds** (`CurrentSession.permissions`, keys only), by area and place;
-  an unbuilt route has no entry even when its key is held. A hint never authorises: every route is behind `RequirePermission`, and the
-  server checks every request. No role name or bundle is read anywhere in the navigation or the guards; the navigation tests carry
-  the keys of each seeded bundle written out beside its name, held to the seed by a root test.
-- **The Ink side menu** (§4.6, the shell recipe) is 16rem wide and as tall as the window, and stays where it is while the page
-  scrolls. Its head is the symbol on a white tile and the product's name as plain text (the wordmark is never redrawn), with the
-  collapse button. Each entry is an icon and a label (§22; DESIGN_SYSTEM §24): text `shell.text.muted`, and the current entry a
-  filled item in the Primary action colour with white text (6.52:1), bold, and `aria-current`, never marked by colour alone. Focus
-  uses the **inverse** recipe (`focus.ringInverse` outside a band of `focus.offsetInverse`), because the default ring is only 2.64:1
-  on Ink. Its foot is the account card: the person's initials (decoration), their name, where they act (the hub's name, or how many
-  hubs) and the sign-out icon button. The menu presents what it is given and knows nothing of sessions, permissions or routes.
-- **On a wide screen (from 48rem) it collapses.** The button at its head ("Collapse menu", then "Expand menu", with `aria-expanded`)
-  makes it a rail of icons 4.5rem wide: every entry keeps its name (the label is drawn out of sight and not removed) and a `title`, and
-  the page takes the room. The choice lasts as long as the page and no longer: nothing is written to web storage, so a reload starts
-  expanded. Enlarged text widens the menu with it, never past half the window.
-- **On a narrow screen it slides in.** A slim bar with a menu button, the mark and the name stands in its place; the button slides the
-  menu in over the page, behind a scrim. While it is open the main content is inert; Escape, the scrim, the close button and following a
-  link close it. Focus goes to the close button on opening and back to the menu button on closing (a navigation leaves focus to the new
-  page's heading, which the frame moves it to). Closed, it is out of sight and out of the tab order. A person who asked for reduced
-  motion sees it appear and disappear without the slide.
-- **It reflows.** The whole panel scrolls when the window is too short for it (enlarged text, a low window, zoom), instead of one part
-  being squeezed until the account card spills out; the product's name goes under the mark, and the close button under the name, when
-  they do not fit in a row. At 320px and at 200% text nothing clips and the page never scrolls sideways. Under forced colours the menu
-  keeps an edge and the current entry a system highlight.
-- **Sign-out** is an icon button ("Sign out") in the account card, on every signed-in screen. It calls `signOut` and ends the session by
-  the one action that ends it (the same event that an answer of `SESSION_INVALID` raises), so the cache, the person and the screen go
-  the way they always do. `204` and `SESSION_INVALID` are **done**; anything else (no connection, a fault, `CSRF_VALIDATION_FAILED`)
-  leaves the person signed in with "Sign-out did not finish, so you are still signed in." and **Try again**, which is safe because the act
-  is idempotent; "signed out" is never said while the session may be live. An answer for a session that was replaced meanwhile is dropped.
-- **Who is signed in** is told by the account card and by the landing, each in its own words; a session with no display name is "Signed
-  in" in the card and "You are signed in." on the landing.
+- **A layout route between the session guard and the signed-in routes**, and around nothing else: it is drawn only for a session the API has said is there and only for the routes of the registry. The neutral frame is not changed: an address that matches no route uses the frame with no sidebar and no top bar, even for a person who is signed in.
+- **The sidebar and the top bar are drawn into the frame's own places** (`useFrameChrome` beside the main content, `useFrameTopBar` over it), and the route tree asks the frame for its sidebar layout (`useFrameLayout`): the frame then draws no banner above the page, and the top bar is the page's banner. The order of the page is skip link, sidebar, top bar, main content, each a landmark of its own (the sidebar an `aside` named "Main menu" holding the `nav` named "Primary"; the top bar the `header`), never inside the main content, and the skip link passes the sidebar and the top bar. The frame's landmarks, skip link and move of focus are the frame's and are not copied.
+- **One route registry** (`SIGNED_IN_ROUTES`) is where the signed-in routes and their places in the navigation are written, and the route tree and the navigation are both derived from it: a route cannot exist without a decision about its place (an entry of the sidebar with its group, label, icon, order and, where it has one, the queue whose count it carries; an action of the New menu; a page of the account menu; or `null` for a screen reached from another) and about the key it needs (a permission, or any signed-in session). An entry cannot link a screen that does not exist, because nothing but a route makes one. A later task adds its screens there and nowhere else.
+- **The navigation is the entries of the routes whose key the session holds** (`navigationFor`, from `CurrentSession.permissions` and the routes that exist), in the seven groups of the specification (Today, Pickups, Hub, Dispatch, Money, People and access, System), a group only when it has an entry, in the registry's order; an unbuilt route has no entry even when its key is held. A hint never authorises: every route is behind `RequirePermission`, and the server checks every request. No role name or bundle is read anywhere in the navigation or the guards (`test/navigation-no-roles.test.ts`); the navigation tests carry the keys of each seeded bundle written out beside its name, held to the seed by a root test, and a soundness check refuses a registry with an entry that has no label, no icon or an order another entry of its group has.
+- **The sidebar** (§4.6, the shell recipe) is Ink in both themes, with a 1px right edge in `shell.border` (a hairline that measures 1.19:1 against the Ink in the light theme, where it is almost the Ink's own colour and hardly shows beside a light page, and 1.24:1 in the dark theme, where the Ink lies beside a canvas of almost the same darkness and the edge is what marks the side of the sidebar), 248px wide (15.5rem) and as tall as the window, and stays where it is while the page scrolls. At its head are the all-white lockup (about 132 by 42, its own file, never redrawn) and the button that collapses it. Then the groups: a group's heading is 11px, weight 600, in capitals, and is the label of the list of its entries (a screen reader says "Today, list, 2 items", and no heading is added to the page's outline); an entry is 36px high with the radius of a control (`radius.md`), a 17px icon of the family and a label of 13.5px in `shell.text.muted`, with `shell.surface.hover` and `shell.text` under the pointer. **The current entry is a solid crimson fill (`shell.active`) with white bold text and `aria-current="page"`**, never marked by colour alone and, under forced colours, a border and the system's highlight. Where the server counted a queue an entry carries a count (`CountBadge`, §37), a pill that is white at 18% on the current entry (at 22% the white text on the crimson measures 4.32:1, and the specification asks for 4.5:1 at that size; at 18% it measures 4.63:1 on the crimson and 5.31:1 on its hover fill, in both themes, which the test "the pill of a count on the current entry of the sidebar" in `scripts/design-tokens.test.ts` holds; the Product Owner accepted 18% in the place of 22% on 6 November 2026); a count that is loading, missing or failed is not drawn. Focus uses the **inverse** recipe (`focus.ringInverse` outside a band of `focus.offsetInverse`), because the default ring is only 2.96:1 on Ink. The foot names the person (the initials as decoration, the name, and where they act: the hub's name, or how many hubs); the session names no role, so none is shown.
+- **The rail and the sheet.** From 1280px the sidebar is the full one, and below it the rail, 64px (4rem) wide; the button at its head ("Collapse menu", then "Expand menu", with `aria-expanded`) asks for the other. On the rail every entry keeps its name (the label is drawn out of sight and not removed) and shows it, with what its count counts, in a tooltip on hover and on focus (300 ms; Escape takes it away); the lockup gives way to the symbol on a white tile (`BrandLockup`), a count sits under the icon, inside its entry (the CountBadge at its own 12px size, not scaled; the entry stays 36px high, and on the current entry the pill is wholly on the crimson) and the headings give way to a rule. The choice lasts as long as the page and no longer: nothing is written to web storage, so a reload starts at what the width gives. **Under 768px the sidebar is a sheet**: the Sheet primitive, a modal dialog named "Main menu" that slides in from the left in `motion.slow` and is never wider than 85% of the window, opened by the "Open menu" button at the start of the top bar. Focus goes to "Close menu" and is kept inside; Escape, the scrim, "Close menu" and following an entry close it; while it is open the page behind is hidden from assistive technology; focus goes back to the button, or, after a link, to the new page's heading. A person who asked for reduced motion sees it appear and disappear without the slide. The lockup gives up width when text is enlarged, so the close button stays inside the sheet, and the whole panel scrolls when the window is too short for it. At 320px and at 200% text nothing clips and the page never scrolls sideways.
+- **The top bar** is 56px high on the default surface, with the subtle border under it and 24px of padding at the sides (24px from 768px and 16px under it, as the page is padded: one limit, `47.9375rem`, for the bar, the page and the sheet), and the controls in it are the small height (36px). **It stays at the top of the window while the page scrolls** (a sticky item of the frame, over the page and under the menus that open from it) **and the root keeps its height clear as scroll padding** (`scroll-padding-top`, the bar's **measured** height and a little more: the bar wraps into a second row when text is enlarged, and `useTopBarClearance` keeps the measure, audit B2 of 7 November 2026), so that a heading the frame focuses, a control reached by Tab or an in-page link is brought in below it and not under it (WCAG 2.4.11); **the skip link, once focused, is painted above it** (its layer is above the bar's and below the menus'). A browser test scrolls the page, brings a heading in, and asks which element is at the centre and the corners of the focused skip link, at 390, 768 and 1280px. Another tabs backwards up a long list, at 100% and at 200% text, and asks that each control reached is below the bottom edge of the bar. From the start: on a narrow screen the "Open menu" button, then the hub switcher (a 6px crimson square and the hub's name; for a session with more than one hub a menu of "Show work for", *All hubs* and each hub, kept in memory by `platform/hub` and read by `useActiveHub`; for one hub the name alone), then the search. At the end: the theme control (an icon button named "Theme: System", "Theme: Light" or "Theme: Dark" with a menu of the three, left out of the bar on a narrow screen, where the account menu has the same choice), the New menu (the crimson `brand` Button, "New", with a plus; its items are links to the pages that create, offered only for the keys the session holds, and none for a session that may create nothing) and the account menu (an avatar button named "Account menu").
+- **The search is a button that looks like a field** and says "Search a code, name or phone" with the key hint (`Ctrl K`, `⌘K` on an Apple platform; read to assistive technology as `aria-keyshortcuts`, not as part of the name). It is not a field because a dialog that opens when a control merely takes focus changes the context on focus (WCAG 3.2.1, level A), and a person tabbing across the top bar would open it by passing (the Product Owner accepted a button in the place of a field that opens on focus, 6 November 2026); a click, Enter or Space opens the palette, as does Ctrl or ⌘ K from anywhere in the shell, on every platform (it closes it again; a key held down toggles nothing; and it does nothing, and leaves the browser's own use of the key alone, while a native modal dialog of the page is open). **Where the bar gives the search less than about 18.5rem** (a narrow screen, the sidebar open beside the bar at a tablet's width, text enlarged to 200%) **only the icon is drawn and the words stay in the name**: words cut short would be clipped text (WCAG 1.4.4 and 1.4.10), and a search with no room for its icon wraps to a row of its own. The question is asked of the search's own place (a container query, in `rem`), not of the window.
+- **The command palette** (the `command` primitive in a dialog named "Search") has three groups in this order: *Go to* (the built pages the session may open), *Create* (the New menu's actions) and *Records* (`lookupRecords`, §37). The first two are narrowed by what is typed, by the name of a page or by what it is for; **the records are the server's answer to the text and are never filtered again** (a record found by a phone number does not contain the number). The search asks only while the palette is open and the text is two to 64 characters (once trimmed and its white space folded, as the server reads it), once the text has stood still, and **never again by itself**: each state is told in plain words under the list (a hint, "Searching…", "No record matches “…”", "Use 64 characters or fewer to search records." for a longer text, and a failure in the words of the portal's table with *Try again*), in **one polite live region that stays in the document through every state** and says how many records were found when there are results (the failure is an alert of its own), and the text is forgotten when it closes. **The line under a record is the portal's own** (`record-line.ts`): the sender, the state in the words the same state has on its page, the hub, the day, and a phone number only as the server masked it, on the record that number found; a state the portal has no words for is left out and never drawn as it came. A record opens by the portal's own page for its kind and id (`recordRoute`), and no link, wording or number of the answer is used. Arrows move, Enter opens, Escape closes.
+- **Focus goes where the person is.** A dialog that has no trigger of its own (the palette, the sheet) gives focus back to whatever had it when it opened, or to its button, and a menu or a dialog that was used to go somewhere leaves it on the new page's heading, where the frame put it (`app/shell/focus-return.ts`): Radix gives focus back to a trigger and to nothing else, and would otherwise take it from the heading of the page that opened.
+- **The theme** is chosen in the theme control and in the account menu, and is the one thing the portal keeps in the browser: `localStorage`, the key `melarc-theme`, written for Light and Dark and removed for System (the default, which follows the computer), read, written and removed in one module (`platform/theme/theme-choice.ts`, the only module that touches web storage and the one exception to the rule that application code does not) and applied as `data-theme` on the root. A script of the page's own origin (`public/theme-init.js`, a classic script in the head and the one other file that touches the storage: it only reads the key) applies the stored choice before the first paint, because a module script is deferred and the policy refuses an inline one; `test/theme-init.test.ts` holds it to the module's key. The other tab of the same browser follows a change: the listener of the `storage` event is registered once, when the application starts (`startThemeChoice`), and not by each control that shows the choice, so every page follows it, with or without a theme control on the screen.
+- **The account menu** says who is signed in and where they act, offers the personal pages (Trusted browsers), the theme (System, Light, Dark) and **Sign out**. A page called "Profile and hubs" is not offered: no such page exists, and a page that is not built has no entry.
+- **Sign-out** is the last item of the account menu, on every signed-in screen. It calls `signOut` and ends the session by the one action that ends it (the same event that an answer of `SESSION_INVALID` raises), so the cache, the person and the screen go the way they always do. The menu stays open on "Signing out…" while it is under way, and a second selection does nothing. `204` and `SESSION_INVALID` are **done**; anything else (no connection, a fault, `CSRF_VALIDATION_FAILED`) leaves the person signed in with "Sign-out did not finish, so you are still signed in." at the top of the page and **Try again**, which is safe because the act is idempotent, and the menu is closed when the failure arrives; "signed out" is never said while the session may be live. An answer for a session that was replaced meanwhile is dropped.
+- **The counts** come from `getQueueSummary` and are read when the shell loads, when the person goes to another page, when they ask for a refresh of a queue, when they choose another hub and after an act that changes a queue (`platform/queue-summary/queue-changing-acts.ts`: one list of the acts, held to the contract by a test; one wrapper of the API client tells of an act answered `ok`, and one function reads the summary again, replacing a read still on its way), never on a timer.
+- **Who is signed in** is told by the foot of the sidebar, the account menu and My work, each in its own words; a session with no display name is "Signed in" in the foot and the menu and "You are signed in." on My work.
 
 ### 12.7 The pre-sign-in screens as built (S0.43)
 
@@ -886,15 +858,15 @@ Owner, 25 October 2026, with a reference screenshot of a dark menu with icons, a
 
 ### 12.8 The six signed-in identity screens as built (S0.44)
 
-> **Code:** `apps/ops-web/src/app/pages/staff/`, `app/pages/LandingPage.tsx`, `platform/staff/`
+> **Code:** `apps/ops-web/src/app/pages/staff/`, `platform/staff/`. (The signed-in landing is My work, `app/pages/my-work/`, §12.6.)
 
-- **Six screens behind the registry** (`SIGNED_IN_ROUTES`): `/` (the landing), `/admin/staff` (the list and the approver's queue),
+- **Six screens behind the registry** (`SIGNED_IN_ROUTES`): `/` (the landing; My work since redesign step R4), `/admin/staff` (the list and the approver's queue),
   `/admin/staff/new`, `/admin/staff/{id}`, `/admin/staff/{id}/mfa/reset` and `/admin/sessions`. Each names the permission key its guard needs
-  and, for the first three and the sessions page, a menu entry with a line of what it is for (the landing lists them). The detail and the
+  and, for the first three and the sessions page, a menu entry (the sidebar's since redesign step R4; S0.44's landing listed them with a line of what each is for). The detail and the
   reset are reached from a profile, so they have none. A profile also leads to the sessions page with the person chosen; opened from the menu
   it asks for one.
 - **The list opens on what the person came for**: the queue for a session that can approve, everyone for one that cannot. The view and the
-  search are in the address, so a link (the landing's "Review the queue") and Back mean what they say; the page of results is not, because a
+  search are in the address, so a link (the card of the staff profiles waiting for approval on My work, which S0.44's "Review the queue" became) and Back mean what they say; the page of results is not, because a
   token is good only for the list it was given for. *None waiting* and *the filter hides everything* are told differently; a count is exact only
   when the whole queue is on the page, and is never shown while the list is loading.
 - **A profile is read once and the page acts on the version it read** (`WithProfile`, `If-Match` exactly as the server sent it); a second
@@ -1240,7 +1212,7 @@ Important business outcomes must not exist only in disappearing toast messages.
 
 ## 22. Icon Button
 
-> **Status:** ACTIVE (25 October 2026: the eye of the password field, and the controls of the side menu and its account card)
+> **Status:** ACTIVE (25 October 2026: the eye of the password field; the controls of the sidebar and the top bar since redesign step R4)
 
 A native `<button>` named by a required `label` and drawn with one icon of the family (DESIGN_SYSTEM §24; the registry is
 `components/ui/icon/icons.ts`). It is the only way to make an icon-only control (`components/ui/icon-button/`).
@@ -1448,7 +1420,7 @@ how a request is drawn and nothing the queue reads, asks, orders or allows. Code
   with its state, the sender, then each fact under the name of its column. A term sits beside its value where there is room and over it where
   there is not. A queue given no `card` is drawn exactly as before (the approvals and the message log).
 - **One drawing at a time.** Both are drawn and the stylesheet shows one, by a **container query on the results region** and not a media
-  query on the screen: the docked menu takes 16rem (4.5rem collapsed), so the same screen gives a queue more or less room as the menu opens and
+  query on the screen: the docked menu takes 15.5rem (4rem as the rail), so the same screen gives a queue more or less room as the menu opens and
   shuts. The table is shown from 64rem (`breakpoint.lg`, written as a number because a query condition cannot read a token) and cards below it;
   `rem` follows enlarged text, so enlarging it gives way to the cards before the columns break. The one not shown is `display: none`, out of the
   accessibility tree and the Tab order, and the list says `role="list"` outright because Safari takes it from a list whose markers a style removes.
@@ -1671,7 +1643,7 @@ Rules:
 - never use realistic production-looking customer data;
 - do not let the showcase become a second component specification.
 
-What it holds since redesign step R3 (5 November 2026): two pages, and the production build contains neither (`test/build.test.ts`). `/__showcase` draws the components of `components/ui`. `/__showcase/primitives` draws every installed shadcn/ui primitive (DESIGN_SYSTEM §29.2) in the words a Melarc screen would use, with synthetic data, in both themes: a switch of the theme sits in its header and is held in memory, never stored (the stored choice is redesign step R4's, DESIGN_SYSTEM §31). A primitive is added to it in the change that installs it.
+What it holds since redesign step R4 (7 November 2026): three pages, and the production build contains none of them (`test/build.test.ts`). `/__showcase` draws the components of `components/ui`. `/__showcase/primitives` draws every installed shadcn/ui primitive (DESIGN_SYSTEM §29.2) in the words a Melarc screen would use, with synthetic data, in both themes: a switch of the theme sits in its header and is held in memory, never stored (the Portal's own stored choice is DESIGN_SYSTEM §31's, and this switch does not write it). `/__showcase/shell` draws the parts of the shell (the sidebar expanded and as the rail, the top bar with its menus, and the command palette in each state of its search) over made-up entries, hubs and counts, on a page of its own so that the page-wide keyboard and reflow checks of `/__showcase` are not run over a second top bar. A primitive is added to its page in the change that installs it, and a part of the shell in the change that builds it.
 
 ---
 
@@ -1942,8 +1914,8 @@ Before accepting the initial UI-foundation implementation:
 - [ ] no fake operational content.
 
 ### Authenticated Ops shell (S0.42)
-- [ ] landmarks correct: banner, navigation, main, in that order, the navigation outside the main content;
-- [ ] navigation focus works, with the inverse ring on the Ink side menu;
+- [ ] landmarks correct: the sidebar (an `aside` holding the navigation), the banner (the top bar) and main, in that order, the navigation and the banner outside the main content;
+- [ ] navigation focus works, with the inverse ring on the Ink sidebar;
 - [ ] current location clear, by more than colour;
 - [ ] no navigation entry inferred from a role name;
 - [ ] no entry for a route that is not built, and none for a key the session does not hold;
@@ -1995,17 +1967,17 @@ Before accepting the initial UI-foundation implementation:
 
 ## 37. Planned kit and deferred pattern register
 
-### The planned kit (PROPOSED)
+### The planned kit
 
-**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. Each is **PROPOSED** (§2): none is built. They are built in redesign step R5, composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
+**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. **Each pattern has one status (§2), and it is the one its row gives:** redesign step R4 built the five of the shell (AppShell v2, CommandPalette, NewMenu, AccountMenu and HubSwitcher) and task C1 built CountBadge, and those six are **IMPLEMENTING**; every other row is **PROPOSED**, and is built in redesign step R5. The register of §40 holds the same statuses. All are composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
 
 | Pattern | What it is for |
 |---|---|
-| AppShell v2 | the signed-in frame: the sidebar of seven groups with counts, and the top bar ([surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)) |
-| CommandPalette and global search | opening any record by its code, a name or a phone number (Ctrl/Cmd K) |
-| NewMenu | every create action, gathered in one menu |
-| AccountMenu | personal settings (profile and hubs, trusted browsers) and sign-out |
-| HubSwitcher | the hub a person browses, and acts in |
+| AppShell v2 | the signed-in frame: the sidebar of seven groups with counts, and the top bar ([surfaces/ops-portal.md §4](../surfaces/ops-portal.md#4-navigation-model)). **Built in redesign step R4** and **IMPLEMENTING** (§2): `components/ui/app-shell/` (`Sidebar`, `MobileSidebar`, `TopBar`), drawn by `app/shell/`; as built in §12.6 |
+| CommandPalette and global search | opening any record by its code, a name or a phone number (Ctrl/Cmd K). **Built in redesign step R4** and **IMPLEMENTING** (§2): `CommandPalette` and `SearchButton`, with `app/shell/ShellPalette.tsx` over `lookupRecords`; the search is a button that looks like a field (§12.6) |
+| NewMenu | every create action, gathered in one menu. **Built in redesign step R4** and **IMPLEMENTING** (§2): `NewMenu`, over the `dropdown-menu` primitive, the one crimson `brand` button of the portal |
+| AccountMenu | personal settings (trusted browsers, the theme) and sign-out. **Built in redesign step R4** and **IMPLEMENTING** (§2): `AccountMenu`, which offers no "profile and hubs" page because none exists |
+| HubSwitcher | the hub a person browses, and acts in. **Built in redesign step R4** and **IMPLEMENTING** (§2): `HubSwitcher`, with the choice held by `platform/hub` and read by `useActiveHub` |
 | Tabs with counts | the views of a queue ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)) |
 | FilterBar with chips | a queue's filters, each applied choice a chip that can be removed |
 | DataTable | the queue table, with selection, a bulk-action bar and an inline row action: TanStack Table, which redesign step R3 adopted, over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It builds on Table and QueueTable (§19, §22f) |
@@ -2017,14 +1989,14 @@ Before accepting the initial UI-foundation implementation:
 | Toast | success after a task, with "Open" and "Do another" |
 | Tooltip, Popover | the name of an icon, and the longer explanation behind an info control |
 | StatTile | a figure the server states |
-| CountBadge | a count in a menu or a tab, **built early, by task C1** (5 November 2026), because the queue summary is the first count the server states: `components/ui/count-badge/`, from the Badge primitive and the tokens, drawn beside the menu's entries and on the landing's list. It is **IMPLEMENTING** (§2): the redesign's own screens (R4) take it from here. It draws a whole number it is given, never capped (a capped figure hides the size of a queue), with the words of what it counts for a screen reader, a count of `0` that was read quietly, and **nothing at all for a count that was not given**: a count that is loading, missing or failed is never drawn as `0` (§24, §25). On the side menu it takes the shell's own tokens, white on the pressed ground, turned round on the filled current entry, and at the corner of the icon on the rail |
+| CountBadge | a count in a menu or a tab, **built early, by task C1** (5 November 2026), because the queue summary is the first count the server states: `components/ui/count-badge/`, from the Badge primitive and the tokens, drawn beside the sidebar's entries (redesign step R4). It is **IMPLEMENTING** (§2). It draws a whole number it is given, never capped (a capped figure hides the size of a queue), with the words of what it counts for a screen reader, a count of `0` that was read quietly, and **nothing at all for a count that was not given**: a count that is loading, missing or failed is never drawn as `0` (§24, §25). On the sidebar it takes the shell's own tokens, white on the pressed ground, on the filled current entry a pill of white at 18% (at 22% the white text on the crimson measures 4.32:1, below the 4.5:1 of the specification), and, on the rail, under the icon inside its entry (12px, not scaled) |
 | EmptyState v2, Skeleton v2 | the empty and loading treatments, redrawn: a deliberate replacement of §16 and §17, which stay ACTIVE until their screens migrate (§2) |
 
 A count or a figure on these components is the server's: the component draws what it is given and works nothing out (§24, §25).
 
-### The primitives of redesign step R3 (no Melarc component yet)
+### The primitives of redesign step R3
 
-Step R3 (5 November 2026) installed 24 shadcn/ui primitives in `apps/ops-web/src/components/primitives/` ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toaster), table, tabs, textarea and tooltip. They are **not Melarc components**: no page imports one, and none is a pattern of this file until a component of `components/ui` composes it, a screen uses that component and the Product Owner accepts it (§2). Each is drawn in the showcase (§27), in both themes, with its overlays driven from the keyboard in a real browser. The components of the kit above are composed from them in step R5. The native components that are ACTIVE (Button, Input, Textarea, Checkbox, Select, Table, Dialog, AlertDialog, Skeleton and StatusBadge) are not replaced by their primitives now: an active pattern is not silently replaced (§2), and whether step R5 recomposes any of them is decided there and recorded here.
+Step R3 (5 November 2026) installed 24 shadcn/ui primitives in `apps/ops-web/src/components/primitives/` ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toaster), table, tabs, textarea and tooltip. They are **not Melarc components**: no page imports one, and none is a pattern of this file until a component of `components/ui` composes it, a screen uses that component and the Product Owner accepts it (§2). Each is drawn in the showcase (§27), in both themes, with its overlays driven from the keyboard in a real browser. The components of the kit above are composed from them: those of the shell in redesign step R4 (seven primitives: `badge`, `button`, `command`, `dialog`, `dropdown-menu`, `sheet` and `tooltip`), the rest in step R5. The native components that are ACTIVE (Button, Input, Textarea, Checkbox, Select, Table, Dialog, AlertDialog, Skeleton and StatusBadge) are not replaced by their primitives now: an active pattern is not silently replaced (§2), and whether step R5 recomposes any of them is decided there and recorded here.
 
 ### Phasing out React Aria Components
 
@@ -2102,7 +2074,8 @@ Do not use this file to override a product contract.
 | LoadingIndicator | ACTIVE | Yes |
 | PageHeader | ACTIVE | Yes |
 | NeutralFrame (`AppFrame`) | ACTIVE | Yes |
-| AuthenticatedOpsShell, SideMenu | ACTIVE | Identity implementation (S0.42; a side menu since 25 October 2026) |
+| AuthenticatedOpsShell, Sidebar and TopBar | IMPLEMENTING | The first form was ACTIVE (S0.42); the sidebar and the top bar of redesign step R4 (7 November 2026) replaced it and are built, in the showcase (`/__showcase/shell`) and drawn by every signed-in screen. ACTIVE once the Product Owner accepts them (§2). The components §37 lists with them have the next row |
+| CommandPalette and SearchButton, NewMenu, AccountMenu, HubSwitcher | IMPLEMENTING | Redesign step R4 (7 November 2026): built (`components/ui/app-shell/`), drawn by every signed-in screen, and awaiting the Product Owner's acceptance with the shell (§2) |
 | Icon, IconButton | ACTIVE | 25 October 2026 |
 | DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); the pickup screens use it since S1.19 (29 October 2026), and its look awaits the Product Owner |
 | RadioGroup, Picker, MoneyAmount, Timeline, QueueTable | IMPLEMENTING | Pickup intake (S1.19, 29 October 2026): built, in the showcase, used by the pickup screens (§22b to §22f) |
@@ -2110,14 +2083,14 @@ Do not use this file to override a product contract.
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |
-| CountBadge | IMPLEMENTING | Task C1 (5 November 2026): built, used by the menu and the landing's list, proven in jsdom and in a browser in both themes. ACTIVE once the Product Owner accepts C1 and a redesigned screen (R4) uses it (§2) |
+| CountBadge | IMPLEMENTING | Task C1 (5 November 2026): built, used by the sidebar's entries since redesign step R4 (My work draws the figures of its cards in its own face, not with this component), proven in jsdom and in a browser in both themes. ACTIVE once the Product Owner accepts it with the shell (§2) |
 | ForbiddenState, EmptyState, Skeleton, StatusBadge, Table | ACTIVE | Identity implementation (S0.40) |
 | Select, Dialog, AlertDialog, reason and confirmation | ACTIVE | Identity implementation (S0.41) |
 | Button `danger` | ACTIVE | Identity implementation (S0.41) |
 | FormPage, the five pre-sign-in screens | ACTIVE | Identity implementation (S0.43) |
 | ButtonLink, ConfirmationDialog, the six signed-in identity screens | ACTIVE | Identity implementation (S0.44) |
-| The shadcn/ui primitives of `components/primitives` (24, §37) | IMPLEMENTING | Redesign step R3 (5 November 2026): installed and restyled, drawn in the showcase and driven from the keyboard in a browser. No Melarc component or screen uses one yet, and the Product Owner has not yet accepted them |
-| The planned kit of §37 (AppShell v2, DataTable, Toast and the rest) | PROPOSED | No: built in redesign step R5 |
+| The shadcn/ui primitives of `components/primitives` (24, DESIGN_SYSTEM §29.2) | IMPLEMENTING | Redesign step R3 (5 November 2026): installed and restyled, drawn in the showcase and driven from the keyboard in a browser. Seven are composed by components of redesign step R4 (`badge`, `button`, `command`, `dialog`, `dropdown-menu`, `sheet` and `tooltip`, in `components/ui/app-shell/` and `components/ui/count-badge/`), so every signed-in screen draws them; no screen imports one directly, and the Product Owner has not yet accepted them |
+| The rest of the planned kit of §37 (DataTable, Toast and the others its table does not mark built) | PROPOSED | No: built in redesign step R5 |
 
 ---
 
@@ -2148,7 +2121,7 @@ Paths are under `apps/ops-web/src/`.
 | Skip link | `components/SkipLink.tsx` | **Retain**, restyle | `app/App.test.tsx` (keyboard and focus) |
 | PageHeading, the `h1` that takes focus | `components/PageHeading.tsx` | **Retain**; PageHeader (§11) composes it | `app/App.test.tsx` (one level-one heading, focus after a navigation) |
 | PageHeader | none | **New**, on top of PageHeading | new: title hierarchy, reflow |
-| Navigation for the authenticated shell | `components/PrimaryNavigation.tsx` (a plain list; renders nothing when empty; not used by the neutral frame) | **Retain** for the shell | `components/PrimaryNavigation.test.tsx` |
+| Navigation for the authenticated shell | `components/PrimaryNavigation.tsx` (a plain list; renders nothing when empty; not used by the neutral frame). **Removed in redesign step R4**, with its test: the `Sidebar` of `components/ui/app-shell/` is the navigation now (§12.6) | **Retained** for the shell then; replaced in step R4 | `components/ui/app-shell/Sidebar.test.tsx` |
 | ErrorState | `components/ErrorFallback.tsx`, `components/AppErrorBoundary.tsx`, `app/pages/RouteErrorPage.tsx` (`RouteErrorPage`, `FrameErrorPage`) | **Adapt**: tokens and Button; keep the generic copy, `role="alert"`, the explicit retry and the focus parking | `components/AppErrorBoundary.test.tsx`, `app/frame-failure.test.tsx`, `app/App.test.tsx` (a page that fails) |
 | NotFoundState | `app/pages/NotFoundPage.tsx` | **Adapt**: tokens, Link | `app/App.test.tsx` (unknown routes) |
 | Button | none; the retry in `ErrorFallback` is a native `<button>` styled by a global `button` rule in `styles/app.css` | **New**; it replaces that global rule | new: §4.10 and §26 |
@@ -2200,7 +2173,8 @@ Paths are under `apps/ops-web/src/`. Tests sit beside each component; the browse
 
 The first screens add a variant or size when they first use it (§30). The authenticated Ops shell, its navigation and the
 inverse recipes stay with the identity slice; the frame and `PrimaryNavigation` still show no entries, because nothing
-provides the caller's capabilities yet (DESIGN_SYSTEM §22).
+provides the caller's capabilities yet (DESIGN_SYSTEM §22). (That was the state of 6 October 2026: the identity slice then built
+the shell, and redesign step R4 replaced it and removed `PrimaryNavigation`, §12.6.)
 
 ### 42.4 What the identity slice's foundation added (S0.38 and S0.39, 23 October 2026)
 
@@ -2235,7 +2209,7 @@ showcase in three engines.
 | Button `danger` | `components/ui/button/` | The outline recipe, §4.7 |
 | Dialog, AlertDialog, DialogActions | `components/ui/dialog/` | The native `<dialog>`, §20.1; jsdom is given a small stand-in in `test/setup-components.ts` |
 | ReasonSelect, ReasonConfirmationDialog | `components/ui/reason-select/`, `reason-confirmation/` | §20.3, over `platform/reasons/` and `platform/api/use-confirmed-command.ts` |
-| AuthenticatedOpsShell, the route registry | `app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx` | §12.6. Built as a band across the top (`ShellBar`); replaced on 25 October 2026 by the side menu (§42.8) |
+| AuthenticatedOpsShell, the route registry | `app/AuthenticatedOpsShell.tsx`, `app/navigation/route-registry.tsx` | §12.6. Built as a band across the top (`ShellBar`); replaced on 25 October 2026 by the side menu (§42.8), and by the sidebar and the top bar in redesign step R4 (§12.6) |
 
 ### 42.6 What the identity slice's pre-sign-in screens added (S0.43, 24 October 2026)
 
@@ -2264,7 +2238,7 @@ credential in the answer, and a browser pass in three engines against the produc
 
 | Pattern | Built as | Notes and differences from the plan above |
 |---|---|---|
-| The six screens | `app/pages/LandingPage.tsx`, `app/pages/staff/` (`StaffListPage`, `StaffCreatePage`, `StaffDetailPage`, `StaffMfaResetPage`, `SessionsPage`), routes in `app/navigation/route-registry.tsx` | §12.8. The registry gained a `description` for the landing's list of places (`destinationsFor`) |
+| The six screens | `app/pages/staff/` (`StaffListPage`, `StaffCreatePage`, `StaffDetailPage`, `StaffMfaResetPage`, `SessionsPage`) and the landing, My work (`app/pages/my-work/`), routes in `app/navigation/route-registry.tsx` | §12.8. The registry has a `description` (what a page is for), which finds the page in the command palette |
 | ButtonLink | `components/ui/button/ButtonLink.tsx` | §4.12. An anchor drawn with the Button recipes |
 | ConfirmationDialog | `components/ui/confirmation/ConfirmationDialog.tsx`, with `reason-confirmation/command-outcome.tsx` shared with the reason dialog | §20.4. `ReasonConfirmationDialog` gained `confirmVariant` |
 | The profile gate | `app/pages/staff/WithProfile.tsx` | Reads a profile once for the pages about one (the profile, the reset), and shows the two pages of their own for a profile that is not there or is outside the hubs |
@@ -2283,8 +2257,8 @@ the shell and the split screen against the production build, the side menu and i
 |---|---|---|
 | Icon, the registry | `components/ui/icon/` (`Icon.tsx`, `icons.ts`) | §24 of the design system. Lucide, imported by `icons.ts` alone (the shadcn/ui primitives apart, §37); every icon is named by its meaning and drawn at one stroke and three sizes; a test fails on an icon nobody uses and on a second door to the library |
 | IconButton | `components/ui/icon-button/` | §22. `label` is required; `bare` and `inverse`; `loading`; a `ref` for a caller that moves focus to it |
-| SideMenu | `components/side-menu/` | §12.6. Collapses to a rail, slides in on a narrow screen with the main content inert, scrolls as a whole when the window is too short; the collapse state is in memory only |
-| PrimaryNavigation | `components/PrimaryNavigation.tsx` | A vertical list of an icon and a label; the current entry is a filled item with `aria-current`; a `title` when the menu is collapsed |
+| SideMenu | `components/side-menu/` (removed in redesign step R4: the `Sidebar` of `components/ui/app-shell/` replaced it, §12.6) | Collapses to a rail, slides in on a narrow screen with the main content inert, scrolls as a whole when the window is too short; the collapse state is in memory only |
+| PrimaryNavigation | `components/PrimaryNavigation.tsx` (removed in redesign step R4, with the `Sidebar`, §12.6) | A vertical list of an icon and a label; the current entry is a filled item with `aria-current`; a `title` when the menu is collapsed |
 | BrandLockup | `components/brand/` | The symbol (`public/favicon.svg`, served as it is) on a white tile and the name as text, for a surface on Ink: the side menu and the split screen's band |
 | Frame layouts | `app/AppFrame.tsx`, `app/frame-chrome.ts` | `neutral`, `sidebar` and `split`, chosen by the route tree (`useFrameLayout`), never by a page; the sidebar layout has no banner, the split layout draws its panel in the place beside the main content |
 | AuthSplitLayout, AuthArt | `app/pages/pre-sign-in/AuthSplitLayout.tsx`, `components/auth-art/` | §12.7. Decorative photography, loaded lazily, one table for which photograph goes with which screen (`auth-art.ts`) |
@@ -2305,7 +2279,7 @@ build of the showcase is served under the strict content-security policy (`test/
 
 Paths are under `apps/ops-web/src/`. The primitives have a scan of the showcase with axe in both themes and every overlay driven from the keyboard in a browser
 (`test/browser/primitives.spec.ts`), and a production build of the showcase is served under the strict content-security policy (`primitives-policy.spec.ts`).
-No Melarc component is built on them yet (§37).
+Seven of them are composed by the components of redesign step R4 (§37, §12.6).
 
 | Pattern | Built as | Notes and differences from the plan above |
 |---|---|---|

@@ -334,7 +334,19 @@ export const PROCESS_START_UP: readonly string[] = [
  * signed-out start and every sign-out lands, so each spec that starts signed out or signs out names them too.
  */
 export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
-  'shell.spec.ts': ['apps/ops-web/src/app/pages/pre-sign-in/'],
+  // The shell: it opens on My work (the landing, "/"), a sign-out lands on the pre-sign-in screens, and the sheet's test follows the Sessions entry
+  // (the staff folder).
+  'shell.spec.ts': [
+    'apps/ops-web/src/app/pages/my-work/',
+    'apps/ops-web/src/app/pages/pre-sign-in/',
+    'apps/ops-web/src/app/pages/staff/',
+  ],
+  // The measurement of a heavy session (skipped unless MELARC_MEASURE=1) walks My work, the pickup queue and records, and the run builder.
+  'request-rate.spec.ts': [
+    'apps/ops-web/src/app/pages/my-work/',
+    'apps/ops-web/src/app/pages/pickup/',
+    'apps/ops-web/src/app/pages/manifests/',
+  ],
   'components.spec.ts': ['apps/ops-web/src/showcase/'],
   'secrets.spec.ts': ['apps/ops-web/src/showcase/'],
   'dialogs.spec.ts': ['apps/ops-web/src/showcase/'],
@@ -368,13 +380,30 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/messages/',
     'apps/ops-web/src/app/pages/pickup/',
   ],
-  // The counts of the queues: the landing and the menu are the shell's (a change there reruns every spec); the page it goes to for a change of
-  // page is the trusted browsers', in the account folder; and the late bookings' link opens the pickup requests list, so a change to the pickup
-  // screens reruns it too (`AC-QSUM-11`).
+  // The counts of the queues: the sidebar is the shell's (a change there reruns every spec); My work is the landing; the page it goes to for a
+  // change of page is the trusted browsers', in the account folder; and the late bookings' link opens the pickup requests list, so a change to the
+  // pickup screens reruns it too (`AC-QSUM-11`).
   'queue-summary.spec.ts': [
     'apps/ops-web/src/app/pages/account/',
+    'apps/ops-web/src/app/pages/my-work/',
     'apps/ops-web/src/app/pages/pickup/',
   ],
+  // The top bar: it opens on My work, the account menu leads to the trusted browsers (the account folder), the staff list is asked for the hub that
+  // was chosen (the staff folder), and a sign-out lands on the pre-sign-in screens. The rest of what it draws is the shell's.
+  'top-bar.spec.ts': [
+    'apps/ops-web/src/app/pages/account/',
+    'apps/ops-web/src/app/pages/my-work/',
+    'apps/ops-web/src/app/pages/pre-sign-in/',
+    'apps/ops-web/src/app/pages/staff/',
+  ],
+  // The palette: it opens on My work, a record opens the staff profile's page, and the pages it goes to are the staff and the account ones.
+  'palette.spec.ts': [
+    'apps/ops-web/src/app/pages/account/',
+    'apps/ops-web/src/app/pages/my-work/',
+    'apps/ops-web/src/app/pages/staff/',
+  ],
+  // My work: the landing, and the folder of the page itself.
+  'my-work.spec.ts': ['apps/ops-web/src/app/pages/my-work/'],
 };
 export const OPS_ENTRY = 'apps/ops-web/src/main.tsx';
 const OPS_PAGES = 'apps/ops-web/src/app/pages/';

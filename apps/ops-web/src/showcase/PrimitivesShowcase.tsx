@@ -140,7 +140,7 @@ function Section({ title, children }: { readonly title: string; readonly childre
 
 type ThemeChoice = 'system' | 'light' | 'dark';
 
-/** A switch for this page only, held in memory and never stored: the theme toggle and its stored choice are step R4's. */
+/** A switch for this page only, held in memory and never stored: the portal's own theme control and its stored choice are the shell's (`platform/theme/theme-choice.ts`). */
 function ThemeSwitch() {
   const [choice, setChoice] = useState<ThemeChoice>(() => {
     const set = document.documentElement.getAttribute('data-theme');

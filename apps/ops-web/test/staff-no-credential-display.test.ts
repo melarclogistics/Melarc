@@ -20,7 +20,7 @@ const SRC = resolve(import.meta.dirname, '../src');
 /** The code of the identity screens: their pages, and the platform code they read through and send with. */
 const SCREEN_CODE = [
   'app/pages/staff',
-  'app/pages/LandingPage.tsx',
+  'app/pages/my-work/MyWorkPage.tsx',
   'platform/staff',
   // The vendor screens (S0.52b): they re-issue a setup link and start a recovery, and show a vendor's secret and browsers as facts only.
   'app/pages/vendors',
@@ -113,7 +113,7 @@ describe('what is scanned', () => {
         'app/pages/staff/StaffCreatePage.tsx',
         'app/pages/staff/StaffListPage.tsx',
         'app/pages/staff/SessionsPage.tsx',
-        'app/pages/LandingPage.tsx',
+        'app/pages/my-work/MyWorkPage.tsx',
         'platform/staff/staff-shape.ts',
         'platform/staff/staff-commands.ts',
       ]),

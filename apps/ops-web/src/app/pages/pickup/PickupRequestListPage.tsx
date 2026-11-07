@@ -17,6 +17,7 @@ import { ReadState, type ReadQuery } from '../../../components/ui/read-state/Rea
 import { Select } from '../../../components/ui/select/Select';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { OperationFailure } from '../../../platform/api/api-response';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import {
   calendarDateOf,
   PICKUP_STATES,
@@ -29,6 +30,7 @@ import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
+import { NothingAtHub } from '../NothingAtHub';
 import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER } from './pickup-presentation';
 import { QUEUE_COLUMNS, QueueCard, queueFactsOf } from './pickup-queue-view';
 import { requestOfClick, restorePlace, searchOf } from './queue-return';
@@ -97,7 +99,11 @@ export function PickupRequestListPage() {
   const state = stateOf(params.get('state'));
   const cutoff = cutoffOf(params.get('cutoff'), state);
   const serviceDate = calendarDateOf(params.get('date'));
-  const signature = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}`;
+  // The hub the switcher chose (task C3): one of the filters of the list, so part of the signature: a page token, a place left and a visit are each
+  // for one hub, and another hub starts again at the first page.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}|${hubId ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
   const continuity = useQueueContinuity();
   const [arrival] = useState(() => continuity.returningTo(signature));
@@ -106,6 +112,7 @@ export function PickupRequestListPage() {
     ...(state === undefined ? {} : { state }),
     ...(cutoff === undefined ? {} : { cutoffExceptionState: cutoff }),
     ...(serviceDate === undefined ? {} : { serviceDate }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
@@ -129,7 +136,7 @@ export function PickupRequestListPage() {
   // filter they were on is a visit of its own and not the old one again. A visit's number is never used twice, so what was said of one visit
   // can be said of no other, and an answer that arrives in another visit (late, after the officer has been elsewhere and come back) is said
   // of nothing.
-  const pageKey = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}|${paging.pageToken ?? ''}`;
+  const pageKey = `${signature}|${paging.pageToken ?? ''}`;
   const [visit, setVisit] = useState({ key: pageKey, id: 0 });
   const [refreshedVisit, setRefreshedVisit] = useState<number | undefined>();
   if (visit.key !== pageKey) setVisit({ key: pageKey, id: visit.id + 1 });
@@ -263,6 +270,19 @@ export function PickupRequestListPage() {
       >
         Page {paging.page} has no requests now. Earlier pages may still have some.
       </EmptyState>
+    ) : hub !== undefined ? (
+      // A chosen hub is a filter too (audit B1): the list is empty at this hub, which says nothing of the others.
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="pickup requests"
+        filtered={filtering}
+        clear={
+          <Button type="button" variant="secondary" onClick={clearEverything}>
+            Show every request
+          </Button>
+        }
+      />
     ) : filtering ? (
       <EmptyState
         kind="filtered"

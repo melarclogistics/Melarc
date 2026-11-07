@@ -738,7 +738,11 @@ describe('the staff creation form: the session', () => {
       expect(creates()).toHaveLength(1);
     });
 
-    await view.user.click(screen.getByRole('button', { name: 'Sign out' }));
+    // The sign-out is an item of the account menu in the top bar: the menu is opened first.
+    await view.user.click(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Account menu' }),
+    );
+    await view.user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
     await act(async () => {
       finish();
       await held;

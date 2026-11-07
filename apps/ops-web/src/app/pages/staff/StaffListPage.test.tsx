@@ -521,7 +521,7 @@ describe('the staff list: the guard', () => {
   it('has no entry in the menu for a session that does not hold the key', async () => {
     open('/', KEYS.maker);
 
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     expect(
       within(screen.getByRole('navigation', { name: 'Primary' })).queryByRole('link', {

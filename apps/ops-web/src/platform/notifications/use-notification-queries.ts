@@ -28,21 +28,26 @@ export interface NotificationListParams {
   readonly channel?: NotificationChannel;
   /** Only the messages raised about this record: the identifier of the pickup request they announce. */
   readonly subjectId?: string;
+  /**
+   * Only the messages of this hub (task C3; the hub chosen in the switcher, `useActiveHub`): a filter that narrows and never widens what the grant
+   * reaches. Left out for *All hubs*, and by the page that asks for the messages of one record, which is that record's whatever hub is chosen.
+   */
+  readonly hubId?: string;
   readonly pageToken?: string;
   readonly enabled?: boolean;
 }
 
 /**
  * `listNotifications`: a page of the messages of the hubs the session's grant reaches (`notification.read`), newest first, scoped by the
- * server and filtered by state, audience, channel and the record they are about. The Ops feed is this list with `channel=FEED` and
- * `audience=OPS_FEED`. **Nothing here asks for, holds or builds a number, a text or a code**: the filters are closed words and an identifier,
- * and an entry has no such field.
+ * server and filtered by state, audience, channel, the record they are about and, since task C3, the hub. The Ops feed is this list with
+ * `channel=FEED` and `audience=OPS_FEED`. **Nothing here asks for, holds or builds a number, a text or a code**: the filters are closed words
+ * and identifiers, and an entry has no such field.
  */
 export function useNotifications(
   params: NotificationListParams,
 ): UseQueryResult<NotificationPageView> {
   const client = useApiClient();
-  const { state, audience, channel, subjectId, pageToken, enabled = true } = params;
+  const { state, audience, channel, subjectId, hubId, pageToken, enabled = true } = params;
   return useQuery({
     queryKey: [
       'notifications',
@@ -51,6 +56,7 @@ export function useNotifications(
       audience ?? null,
       channel ?? null,
       subjectId ?? null,
+      hubId ?? null,
       pageToken ?? null,
     ],
     enabled,
@@ -64,6 +70,7 @@ export function useNotifications(
               ...(audience === undefined ? {} : { audience }),
               ...(channel === undefined ? {} : { channel }),
               ...(subjectId === undefined ? {} : { subject_id: subjectId }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },
           },

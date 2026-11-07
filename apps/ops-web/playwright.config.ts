@@ -46,8 +46,8 @@ function requestedEngines(value: string | undefined): Engine[] {
 /**
  * Browser tests of the application, in real browsers.
  *
- *   shell       the application shell, against the production build served the way a static host would serve it.
- *               It needs no API and no database: the shell calls neither.
+ *   shell       the application shell (the frame, the sidebar, the sheet of a narrow screen, sign-out), against the production build served
+ *               the way a static host would serve it. It needs no database, and its API is a stand-in that answers who is signed in.
  *   components  the real components in the development-only showcase, which the production build does not contain
  *               (test/build.test.ts proves that), so they run against the Vite development server. The secrets and dialogs specs
  *               are the same showcase in files of their own.
@@ -68,8 +68,15 @@ function requestedEngines(value: string | undefined): Engine[] {
  *               the contract and answered by the stand-in).
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
- *   queue-summary the counts of the queues (task C1), the same two ways: the menu's counts, the landing's list, a failed read and the read again on
+ *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on
  *               a change of page, with a stand-in for the API that answers the summary the test gives it.
+ *   top-bar     the top bar of the shell (redesign step R4), the same two ways: the hub switcher, the New menu, the account menu, the theme with its
+ *               pre-paint script, and the search button.
+ *   palette     the command palette (R4), the same two ways, with a stand-in for the search of records that plants wording, a link and a number
+ *               in clear in answers that never carry them.
+ *   my-work     My work, the landing (R4), the same two ways: its frame, its cards and each state of the read of the summary.
+ *   request-rate the requests of a heavy officer's session (audit follow-up of 7 November 2026, B13) against the production build: a session of three
+ *               minutes at a person's pace, counted by operation. It is skipped unless MELARC_MEASURE=1 (it takes about three and a half minutes).
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -244,6 +251,50 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice, and the shell reads the summary from an effect).
       name: `queue-summary-dev-${engine}`,
       testMatch: 'queue-summary.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The requests of a heavy officer's session (B13) against the production build, with a stand-in for the API: three minutes at a person's pace,
+      // counted by operation, with the busiest 60 seconds. It is skipped unless MELARC_MEASURE=1 is set: it takes about three and a half minutes.
+      name: `request-rate-${engine}`,
+      testMatch: 'request-rate.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The top bar of the signed-in shell (redesign step R4) against the production build, where the pre-paint script of the theme is the one
+      // that ships.
+      name: `top-bar-${engine}`,
+      testMatch: 'top-bar.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the menus and the theme are effects of the shell).
+      name: `top-bar-dev-${engine}`,
+      testMatch: 'top-bar.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The command palette (R4) against the production build, with a stand-in for the search of records.
+      name: `palette-${engine}`,
+      testMatch: 'palette.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the search is made from an effect).
+      name: `palette-dev-${engine}`,
+      testMatch: 'palette.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // My work, the landing (R4), against the production build, with a stand-in for the summary of the queues.
+      name: `my-work-${engine}`,
+      testMatch: 'my-work.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the page reads the summary from an effect).
+      name: `my-work-dev-${engine}`,
+      testMatch: 'my-work.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),

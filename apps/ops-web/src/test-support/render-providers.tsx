@@ -5,8 +5,10 @@ import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { ApiClientProvider } from '../platform/api/api-client';
+import { HubChoiceScope } from '../platform/hub/active-hub';
 import { createQueryClient, endSession } from '../platform/query/query-client';
 import { holdOf } from '../platform/query/read-hold';
+import { queueSummaryObserver } from '../platform/queue-summary/queue-summary-refresh';
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
 import { SessionStore, type SessionView } from '../platform/session/session-store';
@@ -43,12 +45,16 @@ export function renderWithProviders(ui: ReactElement, options: ProvidersOptions 
       holdOf(queryClient).hold(askedSeconds);
     },
   });
+  // The same reaction to an act that the application has (`AppProviders`): the queue summary is read again after an act that can change a queue.
+  const onAct = queueSummaryObserver(queryClient);
   const user = userEvent.setup();
   const wrap = (element: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider boundary={boundary}>
+      <ApiClientProvider boundary={boundary} onAct={onAct}>
         <SessionProvider store={store}>
-          <MemoryRouter initialEntries={[options.path ?? '/']}>{element}</MemoryRouter>
+          <HubChoiceScope>
+            <MemoryRouter initialEntries={[options.path ?? '/']}>{element}</MemoryRouter>
+          </HubChoiceScope>
         </SessionProvider>
       </ApiClientProvider>
     </QueryClientProvider>

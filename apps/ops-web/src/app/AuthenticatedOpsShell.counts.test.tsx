@@ -38,16 +38,17 @@ const REGISTRY: readonly SignedInRoute[] = [
     path: '/',
     element: page('Melarc Ops Portal'),
     access: ANY_SIGNED_IN_SESSION,
-    menu: { label: 'Home', icon: 'overview', area: 'overview', order: 0 },
+    menu: { place: 'sidebar', group: 'today', label: 'Home', icon: 'my-work', order: 0 },
   },
   {
     path: '/pickup-requests',
     element: page('Pickup requests'),
     access: { permission: 'pickup.read' },
     menu: {
+      place: 'sidebar',
+      group: 'pickups',
       label: 'Pickup requests',
       icon: 'pickup-requests',
-      area: 'pickup-intake',
       order: 0,
       queue: 'PICKUP_AWAITING_CONFIRMATION',
     },
@@ -57,10 +58,11 @@ const REGISTRY: readonly SignedInRoute[] = [
     element: page('Manifests'),
     access: { permission: 'pickup.read' },
     menu: {
+      place: 'sidebar',
+      group: 'pickups',
       label: 'Manifests',
       icon: 'manifests',
-      area: 'pickup-runs',
-      order: 0,
+      order: 1,
       queue: 'PICKUP_RUNS_IN_PROGRESS',
     },
   },
@@ -69,9 +71,10 @@ const REGISTRY: readonly SignedInRoute[] = [
     element: page('Staff'),
     access: { permission: 'staff.read' },
     menu: {
+      place: 'sidebar',
+      group: 'people',
       label: 'Staff',
       icon: 'staff',
-      area: 'administration',
       order: 0,
       queue: 'STAFF_AWAITING_APPROVAL',
     },
@@ -80,7 +83,7 @@ const REGISTRY: readonly SignedInRoute[] = [
     path: '/admin/vendors',
     element: page('Vendors'),
     access: { permission: 'vendor.read' },
-    menu: { label: 'Vendors', icon: 'vendors', area: 'administration', order: 1 },
+    menu: { place: 'sidebar', group: 'people', label: 'Vendors', icon: 'vendors', order: 1 },
   },
 ];
 
@@ -95,9 +98,18 @@ interface Counted {
 }
 const WHEN = '2026-11-02T09:00:00.000Z';
 
-function open(handler: () => Response | Promise<Response>, path = '/') {
+function open(
+  handler: (request: Request) => Response | Promise<Response>,
+  path = '/',
+  hubs?: readonly { id: string; display_name: string }[],
+) {
   api = installFakeApi({
-    ...signedInApi(sessionFixture({ permissions: [...KEYS] })),
+    ...signedInApi(
+      sessionFixture({
+        permissions: [...KEYS],
+        ...(hubs === undefined ? {} : { authorized_hubs: [...hubs] }),
+      }),
+    ),
     [SUMMARY]: handler,
   });
   return renderApp(path, signInStandIn, REGISTRY);
@@ -331,6 +343,71 @@ describe('when the counts are read (AC-QSUM-09)', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(summaryReads()).toBe(1);
+  });
+});
+
+describe('the counts follow the hub switcher (task C3)', () => {
+  const ACCRA = { id: '5b6c7d8e-9f01-4a2b-8c3d-4e5f6a7b8c9d', display_name: 'Accra Hub' };
+  const KUMASI = { id: '6c7d8e9f-0a12-4b3c-9d4e-5f6a7b8c9d0e', display_name: 'Kumasi Hub' };
+  const countsOf = (request: Request) => {
+    const hub = new URL(request.url).searchParams.get('hub_id');
+    const count = hub === ACCRA.id ? 2 : hub === KUMASI.id ? 3 : 5;
+    return json(200, {
+      queues: [{ queue: 'PICKUP_AWAITING_CONFIRMATION', count, oldest_at: WHEN }],
+    });
+  };
+  const switcher = (name: string) =>
+    within(screen.getByRole('banner')).getByRole('button', { name: `Hub: ${name}` });
+
+  // Break caught: counts that do not follow the switcher: the menu says Kumasi Hub and draws the figures of every hub, or the figures of the hub
+  // that was left.
+  it('draws the counts of the hub chosen beside the entries, and those of every hub for All hubs', async () => {
+    const { user } = open(countsOf, '/', [ACCRA, KUMASI]);
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 5 waiting for confirmation' }),
+    ).toBeVisible();
+
+    await user.click(switcher('All hubs'));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Kumasi Hub' }));
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 3 waiting for confirmation' }),
+    ).toBeVisible();
+
+    await user.click(switcher('Kumasi Hub'));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'All hubs' }));
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 5 waiting for confirmation' }),
+    ).toBeVisible();
+  });
+
+  // Break caught: the count of the hub that was left kept beside the entry while the count of the hub chosen is read, which is one hub's figure
+  // under another's name.
+  it('draws no count while the counts of the hub chosen are read, and not those of the hub that was left', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { user } = open(
+      async (request) => {
+        if (new URL(request.url).searchParams.has('hub_id')) await gate;
+        return countsOf(request);
+      },
+      '/',
+      [ACCRA, KUMASI],
+    );
+    await screen.findByRole('link', { name: 'Pickup requests 5 waiting for confirmation' });
+
+    await user.click(switcher('All hubs'));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Kumasi Hub' }));
+
+    await waitFor(() => {
+      expect(badges()).toHaveLength(0);
+    });
+    expect(screen.queryByRole('link', { name: /waiting for confirmation/ })).toBeNull();
+    release();
+    expect(
+      await screen.findByRole('link', { name: 'Pickup requests 3 waiting for confirmation' }),
+    ).toBeVisible();
   });
 });
 

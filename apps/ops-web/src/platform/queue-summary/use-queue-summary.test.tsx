@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query';
 import { act, screen, waitFor } from '@testing-library/react';
 import { useLocation, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -5,12 +6,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { errorResponse, installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import { renderWithProviders } from '../../test-support/render-providers';
 import { holdOf } from '../query/read-hold';
+import { ActiveHubProvider, useHubChoice } from '../hub/active-hub';
+import { refreshQueueSummaryNow } from './queue-summary-refresh';
 import {
+  QUEUE_SUMMARY_KEY,
   useQueueSummary,
   useRefreshQueueSummary,
   useRefreshQueueSummaryOnReturn,
 } from './use-queue-summary';
 
+/**
+ * How the summary of the queues is read and when it is read again: the moments of `AC-QSUM-09` (on load, on a change of page, on a queue's refresh, on a
+ * change of hub and after an act that changes a queue), and what the readers of the summary draw from it meanwhile: the menu draws a count only when it has
+ * one (`AC-QSUM-07`) and My work says only what the summary says (`AC-QSUM-08`). The acts that change a queue are held where they are listed
+ * (`queue-refresh-after-acts.test.tsx`).
+ */
 let api: FakeApi;
 
 afterEach(() => {
@@ -276,19 +286,145 @@ describe('when the summary is read again (AC-QSUM-09)', () => {
   });
 });
 
+describe('the hub the summary is asked for (task C3; AC-HUBF-09, and the reads of AC-QSUM-09 for a change of hub and after an act)', () => {
+  const ACCRA = { id: '5b6c7d8e-9f01-4a2b-8c3d-4e5f6a7b8c9d', display_name: 'Accra Hub' };
+  const KUMASI = { id: '6c7d8e9f-0a12-4b3c-9d4e-5f6a7b8c9d0e', display_name: 'Kumasi Hub' };
+
+  /** Buttons that choose a hub as the switcher of the top bar does. */
+  function Chooser() {
+    const { choose } = useHubChoice();
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            choose(ACCRA.id);
+          }}
+        >
+          Choose Accra
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            choose(KUMASI.id);
+          }}
+        >
+          Choose Kumasi
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            choose(undefined);
+          }}
+        >
+          Choose all
+        </button>
+      </>
+    );
+  }
+
+  /** The summary asked for, inside the provider of the hub choice that the shell mounts. */
+  function Switched({ hubs }: { readonly hubs: readonly { id: string; display_name: string }[] }) {
+    return (
+      <ActiveHubProvider hubs={hubs}>
+        <Chooser />
+        <Asker />
+      </ActiveHubProvider>
+    );
+  }
+
+  /** The `hub_id` of each read of the summary so far, in order: `null` where none was sent. */
+  const hubsAsked = (): (string | null)[] =>
+    api.requests
+      .filter((request) => new URL(request.url).pathname === '/api/v1/ops/queue-summary')
+      .map((request) => new URL(request.url).searchParams.get('hub_id'));
+
+  // Break caught: a summary that ignores the switcher (the counts of every hub drawn under the name of one), or one that sends a hub for All hubs.
+  it('sends hub_id for the hub chosen and nothing for All hubs', async () => {
+    api = installFakeApi({ [SUMMARY]: answering() });
+    const view = renderWithProviders(<Switched hubs={[ACCRA, KUMASI]} />, { signedIn: true });
+    await screen.findByText('Waiting: 1');
+    expect(hubsAsked()).toEqual([null]);
+
+    await view.user.click(screen.getByRole('button', { name: 'Choose Kumasi' }));
+    await screen.findByText('Waiting: 2');
+    expect(hubsAsked()).toEqual([null, KUMASI.id]);
+
+    await view.user.click(screen.getByRole('button', { name: 'Choose all' }));
+    await screen.findByText('Waiting: 3');
+    expect(hubsAsked()).toEqual([null, KUMASI.id, null]);
+  });
+
+  // Break caught: the counts of the hub that was left drawn while the counts of the hub chosen are on their way: one hub's figures under another's name.
+  it('draws nothing of the hub that was left while the counts of the other are read', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const answer = answering();
+    api = installFakeApi({
+      [SUMMARY]: async (request) => {
+        if (new URL(request.url).searchParams.has('hub_id')) await gate;
+        return answer();
+      },
+    });
+    const view = renderWithProviders(<Switched hubs={[ACCRA, KUMASI]} />, { signedIn: true });
+    await screen.findByText('Waiting: 1');
+
+    await view.user.click(screen.getByRole('button', { name: 'Choose Kumasi' }));
+
+    expect(await screen.findByText('Reading')).toBeVisible();
+    expect(screen.queryByText('Waiting: 1')).toBeNull();
+    release();
+    expect(await screen.findByText('Waiting: 2')).toBeVisible();
+  });
+
+  // Break caught: a hub sent for a session that has nothing to choose, which would narrow it to what it already sees.
+  it('sends no hub for a session of one hub, whatever is chosen', async () => {
+    api = installFakeApi({ [SUMMARY]: answering() });
+    const view = renderWithProviders(<Switched hubs={[ACCRA]} />, { signedIn: true });
+    await screen.findByText('Waiting: 1');
+
+    await view.user.click(screen.getByRole('button', { name: 'Choose Accra' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(hubsAsked()).toEqual([null]);
+  });
+
+  // Break caught: the read after an act (the Product Owner's decision D11(b)) going to the counts of every hub while the person looks at one hub's.
+  it('is read again for the hub chosen after an act that changes a queue', async () => {
+    api = installFakeApi({ [SUMMARY]: answering() });
+    const view = renderWithProviders(<Switched hubs={[ACCRA, KUMASI]} />, { signedIn: true });
+    await screen.findByText('Waiting: 1');
+    await view.user.click(screen.getByRole('button', { name: 'Choose Accra' }));
+    await screen.findByText('Waiting: 2');
+
+    await act(async () => {
+      await refreshQueueSummaryNow(view.queryClient);
+    });
+
+    await screen.findByText('Waiting: 3');
+    expect(hubsAsked()).toEqual([null, ACCRA.id, ACCRA.id]);
+  });
+});
+
 describe('what is kept', () => {
+  /** What the query client holds of the summary, under any hub (the key is the prefix `queue-summary` and then the hub). */
+  const held = (client: QueryClient): number =>
+    client.getQueriesData({ queryKey: QUEUE_SUMMARY_KEY }).length;
+
   // Break caught: one person's counts shown to the next person on the same browser.
   it('is dropped when the session ends, with everything else the query client holds', async () => {
     api = installFakeApi({ [SUMMARY]: answering() });
     const view = renderWithProviders(<Asker />, { signedIn: true });
     await screen.findByText('Waiting: 1');
-    expect(view.queryClient.getQueryData(['queue-summary'])).toBeDefined();
+    expect(held(view.queryClient)).toBe(1);
 
     act(() => {
       view.queryClient.clear();
     });
 
-    expect(view.queryClient.getQueryData(['queue-summary'])).toBeUndefined();
+    expect(held(view.queryClient)).toBe(0);
   });
 
   // Break caught: the summary kept after nothing shows it, so that the next visit starts from an old figure.
@@ -300,7 +436,7 @@ describe('what is kept', () => {
     view.unmount();
 
     await waitFor(() => {
-      expect(view.queryClient.getQueryData(['queue-summary'])).toBeUndefined();
+      expect(held(view.queryClient)).toBe(0);
     });
   });
 });

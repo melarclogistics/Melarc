@@ -109,16 +109,30 @@ export function watchPage(page: Page) {
 
 /**
  * One line per violation: the rule, what it asks for and the first elements that break it. `disable` names rules of axe to leave out of this
- * scan, for the one state in which axe is known to be wrong, with the reason written where it is used.
+ * scan, for the one state in which axe is known to be wrong, with the reason written where it is used. `include` limits the scan to the part of the
+ * page a selector names (the sidebar, when it is the sidebar that is under test), so that a test of one part fails for that part only.
+ *
+ * **The colours are those of a page that has stopped changing.** axe reads the colour of each element at the moment it reaches it, so a button the pointer
+ * has just pressed (its fill takes `motion.fast` to arrive under the pointer) is read as a colour that is neither state, and the contrast of a primary button
+ * failed in about one run in three at 768px (found in the review of 7 November 2026, and present with the stylesheet and the components of the baseline tree
+ * too). The transitions under way are waited for: they are finite, and an animation that never ends (a spinner) is not one of them.
  */
 export async function wcagViolations(
   page: Page,
-  options: { readonly disable?: readonly string[] } = {},
+  options: { readonly disable?: readonly string[]; readonly include?: string } = {},
 ): Promise<string[]> {
-  const results = await new AxeBuilder({ page })
+  await page.evaluate(async () => {
+    const transitions = document
+      .getAnimations()
+      .filter((animation) => animation instanceof CSSTransition);
+    await Promise.allSettled(transitions.map((animation) => animation.finished));
+  });
+  const scan = new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
-    .disableRules([...(options.disable ?? [])])
-    .analyze();
+    .disableRules([...(options.disable ?? [])]);
+  const results = await (
+    options.include === undefined ? scan : scan.include(options.include)
+  ).analyze();
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.help} (${violation.nodes

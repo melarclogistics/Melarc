@@ -38,25 +38,37 @@ export interface ManifestListParams {
   readonly state?: ManifestFilterState;
   /** Only the manifests worked on this day: `YYYY-MM-DD`, a day that exists. Left out for every day, and never sent empty. */
   readonly serviceDate?: string;
+  /**
+   * Only the manifests of this hub (task C3; the hub chosen in the switcher, `useActiveHub`): a filter that narrows and never widens what the grant
+   * reaches. Left out for *All hubs*.
+   */
+  readonly hubId?: string;
   readonly pageToken?: string;
   readonly enabled?: boolean;
 }
 
 /**
  * `listPickupManifests`: a page of the manifests of the session's hubs (`pickup.read`), oldest first, as the server orders them, narrowed by
- * the two filters the operation has (OB-S1-25): `state` and `service_date`, each exact and combined as "and". **The server filters, and the
- * page filters nothing**: a part of a page filtered in the browser would pass for the whole. A filter is a parameter of the request or it is
- * not there: this is the one place a request is made, so a value the contract would refuse (a state that is not one of the five, a day that
- * does not exist, an empty text) is left out here whoever asked, and no parameter is ever sent twice. A page token belongs to the filters it was
- * made with, so the query is keyed by all three and a changed filter is another query with no token.
+ * the filters the operation has (OB-S1-25, and task C3 for the hub): `state`, `service_date` and `hub_id`, each exact and combined as "and".
+ * **The server filters, and the page filters nothing**: a part of a page filtered in the browser would pass for the whole. A filter is a
+ * parameter of the request or it is not there: this is the one place a request is made, so a value the contract would refuse (a state that is
+ * not one of the five, a day that does not exist, an empty text) is left out here whoever asked, and no parameter is ever sent twice. A page
+ * token belongs to the filters it was made with, so the query is keyed by all four and a changed filter is another query with no token.
  */
 export function useManifests(params: ManifestListParams): UseQueryResult<ManifestPageView> {
   const client = useApiClient();
-  const { pageToken, enabled = true } = params;
+  const { hubId, pageToken, enabled = true } = params;
   const state = MANIFEST_FILTER_STATES.find((each) => each === params.state);
   const serviceDate = calendarDateOf(params.serviceDate);
   return useQuery({
-    queryKey: ['manifests', 'list', state ?? null, serviceDate ?? null, pageToken ?? null],
+    queryKey: [
+      'manifests',
+      'list',
+      state ?? null,
+      serviceDate ?? null,
+      hubId ?? null,
+      pageToken ?? null,
+    ],
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -66,6 +78,7 @@ export function useManifests(params: ManifestListParams): UseQueryResult<Manifes
             query: {
               ...(state === undefined ? {} : { state }),
               ...(serviceDate === undefined ? {} : { service_date: serviceDate }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },
           },

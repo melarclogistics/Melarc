@@ -3,10 +3,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { SIGNED_IN_SESSION, stubApi } from './support/api';
 import { watchPage, wcagViolations } from './support/page';
 import { SUMMARY_PATH } from './support/queue-summary';
+import { menuEntry, openAccountMenu, primaryNav } from './support/shell';
 
 /**
- * The queue summary in a browser (task C1; `AC-QSUM-07`, `AC-QSUM-08`, `AC-QSUM-09`; and `AC-QSUM-11`, task C1.1): the menu draws a count beside
- * the entry of each queue the server counted, the landing lists those queues, oldest first, with a link to each, a failed read says so and
+ * The queue summary in a browser (task C1; `AC-QSUM-07`, `AC-QSUM-08`, `AC-QSUM-09`; and `AC-QSUM-11`, task C1.1; drawn by the sidebar and My work of
+ * redesign step R4): the sidebar draws a count beside the entry of each queue the server counted and that has an entry, My work has a card for each
+ * queue that holds something, the one that has waited longest first, and one line for the queues that are clear, a failed read says so and
  * offers *Try again*, the page goes back to the server for the counts when the person goes to another page, and the late bookings open the
  * pickup list under their own filter. The production build, in a real engine; only the
  * network is stood in (the sessions and the summary are the stand-in's, the counts are synthetic).
@@ -29,6 +31,14 @@ const QUEUES = [
   { queue: 'PICKUP_UNMANIFESTED_POOL', count: 4, oldest_at: '2026-10-31T09:05:00.000Z' },
   { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 0 },
   { queue: 'STAFF_AWAITING_APPROVAL', count: 12, oldest_at: '2026-11-04T10:00:00.000Z' },
+];
+
+/** The counts the rail test draws: one, four (grouped) and two digits, so that the widest pill on the rail is the one that has to fit. */
+const RAIL_COUNTS = [
+  { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 7, oldest_at: '2026-11-03T08:00:00.000Z' },
+  { queue: 'PICKUP_EXCEPTION_APPROVAL', count: 1234, oldest_at: '2026-11-01T14:30:00.000Z' },
+  { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 12, oldest_at: '2026-11-05T07:00:00.000Z' },
+  { queue: 'STAFF_AWAITING_APPROVAL', count: 3, oldest_at: '2026-11-04T10:00:00.000Z' },
 ];
 
 interface Opened {
@@ -78,7 +88,7 @@ async function open(
   return { summaryReads: () => reads };
 }
 
-const menu = (page: Page) => page.getByRole('navigation', { name: 'Primary' });
+const menu = (page: Page) => primaryNav(page);
 
 test.describe('the counts of the queues in a browser', () => {
   // Break caught: counts that are not drawn in a real engine, or drawn beside the wrong entry.
@@ -87,42 +97,53 @@ test.describe('the counts of the queues in a browser', () => {
     await open(page);
 
     await expect(
-      menu(page).getByRole('link', { name: 'Pickup requests 5 waiting for confirmation' }),
+      menu(page).getByRole('link', { name: 'Requests 5 waiting for confirmation' }),
     ).toBeVisible();
     await expect(
-      menu(page).getByRole('link', { name: 'Exceptions to approve 3 waiting for approval' }),
-    ).toBeVisible();
-    await expect(
-      menu(page).getByRole('link', { name: 'Build a manifest 4 confirmed and not yet on a run' }),
+      menu(page).getByRole('link', { name: 'Decisions 3 waiting for approval' }),
     ).toBeVisible();
     await expect(
       menu(page).getByRole('link', { name: 'Staff 12 waiting for approval' }),
     ).toBeVisible();
     // A queue with nothing in it that was read is drawn, quietly; an entry with no queue draws none.
-    await expect(menu(page).getByRole('link', { name: 'Manifests 0 in progress' })).toBeVisible();
-    await expect(menu(page).getByRole('link', { name: 'Overview' })).toBeVisible();
+    await expect(menu(page).getByRole('link', { name: 'Pickup runs 0 in progress' })).toBeVisible();
+    await expect(menu(page).getByRole('link', { name: 'My work' })).toBeVisible();
     await expect(
-      menu(page).getByRole('link', { name: 'Overview' }).locator('.ui-count-badge'),
+      menu(page).getByRole('link', { name: 'My work' }).locator('.ui-count-badge'),
     ).toHaveCount(0);
+    // Break caught (review of 7 November 2026): the helper the specs use to look for an entry by its label (`menuEntry`) not finding an entry that has
+    // a count after its label, so that the specs that assert an entry is ABSENT for a session without the key would pass for an entry that was there.
+    for (const label of ['Requests', 'Decisions', 'Staff', 'Pickup runs']) {
+      await expect(menuEntry(page, label), label).toHaveCount(1);
+    }
+    // ...and a label is a whole word of the entry's name: the first letters of "Pickup runs" are not an entry.
+    await expect(menuEntry(page, 'Pickup run')).toHaveCount(0);
+    // Four entries have a queue: the other two queues of the summary (the late bookings, the confirmed pickups not on a run) have no entry, and
+    // are drawn on My work only.
+    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
     expect(seen.problems).toEqual([]);
   });
 
-  // Break caught: the landing listing what the keys suggest and not what the server counted, in any order but the oldest first.
-  test('the landing lists the queues the server counted, the oldest first, each with a link', async ({
+  // Break caught: My work listing what the keys suggest and not what the server counted, in any order but the oldest first, a card for a queue
+  // that is clear, or a clear queue left out of the line that says so.
+  test('My work has a card for each queue that holds something, the oldest first, each with a link, and one line for the clear ones', async ({
     page,
   }) => {
     await open(page);
 
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     const list = page.getByRole('list', { name: 'Waiting for you' });
-    await expect(list.getByRole('listitem')).toHaveCount(6);
+    await expect(list.getByRole('listitem')).toHaveCount(5);
     await expect(list.getByRole('link')).toHaveText([
       'Late bookings waiting for a cut-off decision',
       'Confirmed pickups not yet on a run',
       'One-package exceptions waiting for approval',
       'Pickup requests waiting for confirmation',
       'Staff profiles waiting for approval',
-      'Pickup runs in progress',
     ]);
+    // The queue the server counted and found empty is not a card: it is one quiet line.
+    await expect(page.getByText('Also clear: Pickup runs in progress.')).toBeVisible();
+    await expect(list.getByText('Pickup runs in progress')).toHaveCount(0);
     await expect(
       list.getByRole('link', { name: 'Pickup requests waiting for confirmation' }),
     ).toHaveAttribute('href', '/pickup-requests?state=PENDING');
@@ -194,7 +215,7 @@ test.describe('the counts of the queues in a browser', () => {
 
     await expect(page.getByText('The summary of what is waiting could not be read.')).toBeVisible();
     await expect(page.getByText('Nothing is waiting.')).toHaveCount(0);
-    await expect(menu(page).getByRole('link', { name: 'Pickup requests' })).toBeVisible();
+    await expect(menu(page).getByRole('link', { name: 'Requests' })).toBeVisible();
     await expect(menu(page).locator('.ui-count-badge')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Try again' }).click();
@@ -202,7 +223,7 @@ test.describe('the counts of the queues in a browser', () => {
     await expect(
       page.getByRole('link', { name: 'Pickup requests waiting for confirmation' }),
     ).toBeVisible();
-    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(5);
+    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
   });
 
   // Break caught: the counts of the moment the page opened shown beside every page the person goes to after it.
@@ -212,43 +233,71 @@ test.describe('the counts of the queues in a browser', () => {
       [{ queue: 'PICKUP_AWAITING_CONFIRMATION', count: 9, oldest_at: '2026-11-03T08:00:00.000Z' }],
     ]);
     await expect(
-      menu(page).getByRole('link', { name: 'Pickup requests 5 waiting for confirmation' }),
+      menu(page).getByRole('link', { name: 'Requests 5 waiting for confirmation' }),
     ).toBeVisible();
     expect(opened.summaryReads()).toBe(1);
 
-    await menu(page).getByRole('link', { name: 'Trusted browsers' }).click();
+    const account = await openAccountMenu(page);
+    await account.getByRole('menuitem', { name: 'Trusted browsers' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'Trusted browsers' })).toBeVisible();
     await expect(
-      menu(page).getByRole('link', { name: 'Pickup requests 9 waiting for confirmation' }),
+      menu(page).getByRole('link', { name: 'Requests 9 waiting for confirmation' }),
     ).toBeVisible();
     expect(opened.summaryReads()).toBe(2);
   });
 
-  // Break caught: the count lost on the rail, where the labels are not drawn.
-  test('the rail keeps the count beside the icon, and the name of the entry in the tooltip', async ({
+  // Break caught: the count lost on the rail, where the labels are not drawn, or the name and the count not told to a pointer or a keyboard.
+  // Break caught (Product Owner, 7 November 2026): a count that leaves its entry (hung off the corner of the link, over the icon at four digits, or half on
+  // the crimson and half on the Ink on the current entry), an entry that grows to hold it, a figure drawn smaller than it is beside a name, or a rail that grew.
+  test('the rail keeps the count inside its entry, under the icon, and the name of the entry and what it counts in the tooltip', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await open(page);
+    // The entries of the rail with a count of one, two and four digits (the thousands are grouped: "1,234"), and the current entry among them.
+    await open(page, [RAIL_COUNTS], '/approvals');
     await page.getByRole('button', { name: 'Collapse menu' }).click();
 
     const link = menu(page).getByRole('link', {
-      name: 'Pickup requests 5 waiting for confirmation',
+      name: 'Requests 7 waiting for confirmation',
     });
-    await expect(link).toHaveAttribute('title', 'Pickup requests: 5 waiting for confirmation');
-    await expect(link.locator('.ui-count-badge')).toBeVisible();
-    const [badge, row] = await Promise.all([
-      link.locator('.ui-count-badge').boundingBox(),
-      link.boundingBox(),
-    ]);
-    // At the corner of the icon: inside the row, which did not grow to take it.
-    expect(badge).not.toBeNull();
-    expect(row).not.toBeNull();
-    if (badge !== null && row !== null) {
-      expect(badge.x).toBeGreaterThanOrEqual(row.x);
-      expect(badge.x + badge.width).toBeLessThanOrEqual(row.x + row.width + 1);
-      expect(row.width).toBeLessThan(120);
+    await link.hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Requests: 7 waiting for confirmation');
+
+    const rail = await page.getByRole('complementary', { name: 'Main menu' }).boundingBox();
+    expect(rail).not.toBeNull();
+    expect(Math.round(rail?.width ?? 0)).toBe(64);
+    for (const name of [
+      'Requests 7 waiting for confirmation',
+      'Pickup runs 12 in progress',
+      'Decisions 1,234 waiting for approval',
+    ]) {
+      const entry = menu(page).getByRole('link', { name });
+      const pill = entry.locator('.ui-count-badge');
+      await expect(pill, name).toBeVisible();
+      const [badge, row, icon, style] = await Promise.all([
+        pill.boundingBox(),
+        entry.boundingBox(),
+        entry.locator('.ui-sidebar__icon').boundingBox(),
+        pill.evaluate((element) => {
+          const computed = getComputedStyle(element);
+          return { fontSize: computed.fontSize, transform: computed.transform };
+        }),
+      ]);
+      expect(badge, name).not.toBeNull();
+      expect(row, name).not.toBeNull();
+      expect(icon, name).not.toBeNull();
+      if (badge === null || row === null || icon === null) continue;
+      // Inside the entry on all four sides, so that it never leaves its link and, on the current entry, is wholly on the crimson.
+      expect(badge.x, name).toBeGreaterThanOrEqual(row.x);
+      expect(badge.y, name).toBeGreaterThanOrEqual(row.y);
+      expect(badge.x + badge.width, name).toBeLessThanOrEqual(row.x + row.width);
+      expect(badge.y + badge.height, name).toBeLessThanOrEqual(row.y + row.height);
+      // Under the icon and never over it, in an entry that is 36px as it is without a count.
+      expect(badge.y, name).toBeGreaterThanOrEqual(icon.y + icon.height);
+      expect(row.height, name).toBeCloseTo(36, 0);
+      // The figure is the CountBadge's own 12px, not scaled down.
+      expect(style, name).toEqual({ fontSize: '12px', transform: 'none' });
     }
   });
 });
@@ -256,13 +305,35 @@ test.describe('the counts of the queues in a browser', () => {
 test.describe('accessibility of the counts', () => {
   for (const scheme of ['light', 'dark'] as const) {
     // Break caught: a badge or a list line that fails contrast or naming in either theme.
-    test(`the landing and the menu have no violations in the ${scheme} theme`, async ({ page }) => {
+    test(`My work and the sidebar have no violations in the ${scheme} theme`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
       await open(page);
       await expect(page.getByRole('list', { name: 'Waiting for you' })).toBeVisible();
-      await expect(menu(page).locator('.ui-count-badge')).toHaveCount(5);
+      await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
 
-      expect(await wcagViolations(page), `${scheme}: the landing`).toEqual([]);
+      expect(await wcagViolations(page), `${scheme}: My work`).toEqual([]);
+    });
+
+    // Break caught (Product Owner, 7 November 2026): the figure on the pill of the current entry, white at 18% over the crimson, below 4.5:1 in a real engine, on
+    // the rail or beside the name; or the pill moved off the crimson where the contrast was measured.
+    test(`the sidebar has no violations with a count on its current entry, docked and on the rail, in the ${scheme} theme`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await open(page, [RAIL_COUNTS], '/approvals');
+      const current = menu(page).getByRole('link', {
+        name: 'Decisions 1,234 waiting for approval',
+      });
+      await expect(current).toHaveAttribute('aria-current', 'page');
+
+      expect(await wcagViolations(page, { include: '.ui-sidebar' }), `${scheme}: docked`).toEqual(
+        [],
+      );
+
+      await page.getByRole('button', { name: 'Collapse menu' }).click();
+      await expect(current.locator('.ui-count-badge')).toBeVisible();
+      expect(await wcagViolations(page, { include: '.ui-sidebar' }), `${scheme}: rail`).toEqual([]);
     });
   }
 });

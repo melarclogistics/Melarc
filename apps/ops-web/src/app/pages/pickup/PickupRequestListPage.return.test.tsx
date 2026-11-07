@@ -385,7 +385,7 @@ describe('the queue, coming to it any other way', () => {
 
     await view.user.click(
       within(screen.getByRole('complementary', { name: 'Main menu' })).getByRole('link', {
-        name: 'Pickup requests',
+        name: 'Requests',
       }),
     );
 

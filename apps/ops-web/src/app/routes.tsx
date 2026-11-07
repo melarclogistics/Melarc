@@ -39,6 +39,14 @@ function showcaseRoutes(): RouteObject[] {
         return { Component: PrimitivesShowcasePage };
       },
     },
+    {
+      // The shell of the signed-in screens (redesign step R4): the sidebar, the top bar and the command palette, with made-up entries. The same gate.
+      path: '__showcase/shell',
+      lazy: async () => {
+        const { ShellShowcasePage } = await import('../showcase/ShellShowcase');
+        return { Component: ShellShowcasePage };
+      },
+    },
   ];
 }
 

@@ -20,7 +20,9 @@ import type {
   StaffIdentityPageView,
   StaffIdentityView,
 } from '../../../platform/staff/staff-shape';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { useAssignableBundles, useStaffList } from '../../../platform/staff/use-staff-queries';
+import { NothingAtHub } from '../NothingAtHub';
 import {
   defaultViewFor,
   hubNameOf,
@@ -72,8 +74,12 @@ export function StaffListPage() {
   const view = viewOf(params.get('view')) ?? defaultViewFor(canApprove);
   const q = (params.get('q') ?? '').trim();
 
+  // The hub the person narrowed the screens to in the top bar, if they did: a filter of the list like the view, so a change of hub is a new list.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+
   // The tokens of the pages visited, for the list they were given for: a token is only good for the filter that produced it.
-  const signature = `${view}|${q}`;
+  const signature = `${view}|${q}|${hubId ?? ''}`;
   const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
     signature,
     tokens: [],
@@ -85,6 +91,7 @@ export function StaffListPage() {
   const status = statusOfView(view);
   const list = useStaffList({
     ...(status === undefined ? {} : { status }),
+    ...(hubId === undefined ? {} : { hubId }),
     q,
     ...(pageToken === undefined ? {} : { pageToken }),
     enabled: me !== undefined,
@@ -189,7 +196,16 @@ export function StaffListPage() {
   const announce = interacted;
 
   const empty =
-    q === '' && view === 'waiting' ? (
+    hub !== undefined ? (
+      // A chosen hub is a filter too (audit B1): nothing at this hub says nothing of the others, so it is never "nothing is waiting" or "no profiles yet".
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="staff profiles"
+        filtered={q !== '' || view !== 'all'}
+        clear={showEveryone}
+      />
+    ) : q === '' && view === 'waiting' ? (
       <EmptyState kind="none" heading="Nothing is waiting for approval" announce={announce}>
         New profiles appear here as soon as someone creates them.
       </EmptyState>

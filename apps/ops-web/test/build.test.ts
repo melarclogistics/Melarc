@@ -122,6 +122,8 @@ describe('the production build', () => {
 
     expect(scripts.length).toBeGreaterThan(0);
     for (const [, attributes, body] of scripts) {
+      // The one script that is not of the bundle: the pre-paint theme script (`public/theme-init.js`, held byte for byte to its source further down).
+      if (/\ssrc="\/theme-init\.js"/.test(attributes ?? '')) continue;
       expect(attributes).toMatch(/\ssrc="\/assets\/[^"]+\.js"/);
       expect(body).toBe('');
     }
@@ -299,6 +301,22 @@ describe('the production build', () => {
     expect(output.get('index.html') ?? '').toMatch(
       /<link\b[^>]*rel="icon"[^>]*href="\/favicon\.svg"|<link\b[^>]*href="\/favicon\.svg"[^>]*rel="icon"/,
     );
+  });
+
+  // Break caught: the theme script made a module (deferred: the page paints once in the system theme before it runs), given async or defer,
+  // left out of the build, changed on its way in, or put behind the bundle. It applies the person's stored choice before the first paint, and only
+  // a classic script in the head, ahead of everything else, does that without an inline script, which the policy refuses (script-src 'self').
+  it('ships the pre-paint theme script as its own file, unchanged, a classic script in the head ahead of the bundle', async () => {
+    const original = await readFile(resolve(APP_ROOT, 'public/theme-init.js'), 'utf8');
+    const html = output.get('index.html') ?? '';
+    const head = /<head>([\s\S]*?)<\/head>/.exec(html)?.[1] ?? '';
+    const tag = /<script\b[^>]*\ssrc="\/theme-init\.js"[^>]*>\s*<\/script>/.exec(head)?.[0] ?? '';
+
+    expect(output.get('theme-init.js')).toBe(original);
+    expect(tag).not.toBe('');
+    expect(tag).not.toMatch(/\b(?:type|async|defer|nomodule)\b/i);
+    expect(head.search(/<script\b/)).toBe(head.indexOf(tag));
+    expect(html.indexOf(tag)).toBeLessThan(html.search(/<script\b[^>]*\ssrc="\/assets\//));
   });
 
   // Break caught: the test-only QR decoder shipping to users, which would be a second QR implementation in the bundle for

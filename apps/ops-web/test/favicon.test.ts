@@ -41,7 +41,7 @@ describe('the favicon the Ops Portal serves', () => {
     expect(readme).toContain('apps/ops-web/public/favicon.svg');
   });
 
-  // Break caught: the symbol drawn in the page as a mark (the side menu, the split screen's band) while the brand record still says that no other
+  // Break caught: the symbol drawn in the page as a mark (the sidebar's rail, the split screen's band) while the brand record still says that no other
   // use is approved and nothing says that this use is waiting for the Product Owner. `BrandLockup` is where the symbol is drawn; the day it
   // stops drawing it, this test fails and the record is brought back to the tab icon alone.
   it('is recorded as in provisional use as the in-page mark, for the owner to confirm, while BrandLockup draws it', async () => {
@@ -58,7 +58,7 @@ describe('the favicon the Ops Portal serves', () => {
     for (const record of [row, status]) {
       expect(record).toMatch(/BrandLockup/);
       expect(record).toMatch(/owner to confirm/i);
-      expect(record).toMatch(/side menu/i);
+      expect(record).toMatch(/sidebar/i);
     }
   });
 

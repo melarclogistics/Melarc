@@ -4,8 +4,8 @@
  * `!important`.
  *
  * On the page it is the neutral status pair, with the number in the label size and tabular figures so that a column of them lines up. On the
- * side menu's Ink it is the shell's own: white on the pressed ground (13.1:1), and on the filled current entry it turns round, the crimson on white
- * (6.15:1), which keeps it apart from the entry's own hover ground (the darker crimson). A count of 0 that was read is drawn quiet: the border and
+ * sidebar's Ink it is the shell's own: white on the pressed ground (13.1:1), and on the filled current entry it is white at 18% over the crimson,
+ * which keeps it apart from the entry's own hover ground (the darker crimson). A count of 0 that was read is drawn quiet: the border and
  * the muted text without the fill, so a queue with nothing in it does not shout, and it is still a figure and still announced.
  */
 .ui-count-badge {
@@ -35,7 +35,7 @@
   color: var(--color-text-secondary);
 }
 
-/* ---- On the side menu ---- */
+/* ---- On the sidebar ---- */
 
 .ui-count-badge[data-surface='shell'] {
   border-color: var(--shell-border);
@@ -48,16 +48,22 @@
   color: var(--shell-text-subtle);
 }
 
-/* The current entry is filled with the brand crimson: the badge on it is white with the crimson figure. */
-.ui-primary-nav__link[aria-current='page'] .ui-count-badge[data-surface='shell'] {
-  border-color: var(--shell-active-text);
-  background: var(--shell-active-text);
-  color: var(--shell-active);
+/*
+ * The current entry is filled with the brand crimson (redesign step R4): the badge on it is white at 18% over the fill, with the figure white (4.63:1
+ * on the fill, 5.31:1 on its hover fill, in both themes). The brief asked for 22%; at 22% the white figure measures 4.32:1, below the 4.5:1 that text of
+ * this size needs, so the strongest white that passes is used, and the Product Owner accepted that on 6 November 2026. The pairing is held by the test
+ * "the pill of a count on the current entry of the sidebar" in scripts/design-tokens.test.ts. The pill has no border of its own: it is a lighter patch of
+ * the entry's fill with the figure on it, told from the entry by its shape and its figure and never by colour alone.
+ */
+.ui-sidebar__link[aria-current='page'] .ui-count-badge[data-surface='shell'] {
+  border-color: transparent;
+  background: var(--shell-active-badge);
+  color: var(--shell-active-text);
 }
 
-.ui-primary-nav__link[aria-current='page']
-  .ui-count-badge[data-surface='shell'][data-quiet='true'] {
+.ui-sidebar__link[aria-current='page'] .ui-count-badge[data-surface='shell'][data-quiet='true'] {
   background: transparent;
+  border-color: var(--shell-active-text);
   color: var(--shell-active-text);
 }
 

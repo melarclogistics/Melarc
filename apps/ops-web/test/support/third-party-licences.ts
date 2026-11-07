@@ -32,7 +32,6 @@ export const SHADCN_ROOTS: readonly string[] = [
   'cmdk',
   'sonner',
   'react-day-picker',
-  'date-fns',
   'tailwind-merge',
   'class-variance-authority',
   '@tanstack/react-table',

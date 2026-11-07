@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { decodePainted } from './support/painted';
 import { reachableNames, watchPage, wcagViolations } from './support/page';
+import { expectShellAround, signOutFromMenu } from './support/shell';
 import {
   CODE_FORMS,
   CODES,
@@ -124,7 +125,7 @@ test.describe('moving through the screens', () => {
     const { api, watch } = await open(page, '/');
 
     const menu = page.getByRole('navigation', { name: 'Primary' });
-    await expect(menu.getByRole('link')).toHaveText(['Overview', 'Riders', 'Trusted browsers']);
+    await expect(menu.getByRole('link')).toHaveText(['My work', 'Riders']);
     await menu.getByRole('link', { name: 'Riders' }).click();
     await expect(page).toHaveURL('/admin/riders');
     await focusedIs(page, 'Riders');
@@ -190,6 +191,10 @@ test.describe('moving through the screens', () => {
     await expect(table.getByRole('row', { name: /Ama Boateng/ })).toBeVisible();
 
     await page.getByRole('combobox', { name: 'Status' }).selectOption('');
+    // The status is taken off, and the page has drawn the list without it, before the search is typed, as the step above waits for its own: the page
+    // builds the new address from what it last drew, so a search made before that (the development server is slow enough for it) keeps the old status.
+    await expect(page).toHaveURL('/admin/riders');
+    await expect(table.getByRole('row')).toHaveCount(4);
     await page.getByRole('searchbox', { name: 'Search by name or phone' }).fill('  esi  ');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL('/admin/riders?q=esi');
@@ -473,7 +478,7 @@ test.describe('the enrolment code in a real browser', () => {
   test('is gone when the person signs out', async ({ page }) => {
     await showFirstCode(page);
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutFromMenu(page);
 
     await expect(page).toHaveURL(/\/sign-in/);
     await expect(qr(page)).toHaveCount(0);
@@ -942,15 +947,7 @@ test.describe('every screen and state, at the verified widths', () => {
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
-        const navigation = page.getByRole('navigation', { name: 'Primary', includeHidden: true });
-        await expect(navigation).toHaveCount(1);
-        if (width >= 768) {
-          await expect(page.locator('.ui-side-menu__panel')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__bar')).toBeHidden();
-        } else {
-          await expect(page.locator('.ui-side-menu__bar')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__panel')).toBeHidden();
-        }
+        await expectShellAround(page, width);
       });
     }
   }

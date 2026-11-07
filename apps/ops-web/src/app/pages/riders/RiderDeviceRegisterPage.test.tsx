@@ -188,7 +188,8 @@ describe('the first binding: before a code is asked for', () => {
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
-    expect(screen.queryByRole('img')).toBeNull();
+    // No picture on the page: the QR code is the only one it ever draws. (The page, not the document: the sidebar around it draws the logo.)
+    expect(within(screen.getByRole('main')).queryByRole('img')).toBeNull();
     expect(posts()).toHaveLength(0);
   });
 

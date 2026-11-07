@@ -8,9 +8,11 @@ import { useResolvedTheme } from '../platform/theme/use-resolved-theme';
 import {
   FrameChromeContext,
   FrameControlsContext,
+  FrameTopBarContext,
   type FrameControls,
   type FrameLayout,
 } from './frame-chrome';
+import { useTopBarClearance } from './top-bar-clearance';
 
 const MAIN_CONTENT_ID = 'main-content';
 
@@ -18,12 +20,13 @@ const MAIN_CONTENT_ID = 'main-content';
  * The frame every page sits in: a skip link, a banner and the main landmark. It carries no navigation,
  * user menu or session data itself, because the Ops Portal's pre-authentication pages must render "no navigation, no
  * user menu, no data" (surfaces/ops-portal.md §7). Beside the main content it keeps an empty place
- * (`FrameChromeContext`) that a layout route may draw into: the authenticated Ops shell draws its side menu there, and
- * only the routes under the shell do, so a page outside it has nothing in that place.
+ * (`FrameChromeContext`) that a layout route may draw into, and another over the main content (`FrameTopBarContext`): the authenticated Ops
+ * shell draws its sidebar into the first and its top bar into the second, and only the routes under the shell do, so a page outside it has
+ * nothing in either place.
  *
  * It is drawn in one of three layouts (`FrameLayout`), which the route tree chooses through `useFrameLayout` and no page does: the
- * neutral one (the banner above the main content), the sidebar of the shell (the menu at the side, full height, and no banner, because
- * the menu carries the product's name) and the split screen of the pre-sign-in pages (imagery beside the form, the banner above the form's
+ * neutral one (the banner above the main content), the sidebar layout of the shell (the sidebar at the side, full height, and over the main
+ * content its top bar, which is the page's banner) and the split screen of the pre-sign-in pages (imagery beside the form, the banner above the form's
  * half). The landmarks, the skip link and the move of focus are the frame's in all three.
  *
  * After a client-side navigation focus moves to the new page's heading, so assistive technology
@@ -37,12 +40,14 @@ const MAIN_CONTENT_ID = 'main-content';
 export function AppFrame() {
   const mainRef = useRef<HTMLElement>(null);
   const [chrome, setChrome] = useState<HTMLElement | null>(null);
+  const [topBar, setTopBar] = useState<HTMLElement | null>(null);
   const [layout, setLayout] = useState<FrameLayout>('neutral');
-  const [mainInert, setMainInert] = useState(false);
   const theme = useResolvedTheme();
-  const controls = useMemo<FrameControls>(() => ({ setLayout, setMainInert }), []);
+  const controls = useMemo<FrameControls>(() => ({ setLayout }), []);
   const { pathname } = useLocation();
   const previousPathname = useRef(pathname);
+  // The sticky bar of the sidebar layout is as tall as its controls need, and the page is scrolled clear of all of it, not of its first row.
+  useTopBarClearance(topBar, layout === 'sidebar');
 
   useLayoutEffect(() => {
     if (previousPathname.current === pathname) return;
@@ -72,35 +77,37 @@ export function AppFrame() {
 
   return (
     <FrameChromeContext value={chrome}>
-      <FrameControlsContext value={controls}>
-        <div className={`app-frame app-frame--${layout}`}>
-          <SkipLink targetId={MAIN_CONTENT_ID} />
-          {layout !== 'sidebar' ? (
-            <header className="app-header">
-              {/* The logo identifies the product and is not a link (DESIGN_SYSTEM 26.1). It is the only thing that says "Melarc"
+      <FrameTopBarContext value={topBar}>
+        <FrameControlsContext value={controls}>
+          <div className={`app-frame app-frame--${layout}`}>
+            <SkipLink targetId={MAIN_CONTENT_ID} />
+            {layout !== 'sidebar' ? (
+              <header className="app-header">
+                {/* The logo identifies the product and is not a link (DESIGN_SYSTEM 26.1). It is the only thing that says "Melarc"
                   here, so it carries the name; the text beside it says which application this is. On a dark ground it is the approved
                   all-white lockup (BRAND_FOUNDATION 4.7), chosen by the theme that applies (the root's `data-theme`, then the system
                   setting, as tokens.css does): the black wordmark of the primary logo would vanish there. One image, so the name is read once. */}
-              <img
-                className="app-logo"
-                src={theme === 'dark' ? logoDarkUrl : logoUrl}
-                alt="Melarc Logistics"
-              />
-              <p className="app-name">Ops Portal</p>
-            </header>
-          ) : null}
-          <div ref={setChrome} className="app-chrome" />
-          <main
-            id={MAIN_CONTENT_ID}
-            ref={mainRef}
-            className={`app-main app-main--${layout}`}
-            tabIndex={-1}
-            inert={mainInert}
-          >
-            <Outlet />
-          </main>
-        </div>
-      </FrameControlsContext>
+                <img
+                  className="app-logo"
+                  src={theme === 'dark' ? logoDarkUrl : logoUrl}
+                  alt="Melarc Logistics"
+                />
+                <p className="app-name">Ops Portal</p>
+              </header>
+            ) : null}
+            <div ref={setChrome} className="app-chrome" />
+            <div ref={setTopBar} className="app-topbar" />
+            <main
+              id={MAIN_CONTENT_ID}
+              ref={mainRef}
+              className={`app-main app-main--${layout}`}
+              tabIndex={-1}
+            >
+              <Outlet />
+            </main>
+          </div>
+        </FrameControlsContext>
+      </FrameTopBarContext>
     </FrameChromeContext>
   );
 }

@@ -309,6 +309,7 @@ The sidebar is `surface.inverse`, an Ink ground in both themes, and these tokens
 | `shell.active` | `#BE1E2D` | `#BE1E2D` | The active item: a solid crimson fill in both themes. |
 | `shell.activeText` | `#FFFFFF` | `#FFFFFF` | Text on the active item, set bold. |
 | `shell.activeHover` | `#A91A28` | `#A91A28` | The hovered active item. |
+| `shell.activeBadge` | `rgb(255 255 255 / 0.18)` | `rgb(255 255 255 / 0.18)` | The pill of a count on the active item: white at 18% over the crimson, with the figure in `shell.activeText` (4.63 on `shell.active`, 5.31 on `shell.activeHover`; at 22% the figure would be 4.32, below the 4.5 that text of its size needs, and the Product Owner accepted 18% on 6 November 2026). A component token, held to those numbers by the test "the pill of a count on the current entry of the sidebar" in `scripts/design-tokens.test.ts`. |
 
 ### How the unlisted values were derived
 
@@ -506,7 +507,7 @@ A text field is identified by its boundary, so the boundary must reach 3:1 again
   secondary text (the application's name, the account's hub) is `shell.textSubtle` (5.97
   on Ink, 6.20 on the dark sidebar, 5.01 on hover);
   dividers are `shell.border`.
-- **A count beside an item of the sidebar** (the `CountBadge` on `surface="shell"`, task C1, 5 November 2026) takes the shell's own tokens and no new colour: the number is `shell.text` on `shell.surfacePressed` (13.09), with `shell.border` for its edge; a count of `0` that was read is quiet, `shell.textSubtle` on Ink with no fill (5.97 on Ink, 6.20 on the dark sidebar). On the **current item** the badge is turned round, `shell.active` on `shell.activeText` (6.15), so that it stays apart from the item's own hovered ground (`shell.activeHover`), and a quiet `0` there is `shell.activeText` on `shell.active` (6.15). The words that say what the number counts are for a screen reader and are not drawn. On the page (the landing's list) it is the neutral status pair of §4.4, and a quiet `0` is `text.secondary` without the fill.
+- **A count beside an item of the sidebar** (the `CountBadge` on `surface="shell"`, task C1, 5 November 2026) takes the shell's own tokens: the number is `shell.text` on `shell.surfacePressed` (13.09), with `shell.border` for its edge; a count of `0` that was read is quiet, `shell.textSubtle` on Ink with no fill (5.97 on Ink, 6.20 on the dark sidebar). On the **current item** the badge is a pill of white at 18% over the crimson (`shell.activeBadge`, the one colour this badge adds), with the figure in `shell.activeText`: 4.63 on `shell.active` and 5.31 on `shell.activeHover`, in both themes, so that it stays apart from the item's own hovered ground (at 22% the figure measures 4.32, below the 4.5 that text of its size needs). A quiet `0` there is a ring of `shell.activeText` on `shell.active` (6.15). The words that say what the number counts are for a screen reader and are not drawn. On the page it is the neutral status pair of §4.4, and a quiet `0` is `text.secondary` without the fill; no screen draws it there yet (My work sets its figures in its own face).
 - **The current item** of the sidebar is a filled item and not a bar: `shell.active`, crimson, with `shell.activeText`, white
   (6.15), and `shell.activeHover` when hovered (7.33).
   It is written in weight 700 with `aria-current`, so the state is carried by the white text on the fill, the weight and the
@@ -632,6 +633,7 @@ How they are shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.
 - Do not use uppercase for long labels.
 - Uppercase may be used sparingly for compact metadata where readability remains high.
 - Numbers use tabular numerals everywhere (decided 5 November 2026): `font-variant-numeric: tabular-nums` is set in the base type (`base.css`), so that a column of counts, times and amounts lines up, and a test says so.
+- **Sizes the signed-in shell sets outside this scale** (the Product Owner's brief for redesign step R4, 6 November 2026; built on 7 November and awaiting acceptance, COMPONENT_PATTERNS §12.6). The title of a page inside the shell is 24px on a 30px line, weight 700 and 0.02em tighter, where `text.heading.xl` above is 28/36/600 (the title of the neutral frame and of the pre-sign-in pages keeps `text.heading.xl`). The sidebar's entries are 13.5px at weight 500, and 700 on the current entry. The headings of the sidebar's groups are 11px, weight 600, in capitals, 0.08em apart; the labels of the sections of My work and of the top bar's menus are 11.5px, weight 600, in capitals, 0.06em apart; the key hint of the search is 11px; the figure on a card of My work is 32px at weight 700. The three sizes under 12px depart from the first rule and the bold weights from the second: they are labels and hints that name a group or a shortcut and never carry the information themselves, and they are written here so that the departure is on record and does not spread. **Decided on 7 November 2026 (the audit of the redesign): they are tokens, and the number is written once.** The sizes that are not the scale's are component tokens of `tokens.css` (§3.3), each named for the one component that uses it and in `rem`: `--text-nav-entry-size` (the name of a sidebar entry), `--text-group-label-size` and its line height (a group's heading, and the key hint of the search), `--text-section-label-size` and its line height (the labels of the sections of the menus and of My work), `--sidebar-icon-size`, `--sidebar-heading-space-before` and `--sidebar-heading-space-after`, and `--hub-mark-size` (the hub switcher's square); the figure on a card of My work takes `text.display.sm`'s 32px on 40px at weight 700. `scripts/design-tokens.test.ts` records each as a component token with its reason, and no stylesheet of a component carries these numbers.
 
 ---
 
@@ -869,7 +871,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
 | Layout | Route family | Contains | Never contains | In code |
 |---|---|---|---|---|
 | **Neutral frame** | any address that matches no route, and the development showcase | a skip link, a banner that names the product, the main landmark, the move of focus to the new page's heading after a navigation | navigation, a user menu, sign-out, session data, anything loaded for a signed-in user | `apps/ops-web/src/app/AppFrame.tsx` |
-| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the skip link and the landmarks, an **Ink side menu** docked at the left (the primary navigation, and an account card with the sign-out control), collapsible to a rail of icons and sliding in over the page on a narrow screen; **no banner**, because the menu carries the product's name | content for a caller who has no session | the frame in its sidebar layout, the menu drawn into the place beside the main content (`apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `components/side-menu/`; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.6). It was a band across the top until 25 October 2026, when the Product Owner decided that the Ops Portal is an application and not a website |
+| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the skip link and the landmarks, an **Ink sidebar** docked at the left (the primary navigation, in groups, and the person at its foot), the 64px rail below 1280px and on request and a sheet on a narrow screen, and over the page a **top bar of 56px**, which is the page's banner (the hub switcher, the search, the theme, the New menu and the account menu with the sign-out control); no banner above the page, because the sidebar carries the product's name | content for a caller who has no session | the frame in its sidebar layout, the sidebar and the top bar drawn into the frame's own places (`apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/shell/`, `components/ui/app-shell/`; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.6). It was a band across the top until 25 October 2026, when the Product Owner decided that the Ops Portal is an application and not a website, and a side menu with an account card until redesign step R4 |
 | **Split-screen layout** | the five pre-sign-in routes (`/sign-in`, `/sign-in/mfa`, `/setup/credential`, `/setup/mfa`, `/setup/mfa/complete`), and the two recovery routes when they are built; the setup routes are reached by a grant and carry no session | the skip link and the landmarks, the banner (the logo) above the main landmark that holds the form, and beside them a decorative panel of photography over a band of Ink with the mark and the name (§13.1a); under 64rem the panel is not drawn and the form is alone | the authenticated shell, navigation, anything loaded for a signed-in user | the frame in its split layout (`AuthSplitLayout`), its banner and main landmark unchanged; the five pre-sign-in screens (the sign-in pair and the three setup pages) are in `apps/ops-web/src/app/pages/pre-sign-in/` (S0.43; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.7) |
 
 - The route tree chooses the layout; a page never decides which frame it sits in.
@@ -880,7 +882,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
   to none, and uses the neutral frame, because that page cannot know whether a session exists.
 - A generic restyle does not wrap every route in the Ink shell.
 - The authenticated shell should feel spacious and stable; the neutral frame is quiet, with no Ink navigation.
-- **Approved direction (Product Owner, 5 November 2026), built in step R4:** the signed-in shell gains a top bar over the main content (the hub switcher, a global search, a New menu and the account menu), the sidebar shows seven groups, and the account card moves into the account menu. The structure is [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); the table above is the shell as built.
+- **Approved direction (Product Owner, 5 November 2026), built in step R4 (7 November 2026; awaiting the Product Owner's acceptance):** the signed-in shell gains a top bar over the main content (the hub switcher, a global search, the theme control, a New menu and the account menu; on a narrow screen the theme is chosen in the account menu instead), the sidebar shows seven groups, and the account menu says who is signed in and where they act, beside the sidebar's foot, which still names the person. The structure is [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); the table above is the shell as built.
 
 **Decided (Product Owner, 6 October 2026): the setup layout is the neutral frame.** The Ops spec says the setup routes
 render "no application shell" and must not render "the authenticated shell". The neutral frame is not the authenticated
@@ -1190,15 +1192,17 @@ Exact mappings belong with implemented domain patterns.
 
 Navigation belongs to the authenticated Ops shell (§13.1). The neutral frame and the split screen carry none.
 
-**It is a side menu, not a band across the top** (Product Owner, 25 October 2026: the Ops Portal is an application and not a
-website). Docked at the left on a wide screen, full height, on Ink; a button at its head collapses it to a rail of icons and
-expands it again, and every entry keeps its name when collapsed (visually hidden, with the name as a tooltip). On a narrow screen
-(under 48rem) it is hidden, a slim bar with a menu button stands in its place, and the menu slides in over the page: the page
-behind it is inert, Escape, the scrim, the close button and following a link close it, and focus goes in on opening and back on
-closing. Its foot is the account card: the person's initials, name and where they act, and an icon button that signs out. The
-choice of collapsed or expanded is kept while the page lives and not longer (nothing is written to web storage).
+**It is a sidebar, not a band across the top** (Product Owner, 25 October 2026: the Ops Portal is an application and not a
+website; built in its present form in redesign step R4, 7 November 2026). Docked at the left, full height, on Ink, 248px wide with the
+all-white lockup at its head; a button at its head collapses it to the 64px rail of icons and expands it again, and every entry keeps its
+name on the rail (visually hidden in the entry, and shown in a tooltip on hover and on focus). It is the rail below 1280px and the full
+sidebar from there, unless the person asked for the other, and under 48rem it is a sheet: a modal dialog that slides in over the page when
+the top bar's menu button is pressed; the page behind it is hidden from assistive technology, Escape, the scrim, the close button and
+following a link close it, and focus goes in on opening and back on closing. **The current entry is a solid crimson fill with white bold
+text** and `aria-current="page"`. Its foot names the person and where they act. The choice of the rail or the full width is kept while the
+page lives and not longer (nothing is written to web storage).
 
-**Approved direction (Product Owner, 5 November 2026; built in step R4).** The menu shows seven groups in the order of the hub's day, each only when the session holds a key for one of its built pages, and a queue entry carries a live count where the server states one. What the account card holds (the person's name and hubs, the trusted browsers, sign-out) moves into an account menu in a top bar that also holds the hub switcher, a global search and a New menu. The groups, the entries and the top bar are [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); how they are drawn is this document's and, for the components, [COMPONENT_PATTERNS §37](COMPONENT_PATTERNS.md#37-planned-kit-and-deferred-pattern-register)'s.
+**Approved direction (Product Owner, 5 November 2026; built in step R4).** The sidebar shows seven groups in the order of the hub's day, each only when the session holds a key for one of its built pages, and a queue entry carries a live count where the server states one. What the account card held (the person's name and hubs, the trusted browsers, sign-out) is in an account menu in a top bar that also holds the hub switcher, a global search, the theme control and a New menu. The groups, the entries and the top bar are [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); how they are drawn is this document's and, for the components, [COMPONENT_PATTERNS §12.6](COMPONENT_PATTERNS.md#126-the-authenticated-ops-shell-as-built-s042-the-sidebar-and-the-top-bar-since-redesign-step-r4)'s.
 
 Navigation should communicate:
 
@@ -1444,13 +1448,13 @@ The dependencies and their licences are in §29.5.
 
 ### The planned kit (Product Owner, 5 November 2026)
 
-The redesign replaces the list of components that were deferred until real screens demanded them with a planned kit. It is built in redesign step R5, composed in `components/ui` from the shadcn/ui primitives (§29.2), to §28, and each component is recorded in `COMPONENT_PATTERNS.md` §37 as PROPOSED:
+The redesign replaces the list of components that were deferred until real screens demanded them with a planned kit. It is composed in `components/ui` from the shadcn/ui primitives (§29.2), to §28, and each component is recorded in `COMPONENT_PATTERNS.md` §37 as PROPOSED until it is built. Redesign step R4 built the first five below (7 November 2026) and task C1 built CountBadge, which the list further down names: those six are IMPLEMENTING and await the Product Owner's acceptance. The rest are built in redesign step R5.
 
-- AppShell v2 (the sidebar groups with counts, and the top bar);
-- CommandPalette and global search;
-- NewMenu;
-- AccountMenu;
-- HubSwitcher;
+- AppShell v2 (the sidebar groups with counts, and the top bar), built in step R4;
+- CommandPalette and global search, built in step R4;
+- NewMenu, built in step R4;
+- AccountMenu, built in step R4;
+- HubSwitcher, built in step R4;
 - Tabs with counts;
 - FilterBar with chips;
 - DataTable (selection, a bulk-action bar and an inline row action);
@@ -1608,7 +1612,6 @@ Redesign step R3 added these, each an exact pin as the dependency policy require
 | `cmdk` | 1.1.1 | MIT | the command palette |
 | `sonner` | 2.0.8 | MIT | the toaster |
 | `react-day-picker` | 10.0.2 | MIT | the calendar |
-| `date-fns` | 4.4.0 | MIT | the calendar's dates |
 | `class-variance-authority` | 0.7.1 | Apache-2.0 | the variants of a primitive |
 | `clsx` | 2.1.1 | MIT | class names |
 | `tailwind-merge` | 3.7.0 | MIT | class names |
@@ -1617,7 +1620,7 @@ Redesign step R3 added these, each an exact pin as the dependency policy require
 | `tailwindcss`, `@tailwindcss/vite` | 4.3.3 | MIT | the stylesheet, at build time |
 | `shadcn` | 4.22.1 | MIT | the CLI and its MCP server (a development dependency) |
 
-Each ships with the build under its own licence (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does): 16 files were added to `apps/ops-web/public/licenses/`, copied byte for byte, and packages whose text is identical share one (the 61 packages of Radix UI are one file). The list is `apps/ops-web/test/support/third-party-licences.ts`; `apps/ops-web/test/shadcn-licences.test.ts` holds it to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships to the same. The licence of the registry's own source, which the primitives are, is the `shadcn` package's. Two packages have no licence file to ship, and are named in the list with the reason: `react-remove-scroll-bar` (MIT by its `package.json`, which holds none) and `tslib` (0BSD, which asks for no notice); the type-only packages put no code in the bundle.
+Each ships with the build under its own licence (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does): 16 files were added to `apps/ops-web/public/licenses/`, copied byte for byte, and packages whose text is identical share one (the 61 packages of Radix UI are one file). The list is `apps/ops-web/test/support/third-party-licences.ts`; `apps/ops-web/test/shadcn-licences.test.ts` holds it to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships to the same. The licence of the registry's own source, which the primitives are, is the `shadcn` package's. Two packages have no licence file to ship, and are named in the list with the reason: `react-remove-scroll-bar` (MIT by its `package.json`, which holds none) and `tslib` (0BSD, which asks for no notice); the type-only packages put no code in the bundle. `date-fns`, which step R3 added as a direct dependency of the portal for the calendar, was removed from it in redesign step R4: the portal imports it nowhere, and `react-day-picker` depends on it, so it is installed and its licence is shipped all the same (the list names it as a package of the tree, and it is no longer a root of it).
 
 ### 29.6 Deviations from the registry source
 
@@ -1685,9 +1688,9 @@ The only exceptions are the two fixed colors of §4.2, `white` and `black`, whic
 - `color-scheme` follows the theme, so that native controls (scrollbars, checkboxes, form fields) do too;
 - each dark pairing is in §4.6 and is held by the tests as the light pairings are, and the components are scanned in the dark in a real browser (§14).
 
-**The choice of theme.** The portal follows the operating system's light or dark setting by default. A person may override it, and that choice is kept in the browser's local storage: a non-sensitive preference, approved as a browser-storage decision under [PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision) (Product Owner, 5 November 2026). The toggle, and the reading and writing of that preference, arrive in redesign step R4; step R2 builds neither, and the token file reads no storage.
+**The choice of theme.** The portal follows the operating system's light or dark setting by default. A person may override it, and that choice is kept in the browser's local storage: a non-sensitive preference, approved as a browser-storage decision under [PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision) (Product Owner, 5 November 2026). **As built in redesign step R4:** the theme control of the top bar and the account menu offer *System* (the default), *Light* and *Dark*; the choice is kept under one key, `melarc-theme`, written for Light and Dark and removed for System, in one module (`apps/ops-web/src/platform/theme/theme-choice.ts`, the only exception to the rule that application code uses no web storage, named in the ESLint configuration) that sets `data-theme` on the root, and the token file still reads no storage. A script of the page's own origin (`public/theme-init.js`, a classic script in the head of `index.html`) applies the stored choice before the first paint, because a module script is deferred and an inline one is refused by the content-security policy; a value that is not `light` or `dark` is ignored, and the other tabs of the browser follow a change.
 
-The logo has its own version for dark grounds ([BRAND_FOUNDATION §4.7](BRAND_FOUNDATION.md#47-the-logo-in-the-ops-portal)). Since redesign step R3 the banner of the Ops Portal's frame (the sign-in screens and the neutral pages) draws the all-white lockup whenever the dark theme applies, by the system's setting or by `data-theme="dark"`: `AppFrame` chooses the file with `useResolvedTheme`, one image that carries the name once, and `src/app/frame-logo.test.tsx` holds it. The Ink sidebar's lockup is step R4's.
+The logo has its own version for dark grounds ([BRAND_FOUNDATION §4.7](BRAND_FOUNDATION.md#47-the-logo-in-the-ops-portal)). Since redesign step R3 the banner of the Ops Portal's frame (the sign-in screens and the neutral pages) draws the all-white lockup whenever the dark theme applies, by the system's setting or by `data-theme="dark"`: `AppFrame` chooses the file with `useResolvedTheme`, one image that carries the name once, and `src/app/frame-logo.test.tsx` holds it. The Ink sidebar draws the all-white lockup in both themes (redesign step R4).
 
 ---
 
@@ -1820,11 +1823,11 @@ Each pattern should eventually document:
 | 4px spacing base | **APPROVED** (6 October 2026) |
 | Responsive breakpoint set | **APPROVED** (6 October 2026) |
 | Blue focus ring `#2563A6` | **APPROVED** (6 October 2026) for the light theme; `#7AA7F0` in the dark theme (5 November 2026) |
-| Light and dark themes (§31, §4.3) | **APPROVED for Version 1** (Product Owner, 5 November 2026); built as tokens in step R2, where the system's setting decides; the toggle and its stored choice are step R4's |
-| Theme choice (§31) | **DECIDED** 5 November 2026 (Product Owner): follows the operating system by default; a person may override it; the choice is kept in the browser's local storage as a non-sensitive preference ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)); the toggle is built in step R4 |
+| Light and dark themes (§31, §4.3) | **APPROVED for Version 1** (Product Owner, 5 November 2026); built as tokens in step R2, where the system's setting decides; the toggle and its stored choice were built in step R4 (7 November 2026, §31) |
+| Theme choice (§31) | **DECIDED** 5 November 2026 (Product Owner): follows the operating system by default; a person may override it; the choice is kept in the browser's local storage as a non-sensitive preference ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)); the toggle was built in step R4 (7 November 2026, §31) |
 | Visual direction (§4.7) | **APPROVED** 5 November 2026: Ink carries the work and crimson carries the brand; the palette, the radii (8, 12 and 16px), the heights (36, 44 and 56px), the motion and the one shadow are the values in force since step R2; the values R2 derived (§4.3), the 44px controls, the 36px rows and the single floating shadow were approved as built on 5 November 2026, in the task of step R3 |
 | Devices (§12) | **DECIDED** 5 November 2026: hub-floor tasks are tablet-first at 768px; the record panel is a full-screen sheet and the sidebar collapses to icons at that width |
-| Planned component kit (§27; COMPONENT_PATTERNS §37) | **APPROVED** 5 November 2026 and **PROPOSED** as patterns; built in step R5 |
+| Planned component kit (§27; COMPONENT_PATTERNS §37) | **APPROVED** 5 November 2026 and **PROPOSED** as patterns, except the six built (the shell's five in step R4, 7 November 2026, and CountBadge in task C1: **IMPLEMENTING**, awaiting the Product Owner's acceptance); the rest is built in step R5 |
 | Tailwind (§29.2, §29.3) | **DECIDED** 5 November 2026 (Product Owner): Tailwind CSS v4 on the semantic tokens, preflight not imported; built in step R3 |
 | Radix, shadcn/ui (§29.2) | **DECIDED** 5 November 2026 (Product Owner): shadcn/ui over Radix UI is the component foundation of new components, from the official registry only, through `components/primitives` and one door; built in step R3, which awaits the Product Owner's acceptance |
 | Content-security policy (§29.4) | **DECIDED** 5 November 2026 (Product Owner): `style-src 'self' 'unsafe-inline'`, and no other directive relaxed; `script-src` is never relaxed |

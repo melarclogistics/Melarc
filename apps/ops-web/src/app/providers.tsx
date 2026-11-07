@@ -2,8 +2,10 @@ import { QueryClientProvider, QueryErrorResetBoundary } from '@tanstack/react-qu
 import { useState, type ReactNode } from 'react';
 
 import { ApiClientProvider } from '../platform/api/api-client';
+import { HubChoiceScope } from '../platform/hub/active-hub';
 import { createQueryClient, endSession } from '../platform/query/query-client';
 import { holdOf } from '../platform/query/read-hold';
+import { queueSummaryObserver } from '../platform/queue-summary/queue-summary-refresh';
 import { LANDING_PATH } from '../platform/session/paths';
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
@@ -35,6 +37,8 @@ export interface AppProvidersProps {
 export function AppProviders({ children, navigate }: AppProvidersProps) {
   const [session] = useState(() => new SessionStore());
   const [queryClient] = useState(() => createQueryClient());
+  // What the portal does when an act of its own is answered with success: read the queue summary again if the act can change a queue.
+  const [onAct] = useState(() => queueSummaryObserver(queryClient));
   const [boundary] = useState(
     () =>
       new SessionBoundary({
@@ -54,14 +58,15 @@ export function AppProviders({ children, navigate }: AppProvidersProps) {
     <QueryClientProvider client={queryClient}>
       {/* The error page resets the queries that failed into it: it and the pages must share one boundary. */}
       <QueryErrorResetBoundary>
-        <ApiClientProvider boundary={boundary}>
+        <ApiClientProvider boundary={boundary} onAct={onAct}>
           <SessionProvider
             store={session}
             end={() => {
               boundary.end(SIGNED_OUT);
             }}
           >
-            {children}
+            {/* The choice of hub lives here, above the router and inside the session: it survives a visit to a page outside the shell. */}
+            <HubChoiceScope>{children}</HubChoiceScope>
           </SessionProvider>
         </ApiClientProvider>
       </QueryErrorResetBoundary>

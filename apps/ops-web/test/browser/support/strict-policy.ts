@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 
 /**
  * A strict policy used as a compatibility baseline: no inline script, no eval, nothing from another origin. It is the policy the edge of the
@@ -24,8 +24,16 @@ export const STRICT_POLICY = [
 /**
  * Sends STRICT_POLICY with every response of the page and returns the violations the browser reports, which the caller
  * reads after the page has run.
+ *
+ * **The policy is proved against the production build**, so a test that enforces it is skipped in a `-dev-` project (the same spec file runs there
+ * against the development server): that server puts an inline script in the page (the React refresh preamble), which `script-src 'self'` refuses by
+ * design, and what the test would report is the server's and not the application's.
  */
 export async function enforceStrictPolicy(page: Page): Promise<string[]> {
+  test.skip(
+    test.info().project.name.includes('-dev-'),
+    'The strict policy is proved against the production build: the development server puts an inline script in the page.',
+  );
   await page.route('**/*', async (route) => {
     const response = await route.fetch();
     await route.fulfill({

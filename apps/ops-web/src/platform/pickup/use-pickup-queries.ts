@@ -48,13 +48,18 @@ export interface PickupListParams {
    * reviewed (the server's reading, S1.20). It is staff's alone; a page that sends it is a staff page.
    */
   readonly manifested?: boolean;
+  /**
+   * Only the requests of this hub (task C3; the hub chosen in the switcher, `useActiveHub`): a filter that narrows and never widens what the grant
+   * reaches. Left out for *All hubs*. A page token belongs to the filters it was made with, and the hub is one of them.
+   */
+  readonly hubId?: string;
   readonly pageToken?: string;
   readonly enabled?: boolean;
 }
 
 /**
- * `listPickupRequests`: a page of the requests the session's grant reaches (`pickup.read`), scoped by the server, filtered by state, date and
- * the state of the one-package exception.
+ * `listPickupRequests`: a page of the requests the session's grant reaches (`pickup.read`), scoped by the server, filtered by state, date, the
+ * state of the one-package exception and, since task C3, the hub.
  */
 export function usePickupRequests(params: PickupListParams): UseQueryResult<PickupRequestPageView> {
   const client = useApiClient();
@@ -64,6 +69,7 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
     exceptionState,
     cutoffExceptionState,
     manifested,
+    hubId,
     pageToken,
     enabled = true,
   } = params;
@@ -76,6 +82,7 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
       exceptionState ?? null,
       cutoffExceptionState ?? null,
       manifested ?? null,
+      hubId ?? null,
       pageToken ?? null,
     ],
     enabled,
@@ -94,6 +101,7 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
                 ? {}
                 : { cutoff_exception_state: cutoffExceptionState }),
               ...(manifested === undefined ? {} : { manifested }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },
           },

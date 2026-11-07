@@ -13,11 +13,13 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { Table, type TableColumn } from '../../../components/ui/table/Table';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { useVendorAccounts } from '../../../platform/vendor/use-vendor-queries';
 import type {
   VendorAccountPageView,
   VendorAccountView,
 } from '../../../platform/vendor/vendor-shape';
+import { NothingAtHub } from '../NothingAtHub';
 import { hubNameOf } from '../staff/staff-presentation';
 import { secretSentence, VENDOR_STATUS_MAP } from './vendor-presentation';
 import '../staff/staff-pages.css';
@@ -35,10 +37,18 @@ export function VendorListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const q = (params.get('q') ?? '').trim();
-  const [paging, setPaging] = useState<{ q: string; tokens: readonly string[] }>({ q, tokens: [] });
-  const tokens = paging.q === q ? paging.tokens : [];
+  // The hub the person narrowed the screens to in the top bar, if they did: a filter of the list like the search, so a change of hub is a new list.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `${q}|${hubId ?? ''}`;
+  const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
+    signature,
+    tokens: [],
+  });
+  const tokens = paging.signature === signature ? paging.tokens : [];
   const pageToken = tokens.at(-1);
   const list = useVendorAccounts({
+    ...(hubId === undefined ? {} : { hubId }),
     q,
     ...(pageToken === undefined ? {} : { pageToken }),
     enabled: me !== undefined,
@@ -92,8 +102,29 @@ export function VendorListPage() {
     },
   ];
 
+  const clearSearch = (
+    <Button
+      type="button"
+      variant="secondary"
+      onClick={() => {
+        setInteracted(true);
+        setParams(new URLSearchParams(), { replace: true });
+      }}
+    >
+      Clear the search
+    </Button>
+  );
   const empty =
-    q === '' ? (
+    hub !== undefined ? (
+      // A chosen hub is a filter too (audit B1): no account at this hub says nothing of the others, so it is never "no vendor accounts yet".
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="vendor accounts"
+        filtered={q !== ''}
+        clear={clearSearch}
+      />
+    ) : q === '' ? (
       <EmptyState kind="none" heading="No vendor accounts yet" announce={interacted}>
         Accounts of the vendors at your hubs appear here once their organisation is approved.
       </EmptyState>
@@ -102,18 +133,7 @@ export function VendorListPage() {
         kind="filtered"
         heading="No accounts match"
         announce={interacted}
-        action={
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              setInteracted(true);
-              setParams(new URLSearchParams(), { replace: true });
-            }}
-          >
-            Clear the search
-          </Button>
-        }
+        action={clearSearch}
       >
         Nothing fits this search. Clear it to see every account.
       </EmptyState>
@@ -179,7 +199,7 @@ export function VendorListPage() {
                       variant="secondary"
                       onClick={() => {
                         focusResults.current = true;
-                        setPaging({ q, tokens: tokens.slice(0, -1) });
+                        setPaging({ signature, tokens: tokens.slice(0, -1) });
                       }}
                     >
                       <Icon name="previous" size="sm" />
@@ -192,7 +212,7 @@ export function VendorListPage() {
                       variant="secondary"
                       onClick={() => {
                         focusResults.current = true;
-                        setPaging({ q, tokens: [...tokens, nextToken] });
+                        setPaging({ signature, tokens: [...tokens, nextToken] });
                       }}
                     >
                       Next page

@@ -12,9 +12,20 @@ export function useFrameChrome(): HTMLElement | null {
 }
 
 /**
+ * The place in the frame between the side chrome and the main content where the authenticated shell draws its **top bar** (redesign step R4): the
+ * element itself, or null until the frame has put it in the page. It is in the page in every layout and drawn only in the sidebar one; like the
+ * place beside the main content it is the frame's, and only the routes under the shell draw into it.
+ */
+export const FrameTopBarContext = createContext<HTMLElement | null>(null);
+
+export function useFrameTopBar(): HTMLElement | null {
+  return useContext(FrameTopBarContext);
+}
+
+/**
  * The three layouts of the application (DESIGN_SYSTEM section 13.1), chosen by the route tree and never by the page: the **neutral** frame
  * (a banner above the main content: pages outside the two below, such as the not-found page), the **sidebar** layout of the authenticated
- * Ops shell (a menu docked at the side, full height, and no banner: the menu carries the product's name), and the **split** layout of the
+ * Ops shell (a sidebar docked at the side, full height, and over the main content a top bar, which is the page's banner), and the **split** layout of the
  * pre-sign-in screens (a panel of imagery beside the form, full height, and no banner: the form carries the logo).
  */
 export type FrameLayout = 'neutral' | 'sidebar' | 'split';
@@ -23,13 +34,10 @@ export type FrameLayout = 'neutral' | 'sidebar' | 'split';
 export interface FrameControls {
   /** Chooses the layout the frame is drawn in. A layout route sets its own while it is mounted and the frame goes back to neutral after it. */
   readonly setLayout: (layout: FrameLayout) => void;
-  /** Makes the main content inert, for as long as a menu that slid in over it is open, so that the page behind it cannot be reached. */
-  readonly setMainInert: (inert: boolean) => void;
 }
 
 const NO_CONTROLS: FrameControls = {
   setLayout: () => undefined,
-  setMainInert: () => undefined,
 };
 
 /** Provided by `AppFrame`. Outside a frame (a component rendered alone in a test) the controls do nothing. */

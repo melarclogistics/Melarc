@@ -20,13 +20,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const landing = () => screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+const landing = () => screen.findByRole('heading', { level: 1, name: 'My work' });
 const notFound = () => screen.findByRole('heading', { level: 1, name: 'Page not found' });
 
 describe('the application shell', () => {
   // Break caught: a frame with no landmarks, so a screen reader user cannot jump to the content, or a banner that does
   // not name the product: the logo is the only thing that says "Melarc", so it carries the name (DESIGN_SYSTEM 26.1). This is the
-  // neutral frame, which an address that matches no route has (the signed-in screens have a side menu instead, and no banner).
+  // neutral frame, which an address that matches no route has (the signed-in screens have a sidebar and a top bar instead).
   it('has a banner naming the product, with the logo, and one main landmark', async () => {
     renderApp('/no-such-page');
     await notFound();
@@ -71,22 +71,24 @@ describe('the application shell', () => {
     ).toBeNull();
   });
 
-  // Break caught: the signed-in landing without the navigation and the sign-out control that every signed-in screen carries
-  // (surfaces/ops-portal.md §7, `/`), or with them inside the main content, or with the neutral frame's banner above the menu.
-  it('carries the navigation and the sign-out control of the authenticated shell on the landing, in the side menu and not in the page', async () => {
+  // Break caught: the signed-in landing without the navigation and the account menu (and in it the sign-out) that every signed-in screen carries
+  // (surfaces/ops-portal.md §7, `/`), or with them inside the main content, or with the neutral frame's banner above the sidebar.
+  it('carries the navigation and the account menu of the authenticated shell on the landing, in the sidebar and the top bar and not in the page', async () => {
     const { container } = renderApp();
     await landing();
 
     const menu = screen.getByRole('complementary', { name: 'Main menu' });
     const nav = within(menu).getByRole('navigation', { name: 'Primary' });
-    const signOut = within(menu).getByRole('button', { name: 'Sign out' });
-    expect(within(nav).getByRole('link', { name: 'Overview' })).toHaveAttribute(
+    const bar = screen.getByRole('banner');
+    const account = within(bar).getByRole('button', { name: 'Account menu' });
+    expect(within(nav).getByRole('link', { name: 'My work' })).toHaveAttribute(
       'aria-current',
       'page',
     );
     expect(screen.getByRole('main')).not.toContainElement(menu);
+    expect(screen.getByRole('main')).not.toContainElement(bar);
     expect(container.querySelector('.app-header')).toBeNull();
-    expect(menu).toContainElement(signOut);
+    expect(account).toBeVisible();
   });
 
   // Break caught: a landing that implies working functionality or fabricated operational data. It says who is signed
@@ -95,9 +97,9 @@ describe('the application shell', () => {
     renderApp();
 
     expect(await landing()).toBeVisible();
-    // The page says who is signed in, and so does the account card of the menu: the page's words are the ones this is about.
+    // The page says who is signed in, and so does the foot of the sidebar: the page's words are the ones this is about.
     expect(within(screen.getByRole('main')).getByText('Synthetic Officer')).toBeVisible();
-    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
   });
@@ -108,7 +110,7 @@ describe('the application shell', () => {
     await landing();
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(document.title).toBe('Melarc Ops Portal');
+    expect(document.title).toBe('My work · Melarc Ops Portal');
   });
 
   // Break caught: the shell calling the API for anything but who is signed in, calling a third party, or keeping
@@ -263,9 +265,7 @@ describe('a page that fails', () => {
       await router.navigate('/');
     });
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-    ).toBeVisible();
+    expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

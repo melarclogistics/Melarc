@@ -88,6 +88,54 @@ const ARIA_PATTERNS = [
   },
 ];
 
+// What the Ops Portal's application code may not name, in lists, so that the one module that keeps the person's choice of theme can be given
+// `localStorage` and nothing else (the block for it, below the Ops Portal's own): a flat-config rule is replaced, not merged, by a later block,
+// so that block states the same rule again, from these lists, with the one name taken out.
+const TRANSPORT_GLOBALS = ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'];
+const STORAGE_GLOBALS = ['localStorage', 'sessionStorage', 'indexedDB'];
+const WINDOW_OBJECTS = ['window', 'globalThis', 'self'];
+const WINDOW_PROPERTIES = [
+  'fetch',
+  'open',
+  'localStorage',
+  'sessionStorage',
+  'indexedDB',
+  'XMLHttpRequest',
+  'WebSocket',
+  'EventSource',
+];
+const restrictedGlobals = (names) =>
+  names.map((name) => ({
+    name,
+    message:
+      'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser), and keeps nothing in the browser storage: a session is an HttpOnly cookie.',
+  }));
+const restrictedWindowProperties = (properties) =>
+  WINDOW_OBJECTS.flatMap((object) =>
+    properties.map((property) => ({
+      object,
+      property,
+      message: `${object}.${property} is not for application code: requests go through the generated client, and nothing is kept in browser storage.`,
+    })),
+  );
+const OTHER_RESTRICTED_PROPERTIES = [
+  {
+    object: 'navigator',
+    property: 'sendBeacon',
+    message: 'navigator.sendBeacon sends a request that skips the generated client.',
+  },
+  {
+    object: 'document',
+    property: 'write',
+    message: 'document.write puts text into the page as HTML.',
+  },
+  {
+    object: 'document',
+    property: 'cookie',
+    message: 'The session and CSRF cookies are read by the client and by nothing else.',
+  },
+];
+
 export default defineConfig(
   // The generated API client is machine output, checked for freshness rather than for style. So is what Gradle writes below the attestation
   // verifier (its build folders hold an HTML test report with JavaScript of its own, and `.gradle` its caches).
@@ -165,53 +213,12 @@ export default defineConfig(
     rules: {
       'no-restricted-globals': [
         'error',
-        ...[
-          'fetch',
-          'XMLHttpRequest',
-          'WebSocket',
-          'EventSource',
-          'localStorage',
-          'sessionStorage',
-          'indexedDB',
-        ].map((name) => ({
-          name,
-          message:
-            'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser), and keeps nothing in the browser storage: a session is an HttpOnly cookie.',
-        })),
+        ...restrictedGlobals([...TRANSPORT_GLOBALS, ...STORAGE_GLOBALS]),
       ],
       'no-restricted-properties': [
         'error',
-        ...['window', 'globalThis', 'self'].flatMap((object) =>
-          [
-            'fetch',
-            'open',
-            'localStorage',
-            'sessionStorage',
-            'indexedDB',
-            'XMLHttpRequest',
-            'WebSocket',
-            'EventSource',
-          ].map((property) => ({
-            object,
-            property,
-            message: `${object}.${property} is not for application code: requests go through the generated client, and nothing is kept in browser storage.`,
-          })),
-        ),
-        {
-          object: 'navigator',
-          property: 'sendBeacon',
-          message: 'navigator.sendBeacon sends a request that skips the generated client.',
-        },
-        {
-          object: 'document',
-          property: 'write',
-          message: 'document.write puts text into the page as HTML.',
-        },
-        {
-          object: 'document',
-          property: 'cookie',
-          message: 'The session and CSRF cookies are read by the client and by nothing else.',
-        },
+        ...restrictedWindowProperties(WINDOW_PROPERTIES),
+        ...OTHER_RESTRICTED_PROPERTIES,
       ],
       'no-restricted-imports': [
         'error',
@@ -248,6 +255,24 @@ export default defineConfig(
       'no-eval': 'error',
       'no-new-func': 'error',
       'no-script-url': 'error',
+    },
+  },
+  {
+    // **The one exception to the ban on web storage** (PRODUCT_DESIGN_DIRECTION section 7; the Product Owner, 5 November 2026, and 6 November 2026, A11):
+    // the person's choice of theme, `light` or `dark`, a non-sensitive preference under one key of `localStorage`. It is for this one module and for
+    // the bare name `localStorage` alone (the module uses no other form: `window.localStorage`, `globalThis.localStorage` and `self.localStorage`
+    // stay refused in it, so the rule it relaxes is the one rule, `no-restricted-globals`, and no other): `sessionStorage`, `indexedDB`, the cookie,
+    // every transport and every other rule above still apply to it, and every other file of the application is refused as before
+    // (`scripts/eslint-rules.test.ts` holds both). A session, a token or anything about a person is never stored there.
+    files: ['apps/ops-web/src/platform/theme/theme-choice.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...restrictedGlobals([
+          ...TRANSPORT_GLOBALS,
+          ...STORAGE_GLOBALS.filter((name) => name !== 'localStorage'),
+        ]),
+      ],
     },
   },
   {

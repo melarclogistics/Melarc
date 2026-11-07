@@ -13,6 +13,7 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { TableColumn } from '../../../components/ui/table/Table';
 import { useApiClient } from '../../../platform/api/api-client';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { approveOnePackageException } from '../../../platform/pickup/pickup-commands';
 import type {
   ApprovalView,
@@ -23,6 +24,7 @@ import type {
 import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
+import { NothingAtHub } from '../NothingAtHub';
 import { hubNameOf } from '../staff/staff-presentation';
 import { actorText, isSelf, packagesText, PICKUP_STATE_MAP } from './pickup-presentation';
 import './pickup-pages.css';
@@ -60,9 +62,13 @@ const rowsOf = (page: PickupRequestPageView): Waiting[] =>
 export function ApprovalsPage() {
   const me = useSignedInSession();
   const client = useApiClient();
-  const paging = useQueuePaging('one-package-exceptions-requested');
+  // The hub the switcher chose (task C3) is one of the filters of the queue: another hub starts again at the first page.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const paging = useQueuePaging(`one-package-exceptions-requested|${hubId ?? ''}`);
   const list = usePickupRequests({
     exceptionState: 'REQUESTED',
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
@@ -192,10 +198,19 @@ export function ApprovalsPage() {
         query={list}
         isEmpty={(data) => data.items.length === 0}
         empty={
-          <EmptyState kind="none" heading="No exceptions waiting">
-            A one-package exception appears here when an Ops officer asks for one at your hubs, and
-            leaves once it is approved.
-          </EmptyState>
+          hub !== undefined ? (
+            // A chosen hub is a filter of the queue (audit B1): nothing waiting at this hub says nothing of the others.
+            <NothingAtHub
+              hub={hub}
+              showAllHubs={showAllHubs}
+              what="one-package exceptions waiting for approval"
+            />
+          ) : (
+            <EmptyState kind="none" heading="No exceptions waiting">
+              A one-package exception appears here when an Ops officer asks for one at your hubs,
+              and leaves once it is approved.
+            </EmptyState>
+          )
         }
         loadingLabel="Loading the exceptions waiting for approval…"
         skeleton={<Skeleton lines={4} />}

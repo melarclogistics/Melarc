@@ -15,6 +15,7 @@ import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
+import { useActiveHub } from '../../../platform/hub/active-hub';
 import { copyFor, type Problem } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { createStaffIdentity, type NewStaffProfile } from '../../../platform/staff/staff-commands';
@@ -95,13 +96,15 @@ function CreateForm({
   const client = useApiClient();
   const me = useSignedInSession();
   const hubs = me?.session.authorized_hubs ?? [];
+  const activeHub = useActiveHub();
   const [values, setValues] = useState<Values>({
     fullName: '',
     email: '',
     phone: '',
     roleId: '',
-    // A person who acts in one hub places a profile in it; anyone else chooses.
-    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : '',
+    // A person who acts in one hub places a profile in it; anyone else starts with the hub they chose in the switcher of the top bar, and chooses when
+    // they chose All hubs.
+    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : (activeHub ?? ''),
   });
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);

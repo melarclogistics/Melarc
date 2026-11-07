@@ -10,10 +10,20 @@
   line-height: var(--text-heading-md-line-height);
 }
 
-/* A frame to look at the side menu in: it is full height in the application, so here it has a height of its own. */
-.showcase-side-menu {
+/* Frames to look at the sidebar and the top bar in: the sidebar is full height in the application, so here it has a height of its own. */
+.showcase-sidebars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.showcase-sidebar {
   display: flex;
   height: 28rem;
+}
+
+.showcase-topbar {
+  border: 1px solid var(--color-border-subtle);
 }
 
 .showcase-icons {
@@ -145,7 +155,7 @@
   list-style: none;
 }
 
-/* The side menu's ground, for the things that are drawn on it (a count badge): the same Ink and text as the menu. */
+/* The sidebar's ground, for the things that are drawn on it (a count badge): the same Ink and text as the sidebar. */
 .showcase-ink {
   display: flex;
   flex-wrap: wrap;

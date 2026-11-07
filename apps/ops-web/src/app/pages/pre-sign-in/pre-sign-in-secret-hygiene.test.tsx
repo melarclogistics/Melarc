@@ -255,7 +255,7 @@ describe('the password a person types', () => {
     await user.type(screen.getByLabelText('Password (required)'), PASSWORD);
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
 
     expect(whereIs(PASSWORD)).toEqual([]);
   });

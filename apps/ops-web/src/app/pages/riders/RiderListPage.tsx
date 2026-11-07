@@ -19,8 +19,10 @@ import {
   type RiderStatus,
   type RiderView,
 } from '../../../platform/rider/rider-shape';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { useRiders } from '../../../platform/rider/use-rider-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { NothingAtHub } from '../NothingAtHub';
 import { hubNameOf } from '../staff/staff-presentation';
 import {
   deviceSentence,
@@ -49,8 +51,12 @@ export function RiderListPage() {
   const q = (params.get('q') ?? '').trim();
   const status = statusOf(params.get('status'));
 
+  // The hub the person narrowed the screens to in the top bar, if they did: a filter of the list like the status, so a change of hub is a new list.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+
   // The tokens of the pages visited, for the list they were given for: a token is only good for the filter that produced it.
-  const signature = `${status ?? ''}|${q}`;
+  const signature = `${status ?? ''}|${q}|${hubId ?? ''}`;
   const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
     signature,
     tokens: [],
@@ -60,6 +66,7 @@ export function RiderListPage() {
   const list = useRiders({
     q,
     ...(status === undefined ? {} : { status }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(pageToken === undefined ? {} : { pageToken }),
     enabled: me !== undefined,
   });
@@ -124,30 +131,50 @@ export function RiderListPage() {
   ];
 
   const filtering = q !== '' || status !== undefined;
-  const empty = filtering ? (
-    <EmptyState
-      kind="filtered"
-      heading="No riders match"
-      announce={interacted}
-      action={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            change({ status: '', q: '' });
-          }}
-        >
-          Show every rider
-        </Button>
-      }
-    >
-      Nothing fits this view and search. Show every rider to start again.
-    </EmptyState>
-  ) : (
-    <EmptyState kind="none" heading="No riders yet" announce={interacted}>
-      The riders of your hubs appear here once they are on the roster.
-    </EmptyState>
-  );
+  const empty =
+    hub !== undefined ? (
+      // A chosen hub is a filter too (audit B1): the roster is empty at this hub, which says nothing of the others.
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="riders"
+        filtered={filtering}
+        clear={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              change({ status: '', q: '' });
+            }}
+          >
+            Show every rider
+          </Button>
+        }
+      />
+    ) : filtering ? (
+      <EmptyState
+        kind="filtered"
+        heading="No riders match"
+        announce={interacted}
+        action={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              change({ status: '', q: '' });
+            }}
+          >
+            Show every rider
+          </Button>
+        }
+      >
+        Nothing fits this view and search. Show every rider to start again.
+      </EmptyState>
+    ) : (
+      <EmptyState kind="none" heading="No riders yet" announce={interacted}>
+        The riders of your hubs appear here once they are on the roster.
+      </EmptyState>
+    );
 
   return (
     <>

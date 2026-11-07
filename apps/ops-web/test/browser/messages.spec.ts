@@ -11,6 +11,7 @@ import {
   type World,
 } from './support/messages-api';
 import { watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
 
 /**
  * The message log (S1.12e) in a real browser: the list with its filters, the Ops feed, the narrowing to one request and the link to it from
@@ -78,10 +79,7 @@ test.describe('moving through the screens', () => {
   // Break caught: a menu entry that goes nowhere, or a new page whose heading a screen reader never hears.
   test('the menu leads to the log, which lands on its heading', async ({ page }) => {
     const { api, watch } = await open(page, '/');
-    await page
-      .getByRole('navigation', { name: 'Primary' })
-      .getByRole('link', { name: 'Messages' })
-      .click();
+    await menuEntry(page, 'Message log').click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'Messages' })).toBeFocused();
     await expect(table(page)).toBeVisible();
@@ -94,9 +92,7 @@ test.describe('moving through the screens', () => {
     const { api } = await open(page, LOG, { permissions: ['pickup.read'] });
 
     await expect(page.locator('code', { hasText: 'notification.read' }).first()).toBeVisible();
-    await expect(
-      page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Messages' }),
-    ).toHaveCount(0);
+    await expect(menuEntry(page, 'Message log')).toHaveCount(0);
     expect(lists(api)).toEqual([]);
   });
 

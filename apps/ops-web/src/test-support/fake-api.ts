@@ -46,7 +46,7 @@ export function errorResponse(status: number, code: string, details?: unknown): 
 export function installFakeApi(handlers: Record<string, Handler> = {}): FakeApi {
   // The shell of every signed-in screen reads the queue summary for the menu's counts (`getQueueSummary`, task C1), so the stand-in answers it
   // without anyone arranging it, **with no queue at all**: a session the server gave none, which draws no count and says nothing of waiting. A
-  // test of the counts, or of the landing's list, gives its own handler. The read is a request like any other: it is in `requests`.
+  // test of the counts, or of My work's cards, gives its own handler. The read is a request like any other: it is in `requests`.
   const table = new Map<string, Handler>(
     Object.entries<Handler>({
       'GET /ops/queue-summary': () => json(200, { queues: [] }),
@@ -85,7 +85,7 @@ export function installFakeApi(handlers: Record<string, Handler> = {}): FakeApi 
 /**
  * The API of a browser where this session is the signed-in one. The shell of every signed-in screen reads the queue summary for the menu's
  * counts (`getQueueSummary`, task C1), so a signed-in browser answers it, and by default **with no queue at all**: a session the server gave
- * none, which draws no count and says nothing of waiting. A test of the counts, or of the landing's list, replaces the handler.
+ * none, which draws no count and says nothing of waiting. A test of the counts, or of My work's cards, replaces the handler.
  */
 export function signedInApi(session: SessionView): Record<string, Handler> {
   return {

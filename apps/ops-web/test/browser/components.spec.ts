@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 
@@ -15,6 +15,12 @@ async function openShowcase(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1, name: 'Component showcase' })).toBeVisible();
 }
 
+/** The shell's own page of the showcase (`/__showcase/shell`): the sidebar, the top bar and the palette, which the components' page does not hold. */
+async function openShell(page: Page): Promise<void> {
+  await page.goto(`${SHOWCASE}/shell`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Shell showcase' })).toBeVisible();
+}
+
 /** How far the document is wider than the window; zero or less means no sideways scrolling. */
 const overflow = (page: Page): Promise<number> =>
   page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -27,9 +33,9 @@ interface FocusStop {
   readonly outlineColour: string;
   /** What `--focus-ring` computes to, so a test names no colour of its own. */
   readonly ringColour: string;
-  /** What `--focus-ring-inverse` computes to, the ring on the Ink side menu of the shell. */
+  /** What `--focus-ring-inverse` computes to, the ring on the Ink sidebar of the shell. */
   readonly inverseRingColour: string;
-  /** Whether the element sits in the Ink side menu, where the inverse ring is the specified one (DESIGN_SYSTEM section 4.6). */
+  /** Whether the element sits in the Ink sidebar, where the inverse ring is the specified one (DESIGN_SYSTEM section 4.6). */
   readonly inInk: boolean;
 }
 
@@ -59,7 +65,7 @@ async function focusStop(page: Page): Promise<FocusStop | null> {
       outlineColour: style.outlineColor,
       ringColour,
       inverseRingColour,
-      inInk: element.closest('.ui-side-menu') !== null,
+      inInk: element.closest('.ui-sidebar') !== null,
     };
   });
 }
@@ -574,108 +580,108 @@ test.describe('the table and the state components in a browser', () => {
   });
 });
 
-test.describe('the side menu in a browser', () => {
-  const demo = (page: Page) => page.locator('.showcase-side-menu');
-  const panel = (page: Page) => demo(page).locator('.ui-side-menu__panel');
-  const entries = (page: Page) =>
-    demo(page).getByRole('navigation', { name: 'Primary' }).getByRole('link');
-  const widthOf = async (page: Page): Promise<number> =>
-    (await panel(page).boundingBox())?.width ?? 0;
+test.describe('the sidebar and the top bar in a browser', () => {
+  // The demos of the showcase (ShellDemos): the sidebar expanded, the sidebar as the rail, and the top bar with its menus. The real shell, with its
+  // sheet for a narrow screen, its rail below 1280px and its palette, is held in shell.spec.ts against the production build.
+  const expanded = (page: Page) => page.getByRole('group', { name: 'Demo sidebar, expanded' });
+  const rail = (page: Page) => page.getByRole('group', { name: 'Demo sidebar, rail' });
+  const panelOf = (group: Locator) => group.locator('.ui-sidebar');
+  const entries = (group: Locator) =>
+    group.getByRole('navigation', { name: 'Primary' }).getByRole('link');
+  const widthOf = async (group: Locator): Promise<number> =>
+    (await panelOf(group).boundingBox())?.width ?? 0;
 
-  // Break caught: a menu that cannot be collapsed, or that loses the names of its entries when it is, or that comes back wider or narrower than
+  // Break caught: a sidebar that cannot be collapsed, or that loses the names of its entries when it is, or that comes back wider or narrower than
   // it was. Motion is off, so that a width is read where it ended and not on the way.
   test('collapses to a rail of icons and expands again, each entry keeping its name', async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await openShowcase(page);
-    await demo(page).scrollIntoViewIfNeeded();
+    await openShell(page);
+    await expanded(page).scrollIntoViewIfNeeded();
     const rem = await page.evaluate(() =>
       parseFloat(getComputedStyle(document.documentElement).fontSize),
     );
-    expect(await widthOf(page)).toBe(16 * rem);
+    // 248px, and the 64px rail: 15.5rem and 4rem at the browser's text size.
+    expect(await widthOf(expanded(page))).toBe(15.5 * rem);
+    expect(await widthOf(rail(page))).toBe(4 * rem);
 
-    await demo(page).getByRole('button', { name: 'Collapse menu' }).click();
+    await expanded(page).getByRole('button', { name: 'Collapse menu' }).click();
 
-    await expect(demo(page).getByRole('button', { name: 'Expand menu' })).toHaveAttribute(
+    await expect(expanded(page).getByRole('button', { name: 'Expand menu' })).toHaveAttribute(
       'aria-expanded',
       'false',
     );
-    expect(await widthOf(page)).toBe(4.5 * rem);
-    for (const name of ['Demo overview', 'Demo staff', 'Demo add a profile', 'Demo sessions']) {
-      await expect(entries(page).filter({ hasText: name })).toHaveAttribute('title', name);
+    expect(await widthOf(expanded(page))).toBe(4 * rem);
+    for (const name of ['Demo my work', 'Demo decisions', 'Demo staff', 'Demo sessions']) {
+      const link = entries(expanded(page)).filter({ hasText: name });
+      await expect(link).toHaveCount(1);
+      // The name is drawn out of sight and not taken out of the document, and the picture stays.
+      expect(
+        (await link.locator('.ui-sidebar__label').boundingBox())?.width ?? 99,
+      ).toBeLessThanOrEqual(1);
+      expect((await link.locator('svg').first().boundingBox())?.width ?? 0).toBeGreaterThan(0);
     }
-    expect(await entries(page).count()).toBe(4);
+    expect(await entries(expanded(page)).count()).toBe(4);
 
-    await demo(page).getByRole('button', { name: 'Expand menu' }).click();
+    await expanded(page).getByRole('button', { name: 'Expand menu' }).click();
 
-    expect(await widthOf(page)).toBe(16 * rem);
+    expect(await widthOf(expanded(page))).toBe(15.5 * rem);
   });
 
-  // Break caught: the menu's narrow-screen form clipping an entry or making the page scroll sideways at 320 px, or its panel in the tab order
-  // and on the screen before anyone opened it.
-  test('is a bar with a menu button at 320 px, and its panel slides in without scrolling the page sideways', async ({
+  // Break caught: a rail whose entry gives no name to a pointer or a keyboard user: an icon that has to be guessed.
+  test('shows the name of an entry of the rail in a tooltip on hover and on focus, and Escape takes it away', async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 320, height: 640 });
-    await openShowcase(page);
-    await demo(page).scrollIntoViewIfNeeded();
-    const open = demo(page).getByRole('button', { name: 'Open menu' });
+    await openShell(page);
+    const link = entries(rail(page)).filter({ hasText: 'Demo staff' });
+    await link.scrollIntoViewIfNeeded();
 
-    await expect(open).toBeVisible();
-    await expect(panel(page)).toBeHidden();
-    expect(await overflow(page)).toBeLessThanOrEqual(0);
-
-    await open.click();
-
-    await expect(panel(page)).toBeVisible();
-    await expect(demo(page).getByRole('button', { name: 'Close menu' })).toBeFocused();
-    await expect.poll(async () => (await panel(page).boundingBox())?.x ?? -1).toBe(0);
-    expect(await overflow(page)).toBeLessThanOrEqual(0);
-    const boxes = await entries(page).evaluateAll((links) =>
-      links.map((link) => {
-        const rect = link.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          clipped: link.scrollWidth > link.clientWidth + 1,
-        };
-      }),
+    await link.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(
+      /Demo staff: 0 waiting for approval \(demo\)/,
     );
-    expect(boxes).toHaveLength(4);
-    for (const box of boxes) {
-      expect(box.left).toBeGreaterThanOrEqual(0);
-      expect(box.right).toBeLessThanOrEqual(320);
-      expect(box.clipped).toBe(false);
-    }
-    expect(await wcagViolations(page), 'with the demo menu open').toEqual([]);
-
     await page.keyboard.press('Escape');
-    await expect(panel(page)).toBeHidden();
-    await expect(open).toBeFocused();
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+
+    await page.mouse.move(0, 0);
+    await link.focus();
+    await expect(page.getByRole('tooltip')).toHaveText(/Demo staff/);
   });
 
-  // Break caught: the bar or the open panel pushing a control out of the screen at 320 px with text enlarged to 200% (WCAG 1.4.4, 1.4.10).
+  // Break caught: the sidebar's controls pushed out of the screen at 320 px with text enlarged to 200% (WCAG 1.4.4, 1.4.10), or the page made to
+  // scroll sideways by it.
   test('keeps its controls inside the screen at 320 px with text enlarged to 200%', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 640 });
-    await openShowcase(page);
-    await demo(page).scrollIntoViewIfNeeded();
+    await openShell(page);
+    await expanded(page).scrollIntoViewIfNeeded();
     await page.evaluate(() => {
       document.documentElement.style.fontSize = '200%';
     });
-    await demo(page).getByRole('button', { name: 'Open menu' }).click();
-    await expect.poll(async () => (await panel(page).boundingBox())?.x ?? -1).toBe(0);
 
     expect(await overflow(page)).toBeLessThanOrEqual(0);
+    // The demo top bar too: its controls wrap to further rows inside the window rather than leave it.
+    const bar = page.locator('header.ui-topbar');
+    await bar.scrollIntoViewIfNeeded();
     for (const control of [
-      demo(page).getByRole('button', { name: 'Close menu' }),
-      entries(page).first(),
-      entries(page).last(),
-      demo(page).getByRole('button', { name: 'Sign out' }),
+      bar.getByRole('button', { name: /^Hub: / }),
+      bar.getByRole('button', { name: 'Search a code, name or phone' }),
+      bar.getByRole('button', { name: /^Theme: / }),
+      bar.getByRole('button', { name: 'New' }),
+      bar.getByRole('button', { name: 'Account menu' }),
     ]) {
-      await control.focus();
+      const box = await control.boundingBox();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+    }
+    for (const control of [
+      expanded(page).getByRole('button', { name: 'Collapse menu' }),
+      entries(expanded(page)).first(),
+      entries(expanded(page)).last(),
+    ]) {
+      await control.scrollIntoViewIfNeeded();
       const box = await control.boundingBox();
       expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
       expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
@@ -683,9 +689,11 @@ test.describe('the side menu in a browser', () => {
   });
 
   // Break caught: the current entry told by colour alone, or lost under forced colours.
-  test('marks the current entry by more than its colour', async ({ page }) => {
-    await openShowcase(page);
-    const current = entries(page).filter({ hasText: 'Demo overview' });
+  test('marks the current entry by more than its colour: a solid fill, bold, and aria-current', async ({
+    page,
+  }) => {
+    await openShell(page);
+    const current = entries(expanded(page)).filter({ hasText: 'Demo my work' });
 
     await expect(current).toHaveAttribute('aria-current', 'page');
     const [currentStyle, otherStyle] = await Promise.all([
@@ -693,7 +701,7 @@ test.describe('the side menu in a browser', () => {
         const style = getComputedStyle(element);
         return { weight: style.fontWeight, fill: style.backgroundColor };
       }),
-      entries(page)
+      entries(expanded(page))
         .filter({ hasText: 'Demo staff' })
         .evaluate((element) => {
           const style = getComputedStyle(element);
@@ -704,10 +712,12 @@ test.describe('the side menu in a browser', () => {
     expect(currentStyle.fill).not.toBe(otherStyle.fill);
   });
 
-  test('is Ink, with the text of the shell colours', async ({ page }) => {
-    await openShowcase(page);
+  test('is Ink, with the text of the shell colours and the crimson of the shell for the current entry', async ({
+    page,
+  }) => {
+    await openShell(page);
 
-    const colours = await demo(page).evaluate((element) => {
+    const colours = await expanded(page).evaluate((element) => {
       const resolve = (property: 'color' | 'backgroundColor', name: string): string => {
         const span = document.createElement('span');
         span.style[property] = `var(${name})`;
@@ -716,22 +726,90 @@ test.describe('the side menu in a browser', () => {
         span.remove();
         return value;
       };
-      const panelElement = element.querySelector('.ui-side-menu__panel');
-      const link = element.querySelector('.ui-primary-nav a:not([aria-current])');
-      const name = element.querySelector('.ui-side-menu__name');
+      const panelElement = element.querySelector('.ui-sidebar');
+      const link = element.querySelector('.ui-sidebar__link:not([aria-current])');
+      const current = element.querySelector('.ui-sidebar__link[aria-current]');
+      const name = element.querySelector('.ui-sidebar__name');
+      const heading = element.querySelector('.ui-sidebar__heading');
       return {
         fill: panelElement === null ? '' : getComputedStyle(panelElement).backgroundColor,
         entry: link === null ? '' : getComputedStyle(link).color,
         person: name === null ? '' : getComputedStyle(name).color,
+        heading: heading === null ? '' : getComputedStyle(heading).color,
+        currentFill: current === null ? '' : getComputedStyle(current).backgroundColor,
+        currentText: current === null ? '' : getComputedStyle(current).color,
         ink: resolve('backgroundColor', '--color-surface-inverse'),
         muted: resolve('color', '--shell-text-muted'),
         text: resolve('color', '--shell-text'),
+        subtle: resolve('color', '--shell-text-subtle'),
+        active: resolve('backgroundColor', '--shell-active'),
+        activeText: resolve('color', '--shell-active-text'),
       };
     });
     expect(colours.fill).toBe(colours.ink);
     expect(colours.entry).toBe(colours.muted);
     expect(colours.person).toBe(colours.text);
+    expect(colours.heading).toBe(colours.subtle);
+    expect(colours.currentFill).toBe(colours.active);
+    expect(colours.currentText).toBe(colours.activeText);
   });
+
+  // Break caught: a sidebar whose entries are not the specified 36px, whose group headings are not the specified 11px upper-case labels, or whose
+  // lockup is not about 132 by 42.
+  test('has entries of 36px, group headings of 11px in capitals, and the lockup at about 132 by 42', async ({
+    page,
+  }) => {
+    await openShell(page);
+    await expanded(page).scrollIntoViewIfNeeded();
+
+    const measured = await expanded(page).evaluate((element) => {
+      const entry = element.querySelector('.ui-sidebar__link');
+      const heading = element.querySelector('.ui-sidebar__heading');
+      const mark = element.querySelector('.ui-sidebar__logo');
+      return {
+        entry: entry?.getBoundingClientRect().height ?? 0,
+        radius: entry === null ? '' : getComputedStyle(entry).borderTopLeftRadius,
+        size: heading === null ? '' : getComputedStyle(heading).fontSize,
+        weight: heading === null ? '' : getComputedStyle(heading).fontWeight,
+        transform: heading === null ? '' : getComputedStyle(heading).textTransform,
+        spacing: heading === null ? '' : getComputedStyle(heading).letterSpacing,
+        logo: mark?.getBoundingClientRect() ?? null,
+      };
+    });
+    expect(measured.entry).toBe(36);
+    expect(measured.radius).toBe('8px');
+    expect(measured.size).toBe('11px');
+    expect(measured.weight).toBe('600');
+    expect(measured.transform).toBe('uppercase');
+    expect(parseFloat(measured.spacing)).toBeCloseTo(0.88, 1);
+    expect(measured.logo?.height ?? 0).toBeCloseTo(42, 0);
+    expect(measured.logo?.width ?? 0).toBeGreaterThan(125);
+    expect(measured.logo?.width ?? 0).toBeLessThan(140);
+  });
+
+  // Break caught: the shell's page logging an error, throwing, or reaching for anything other than its own files.
+  test('is a healthy page: no console error, and only its own origin', async ({
+    page,
+    baseURL,
+  }) => {
+    const seen = watchPage(page);
+    await openShell(page);
+    await expect(expanded(page)).toBeVisible();
+
+    expect(seen.problems).toEqual([]);
+    for (const url of seen.requests) expect(new URL(url).origin, url).toBe(baseURL);
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    // Break caught: a sidebar (expanded or as the rail), a top bar or a hint of a key that fails contrast, naming or target size, in either theme.
+    test(`has no WCAG 2.2 A or AA violation in the ${scheme} theme`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await openShell(page);
+      await expect(expanded(page)).toBeVisible();
+
+      expect(await wcagViolations(page)).toEqual([]);
+    });
+  }
 });
 
 test.describe('the components in a browser: a healthy page', () => {

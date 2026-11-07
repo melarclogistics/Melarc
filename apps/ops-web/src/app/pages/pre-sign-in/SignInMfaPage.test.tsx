@@ -84,7 +84,7 @@ describe('the second step of sign-in', () => {
 
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-    expect(screen.queryByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
     expect(api.requests.filter((request) => request.method === 'GET')).toHaveLength(0);
   });
 
@@ -125,7 +125,7 @@ describe('the second step of sign-in', () => {
       });
 
       await enter(view);
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
       unsubscribe();
 
       expect(visited).not.toContain('/sign-in');
@@ -310,9 +310,7 @@ describe('the second step of sign-in', () => {
       );
       expect(screen.getByLabelText('Authenticator code (required)')).toHaveValue('');
       await enter(view, '654321');
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(attempts).toBe(2);
     });
 
@@ -335,7 +333,7 @@ describe('the second step of sign-in', () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     });
   });
 
@@ -392,7 +390,7 @@ describeInterfaceStates('The second step of sign-in', {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     },
   },
   empty: {
@@ -434,9 +432,7 @@ describeInterfaceStates('The second step of sign-in', {
 
       await enter(view, '654321');
 
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
@@ -449,9 +445,7 @@ describeInterfaceStates('The second step of sign-in', {
       const view = await atTheSecondStep(() => json(200, sessionFixture()));
       await enter(view);
 
-      expect(
-        await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-      ).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     },
   },
   'permission-restricted': {
@@ -523,7 +517,7 @@ describe('the choice to remember the browser (staff-authentication.md section 5.
     await view.user.click(screen.getByRole('checkbox', { name: /Remember this browser/ }));
     await enter(view);
 
-    await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
     expect(document.body.innerHTML).not.toContain('SENTINEL');
   });
 });

@@ -4,19 +4,25 @@ import './count-badge.css';
 /** A count as the page writes a number: grouped by thousands, in the style of the portal's other figures. */
 const NUMBER = new Intl.NumberFormat('en-GB');
 
+/** The same, for a text that says a count in words (a tooltip, a card): one way of writing it, so that "1,234" is never "1234" in one place and not in another. */
+export function formatCount(count: number): string {
+  return NUMBER.format(count);
+}
+
 export interface CountBadgeProps {
   /** How many. A whole number from zero; the figure is drawn as it is, never capped (`99+` would hide the size of a queue). */
   readonly count: number;
   /**
    * What the number counts, said after it to someone who hears the page: "waiting for confirmation", "in progress". The number alone is
    * not a name, and a count of runs in progress beside *Manifests* is not a count of manifests, so the words go with it for a screen
-   * reader and stay out of the way for the eye. Left out where the words beside the badge already say what it counts (a line of the
-   * landing, whose link is the queue's name): the number is then read as the number it is.
+   * reader and stay out of the way for the eye. Left out where the words beside the badge already say what it counts (a line that names the
+   * queue next to its number): the number is then read as the number it is.
    */
   readonly meaning?: string;
   /**
-   * The ground the badge is on: `page` is the page's own (the landing), `shell` is the side menu's Ink, where the tokens of the shell take
-   * the place of the status pairs and where the current entry's filled ground gets a badge of its own (`count-badge.css`).
+   * The ground the badge is on: `page` is the page's own (no screen draws it yet: My work sets its figures in its own face), `shell` is the
+   * sidebar's Ink, where the tokens of the shell take the place of the status pairs and where the current entry's filled ground gets a badge of
+   * its own (`count-badge.css`).
    */
   readonly surface?: 'page' | 'shell';
 }

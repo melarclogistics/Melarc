@@ -200,6 +200,8 @@ describe('the Ops Portal reaches the API through the generated client only', () 
       for (const path of [
         OPS,
         'apps/ops-web/src/components/Probe.tsx',
+        // A folder that no longer exists (the side menu was removed in redesign step R4): a probe path is a name for the rule, and any file under
+        // `components/` outside the three allowed places is refused.
         'apps/ops-web/src/components/side-menu/Probe.tsx',
         'apps/ops-web/src/platform/Probe.ts',
       ]) {
@@ -305,6 +307,78 @@ describe('the Ops Portal reaches the API through the generated client only', () 
       "const response = fetch('/api/v1/x');",
     ]) {
       assert.notDeepEqual(messagesFor(component, code), [], `${code} was not refused`);
+    }
+  });
+
+  // The one exception to the ban on web storage (redesign step R4; PRODUCT_DESIGN_DIRECTION section 7): the module that keeps the person's choice
+  // of theme may name `localStorage` by its bare name (the only form it uses), and nothing else is let through for it or for anything beside it.
+  const THEME_MODULE = 'apps/ops-web/src/platform/theme/theme-choice.ts';
+
+  // Break caught: the exception widened: another file beside the module (the hook next to it, a page, a component) allowed to keep something in
+  // the browser, which is how a second thing gets stored without anyone deciding it.
+  it('lets only the theme module name localStorage, by its bare name', () => {
+    for (const code of [
+      "localStorage.getItem('melarc-theme');",
+      "localStorage.setItem('melarc-theme', 'dark');",
+      "localStorage.removeItem('melarc-theme');",
+    ]) {
+      assert.deepEqual(
+        messagesFor(THEME_MODULE, code),
+        [],
+        `${code} was refused in the theme module`,
+      );
+      for (const path of [
+        'apps/ops-web/src/platform/theme/use-theme-choice.ts',
+        'apps/ops-web/src/platform/theme/other.ts',
+        'apps/ops-web/src/platform/hub/active-hub.tsx',
+        'apps/ops-web/src/components/ui/app-shell/ThemeControl.tsx',
+        'apps/ops-web/src/app/Probe.tsx',
+      ]) {
+        assert.notDeepEqual(messagesFor(path, code), [], `${code} was not refused in ${path}`);
+      }
+    }
+  });
+
+  // Break caught (review of 7 November 2026): the exception relaxing a second rule (`no-restricted-properties`) as well as `no-restricted-globals`, and so
+  // letting the module reach storage through `window`, `globalThis` or `self`, which it has no use for: the exception is as narrow as the module.
+  it('refuses window.localStorage, globalThis.localStorage and self.localStorage in the theme module too', () => {
+    for (const code of [
+      "window.localStorage.setItem('melarc-theme', 'dark');",
+      "globalThis.localStorage.removeItem('melarc-theme');",
+      "self.localStorage.getItem('melarc-theme');",
+    ]) {
+      assert.notDeepEqual(
+        messagesFor(THEME_MODULE, code),
+        [],
+        `${code} was not refused in the theme module`,
+      );
+    }
+  });
+
+  // Break caught: the exception for one storage becoming one for all, or taking the other bans with it: `sessionStorage`, `indexedDB`, the
+  // cookie, and every way to reach the network stay refused in the one module that may keep a theme.
+  it('keeps every other ban in force inside the theme module', () => {
+    for (const [label, code] of [
+      ['sessionStorage', "sessionStorage.setItem('x', 'y');"],
+      ['window.sessionStorage', "window.sessionStorage.setItem('x', 'y');"],
+      ['indexedDB', "indexedDB.open('db');"],
+      ['window.indexedDB', "window.indexedDB.open('db');"],
+      ['document.cookie', "document.cookie = 'a=b';"],
+      ['fetch', "fetch('/api/v1/x');"],
+      ['window.fetch', "window.fetch('/api/v1/x');"],
+      ['XMLHttpRequest', 'const request = new XMLHttpRequest();'],
+      ['WebSocket', "const socket = new WebSocket('wss://x.test');"],
+      ['navigator.sendBeacon', "navigator.sendBeacon('/x', 'a');"],
+      ['window.open', "window.open('https://x.test');"],
+      ['an innerHTML assignment', 'element.innerHTML = html;'],
+      ['eval', "eval('1 + 1');"],
+      ['the icon library', "import { Eye } from 'lucide-react';"],
+    ] as const) {
+      assert.notDeepEqual(
+        messagesFor(THEME_MODULE, code),
+        [],
+        `${label} was not refused in the theme module`,
+      );
     }
   });
 

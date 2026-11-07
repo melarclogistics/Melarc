@@ -36,11 +36,22 @@ export interface RecordLookupState {
   readonly retry: () => void;
 }
 
-/** The text as the server reads it: trimmed, each run of white space one space, and 2 to 64 characters, or nothing. */
+/** The text as the server reads it: trimmed, and each run of white space one space. */
+const foldedText = (text: string): string => text.trim().replaceAll(/\s+/g, ' ');
+
+/**
+ * Whether a text can be searched, once it is folded the way the server reads it (2 to 64 characters): `too-short` and `too-long` are the two ways it
+ * cannot, so that a screen can tell the person which. The search asks for neither.
+ */
+export function lookupTextFit(text: string): 'too-short' | 'too-long' | 'fits' {
+  const length = Array.from(foldedText(text)).length;
+  if (length < LOOKUP_MIN_CHARACTERS) return 'too-short';
+  return length > LOOKUP_MAX_CHARACTERS ? 'too-long' : 'fits';
+}
+
+/** The text as the server reads it, or nothing when it cannot be searched. */
 function searchableText(text: string): string | undefined {
-  const folded = text.trim().replaceAll(/\s+/g, ' ');
-  const length = Array.from(folded).length;
-  return length >= LOOKUP_MIN_CHARACTERS && length <= LOOKUP_MAX_CHARACTERS ? folded : undefined;
+  return lookupTextFit(text) === 'fits' ? foldedText(text) : undefined;
 }
 
 /**

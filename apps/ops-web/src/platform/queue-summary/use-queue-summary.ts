@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
 import { holdOf } from '../query/read-hold';
+import { useActiveHub } from '../hub/active-hub';
+import { QUEUE_SUMMARY_KEY } from './queue-summary-refresh';
 import { parseQueueSummary, type QueueSummaryView } from './queue-summary-shape';
 
-/** The one key of the summary: the menu and the landing read the same query, so a page that asks while the menu is asking is given that read. */
-export const QUEUE_SUMMARY_KEY = ['queue-summary'] as const;
+export { QUEUE_SUMMARY_KEY };
 
 /** What the refresh on return waits under while the page is holding its automatic reads (`read-hold.ts`): one read at the end, however many pages were returned to. */
 const RETURN_KEY = 'queue-summary-return';
@@ -17,10 +18,12 @@ const RETURN_KEY = 'queue-summary-return';
  * menu draws a count beside the entry of a queue from it and the landing lists the queues from it. The server decides which queues the
  * session is given and what each count is; this reads, judges (`queue-summary-shape.ts`) and hands the answer on.
  *
- * **When it is read** (`AC-QSUM-09`): when the signed-in shell loads (the menu asks, and stays asking for as long as the person is signed
- * in), when a page is returned to (`useRefreshQueueSummaryOnReturn`, which the shell calls on a change of page), when a page that shows it
- * opens (a new asker of a stale read starts one), and when the person asks for a refresh of a queue (`useRefreshQueueSummary`, which the
- * queue's refresh calls beside its own read). **Never on a timer, and never when the window is focused or the connection returns**: the
+ * **When it is read** (`AC-QSUM-09`, which owns the list): when the signed-in shell loads (the menu asks, and stays asking for as long as the
+ * person is signed in), when the person goes to another page (`useRefreshQueueSummaryOnReturn`, which the shell calls on a change of path),
+ * when a page that shows it opens (a new asker of a stale read starts one), when the person asks for a refresh of a queue
+ * (`useRefreshQueueSummary`, which the queue's refresh calls beside its own read), when they choose another hub (another key, below, and so
+ * another read) and after an act that changes a queue (`queueSummaryObserver`, which reads at once for an act of `queue-changing-acts.ts`'s
+ * table that the server answered with success). **Never on a timer, and never when the window is focused or the connection returns**: the
  * read is `background` for the session's idle lifetime (it does not count as the person acting), and a page that polled would only
  * show an unattended session how busy the queue is. **While the API has asked the page to wait** (a `429`, `Retry-After`), the read on return
  * waits for the end of the wait and the renewal on opening is not made (`platform/query/read-hold.ts`); the refresh a person asks for does not wait.
@@ -29,18 +32,29 @@ const RETURN_KEY = 'queue-summary-return';
  * *Try again*), and an answer that is not what the contract describes fails as `unexpected-response`, like any other. What is read is
  * dropped when nothing asks for it any more (`gcTime: 0`), and the end of a session empties the cache like any other (`endSession`), so
  * one person's counts are never the next person's.
+ *
+ * **It follows the hub switcher** (task C3, features/operations/hub-filters.md): with a hub chosen the counts are that hub's (`hub_id`), and for
+ * *All hubs* nothing is sent and they are every hub the grant reaches. The hub is read here, by the
+ * hook, and not by its two askers (the menu and My work), so that both ask the same question and share one request; it is part of the key
+ * (after `QUEUE_SUMMARY_KEY`, which stays the prefix that `refreshQueueSummaryNow` and `useRefreshQueueSummary` match), so another hub is another
+ * query: it reads by itself, and one hub's counts are never drawn under another's name (`gcTime: 0` lets the first go).
  */
 export function useQueueSummary(enabled = true): UseQueryResult<QueueSummaryView> {
   const client = useApiClient();
+  const hubId = useActiveHub();
   return useQuery({
-    queryKey: QUEUE_SUMMARY_KEY,
+    queryKey: [...QUEUE_SUMMARY_KEY, hubId ?? null],
     enabled,
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     gcTime: 0,
     queryFn: async () => {
-      const answer = answerOf(await client.GET('/ops/queue-summary'));
+      const answer = answerOf(
+        await client.GET('/ops/queue-summary', {
+          params: { query: hubId === undefined ? {} : { hub_id: hubId } },
+        }),
+      );
       const summary = parseQueueSummary(answer.data);
       if (summary === undefined) throw unexpectedResponse(answer.status);
       return summary;

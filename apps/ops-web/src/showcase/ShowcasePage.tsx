@@ -4,7 +4,6 @@ import { PageHeader } from '../components/PageHeader';
 import { Alert } from '../components/ui/alert/Alert';
 import { AlertDialog } from '../components/ui/dialog/AlertDialog';
 import { Dialog, DialogActions } from '../components/ui/dialog/Dialog';
-import { SideMenu } from '../components/side-menu/SideMenu';
 import { Button } from '../components/ui/button/Button';
 import { Checkbox } from '../components/ui/checkbox/Checkbox';
 import { CodeInput } from '../components/ui/code-input/CodeInput';
@@ -382,7 +381,7 @@ function StatusBadges() {
   );
 }
 
-/** The count of a queue, as the menu and the landing draw it (task C1): on the page, and on the dark ground of the side menu. */
+/** The count of a queue, as the sidebar and My work draw it (task C1): on the page, and on the dark ground of the sidebar. */
 function CountBadges() {
   return (
     <Section title="Count badges">
@@ -1025,39 +1024,6 @@ function DialogDemos() {
   );
 }
 
-/** Made-up entries for the side menu, so that it can be looked at, collapsed and slid in: they go nowhere. */
-const DEMO_MENU_ITEMS = [
-  ['Demo overview', 'overview'],
-  ['Demo staff', 'staff'],
-  ['Demo add a profile', 'add-staff'],
-  ['Demo sessions', 'sessions'],
-] as const;
-
-const DEMO_MENU = DEMO_MENU_ITEMS.map(([label, icon], index) => ({
-  to: index === 0 ? '/__showcase' : `/__showcase/demo-${String(index)}`,
-  label,
-  icon,
-}));
-
-function SideMenuDemo() {
-  return (
-    <Section title="Side menu">
-      <p>
-        The menu of the authenticated shell, with entries that go nowhere. It collapses to its
-        icons, and slides in on a narrow screen.
-      </p>
-      <div className="showcase-side-menu">
-        <SideMenu
-          items={DEMO_MENU}
-          account={{ name: 'Demo Person', detail: 'Demo hub' }}
-          signingOut={false}
-          onSignOut={() => undefined}
-        />
-      </div>
-    </Section>
-  );
-}
-
 /** Every icon of the one family, by the meaning it has in the application, at the three sizes it has. */
 function IconsDemo() {
   return (
@@ -1157,7 +1123,6 @@ export function ShowcasePage() {
       <ReorderDemo />
       <TimelineDemo />
       <DialogDemos />
-      <SideMenuDemo />
       <IconsDemo />
       <Section title="Surfaces">
         <div className="showcase-surfaces">

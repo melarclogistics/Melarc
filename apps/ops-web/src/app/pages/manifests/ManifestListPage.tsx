@@ -20,6 +20,7 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { TableColumn } from '../../../components/ui/table/Table';
 import { OperationFailure } from '../../../platform/api/api-response';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import {
   MANIFEST_FILTER_STATES,
   type ManifestFilterState,
@@ -31,6 +32,7 @@ import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-co
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
+import { NothingAtHub } from '../NothingAtHub';
 import { hubNameOf } from '../staff/staff-presentation';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { MANIFEST_LINKS, requestOfClick, restorePlace } from '../pickup/queue-return';
@@ -200,15 +202,19 @@ export function ManifestListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const { state, date } = filtersOf(params);
-  const signature = `${state ?? ''}|${date ?? ''}`;
+  // The hub the switcher chose (task C3) is a filter of the list like the other two, so it is part of the signature.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `${state ?? ''}|${date ?? ''}|${hubId ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
   const continuity = useQueueContinuity('manifests');
   const [arrival] = useState(() => continuity.returningTo(signature));
-  // A page token belongs to the filters it was made with: a change of either starts again at the first page.
+  // A page token belongs to the filters it was made with: a change of any of them starts again at the first page.
   const paging = useQueuePaging(signature, arrival?.tokens);
   const list = useManifests({
     ...(state === undefined ? {} : { state }),
     ...(date === undefined ? {} : { serviceDate: date }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
@@ -320,6 +326,19 @@ export function ManifestListPage() {
       >
         Page {paging.page} has no manifests now. Earlier pages may still have some.
       </EmptyState>
+    ) : hub !== undefined ? (
+      // A chosen hub is a filter too (audit B1): the list is empty at this hub, which says nothing of the others.
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="manifests"
+        filtered={filtering}
+        clear={
+          <Button type="button" variant="secondary" onClick={clearEverything}>
+            Show every manifest
+          </Button>
+        }
+      />
     ) : filtering ? (
       <EmptyState
         kind="filtered"

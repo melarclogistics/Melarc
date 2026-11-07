@@ -13,6 +13,7 @@ import { Select } from '../../../components/ui/select/Select';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { TableColumn } from '../../../components/ui/table/Table';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import {
   audienceOf,
   channelOf,
@@ -32,6 +33,7 @@ import {
 import { useNotifications } from '../../../platform/notifications/use-notification-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
+import { NothingAtHub } from '../NothingAtHub';
 import {
   AUDIENCE_LABELS,
   CHANNEL_LABELS,
@@ -155,8 +157,9 @@ const columns: TableColumn<NotificationEntryView>[] = [
  * row of the log (what it says of the record, "one request" or "this pickup run", follows the kind of record named in the address, in
  * `message-presentation.ts`, and never the messages that come back, so it is the same in every state). The Ops feed is the same
  * list with `channel=FEED` and `audience=OPS_FEED`. **Empty tells "no messages" from "filtered to nothing"**, and the Ops feed with nothing in it
- * says so. Which messages the session may see is the server's decision (the hubs of its grant); the choices are in the address, and the page of
- * results is not.
+ * says so. Which messages the session may see is the server's decision (the hubs of its grant), narrowed to the hub the switcher chose since task
+ * C3 (not when the log is asked for one record, which is that record's whatever hub is chosen: the exception of `AC-HUBF-09`, decided by the
+ * Product Owner on 7 November 2026); the choices are in the address, and the page of results is not.
  *
  * **It never shows, asks for, copies or builds a number in clear, a message's text or a code.** An entry has none (the contract), the guard has
  * no place for one, and the only number on the screen is the masked hint the server sent. A message is named by what it is about and never by
@@ -175,14 +178,21 @@ export function MessageLogPage() {
     subject === undefined
       ? undefined
       : (subjectTypeOf(params.get('subject_type')) ?? 'PICKUP_REQUEST');
+  // The hub the switcher chose narrows the log (task C3), except when the log is asked for one record (the links "Messages about this request" and
+  // "Messages about this run"): a record's messages are that record's, and the switcher, left on another hub, must not hide them. It is then
+  // no filter of the log, so it is part of neither the request nor the signature.
+  const switcherHub = useActiveHub();
+  const hubId = subject === undefined ? switcherHub : undefined;
+  const { hub, showAllHubs } = useHubScope();
   const paging = useQueuePaging(
-    `${state ?? ''}|${audience ?? ''}|${channel ?? ''}|${subject ?? ''}`,
+    `${state ?? ''}|${audience ?? ''}|${channel ?? ''}|${subject ?? ''}|${hubId ?? ''}`,
   );
   const list = useNotifications({
     ...(state === undefined ? {} : { state }),
     ...(audience === undefined ? {} : { audience }),
     ...(channel === undefined ? {} : { channel }),
     ...(subject === undefined ? {} : { subjectId: subject }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
@@ -227,7 +237,18 @@ export function MessageLogPage() {
   const emptyOpsFeed = opsFeed && state === undefined && subject === undefined;
 
   let empty: ReactNode;
-  if (emptyOpsFeed) {
+  if (hub !== undefined && subject === undefined) {
+    // A chosen hub is a filter of the log too (audit B1), unless the log is asked for one record (`AC-HUBF-09`): then it is the record's, whatever hub is chosen.
+    empty = (
+      <NothingAtHub
+        hub={hub}
+        showAllHubs={showAllHubs}
+        what="messages"
+        filtered={filtering}
+        clear={showEveryMessage}
+      />
+    );
+  } else if (emptyOpsFeed) {
     empty = (
       <EmptyState
         kind="filtered"
