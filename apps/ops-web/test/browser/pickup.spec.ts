@@ -729,9 +729,16 @@ test.describe('the queue: coming back from a request', () => {
       await open(page, '/pickup-requests', { requests: MANY, pageSize: 12 });
       const far = opener(page, codeOf(10));
       await far.scrollIntoViewIfNeeded();
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+      // The place that is left is the one the officer leaves from: the page as it stands when they press the panel's link (the panel is in view where it is, and the page is not
+      // moved to it), which is where Playwright would otherwise scroll to before its click.
+      await far.click();
+      const link = page
+        .getByRole('dialog', { name: codeOf(10) })
+        .getByRole('link', { name: 'Open full page' });
+      await link.scrollIntoViewIfNeeded();
       const before = await page.evaluate(() => window.scrollY);
-      expect(before).toBeGreaterThan(200);
-      await goToRequest(page, codeOf(10));
+      await link.click();
       await expect(page.getByRole('heading', { level: 1, name: codeOf(10) })).toBeVisible();
 
       await back(page);

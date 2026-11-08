@@ -263,8 +263,8 @@ describe('QueueWorkspace', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' }));
-    const panel = await screen.findByRole('dialog', { name: 'ACC-PR-4HT9WD' });
-    expect(panel).toBeVisible();
+    // The panel fades in: it is in the page, whether or not its first frames are over.
+    expect(await screen.findByRole('dialog', { name: 'ACC-PR-4HT9WD' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
 
     expect(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' })).toHaveFocus();

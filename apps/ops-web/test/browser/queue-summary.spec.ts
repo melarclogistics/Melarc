@@ -179,21 +179,24 @@ test.describe('the counts of the queues in a browser', () => {
       .click();
 
     await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW$/);
-    await expect(
-      page.getByText('Only late bookings waiting for a cut-off decision.'),
-    ).toBeVisible();
-    // The list's read may not have reached the route when the banner shows: poll, as the last assertion of the test does.
+    // The late bookings are a chip of the filter row (R6.1): said in words, and taken off by their own remove button.
+    await expect(page.getByText('Only late bookings waiting for a cut-off decision')).toBeVisible();
+    // The list's read may not have reached the route when the chip shows: poll, as the last assertion of the test does.
     await expect.poll(() => asked.at(-1)?.searchParams.get('state')).toBe('CONFIRMED');
     await expect
       .poll(() => asked.at(-1)?.searchParams.get('cutoff_exception_state'))
       .toBe('PENDING_OPS_REVIEW');
 
-    await page.getByRole('button', { name: 'Every cut-off decision' }).click();
+    await page
+      .getByRole('button', {
+        name: 'Remove filter: Only late bookings waiting for a cut-off decision',
+      })
+      .click();
 
     await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED$/);
-    // The button that took the filter off is gone: focus is on the State filter, and not lost to the page.
-    await expect(page.getByRole('combobox', { name: 'State' })).toBeFocused();
-    await expect(page.getByText('Only late bookings waiting for a cut-off decision.')).toHaveCount(
+    // The chip that took the filter off is gone: focus is on what stays in the filter row (the Filter button), and not lost to the page.
+    await expect(page.getByRole('button', { name: 'Filter' })).toBeFocused();
+    await expect(page.getByText('Only late bookings waiting for a cut-off decision')).toHaveCount(
       0,
     );
     await expect.poll(() => asked.at(-1)?.searchParams.has('cutoff_exception_state')).toBe(false);

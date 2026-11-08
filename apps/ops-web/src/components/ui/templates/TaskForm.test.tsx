@@ -189,41 +189,39 @@ describe('TaskForm', () => {
   });
 
   // Break caught: a success that is only words, one whose action says anything but Open, or one with no way to do another.
-  it('announces success as a toast with Open and a way to do another', async () => {
-    const user = userEvent.setup();
-    render(<Toaster />);
+  /** One toast of a task done, with its two acts: each test raises its own and presses one, so that nothing waits on another toast having left. */
+  async function raiseDone(message: string) {
     const open = vi.fn();
     const another = vi.fn();
+    render(<Toaster />);
+    act(() => {
+      announceTaskDone({ message, open, another: { label: 'Book another', onClick: another } });
+    });
+    const toast = (await screen.findByText(message)).closest<HTMLElement>('.ui-toast');
+    if (toast === null) throw new Error('The message is not in a toast.');
+    return { toast, open, another };
+  }
 
-    const raise = (): void => {
-      act(() => {
-        announceTaskDone({
-          message: 'ACC-PR-7KQ2MZ is booked.',
-          open,
-          another: { label: 'Book another', onClick: another },
-        });
-      });
-    };
-    const toastOfTheTask = async (): Promise<HTMLElement> => {
-      const toast = (await screen.findByText('ACC-PR-7KQ2MZ is booked.')).closest<HTMLElement>(
-        '.ui-toast',
-      );
-      if (toast === null) throw new Error('The message is not in a toast.');
-      return toast;
-    };
+  // Break caught: a success that is only words, or one whose first act is not Open.
+  it('announces success as a toast whose first act is Open', async () => {
+    const user = userEvent.setup();
+    const { toast, open, another } = await raiseDone('ACC-PR-7KQ2MZ is booked.');
 
-    raise();
-    await user.click(within(await toastOfTheTask()).getByRole('button', { name: 'Open' }));
+    await user.click(within(toast).getByRole('button', { name: 'Open' }));
+
     expect(open).toHaveBeenCalledTimes(1);
     expect(another).not.toHaveBeenCalled();
+  });
 
-    act(() => {
-      dismissToast();
-    });
-    raise();
-    await user.click(within(await toastOfTheTask()).getByRole('button', { name: 'Book another' }));
+  // Break caught: a success with no way to do another.
+  it('announces success as a toast with a way to do another', async () => {
+    const user = userEvent.setup();
+    const { toast, open, another } = await raiseDone('ACC-PR-4HT9WD is booked.');
+
+    await user.click(within(toast).getByRole('button', { name: 'Book another' }));
+
     expect(another).toHaveBeenCalledTimes(1);
-    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
   });
 
   // Break caught: a composition that fails a WCAG 2.2 rule with the rail, the review and the alerts present.
