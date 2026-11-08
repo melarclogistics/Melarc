@@ -148,6 +148,12 @@ async function goToRequest(page: Page, code: string): Promise<void> {
     .click();
 }
 
+/** The heavier acts of a request are in the menu of its header: the menu is opened and the act chosen, and the act brings its own question or form. */
+async function chooseAct(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name }).click();
+}
+
 const LONG_ADDRESS =
   'Plot 14, Block C, off the Independence Avenue service road beside the old demo bakery, Ridge, Accra, Greater Accra Region';
 const LONG_SENDER = 'Demo Fabrics and Household Linen Wholesale Trading Company Limited';
@@ -1033,7 +1039,7 @@ test.describe('one request', () => {
   // The catalogue's codes are not seeded: the act cannot be done here, and the page says so and who adds them, and sends nothing.
   test('says no cancellation reason is configured, and cannot cancel', async ({ page }) => {
     const { api } = await open(page, DETAIL);
-    await page.getByRole('button', { name: 'Cancel the request' }).click();
+    await chooseAct(page, 'Cancel the request');
     const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
 
     await expect(dialog).toContainText('No cancellation reason is configured yet');
@@ -1054,7 +1060,7 @@ test.describe('one request', () => {
         },
       ],
     });
-    await page.getByRole('button', { name: 'Cancel the request' }).click();
+    await chooseAct(page, 'Cancel the request');
     const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await dialog
       .getByRole('combobox', { name: /^Reason/ })
@@ -1149,7 +1155,7 @@ const SCREENS: readonly Screen[] = [
     name: 'one request',
     reach: async (page) => {
       await open(page, LATE);
-      await expect(page.getByRole('heading', { name: 'What you can do' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     },
   },
   {
@@ -1158,7 +1164,7 @@ const SCREENS: readonly Screen[] = [
       await open(page, DETAIL, {
         cancellationReasons: [{ code: 'DEMO_A', label: 'Demo reason A', attribution: 'CUSTOMER' }],
       });
-      await page.getByRole('button', { name: 'Cancel the request' }).click();
+      await chooseAct(page, 'Cancel the request');
       await expect(
         page.getByRole('alertdialog').getByRole('combobox', { name: /^Reason/ }),
       ).toBeVisible();

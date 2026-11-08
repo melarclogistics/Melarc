@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
@@ -85,12 +86,14 @@ const acts = () => api.requests.filter((request) => request.method === 'POST');
 const bodyOf = async (request: Request | undefined): Promise<unknown> =>
   request === undefined ? undefined : request.clone().json();
 
-const actions = () => {
-  const heading = screen.getByRole('heading', { level: 2, name: 'What you can do' });
-  const section = heading.closest('section');
-  if (section === null) throw new Error('no actions');
-  return section;
-};
+/** The record's own page, for what its header and its notices say: the acts are in its header and its menu, and the person is told what stands in the way in words beside them. */
+const actions = () => screen.getByRole('main');
+
+/** The heavier acts are in the menu of the record's header: it is opened, and the act is chosen. Each brings its own question or form. */
+async function chooseAct(user: UserEvent, name: string): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
 
 describe('the request: what it shows', () => {
   it('shows the request by its code, its state and its facts', async () => {
@@ -269,9 +272,11 @@ describe('the request: what it shows', () => {
 
     const facts = (await screen.findByText('One-package exception')).nextElementSibling;
     if (!(facts instanceof HTMLElement)) throw new Error('no exception facts');
-    expect(within(facts).getByText(/Waiting for a holder of/)).toHaveTextContent(
-      'Waiting for a holder of pickup.exception.approve to approve it.',
+    expect(within(facts).getByText(/Waiting for an approver/)).toHaveTextContent(
+      'Waiting for an approver to approve it.',
     );
+    // A refusal or a wait names the capability in plain words, never a permission key.
+    expect(document.body.textContent).not.toContain('pickup.exception.approve');
     expect(
       within(facts).getByText('Requested by another member of staff on 29 Oct, 08:20.'),
     ).toBeVisible();
@@ -349,7 +354,7 @@ describe('the request: when it cannot be had', () => {
 
     expect(await screen.findByRole('alert')).toBeVisible();
     expect(screen.queryByText(/Requested by/)).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
   });
 
   // Break caught: a request with no version acted on, which would send an If-Match the server never gave.
@@ -357,7 +362,7 @@ describe('the request: when it cannot be had', () => {
     open(() => json(200, pickupRequestFixture()));
 
     expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
   });
 });
 
@@ -435,13 +440,15 @@ describe('confirming', () => {
   it('offers the exception, and not the confirmation, for a single package with no approved exception', async () => {
     open(() => answer(pickupRequestFixture({ declared_package_count: 1 })));
 
-    await screen.findByRole('heading', { name: 'What you can do' });
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
     expect(within(actions()).queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
     expect(within(actions()).getByRole('link', { name: 'Request the exception' })).toHaveAttribute(
       'href',
       `/pickup-requests/${REQUEST_ID}/exception`,
     );
-    expect(within(actions()).getByText(/pickup\.exception\.approve/)).toBeVisible();
+    // What stands in the way is told in words, and names no key.
+    expect(within(actions()).getByText(/This request is for a single package/)).toBeVisible();
+    expect(actions().textContent).not.toContain('pickup.exception.approve');
   });
 
   // An exception that was asked for waits for its checker: it is not asked for twice, and the page leads a checker to the queue.
@@ -457,10 +464,12 @@ describe('confirming', () => {
       [...OFFICER, 'pickup.exception.approve'],
     );
 
-    await screen.findByRole('heading', { name: 'What you can do' });
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
     expect(within(actions()).queryByRole('link', { name: 'Request the exception' })).toBeNull();
     expect(within(actions()).queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
-    expect(within(actions()).getByText(/The exception is requested and waits/)).toBeVisible();
+    expect(
+      within(actions()).getByText(/The one-package exception is requested and waits/),
+    ).toBeVisible();
     expect(
       within(actions()).getByRole('link', { name: 'Go to the exceptions to approve' }),
     ).toHaveAttribute('href', '/approvals');
@@ -476,7 +485,9 @@ describe('confirming', () => {
       ),
     );
 
-    expect(await screen.findByText(/The exception is requested and waits/)).toBeVisible();
+    expect(
+      await screen.findByText(/The one-package exception is requested and waits/),
+    ).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Go to the exceptions to approve' })).toBeNull();
   });
 
@@ -495,37 +506,41 @@ describe('confirming', () => {
 });
 
 describe('the acts the session may not do', () => {
-  // Break caught: an act hidden without a word, or refused by a role: each names the key it needs.
-  it('names the key of each act the session does not hold, and no role', async () => {
+  // Break caught: an act drawn for a session that cannot take it (presentation is the only thing the page does about it), or a refusal worded as a key or a role.
+  it('draws no act the session does not hold, and names no key and no role', async () => {
     open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), ['pickup.read']);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    const section = actions();
-    expect(within(section).queryAllByRole('button')).toEqual([]);
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    expect(within(actions()).queryAllByRole('button')).toEqual([]);
+    expect(within(actions()).queryByRole('link', { name: 'Request the exception' })).toBeNull();
     for (const key of [
       'pickup.request.cancel',
       'pickup.failure.resolve',
       'pickup.attempt.extend',
+      'pickup.request.confirm',
     ]) {
-      expect(within(section).getAllByText(key).length).toBeGreaterThan(0);
+      expect(actions().textContent).not.toContain(key);
     }
-    expect(section.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
+    expect(actions().textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });
 
-  it('names the key of the confirmation on a pending request', async () => {
+  it('draws no confirmation on a pending request for a session without the key', async () => {
     open(undefined, ['pickup.read']);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    expect(within(actions()).getByText('pickup.request.confirm')).toBeVisible();
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    expect(screen.queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
+    expect(actions().textContent).not.toContain('pickup.request.confirm');
   });
 
   // S1.18: an extension needs a confirmed request; a pending one is never offered it.
   it('offers no extension and no escalation on a pending request', async () => {
-    open(undefined, SENIOR);
+    const { user } = open(undefined, SENIOR);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    expect(within(actions()).queryByRole('heading', { name: 'Extend the attempts' })).toBeNull();
-    expect(within(actions()).queryByRole('heading', { name: 'Escalate the request' })).toBeNull();
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Extend the attempts' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
   });
 
   it('offers nothing to change on a declined request', async () => {
@@ -591,7 +606,7 @@ describe('cancelling', () => {
   it('says plainly that no cancellation reason is configured, names who adds them, and cannot cancel', async () => {
     const { user } = open(undefined, OFFICER, { [REASONS]: reasons([]) });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
 
     expect(
@@ -614,7 +629,7 @@ describe('cancelling', () => {
         answer(pickupRequestFixture({ state: 'CANCELLED', cancelled_by_actor_type: 'OPS' }), 'v2'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /Reason/ }),
@@ -646,8 +661,9 @@ describe('cancelling', () => {
       },
     );
 
-    expect(await screen.findByText(/Nothing is charged before a rider is assigned/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Cancel the request' }));
+    // The page tells that no rider holds the run; the cancellation then asks nothing about a charge.
+    expect(await screen.findByText('Not assigned yet')).toBeVisible();
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -669,8 +685,9 @@ describe('cancelling', () => {
       [REASONS]: reasons([cancellationReasonFixture()]),
     });
 
-    expect(await screen.findByText(/A rider is assigned to this request’s run/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Cancel the request' }));
+    // The page tells that a rider holds the run; the cancellation then asks for the charge decision.
+    expect(await screen.findByText('Assigned to the pickup run')).toBeVisible();
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -698,7 +715,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -741,7 +758,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -787,7 +804,7 @@ describe('cancelling', () => {
       },
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -831,7 +848,7 @@ describe('cancelling', () => {
       },
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /Reason/ }),
@@ -869,7 +886,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Reschedule the pickup' }));
+    await chooseAct(user, 'Reschedule the pickup');
     const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -907,7 +924,7 @@ describe('cancelling', () => {
         },
       );
 
-      await user.click(await screen.findByRole('button', { name: 'Reschedule the pickup' }));
+      await chooseAct(user, 'Reschedule the pickup');
       const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
       await user.selectOptions(
         await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -935,7 +952,7 @@ describe('the senior acts and the escalation', () => {
       },
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Extend the attempts' }));
+    await chooseAct(user, 'Extend the attempts');
     const dialog = screen.getByRole('alertdialog', {
       name: 'Extend the attempts of this request?',
     });
@@ -969,7 +986,7 @@ describe('the senior acts and the escalation', () => {
         refusal(409, 'STATE_CONFLICT'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Extend the attempts' }));
+    await chooseAct(user, 'Extend the attempts');
     const dialog = screen.getByRole('alertdialog', {
       name: 'Extend the attempts of this request?',
     });
@@ -1006,18 +1023,17 @@ describe('the senior acts and the escalation', () => {
 
   // S1.18: an escalation is recorded once: once the read says when, the page tells it and offers it no more.
   it('tells an escalation by its date, and offers it no more', async () => {
-    open(() =>
+    const { user } = open(() =>
       answer(pickupRequestFixture({ state: 'CONFIRMED', escalated_at: '2026-10-30T08:00:00Z' })),
     );
 
     const status = (await screen.findByText(/It is confirmed/)).closest('p');
     expect(status).toHaveTextContent('Escalated on 30 Oct, 08:00.');
-    expect(screen.queryByRole('button', { name: 'Escalate the request' })).toBeNull();
-    expect(within(actions()).getByRole('heading', { name: 'Escalated' })).toBeVisible();
-    expect(within(actions()).getByText(/recorded once and is not taken back/)).toBeVisible();
-    // Nothing else changes: it can still be rescheduled and cancelled.
-    expect(within(actions()).getByRole('button', { name: 'Reschedule the pickup' })).toBeVisible();
-    expect(within(actions()).getByRole('button', { name: 'Cancel the request' })).toBeVisible();
+    // Nothing else changes: it can still be rescheduled and cancelled, and is offered no escalation.
+    await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Reschedule the pickup' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
   });
 
   it('escalates with a note, on the version read, with a fresh key', async () => {
@@ -1026,7 +1042,7 @@ describe('the senior acts and the escalation', () => {
         answer(pickupRequestFixture({ state: 'CONFIRMED' }), 'v2'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+    await chooseAct(user, 'Escalate the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
     await user.type(
       within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
@@ -1105,7 +1121,7 @@ describe('the senior acts and the escalation', () => {
         SENIOR,
       );
 
-      await screen.findByRole('heading', { name: 'What you can do' });
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
       expect(screen.queryByRole('button', { name: 'Waive the charge' })).toBeNull();
     },
   );
@@ -1212,7 +1228,7 @@ describeInterfaceStates('The pickup request', {
             violations: [{ in: 'body', pointer: '/note', rule: 'pattern' }],
           }),
       });
-      await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+      await chooseAct(user, 'Escalate the request');
       const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
       await user.type(
         within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
@@ -1257,7 +1273,7 @@ describeInterfaceStates('The pickup request', {
       const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER, {
         [`POST /pickup-requests/${REQUEST_ID}/escalate`]: () => refusal(409, 'STATE_CONFLICT'),
       });
-      await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+      await chooseAct(user, 'Escalate the request');
       const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
       await user.type(
         within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),

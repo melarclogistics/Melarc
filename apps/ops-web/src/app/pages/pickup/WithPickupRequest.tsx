@@ -1,11 +1,10 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, type ReactNode } from 'react';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
@@ -113,11 +112,16 @@ export interface WithPickupRequestProps {
   readonly heading: (request: PickupRequestView | undefined) => RequestHeading;
   /** The way back, above the heading. */
   readonly back?: ReactNode;
+  /**
+   * The page draws its own heading and way back once the request is read (a record page: its header is the request's code, the page's one level-one heading). Until then, and for a failure, this
+   * wrapper's heading stands, so that the page has one.
+   */
+  readonly ownsHeading?: boolean;
   /** The body of the page, drawn once the request has been read. It gets the read itself and does not ask again. */
   readonly children: (record: PickupRecord, query: UseQueryResult<PickupRecord>) => ReactNode;
 }
 
-function Reading({ id, heading, back, children }: WithPickupRequestProps) {
+function Reading({ id, heading, back, ownsHeading = false, children }: WithPickupRequestProps) {
   const query = usePickupRequest(id);
 
   if (query.status === 'error') {
@@ -131,11 +135,15 @@ function Reading({ id, heading, back, children }: WithPickupRequestProps) {
   }
 
   const { title, description, documentTitle } = heading(query.data?.request);
+  // The way back is the same element in every state (loading, loaded, failed), so that a press on it while the request is on its way is not lost to the page replacing it.
+  const loaded = ownsHeading && query.status === 'success';
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
       {back === undefined ? <BackToRequests requestId={id} /> : back}
-      <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+      {loaded ? null : (
+        <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+      )}
       {query.status === 'success' ? (
         children(query.data, query)
       ) : (
