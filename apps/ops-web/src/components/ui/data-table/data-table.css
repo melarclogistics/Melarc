@@ -432,9 +432,13 @@
 
 /* The one button of the card holds its facts; no height of its own is kept beyond them. */
 .ui-data-table__card .ui-data-table__open {
+  display: block;
   align-items: flex-start;
   min-height: 0;
+  min-width: 0;
   padding: 0;
+  /* A button does not wrap its words by itself (the engine's own style is `pre`): the words of a card are a block of text, and a long sender or address wraps in it. */
+  white-space: normal;
 }
 
 /* A card has no hover to show the act: it is always there, above the stretched button like the other controls. */

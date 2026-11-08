@@ -83,9 +83,45 @@ function open(
 const listRequests = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-requests');
 const queryOf = () => new URL(listRequests().at(-1)?.url ?? 'http://x/').searchParams;
-const queueTable = () => screen.findByRole('table', { name: 'Pickup requests' });
+const queueTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', { name: 'Pickup requests' });
+  // The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited.
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
 const backLink = () => screen.findByRole('link', { name: 'Back to pickup requests' });
-const stateSelect = () => screen.getByRole('combobox', { name: 'State' });
+const viewTab = (name: string) => screen.getByRole('tab', { name });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string | RegExp): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+const filterButton = () => screen.getByRole('button', { name: 'Filter' });
+const openButton = (code: string) => new RegExp(`^Open ${code}, `);
+
+/**
+ * The officer opens a request from its row, in the panel beside the queue, and goes to its own page by the panel's "Open full page": that click is what leaves a place. A test that
+ * must not go (it stops the navigation) says so.
+ */
+async function openFullPage(user: UserEvent, code = 'ACC-PR-9WXH4T', stop = false): Promise<void> {
+  await user.click(within(await queueTable()).getByRole('button', { name: openButton(code) }));
+  const panel = await screen.findByRole('dialog', { name: code });
+  const link = await within(panel).findByRole('link', { name: 'Open full page' });
+  if (stop) {
+    link.addEventListener(
+      'click',
+      (event) => {
+        event.preventDefault();
+      },
+      { once: true },
+    );
+  }
+  await user.click(link);
+}
 
 type View = ReturnType<typeof open>;
 
@@ -94,7 +130,7 @@ async function toTheRecord(view: View = open()): Promise<View> {
   await queueTable();
   await view.user.click(screen.getByRole('button', { name: 'Next page' }));
   await screen.findByText(/on page 2/);
-  await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+  await openFullPage(view.user);
   await backLink();
   return view;
 }
@@ -113,9 +149,11 @@ describe('the queue, coming back from a request: the browser’s Back', () => {
     expect(await screen.findByText(/on page 2/)).toBeVisible();
     expect(queryOf().get('page_token')).toBe('next-1');
     expect(queryOf().get('state')).toBe('PENDING');
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('PENDING');
+    expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
     expect(view.router.state.location.pathname + view.router.state.location.search).toBe(QUEUE);
-    expect(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' })).toBeVisible();
+    expect(
+      within(await queueTable()).getByRole('button', { name: openButton('ACC-PR-9WXH4T') }),
+    ).toBeVisible();
   });
 
   it('keeps the cursor out of the address, the storage and the cookies', async () => {
@@ -148,8 +186,8 @@ describe('the queue, coming back from a request: the browser’s Back', () => {
 
     await goBack(view);
 
-    expect(await screen.findByText('Loading the pickup requests…')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(await screen.findByText('Loading pickup requests')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(screen.queryByText('ACC-PR-9WXH4T')).toBeNull();
     expect(screen.queryByText('ACC-PR-7KQ2MZ')).toBeNull();
     expect(queryOf().get('page_token')).toBe('next-1');
@@ -171,10 +209,10 @@ describe('the queue, coming back from a request: the browser’s Back', () => {
 
     await goBack(view);
 
-    expect(await screen.findByText('Checking this page…')).toBeVisible();
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(await screen.findByText('Checking…')).toBeVisible();
+    expect(screen.queryByText(/Updated/)).toBeNull();
     await reads.answer(page([late]));
-    expect(await screen.findByText(/^Last checked /)).toBeVisible();
+    expect(await screen.findByText(/^Updated /)).toBeVisible();
   });
 });
 
@@ -202,15 +240,17 @@ describe('the queue, coming back from a request: the link back', () => {
   // matches the address, so nothing of it is restored).
   it('names the late bookings in the link back, and brings the officer to them, in their words, with focus on the request', async () => {
     const view = open(() => page([lateBooking]), LATE_QUEUE);
-    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await openFullPage(view.user);
 
     expect(await backLink()).toHaveAttribute('href', LATE_QUEUE);
     await view.user.click(await backLink());
 
-    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    const link = within(await queueTable()).getByRole('button', {
+      name: openButton('ACC-PR-9WXH4T'),
+    });
     expect(queryOf().get('state')).toBe('CONFIRMED');
     expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
-    expect(screen.getByText('Only late bookings waiting for a cut-off decision.')).toBeVisible();
+    expect(screen.getByText('Only late bookings waiting for a cut-off decision')).toBeVisible();
     expect(view.router.state.location.pathname + view.router.state.location.search).toBe(
       LATE_QUEUE,
     );
@@ -221,15 +261,17 @@ describe('the queue, coming back from a request: the link back', () => {
 
   it('brings the late bookings back by the browser’s Back too, read again, with focus on the request', async () => {
     const view = open(() => page([lateBooking]), LATE_QUEUE);
-    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await openFullPage(view.user);
     await backLink();
 
     await goBack(view);
 
-    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    const link = within(await queueTable()).getByRole('button', {
+      name: openButton('ACC-PR-9WXH4T'),
+    });
     expect(listRequests()).toHaveLength(2);
     expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
-    expect(screen.getByText('Only late bookings waiting for a cut-off decision.')).toBeVisible();
+    expect(screen.getByText('Only late bookings waiting for a cut-off decision')).toBeVisible();
     await waitFor(() => {
       expect(link).toHaveFocus();
     });
@@ -242,7 +284,9 @@ describe('the queue, coming back from a request: focus and position', () => {
 
     await goBack(view);
 
-    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    const link = within(await queueTable()).getByRole('button', {
+      name: openButton('ACC-PR-9WXH4T'),
+    });
     await waitFor(() => {
       expect(link).toHaveFocus();
     });
@@ -260,11 +304,11 @@ describe('the queue, coming back from a request: focus and position', () => {
 
     await goBack(view);
 
-    const results = (await queueTable()).closest('.ui-queue-table__results');
+    const results = (await queueTable()).closest('.ui-data-table__scroller');
     await waitFor(() => {
       expect(results).toHaveFocus();
     });
-    expect(screen.queryByRole('link', { name: 'ACC-PR-9WXH4T' })).toBeNull();
+    expect(screen.queryByRole('button', { name: openButton('ACC-PR-9WXH4T') })).toBeNull();
   });
 
   // Break caught: a page that comes back with nothing to draw, or with a failure, left with focus on the heading above it.
@@ -288,7 +332,8 @@ describe('the queue, coming back from a request: focus and position', () => {
 
       await goBack(view);
 
-      const region = (await message()).closest('.ui-read-state');
+      await message();
+      const region = (await queueTable()).closest('.ui-data-table__scroller');
       await waitFor(() => {
         expect(region).toHaveFocus();
       });
@@ -303,18 +348,18 @@ describe('the queue, coming back from a request: focus and position', () => {
     );
     await toTheRecord(view);
     await goBack(view);
-    await screen.findByText('Loading the pickup requests…');
-    const state = stateSelect();
+    await screen.findByText('Loading pickup requests');
+    const filter = filterButton();
 
     act(() => {
-      state.focus();
+      filter.focus();
     });
     await reads.answer(page([late]));
     await queueTable();
 
-    expect(state).toHaveFocus();
+    expect(filter).toHaveFocus();
     expect(
-      within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }),
+      within(await queueTable()).getByRole('button', { name: openButton('ACC-PR-9WXH4T') }),
     ).not.toHaveFocus();
   });
 
@@ -326,19 +371,20 @@ describe('the queue, coming back from a request: focus and position', () => {
     );
     await toTheRecord(view);
     await goBack(view);
-    await screen.findByText('Loading the pickup requests…');
+    await screen.findByText('Loading pickup requests');
     scrollTo.mockClear();
     act(() => {
-      stateSelect().focus();
+      filterButton().focus();
     });
 
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
+    await view.user.click(viewTab('Confirmed'));
     await reads.answer(page([late]));
     await reads.answer(page([pending]));
     await queueTable();
 
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(stateSelect()).toHaveFocus();
+    // Focus is on the control the officer pressed (the view they chose), and not given back to anything.
+    expect(viewTab('Confirmed')).toHaveFocus();
   });
 
   it('restores the position on the page after the rows are drawn, and not before', async () => {
@@ -350,12 +396,12 @@ describe('the queue, coming back from a request: focus and position', () => {
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
     vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640);
-    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await openFullPage(view.user);
     await backLink();
     scrollTo.mockClear();
 
     await goBack(view);
-    await screen.findByText('Loading the pickup requests…');
+    await screen.findByText('Loading pickup requests');
     expect(scrollTo).not.toHaveBeenCalled();
     await reads.answer(page([late]));
     await queueTable();
@@ -430,15 +476,7 @@ describe('the queue, coming to it any other way', () => {
  * place left, and what they do next shows whether it is let go of.
  */
 async function leaveWithoutGoing(user: UserEvent): Promise<void> {
-  const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
-  link.addEventListener(
-    'click',
-    (event) => {
-      event.preventDefault();
-    },
-    { once: true },
-  );
-  await user.click(link);
+  await openFullPage(user, 'ACC-PR-9WXH4T', true);
 }
 
 describe('the queue: a place left, and then the filters or the page change', () => {
@@ -450,8 +488,8 @@ describe('the queue: a place left, and then the filters or the page change', () 
     await leaveWithoutGoing(view.user);
     expect(view.router.state.location.pathname).toBe('/pickup-requests');
 
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
-    await view.user.selectOptions(stateSelect(), 'PENDING');
+    await view.user.click(viewTab('Confirmed'));
+    await view.user.click(viewTab('Waiting for confirmation'));
     await queueTable();
     await act(async () => {
       await view.router.navigate(RECORD_PATH);
@@ -475,7 +513,7 @@ describe('the queue: a place left, and then the filters or the page change', () 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
     await leaveWithoutGoing(view.user);
-    await view.user.click(screen.getByRole('button', { name: 'Refresh page' }));
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
     await view.user.click(await screen.findByRole('button', { name: 'Back to first page' }));
     await queueTable();
 
@@ -507,7 +545,7 @@ describe('the queue: a later page that holds nothing', () => {
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'No pickup requests yet' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'No pickup requests match' })).toBeNull();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     // It does not go looking for the earlier pages on its own.
     expect(listRequests()).toHaveLength(2);
   });
@@ -521,10 +559,10 @@ describe('the queue: a later page that holds nothing', () => {
 
     const table = await queueTable();
     expect(queryOf().has('page_token')).toBe(false);
-    expect(within(table).getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+    expect(within(table).getByRole('button', { name: openButton('ACC-PR-7KQ2MZ') })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'No requests on this page' })).toBeNull();
     await waitFor(() => {
-      expect(table.closest('.ui-queue-table__results')).toHaveFocus();
+      expect(table.closest('.ui-data-table__scroller')).toHaveFocus();
     });
   });
 
@@ -536,7 +574,7 @@ describe('the queue: a later page that holds nothing', () => {
 
     const message = await screen.findByRole('heading', { name: 'No requests on this page' });
     await waitFor(() => {
-      expect(message.closest('.ui-read-state')).toHaveFocus();
+      expect(message.closest('.ui-data-table__scroller')).toHaveFocus();
     });
   });
 
@@ -550,9 +588,11 @@ describe('the queue: a later page that holds nothing', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    const failure = await screen.findByRole('alert');
+    await alertSaying('The pickup requests could not be loaded.');
     await waitFor(() => {
-      expect(failure.closest('.ui-read-state')).toHaveFocus();
+      expect(
+        screen.getByRole('table', { name: 'Pickup requests' }).closest('.ui-data-table__scroller'),
+      ).toHaveFocus();
     });
   });
 
@@ -565,13 +605,14 @@ describe('the queue: a later page that holds nothing', () => {
     await screen.findByRole('heading', { name: 'No requests on this page' });
 
     act(() => {
-      stateSelect().focus();
+      filterButton().focus();
     });
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
+    await view.user.click(viewTab('Confirmed'));
     const table = await queueTable();
 
-    expect(stateSelect()).toHaveFocus();
-    expect(table.closest('.ui-queue-table__results')).not.toHaveFocus();
+    // Focus is on the control the officer pressed (the view they chose), and not given back to anything.
+    expect(viewTab('Confirmed')).toHaveFocus();
+    expect(table.closest('.ui-data-table__scroller')).not.toHaveFocus();
   });
 
   it('says the same of a filtered queue, and keeps the filters', async () => {
@@ -582,7 +623,7 @@ describe('the queue: a later page that holds nothing', () => {
 
     expect(await screen.findByRole('heading', { name: 'No requests on this page' })).toBeVisible();
     expect(view.router.state.location.search).toBe('?state=PENDING&date=2026-11-03');
-    expect(stateSelect()).toHaveValue('PENDING');
+    expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('is what the officer finds on coming back to a page that has emptied since', async () => {
@@ -624,13 +665,13 @@ describe('the queue: a page the server will not open', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByText(/That page of the queue could not be opened/)).toBeVisible();
+    await alertSaying(/That page of the queue could not be opened/);
     expect(screen.queryByText(/That filter was not accepted/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(view.router.state.location.search).toBe('?state=PENDING');
-    expect(stateSelect()).toHaveValue('PENDING');
+    expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
     expect(document.body.textContent).not.toMatch(/Diagnostic text that must never reach a screen/);
   });
 
@@ -656,11 +697,9 @@ describe('the queue: a page the server will not open', () => {
       '/pickup-requests?date=2026-11-03',
     );
 
-    expect(
-      await screen.findByText(
-        'That filter was not accepted. Choose a state from the list and a whole date.',
-      ),
-    ).toBeVisible();
+    await alertSaying(
+      'That filter was not accepted. Choose a state from the list and a whole date.',
+    );
     expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
   });
 
@@ -678,7 +717,7 @@ describe('the queue: a page the server will not open', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByText(/That page of the queue could not be opened/)).toBeVisible();
+    await alertSaying(/That page of the queue could not be opened/);
     expect(screen.queryByText(/That filter was not accepted/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
   });
@@ -693,11 +732,9 @@ describe('the queue: a page the server will not open', () => {
       '/pickup-requests?date=2026-11-03',
     );
 
-    expect(
-      await screen.findByText(
-        'That filter was not accepted. Choose a state from the list and a whole date.',
-      ),
-    ).toBeVisible();
+    await alertSaying(
+      'That filter was not accepted. Choose a state from the list and a whole date.',
+    );
     expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
   });
 
@@ -712,7 +749,7 @@ describe('the queue: a page the server will not open', () => {
 
     await goBack(view);
 
-    expect(await screen.findByText(/That page of the queue could not be opened/)).toBeVisible();
+    await alertSaying(/That page of the queue could not be opened/);
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
     expect(view.router.state.location.search).toBe('?state=PENDING');
   });
@@ -734,7 +771,7 @@ describe('the queue, coming back from a request that is not there', () => {
     await queueTable();
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
-    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await openFullPage(view.user);
     await notFound();
     return view;
   }
@@ -753,7 +790,9 @@ describe('the queue, coming back from a request that is not there', () => {
     expect(queryOf().get('page_token')).toBe('next-1');
     expect(queryOf().get('state')).toBe('PENDING');
     expect(view.router.state.location.pathname + view.router.state.location.search).toBe(QUEUE);
-    const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+    const link = within(await queueTable()).getByRole('button', {
+      name: openButton('ACC-PR-9WXH4T'),
+    });
     await waitFor(() => {
       expect(link).toHaveFocus();
     });
@@ -818,7 +857,7 @@ describe('the queue, coming back from a request the officer may not read', () =>
     await queueTable();
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
-    await view.user.click(within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' }));
+    await openFullPage(view.user);
     await screen.findByRole('heading', { level: 1, name: heading });
     return view;
   }
@@ -838,7 +877,9 @@ describe('the queue, coming back from a request the officer may not read', () =>
       expect(queryOf().get('page_token')).toBe('next-1');
       expect(queryOf().get('state')).toBe('PENDING');
       expect(view.router.state.location.pathname + view.router.state.location.search).toBe(QUEUE);
-      const link = within(await queueTable()).getByRole('link', { name: 'ACC-PR-9WXH4T' });
+      const link = within(await queueTable()).getByRole('button', {
+        name: openButton('ACC-PR-9WXH4T'),
+      });
       await waitFor(() => {
         expect(link).toHaveFocus();
       });

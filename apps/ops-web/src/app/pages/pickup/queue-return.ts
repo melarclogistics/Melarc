@@ -10,10 +10,22 @@ import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
 export interface RecordLinks {
   readonly selector: string;
   readonly key: string;
+  /**
+   * Where the record's id is kept when it is not on the control itself: the queue workspace's table marks its **row** (`data-row-id`) and draws the button that opens it inside,
+   * so the id is read from the row. Left out, the id is `dataset[key]` of the control.
+   */
+  readonly idOf?: (control: HTMLElement) => string | undefined;
 }
 
 /** The link of a request, in the queue's table and in its cards (`pickup-queue-view.tsx` puts the request's id on each). */
 export const REQUEST_LINKS: RecordLinks = { selector: 'a[data-request-id]', key: 'requestId' };
+
+/** The button that opens a request in the queue workspace's table or card (`DataTable` puts the request's id on the row or the card that holds it). */
+export const REQUEST_ROW_BUTTONS: RecordLinks = {
+  selector: 'button.ui-data-table__open',
+  key: 'rowId',
+  idOf: (control) => control.closest('[data-row-id]')?.getAttribute('data-row-id') ?? undefined,
+};
 
 /** The link of a manifest, in the manifest list's table and in its cards (`ManifestListPage.tsx` puts the manifest's id on each). */
 export const MANIFEST_LINKS: RecordLinks = { selector: 'a[data-manifest-id]', key: 'manifestId' };
@@ -38,7 +50,7 @@ export function requestOfClick(
   const link = event.target.closest<HTMLAnchorElement>(links.selector);
   if (link === null) return undefined;
   if (link.target !== '' && link.target !== '_self') return undefined;
-  return link.dataset[links.key];
+  return links.idOf === undefined ? link.dataset[links.key] : links.idOf(link);
 }
 
 /**
@@ -109,7 +121,10 @@ export function restorePlace(
   const wanted = place.requestId.toLowerCase();
   const link = Array.from(root.querySelectorAll<HTMLElement>(links.selector)).find(
     (candidate) =>
-      candidate.dataset[links.key]?.toLowerCase() === wanted && isShown(candidate, root),
+      (links.idOf === undefined
+        ? candidate.dataset[links.key]
+        : links.idOf(candidate)
+      )?.toLowerCase() === wanted && isShown(candidate, root),
   );
   if (link !== undefined) {
     link.focus({ preventScroll: true });
@@ -117,7 +132,7 @@ export function restorePlace(
     return;
   }
   (
-    root.querySelector<HTMLElement>('.ui-queue-table__results') ??
+    root.querySelector<HTMLElement>('.ui-queue-table__results, .ui-data-table__scroller') ??
     root.querySelector<HTMLElement>('.ui-read-state')
   )?.focus({ preventScroll: true });
 }

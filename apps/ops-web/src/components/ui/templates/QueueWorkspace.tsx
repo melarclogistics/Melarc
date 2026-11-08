@@ -21,6 +21,8 @@ export type QueueResult<Item> =
       /** What went wrong, and what to do, in the page's words. */
       readonly message: string;
       readonly onRetry?: () => void;
+      /** What the way out says. Default "Retry"; a failure that asking again would not mend names the way that does ("Back to first page"). */
+      readonly retryLabel?: string;
     }
   | {
       readonly status: 'ready';
@@ -217,6 +219,7 @@ export function QueueWorkspace<Item>({
             error: {
               message: result.message,
               ...(result.onRetry === undefined ? {} : { onRetry: result.onRetry }),
+              ...(result.retryLabel === undefined ? {} : { retryLabel: result.retryLabel }),
             },
           }
         : {})}

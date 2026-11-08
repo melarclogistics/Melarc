@@ -24,7 +24,6 @@ import type {
   LocationView,
   OnePackageExceptionView,
   PickupRequestView,
-  PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import type { PickupRecord } from '../../../platform/pickup/use-pickup-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -46,16 +45,10 @@ import {
   PAYER_LABELS,
   PICKUP_STATE_MAP,
   serviceDateText,
+  STATE_SENTENCES,
 } from './pickup-presentation';
 import { WithPickupRequest } from './WithPickupRequest';
 import './pickup-pages.css';
-
-const STATE_SENTENCES: Readonly<Record<PickupState, string>> = {
-  PENDING: 'It waits for an Ops officer to confirm it.',
-  CONFIRMED: 'It is confirmed and waits in the pool for a pickup run.',
-  DECLINED: 'It was declined.',
-  CANCELLED: 'It was cancelled. Its record and its history stay.',
-};
 
 type Act = 'confirm' | 'cutoff' | 'cancel' | 'reschedule' | 'extend' | 'escalate' | 'waive';
 

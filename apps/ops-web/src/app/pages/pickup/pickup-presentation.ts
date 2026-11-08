@@ -31,6 +31,14 @@ export const PICKUP_STATE_ORDER: readonly PickupState[] = [
   'CANCELLED',
 ];
 
+/** One sentence of where a request stands, for the page of a request and for the panel beside the queue. */
+export const STATE_SENTENCES: Readonly<Record<PickupState, string>> = {
+  PENDING: 'It waits for an Ops officer to confirm it.',
+  CONFIRMED: 'It is confirmed and waits in the pool for a pickup run.',
+  DECLINED: 'It was declined.',
+  CANCELLED: 'It was cancelled. Its record and its history stay.',
+};
+
 export const INTENT_LABELS: Readonly<Record<PickupIntent, string>> = {
   OWN_PACKAGES: 'A vendor’s own packages',
   COLLECT_FOR_VENDOR: 'A collection for a vendor',
@@ -152,4 +160,14 @@ export function cancelledByText(request: PickupRequestView): string | undefined 
   if (request.cancelled_by_actor_type === 'VENDOR') return 'Cancelled by the vendor.';
   if (request.cancelled_by_actor_type === 'OPS') return 'Cancelled by Melarc Ops.';
   return undefined;
+}
+
+/**
+ * Whether the screen offers to confirm a request: it is waiting, and it is not a single package whose exception is not approved (the server refuses that one, `PICKUP_MINIMUM_NOT_MET`, so
+ * the act is not drawn). Presentation only: the server decides, whatever a screen offers.
+ */
+export function canBeConfirmed(request: PickupRequestView): boolean {
+  return (
+    request.state === 'PENDING' && !(isSinglePackage(request) && !hasApprovedException(request))
+  );
 }

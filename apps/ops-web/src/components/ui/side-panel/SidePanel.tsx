@@ -76,7 +76,8 @@ export function SidePanel({
         opener.current = document.activeElement;
       }
       wasOpen.current = true;
-      heading.current?.focus();
+      // Without a scroll: the panel is in view where it stands (it is sticky beside the list), and moving the page to the heading would shift the list under the person who opened it.
+      heading.current?.focus({ preventScroll: true });
       return;
     }
     if (wasOpen.current) {

@@ -130,23 +130,24 @@ export interface PickupRecord {
   readonly etag: string;
 }
 
-/** `getPickupRequest`. A request with no version cannot be acted on, and another request than the one asked for is not the answer. */
+/** `getPickupRequest`, read once: a request with no version cannot be acted on, and another request than the one asked for is not the answer. */
+export async function readPickupRequest(client: ApiClient, id: string): Promise<PickupRecord> {
+  const answer = answerOf(await client.GET('/pickup-requests/{id}', { params: { path: { id } } }));
+  const request = parsePickupRequest(answer.data);
+  if (request?.id.toLowerCase() !== id.toLowerCase() || answer.etag === undefined) {
+    throw unexpectedResponse(answer.status);
+  }
+  return { request, etag: answer.etag };
+}
+
+/** `getPickupRequest` as a read of a screen. */
 export function usePickupRequest(id: string, enabled = true): UseQueryResult<PickupRecord> {
   const client = useApiClient();
   return useQuery({
     queryKey: ['pickup-requests', 'request', id],
     enabled,
     ...NOT_KEPT,
-    queryFn: async () => {
-      const answer = answerOf(
-        await client.GET('/pickup-requests/{id}', { params: { path: { id } } }),
-      );
-      const request = parsePickupRequest(answer.data);
-      if (request?.id.toLowerCase() !== id.toLowerCase() || answer.etag === undefined) {
-        throw unexpectedResponse(answer.status);
-      }
-      return { request, etag: answer.etag };
-    },
+    queryFn: () => readPickupRequest(client, id),
   });
 }
 

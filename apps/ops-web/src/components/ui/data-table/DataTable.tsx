@@ -151,7 +151,12 @@ export interface DataTableProps<Item> {
   /** What a screen reader hears while it loads: "Loading pickup requests". */
   readonly loadingLabel?: string;
   /** The failure in the page's words (mapped from the machine code, never the diagnostic message), with the way to try again. */
-  readonly error?: { readonly message: string; readonly onRetry?: () => void };
+  readonly error?: {
+    readonly message: string;
+    readonly onRetry?: () => void;
+    /** What the way out says. Default "Retry"; a failure that asking again would not mend names the way that does ("Back to first page"). */
+    readonly retryLabel?: string;
+  };
   /** What is drawn when a read succeeded and there are no rows: the page's EmptyState, which tells none from filtered to nothing. */
   readonly emptyState?: ReactNode;
   /** The rows are the last that were read, and a newer read failed or is overdue: the page's words and the way to read again. The rows stay. */
@@ -777,7 +782,7 @@ export function DataTable<Item>({
                       <p aria-hidden="true">{error?.message ?? ''}</p>
                       {error?.onRetry === undefined ? null : (
                         <Button type="button" variant="secondary" size="sm" onClick={error.onRetry}>
-                          Retry
+                          {error.retryLabel ?? 'Retry'}
                         </Button>
                       )}
                     </div>

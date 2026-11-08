@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 
-import { Link } from '../../../components/ui/link/Link';
+import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import type { TableColumn } from '../../../components/ui/table/Table';
 import type { PickupRequestView, PickupState } from '../../../platform/pickup/pickup-shape';
 import { hubNameOf } from '../staff/staff-presentation';
 import {
+  canBeConfirmed,
   hasApprovedException,
   hasRequestedException,
   INTENT_LABELS,
@@ -58,6 +59,8 @@ export interface QueueFacts {
   readonly packages: string;
   readonly bookedAs: string;
   readonly needs: string;
+  /** The screen offers to confirm it (waiting, and not a single package without its approved exception). The server decides whatever is offered. */
+  readonly confirmable: boolean;
 }
 
 export function queueFactsOf(
@@ -77,6 +80,7 @@ export function queueFactsOf(
     bookedAs:
       request.pickup_intent === undefined ? NOT_RECORDED : INTENT_LABELS[request.pickup_intent],
     needs: attentionOf(request),
+    confirmable: canBeConfirmed(request),
   };
 }
 
@@ -116,43 +120,42 @@ const Needs = ({ text }: { readonly text: string }) =>
   text === '' ? <Dash means={NO_NOTE} /> : <>{text}</>;
 
 /**
- * The nine facts of the queue in six columns, grouped by what they mean: who and which request, where it stands, when, where and for which hub,
- * what is being collected and as what, and what it needs. The code is the row's header and its one link; the row itself is not a link.
+ * The nine facts of the queue in six columns, grouped by what they mean: who and which request, where it stands, when, where and for which hub, what is being
+ * collected and as what, and what it needs. The code over the sender is the row's header, and **the button that opens the request in the panel beside the queue**
+ * (the table draws it, stretched over the row); the row is no link. When the table's own room narrows (a panel beside it) the columns of lesser weight go, the packages first (under 64rem of the table's own room),
+ * then the date and the address (under 48rem), and the state and what a request needs stay.
  */
-export const QUEUE_COLUMNS: readonly TableColumn<QueueFacts>[] = [
+export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
   {
-    key: 'request',
+    id: 'request',
     header: 'Request / sender',
     rowHeader: true,
-    cell: (row) => (
-      <span className="pickup-lines">
-        <span className="pickup-nowrap">
-          <Link to={row.href} data-request-id={row.id}>
-            {row.code}
-          </Link>
-        </span>
-        <span className="pickup-support">{row.sender}</span>
-      </span>
-    ),
+    cell: (row) => <RowTitle code={row.code} name={row.sender} />,
   },
-  { key: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
+  { id: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
   {
-    key: 'date',
+    id: 'date',
     header: 'Service date',
+    priority: 2,
     cell: (row) => <span className="pickup-nowrap">{row.date}</span>,
   },
   {
-    key: 'where',
+    id: 'where',
     header: 'Pickup address / hub',
+    priority: 2,
     cell: (row) => <Pair first={row.address} second={row.hub} />,
   },
   {
-    key: 'packages',
+    id: 'packages',
     header: 'Packages / booking type',
+    priority: 3,
     cell: (row) => <Pair first={row.packages} second={row.bookedAs} />,
   },
-  { key: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
+  { id: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
 ];
+
+/** What opens a request, for the pointer and for assistive technology: its code and its sender. */
+export const openLabelOf = (row: QueueFacts): string => `Open ${row.code}, ${row.sender}`;
 
 function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
@@ -164,18 +167,16 @@ function Fact({ label, children }: { readonly label: string; readonly children: 
 }
 
 /**
- * A request as a card, for a room too narrow for the columns: the code (the one link) with the state, the sender, and then the facts in the
- * order a person reads them, each under the name of its column. The code is a heading, so that a screen reader can move from request to request.
+ * A request as a card, for a room too narrow for the columns: the code with the state, the sender, and then the facts in the order a person reads them, each under the name of
+ * its column. It holds **no control**: the table draws the card's one hit target (the button that opens the request, stretched over the card).
  */
 export function QueueCard({ facts }: { readonly facts: QueueFacts }) {
   return (
     <>
       <div className="pickup-card__head">
-        <h2 className="pickup-card__title">
-          <Link to={facts.href} data-request-id={facts.id}>
-            {facts.code}
-          </Link>
-        </h2>
+        <span className="pickup-card__title">
+          <OperationalCode>{facts.code}</OperationalCode>
+        </span>
         <State state={facts.state} />
       </div>
       <p className="pickup-card__sender pickup-support">{facts.sender}</p>
