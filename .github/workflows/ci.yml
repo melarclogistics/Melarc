@@ -152,7 +152,7 @@ jobs:
       # The attested enrolment (S0.57) is tested against the real verifier service, which these tests build from source and start: the JDK comes
       # from .java-version (Temurin), as in the verifier job, and Gradle from the wrapper, whose distribution is held to a checksum.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
@@ -492,7 +492,7 @@ jobs:
       # The JDK comes from .java-version (Temurin); do not pin a version here. Gradle comes from the wrapper, whose distribution is
       # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
