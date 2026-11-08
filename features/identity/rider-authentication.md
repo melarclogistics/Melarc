@@ -53,8 +53,8 @@ The device binding is the part that matters. A rider's session is not merely an 
 
 **Sign-in is challenge-response:**
 
-1. `requestRiderSignInChallenge` — the server issues a short-lived, **single-use** nonce.
-2. The handset signs the nonce with the registered private key.
+1. `requestRiderSignInChallenge` — the server issues a short-lived, **single-use** challenge (the canonical unpadded base64url of 32 random bytes).
+2. The handset signs `MELARC-RIDER-SIGNIN-V1`, one `0A` byte and the challenge text with the registered private key (ECDSA P-256 with SHA-256; the encodings are [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.6).
 3. `riderSignIn` submits phone, **the six-digit numeric private PIN**, the challenge, the **signature** and the app's `client_root_signal`.
 4. All factors verify, or no session is issued.
 
@@ -66,7 +66,7 @@ The device binding is the part that matters. A rider's session is not merely an 
 
 The contract defined **re-registration and no first registration**, so a rider could become authentication-capable only by an administrator writing rows.
 
-1. Senior Ops initiates in person — `registerRiderDevice`, `staff.device.register`, own hub. The grant, and the **single-use attestation challenge** that lives and dies with it, reach the handset in the QR. **In person, Senior Ops also verifies the operating rule: this handset is the rider's own and is not shared with another rider** (`MSC-DEC-429`, section 4.4).
+1. Senior Ops — or a Platform Admin whose grant of the key reaches the rider's hub (Product decision, 8 October 2026) — initiates in person: `registerRiderDevice`, `staff.device.register`, within the grant's scope. **That wider scope is for initial registration alone**: replacement (`reregisterRiderDevice`, `staff.device.reregister`) stays at the actor's own hub for both tiers, deliberately, and a negative test holds the difference (`AC-SLICE-000-23`, `GBT-GS13`). The grant, and the **single-use attestation challenge** that lives and dies with it, reach the handset in the QR. **In person, Senior Ops also verifies the operating rule: this handset is the rider's own and is not shared with another rider** (`MSC-DEC-429`, section 4.4).
 2. The handset generates a **hardware-backed signing key** in the Android Keystore with that challenge, and submits the **public half** and its **Key Attestation chain** (`key_attestation`).
 3. **The server verifies the attestation before it registers anything** — [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §15.2.1. A handset that cannot hold a hardware-backed key is refused with `DEVICE_SECURITY_UNSUPPORTED`, and evidence that fails policy with `DEVICE_INTEGRITY_FAILED`; **either way nothing is created.**
 4. **The rider establishes their own PIN**, privately, on their own device.
@@ -82,7 +82,7 @@ The contract defined **re-registration and no first registration**, so a rider c
 
 **The device is trusted because of what happened at enrolment, and sign-in proves it is still the same device**.
 
-- **At enrolment and replacement** the server verifies the handset's **Android Key Attestation** before it registers anything: a hardware-backed, non-exportable signing key at `TrustedEnvironment` or `StrongBox` (StrongBox is not required); the Melarc Rider package and an approved signing-certificate digest; an acceptable lock and boot state; the single-use challenge issued with the grant; and the attested key being exactly the key registered. The policy is [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §15.2.1.
+- **At enrolment and replacement** the server verifies the handset's **Android Key Attestation** before it registers anything: a hardware-backed, non-exportable signing key at `TrustedEnvironment` or `StrongBox` (StrongBox is not required); the Melarc Rider package and an approved signing-certificate digest; an acceptable lock and boot state; the single-use challenge issued with the grant; and the attested key being exactly the key registered. The policy is [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §15.2.1, evaluated by the private verifier service of §15.2.3.
 - **At sign-in nothing is attested again.** The server decides on the rider's authentication material, the current device record and its status, the registered public key, a signature over a fresh single-use challenge, and the fact that the registration was accepted through attestation. **No third-party service is called**, so a sign-in never waits on one.
 - **`client_root_signal` is recorded and never decides.** The app sends `NOT_DETECTED`, `DETECTED` or `UNKNOWN`; `DETECTED` is recorded as a risk signal and does not by itself block sign-in, `NOT_DETECTED` is not evidence of trust, and `UNKNOWN` is valid. It cannot permit or deny authentication.
 - **Nothing after sign-in asks anyone about the device**, so no outage can strand a rider who is carrying parcels, and no live session is invalidated because attestation infrastructure is unreachable.
@@ -106,7 +106,7 @@ The contract defined **re-registration and no first registration**, so a rider c
 ### 5.1 Normal path
 
 0. **The handset already holds a registered keypair.** Enrolment happened in person: Senior Ops called `registerRiderDevice`, the Ops Portal displayed a **QR code**, and the rider scanned it with this handset, which generated the keypair and took the PIN privately. **That QR is the transport, and until 27 August it did not exist** — the initiation response returned an expiry and no credential while completion required one, so no rider could reach this step at all.
-1. **The handset requests a challenge** — `requestRiderSignInChallenge` returns a short-lived single-use nonce. It lives for `authentication_challenge_ttl_minutes` (**5**, `MSC-DEC-268`), and a **failed** signature consumes it just as a successful one does.
+1. **The handset requests a challenge** — `requestRiderSignInChallenge` returns a short-lived single-use challenge. It lives for `authentication_challenge_ttl_minutes` (**5**, `MSC-DEC-268`), and a **failed** signature consumes it just as a successful one does.
 2. **Rider submits phone, PIN, the challenge, the signature and `client_root_signal`.** All five, always. **The rider types two of them; the handset produces the other three.**
 3. **The server decides the factors in a fixed order** (§5.5): the challenge, then the signature against the registered public key, then the PIN. It checks that the challenge is fresh and unused and the device `ACTIVE`, and **records `client_root_signal` without judging it**.
 4. **Any existing live session for this rider is terminated with `REPLACED_BY_NEW_SESSION`**. The displaced handset receives a plain **`401 SESSION_INVALID`** on its next call. **It is never told `SESSION_SUPERSEDED`** — that code exists so a vendor colleague can tell displacement from expiry on a shared credential, and a rider replacing their own session on their own registered handset has nobody to distinguish from. R1.1 reported this gap rather than inventing a value; `MSC-DEC-271` supplies it.
@@ -278,7 +278,7 @@ When Ops Staff or Senior Ops at the rider's hub calls revokeRiderDevice, or Seni
 Then the device is REVOKED, or the session is terminated with ADMIN_REVOKED, in the same transaction as the call,
 And the rider's next API call returns 401 SESSION_INVALID, with no interval in which the old token still works,
 And no cache or blocklist is consulted: the session record itself carries the decision,
-And a revocation made with an empty reason_code is refused with REASON_REQUIRED, and one with an unknown, retired or foreign-domain reason_code with REASON_NOT_ACTIVE, and nothing changes,
+And a revocation made with an empty reason_code is refused with REASON_REQUIRED, and one with an unknown, retired, foreign-domain or not-permitted-for-this-operation reason_code with REASON_NOT_ACTIVE, and nothing changes,
 And no later sign-in succeeds from the revoked handset.
 ```
 
@@ -328,7 +328,8 @@ Given a Senior Ops user performing in-person first device registration,
 When the enrolment grant is issued,
 Then the response contains no PIN field, and the grant appears only inside the no-store enrolment URI that the officer's screen turns into a QR code,
 And the rider establishes the PIN on their own handset,
-And the request schema for enrolment accepts no private key.
+And the request schema for enrolment accepts no private key,
+And the QR payload is exactly the 127-character version-1 form, a parser given the published vectors accepts the valid one and refuses every other without a network call, and the rendered code decodes, by an independent decoder, to the complete payload.
 ```
 
 **Governs:** `MSC-DEC-264` · **Surface:** Melarc Rider · **Test level:** contract
@@ -440,6 +441,8 @@ When that configuration is presented to production startup,
 Then the application refuses to start,
 And the same refusal applies when the accepted attestation roots, the Rider package name or the approved signing-certificate digest set is missing, or the trust-data maximum age is unset or not greater than six hours,
 And the same refusal applies when the credential-message delivery port's capture adapter is selected, or no production delivery adapter is configured,
+And the same refusal applies when the verifier service's endpoint or its caller authentication is missing, a purpose-separated key is absent, a test key adapter is selected, or the in-memory rate limiter is selected,
+And in a deployed environment a verifier that is unreachable, overloaded or past its deadline makes enrolment answer 503 TRUST_DATA_UNAVAILABLE with nothing written and the grant not consumed,
 And no production enrolment path accepts a substitute's outcome or skips verification.
 ```
 
@@ -542,6 +545,7 @@ When the chain is invalid, does not end at an accepted Android attestation root,
 Then it is refused with DEVICE_INTEGRITY_FAILED,
 And no device record is created,
 And the grant is not consumed,
+And an attestation extension that appears in a certificate further toward the leaf than the one nearest the trusted root is never used, so a chain with an appended extension cannot supply the attested key,
 And auth.device.attestation_failed records the outcome and its cause class.
 ```
 
@@ -614,12 +618,14 @@ And the grant is not consumed.
 
 ```text
 Given an enrolment grant and valid attestation evidence,
-And revocation data older than the configured maximum age, or none loaded yet after a start, or accepted roots that cannot be loaded,
+And revocation data older than the configured maximum age, or none loaded yet after a start, or accepted roots that cannot be loaded, or a verifier that is unreachable, overloaded or past its deadline,
 When the handset completes enrolment,
 Then it fails closed with 503 TRUST_DATA_UNAVAILABLE and a Retry-After,
 And the error is neither DEVICE_INTEGRITY_FAILED nor DEVICE_SECURITY_UNSUPPORTED,
+And the response does not say which cause it was, while the log and the unavailability counter carry one of the six closed causes,
+And evidence the verifier evaluated and rejected is still DEVICE_INTEGRITY_FAILED or DEVICE_SECURITY_UNSUPPORTED and is never answered as unavailable,
 And no device record is created and the grant is not consumed, so the same completion succeeds once the data is available,
-And sign-in and every live session are unaffected,
+And sign-in, every live session and every other operation are unaffected and never call the verifier, whether or not it is available,
 And an operational alert is raised.
 ```
 

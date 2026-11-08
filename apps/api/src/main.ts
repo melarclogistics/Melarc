@@ -9,7 +9,12 @@ import { reportConfigProblems } from './platform/config/report-config-problems.j
 import { installFaultHandlers } from './platform/lifecycle/fault-handlers.js';
 import { listenAndMarkReady } from './platform/lifecycle/listen-and-mark-ready.js';
 import { installProcessShutdown } from './platform/lifecycle/shutdown-handlers.js';
+import { ShutdownRegistry } from './platform/lifecycle/shutdown.registry.js';
 import { describeError } from './platform/logging/redaction.js';
+import {
+  applicationMetricsSource,
+  startProcessMetrics,
+} from './platform/metrics/process-metrics.js';
 import { LOGGER } from './platform/platform.tokens.js';
 
 /**
@@ -38,8 +43,26 @@ async function main(): Promise<void> {
 
   installProcessShutdown(app, { logger, shutdown: config.shutdown });
 
-  if (await listenAndMarkReady(app, config.http)) {
-    logger.info({ host: config.http.host, port: config.http.port }, 'api listening');
+  // The private metrics endpoint (S0.68), when configured: a listener of its own, started before the API listens so that a port it
+  // cannot take stops the start, and closed with the other resources on shutdown.
+  const metrics = await startProcessMetrics({
+    endpoint: config.metrics,
+    source: config.metrics === undefined ? undefined : applicationMetricsSource(app),
+    logger,
+  });
+  if (metrics !== undefined) {
+    app.get(ShutdownRegistry).register({ name: 'metrics endpoint', close: () => metrics.close() });
+  }
+
+  try {
+    if (await listenAndMarkReady(app, config.http)) {
+      logger.info({ host: config.http.host, port: config.http.port }, 'api listening');
+    }
+  } catch (error) {
+    // The endpoint is a listener of its own and holds the event loop open. A start that failed after it opened (the API's port taken, an
+    // unsound route inventory) would otherwise never end: no restart policy would fire, and a scraper would see a target that is up.
+    await metrics?.close().catch(() => undefined);
+    throw error;
   }
 }
 

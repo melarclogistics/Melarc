@@ -23,3 +23,11 @@ updates:
     directory: /infrastructure/postgres
     schedule:
       interval: weekly
+
+  # The attestation verifier (S0.55): the Gradle catalogue and the wrapper. Dependabot does not regenerate gradle/verification-metadata.xml,
+  # so a pull request it opens fails CI until someone does (third_party/keyattestation/PROVENANCE.md, "Updating it"), which is the point:
+  # no artifact enters the verifier whose checksum nobody wrote down.
+  - package-ecosystem: gradle
+    directory: /apps/attestation-verifier
+    schedule:
+      interval: weekly

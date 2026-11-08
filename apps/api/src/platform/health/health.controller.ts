@@ -6,9 +6,9 @@ import type { Logger } from 'pino';
 import { LifecycleService } from '../lifecycle/lifecycle.service.js';
 import { LOGGER } from '../platform.tokens.js';
 import { TechnicalEndpoint } from '../routes/access-declaration.js';
-import { ReadinessRegistry } from './readiness.registry.js';
+import { ReadinessRegistry, type NotReadyReason as CheckReason } from './readiness.registry.js';
 
-type NotReadyReason = 'starting' | 'shutting_down' | 'dependency_unavailable';
+type NotReadyReason = 'starting' | 'shutting_down' | CheckReason;
 
 type ReadinessBody = { status: 'ready' } | { status: 'not_ready'; reason: NotReadyReason };
 
@@ -53,9 +53,17 @@ export class HealthController {
     if (this.lifecycle.state === 'starting') return 'starting';
     if (this.lifecycle.state === 'draining') return 'shutting_down';
 
-    const failing = await this.readiness.failing();
+    const failing = await this.readiness.failingChecks();
     if (failing.length === 0) return undefined;
-    this.logger.warn({ checks: failing }, 'readiness check failing');
-    return 'dependency_unavailable';
+    this.logger.warn({ checks: failing.map((each) => each.name) }, 'readiness check failing');
+    // A dependency that does not answer outranks everything: the instance cannot yet tell whether it is seeded or which policy it is
+    // older than, and the remedy of the first (wait) is the one to try first. A database without its reference data outranks a
+    // policy that is superseded, because the policy cannot be read until the seed has run.
+    if (failing.some((each) => each.reason === 'dependency_unavailable')) {
+      return 'dependency_unavailable';
+    }
+    return failing.some((each) => each.reason === 'reference_data_missing')
+      ? 'reference_data_missing'
+      : 'policy_superseded';
   }
 }

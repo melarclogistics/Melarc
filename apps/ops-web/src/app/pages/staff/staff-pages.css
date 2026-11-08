@@ -1,0 +1,140 @@
+/*
+ * The staff screens (S0.44). Layout only: every colour, size and space comes from tokens.css. The components do the rest.
+ */
+
+/* The filters of a list sit in a row and wrap, so nothing is clipped at 320 px or at enlarged text. */
+.staff-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.staff-filters__search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.staff-filters__submit {
+  margin-bottom: var(--space-4);
+}
+
+.staff-count {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.staff-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* A short statement the page makes about a record, set apart from the prose around it by a rule and not by a colour. */
+.staff-note {
+  margin: 0 0 var(--space-4);
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+/*
+ * A record's facts as a term and its value. Stacked, a term sits close to its value and the pairs are set apart; side by side, where there is
+ * room, the terms share a column.
+ */
+.staff-facts {
+  margin: 0 0 var(--space-6);
+}
+
+.staff-facts dt {
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-weight: var(--text-label-md-weight);
+}
+
+.staff-facts dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 40rem) {
+  .staff-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-3) var(--space-6);
+  }
+
+  .staff-facts dt,
+  .staff-facts dd {
+    margin: 0;
+  }
+}
+
+/* What a person can do with a record: a heading, then one block for each thing, each a sentence about it and the controls that do it. */
+.staff-actions {
+  margin-top: var(--space-6);
+}
+
+.staff-actions > h2 {
+  margin-bottom: var(--space-3);
+}
+
+.staff-actions > div + div {
+  margin-top: var(--space-6);
+}
+
+/* A name, an address, a role, a hub: a short line in a table that scrolls sideways rather than breaks in the middle of a word. */
+.staff-nowrap {
+  white-space: nowrap;
+}
+
+.staff-action__text {
+  margin: 0 0 var(--space-3);
+  max-width: 40rem;
+}
+
+.staff-action__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.staff-back {
+  margin: 0 0 var(--space-4);
+}
+
+/* The success that replaces a form: the alert, a sentence about what happens next, and where to go from here. */
+.staff-created {
+  max-width: 40rem;
+}
+
+.staff-created__heading {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+  font-weight: var(--text-heading-sm-weight);
+}
+
+.staff-created .ui-alert {
+  margin-bottom: var(--space-4);
+}
+
+/* The news of an act: it takes focus when it appears, because it replaces what the person was looking at. The global focus rule draws the ring for a keyboard and not for a mouse. */
+.staff-notice {
+  margin-bottom: var(--space-4);
+}
+
+/* The status as a badge and a sentence, on one line where there is room. */
+.staff-status {
+  margin: 0 0 var(--space-4);
+}
+
+/* A mark under a time in a table: it says which of the rows is the session in use, in words and not in colour. */
+.staff-session__mine {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line-height);
+}

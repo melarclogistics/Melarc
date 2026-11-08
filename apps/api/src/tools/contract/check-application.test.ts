@@ -9,6 +9,19 @@ import { listBoundOperations } from '../../platform/contract/contract-operation.
 import { buildOpenApiDocument } from '../../platform/openapi/build-openapi-document.js';
 import { listLiveRoutes } from '../../platform/routes/route-inventory.js';
 import {
+  ACCOUNT_CONTRACT,
+  AnonymousUpdateAccountsModule,
+  ConformingAccountsModule,
+  CookiesForEveryoneAccountsModule,
+  CsrfOmittedAccountsModule,
+  CsrfOptionalAccountsModule,
+  NoCookiesAccountsModule,
+  NoServersAccountsModule,
+  OneCookieAccountsModule,
+  OneServerAccountsModule,
+  RiderOmittedAccountsModule,
+} from '../../test-support/statement-fixtures.js';
+import {
   AnonymousWidgetsModule,
   ConformingGadgetsModule,
   ConformingWidgetsModule,
@@ -17,7 +30,6 @@ import {
   ExplodeDriftGadgetsModule,
   ExtensionDriftWidgetsModule,
   FIXTURE_CONTRACT,
-  FIXTURE_SECURITY_SCHEMES,
   GADGET_CONTRACT,
   HeaderDriftWidgetsModule,
   HiddenWidgetsModule,
@@ -37,7 +49,6 @@ import { checkApplication, TECHNICAL_ROUTES } from './check-application.js';
 import { checkConformance } from './check-conformance.js';
 import type { Finding, FindingCode } from './findings.js';
 import type { JsonObject } from '../../platform/contract/json.js';
-import { JsonEditor } from '../../test-support/json-edit.js';
 import { IMPLEMENTED_OPERATIONS } from './implemented-scope.js';
 
 const REAL_CONTRACT = parse(
@@ -66,9 +77,9 @@ async function start(...extra: Parameters<typeof appWith>): Promise<TestApp> {
 }
 
 /**
- * The fixture application against the fixture contract. The application's own description carries no
- * security scheme definitions yet (the identity slice registers them), so the ones the contract defines
- * are added here: what is under test is each operation's use of them, not their registration.
+ * The fixture application against the fixture contract. The application's own description defines the security
+ * schemes itself (S0.21), and the fixture contract defines the two of them its operations use with the same facts, so
+ * nothing is added here: what is under test is each operation's use of them.
  */
 async function checkFixture(
   module: Parameters<typeof appWith>[0],
@@ -76,13 +87,9 @@ async function checkFixture(
 ) {
   const { app } = await start(module);
   await app.init();
-  const generated = new JsonEditor(
-    JSON.parse(JSON.stringify(buildOpenApiDocument(app))) as JsonObject,
-  );
-  generated.set(['components', 'securitySchemes'], FIXTURE_SECURITY_SCHEMES);
   return checkConformance({
     contract: FIXTURE_CONTRACT,
-    generated: generated.document,
+    generated: JSON.parse(JSON.stringify(buildOpenApiDocument(app))) as JsonObject,
     live: listLiveRoutes(app),
     scope,
     technicalRoutes: TECHNICAL_ROUTES,
@@ -145,6 +152,105 @@ describe('the real application against the real contract', () => {
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
     ]);
+  });
+});
+
+describe('credentials, cookies and hosts stated by the description (S0.21), in a real application', () => {
+  async function checkAccounts(module: Parameters<typeof appWith>[0]) {
+    running = await startTestApp({
+      rootModule: appWith(module),
+      contractSource: { load: () => ACCOUNT_CONTRACT },
+    });
+    const { app } = running;
+    await app.init();
+    return checkConformance({
+      contract: ACCOUNT_CONTRACT,
+      generated: JSON.parse(JSON.stringify(buildOpenApiDocument(app))) as JsonObject,
+      live: listLiveRoutes(app),
+      scope: ['endSession', 'getAccount', 'startRiderRun', 'updateAccount'],
+      technicalRoutes: TECHNICAL_ROUTES,
+      bound: listBoundOperations(app.get(ModulesContainer, { strict: false })),
+    });
+  }
+
+  // Break caught: a check that cannot succeed on operations whose security is a conjunction, whose response sets cookies for one
+  // kind of caller, and whose hosts are their own. The description states all three, and says what the contract says.
+  it('finds nothing in the conforming slice, and compares its four operations', async () => {
+    const report = await checkAccounts(ConformingAccountsModule);
+
+    expect(report.findings).toEqual([]);
+    expect(report.checkedOperations).toEqual([
+      'endSession',
+      'getAccount',
+      'startRiderRun',
+      'updateAccount',
+    ]);
+  });
+
+  // Break caught: the description omitting or getting wrong one of the statements a decorated class cannot make. Each row is the
+  // conforming slice with the single thing named omitted or wrong, and the check must say what it is and where (the bootstrap's
+  // carried-forward notes: until the identity slice states them, a secured operation could only report drift).
+  it.each([
+    [
+      'the CSRF token left out of an operation that needs it with the browser session',
+      CsrfOmittedAccountsModule,
+      ['SECURITY_DRIFT'],
+      /^POST \/accounts\/\{id\} > security$/,
+    ],
+    [
+      'the CSRF token stated as an alternative, which makes it optional',
+      CsrfOptionalAccountsModule,
+      ['SECURITY_DRIFT'],
+      /^POST \/accounts\/\{id\} > security$/,
+    ],
+    [
+      'an operation stated anonymous where the contract makes it authenticated',
+      AnonymousUpdateAccountsModule,
+      ['SECURITY_DRIFT'],
+      /^POST \/accounts\/\{id\} > security$/,
+    ],
+    [
+      'the rider session left out of an operation that accepts it',
+      RiderOmittedAccountsModule,
+      ['SECURITY_DRIFT'],
+      /^GET \/accounts\/\{id\} > security$/,
+    ],
+    [
+      'the cookies of a sign-out not stated at all',
+      NoCookiesAccountsModule,
+      // The cookies and the scheme they are owed for are two facts of the contract, and both are missing.
+      ['COOKIE_DRIFT', 'COOKIE_DRIFT'],
+      /^POST \/sessions\/end > response 204$/,
+    ],
+    [
+      'the cookies of a sign-out stated for every caller, not only a browser session',
+      CookiesForEveryoneAccountsModule,
+      ['COOKIE_DRIFT'],
+      /^POST \/sessions\/end > response 204$/,
+    ],
+    [
+      'one of the two cookies of a sign-out left out',
+      OneCookieAccountsModule,
+      ['COOKIE_DRIFT'],
+      /^POST \/sessions\/end > response 204$/,
+    ],
+    [
+      'the dedicated rider host not stated',
+      NoServersAccountsModule,
+      ['OPERATION_ROUTE_DRIFT'],
+      /^POST \/rider\/runs\/start > servers$/,
+    ],
+    [
+      'only the dedicated rider host stated',
+      OneServerAccountsModule,
+      ['OPERATION_ROUTE_DRIFT'],
+      /^POST \/rider\/runs\/start > servers$/,
+    ],
+  ] as const)('reports %s', async (_label, module, expected, at) => {
+    const report = await checkAccounts(module);
+
+    expect(codes(report.findings)).toEqual(expected);
+    for (const finding of report.findings) expect(finding.at).toMatch(at);
   });
 });
 

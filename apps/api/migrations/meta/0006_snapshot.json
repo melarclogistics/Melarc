@@ -1,0 +1,787 @@
+{
+  "id": "3071459d-364f-4018-addf-27f68e8824f4",
+  "prevId": "1c9ee952-dbf3-4586-baba-04a4ddd0aa83",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.fixed_permission_policy": {
+      "name": "fixed_permission_policy",
+      "schema": "",
+      "columns": {
+        "principal_type": {
+          "name": "principal_type",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "minimum_revision": {
+          "name": "minimum_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "fixed_permission_policy_principal_closed": {
+          "name": "fixed_permission_policy_principal_closed",
+          "value": "\"fixed_permission_policy\".\"principal_type\" IN ('VENDOR', 'RIDER')"
+        },
+        "fixed_permission_policy_revision_positive": {
+          "name": "fixed_permission_policy_revision_positive",
+          "value": "\"fixed_permission_policy\".\"revision\" >= 1"
+        },
+        "fixed_permission_policy_minimum_in_range": {
+          "name": "fixed_permission_policy_minimum_in_range",
+          "value": "\"fixed_permission_policy\".\"minimum_revision\" >= 1 AND \"fixed_permission_policy\".\"minimum_revision\" <= \"fixed_permission_policy\".\"revision\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.hub": {
+      "name": "hub",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "hub_name_key": {
+          "name": "hub_name_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "hub_name_not_empty": {
+          "name": "hub_name_not_empty",
+          "value": "length(btrim(\"hub\".\"name\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.permission": {
+      "name": "permission",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "permission_key_grammar": {
+          "name": "permission_key_grammar",
+          "value": "\"permission\".\"key\" ~ '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,2}$'"
+        },
+        "permission_domain_closed": {
+          "name": "permission_domain_closed",
+          "value": "\"permission\".\"domain\" IN ('pickup', 'hub', 'pricing', 'dispatch', 'delivery', 'payment', 'settlement', 'returns', 'vendor', 'staff', 'notification', 'report', 'settings', 'fleet', 'courier', 'audit', 'permission')"
+        },
+        "permission_domain_is_key_prefix": {
+          "name": "permission_domain_is_key_prefix",
+          "value": "split_part(\"permission\".\"key\", '.', 1) = \"permission\".\"domain\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reason_code": {
+      "name": "reason_code",
+      "schema": "",
+      "columns": {
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_checkpoints": {
+          "name": "valid_checkpoints",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requires_note": {
+          "name": "requires_note",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requires_photo": {
+          "name": "requires_photo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requires_contact_attempt": {
+          "name": "requires_contact_attempt",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requires_approval": {
+          "name": "requires_approval",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "attribution": {
+          "name": "attribution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumes_delivery_attempt": {
+          "name": "consumes_delivery_attempt",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requires_ops_review": {
+          "name": "requires_ops_review",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requires_escalation": {
+          "name": "requires_escalation",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "permitted_operations": {
+          "name": "permitted_operations",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "reason_code_code_grammar": {
+          "name": "reason_code_code_grammar",
+          "value": "\"reason_code\".\"code\" ~ '^[A-Z][A-Z0-9_]*$'"
+        },
+        "reason_code_label_not_empty": {
+          "name": "reason_code_label_not_empty",
+          "value": "length(btrim(\"reason_code\".\"label\")) > 0"
+        },
+        "reason_code_domain_closed": {
+          "name": "reason_code_domain_closed",
+          "value": "\"reason_code\".\"domain\" IN ('DELIVERY_FAILURE', 'RECIPIENT_CONTACT', 'PICKUP_STOP_SKIP', 'HANDOFF_FAILURE', 'SESSION_REVOCATION', 'STAFF_PROFILE_REJECTION', 'STAFF_MFA_RESET', 'CREDENTIAL_ADMINISTRATION', 'RIDER_DEVICE_REPLACEMENT', 'RIDER_DEVICE_REVOCATION')"
+        },
+        "reason_code_attribution_closed": {
+          "name": "reason_code_attribution_closed",
+          "value": "\"reason_code\".\"attribution\" IN ('CUSTOMER', 'MELARC', 'EXTERNAL')"
+        },
+        "reason_code_checkpoints_by_domain": {
+          "name": "reason_code_checkpoints_by_domain",
+          "value": "(\"reason_code\".\"domain\" = 'RECIPIENT_CONTACT' AND \"reason_code\".\"valid_checkpoints\" IS NOT NULL AND cardinality(\"reason_code\".\"valid_checkpoints\") >= 1 AND \"reason_code\".\"valid_checkpoints\" <@ ARRAY['PRE_DISPATCH', 'NEXT_STOP', 'DOORSTEP']::text[]) OR (\"reason_code\".\"domain\" <> 'RECIPIENT_CONTACT' AND \"reason_code\".\"valid_checkpoints\" IS NULL)"
+        },
+        "reason_code_operations_not_null": {
+          "name": "reason_code_operations_not_null",
+          "value": "array_position(\"reason_code\".\"permitted_operations\", NULL) IS NULL"
+        },
+        "reason_code_operations_by_domain": {
+          "name": "reason_code_operations_by_domain",
+          "value": "(\"reason_code\".\"domain\" IN ('SESSION_REVOCATION', 'STAFF_PROFILE_REJECTION', 'STAFF_MFA_RESET', 'CREDENTIAL_ADMINISTRATION', 'RIDER_DEVICE_REPLACEMENT', 'RIDER_DEVICE_REVOCATION') AND \"reason_code\".\"permitted_operations\" IS NOT NULL AND cardinality(\"reason_code\".\"permitted_operations\") >= 1 AND \"reason_code\".\"permitted_operations\"::text ~ '^\\{[A-Za-z][A-Za-z0-9]*(#[A-Z][A-Z_]*)?(,[A-Za-z][A-Za-z0-9]*(#[A-Z][A-Z_]*)?)*\\}$') OR (\"reason_code\".\"domain\" NOT IN ('SESSION_REVOCATION', 'STAFF_PROFILE_REJECTION', 'STAFF_MFA_RESET', 'CREDENTIAL_ADMINISTRATION', 'RIDER_DEVICE_REPLACEMENT', 'RIDER_DEVICE_REVOCATION') AND \"reason_code\".\"permitted_operations\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.role_bundle": {
+      "name": "role_bundle",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "reduction_floor": {
+          "name": "reduction_floor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "privileged": {
+          "name": "privileged",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "role_bundle_name_key": {
+          "name": "role_bundle_name_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "role_bundle_name_not_empty": {
+          "name": "role_bundle_name_not_empty",
+          "value": "length(btrim(\"role_bundle\".\"name\")) > 0"
+        },
+        "role_bundle_audience_closed": {
+          "name": "role_bundle_audience_closed",
+          "value": "\"role_bundle\".\"audience\" IN ('STAFF', 'RIDER', 'VENDOR')"
+        },
+        "role_bundle_revision_positive": {
+          "name": "role_bundle_revision_positive",
+          "value": "\"role_bundle\".\"revision\" >= 1"
+        },
+        "role_bundle_floor_in_range": {
+          "name": "role_bundle_floor_in_range",
+          "value": "\"role_bundle\".\"reduction_floor\" >= 1 AND \"role_bundle\".\"reduction_floor\" <= \"role_bundle\".\"revision\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.role_bundle_grant": {
+      "name": "role_bundle_grant",
+      "schema": "",
+      "columns": {
+        "bundle_id": {
+          "name": "bundle_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "permission_key": {
+          "name": "permission_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hub_scope": {
+          "name": "hub_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ownership_scope": {
+          "name": "ownership_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tier": {
+          "name": "tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "role_bundle_grant_bundle_fkey": {
+          "name": "role_bundle_grant_bundle_fkey",
+          "tableFrom": "role_bundle_grant",
+          "tableTo": "role_bundle",
+          "columnsFrom": [
+            "bundle_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "role_bundle_grant_permission_fkey": {
+          "name": "role_bundle_grant_permission_fkey",
+          "tableFrom": "role_bundle_grant",
+          "tableTo": "permission",
+          "columnsFrom": [
+            "permission_key"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "role_bundle_grant_pkey": {
+          "name": "role_bundle_grant_pkey",
+          "columns": [
+            "bundle_id",
+            "permission_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "role_bundle_grant_hub_scope_closed": {
+          "name": "role_bundle_grant_hub_scope_closed",
+          "value": "\"role_bundle_grant\".\"hub_scope\" IN ('none', 'own', 'all')"
+        },
+        "role_bundle_grant_ownership_scope_closed": {
+          "name": "role_bundle_grant_ownership_scope_closed",
+          "value": "\"role_bundle_grant\".\"ownership_scope\" IN ('own', 'assigned', 'any')"
+        },
+        "role_bundle_grant_tier_closed": {
+          "name": "role_bundle_grant_tier_closed",
+          "value": "\"role_bundle_grant\".\"tier\" IN ('A', 'S', 'P')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.setting": {
+      "name": "setting",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value_type": {
+          "name": "value_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "setting_key_grammar": {
+          "name": "setting_key_grammar",
+          "value": "\"setting\".\"key\" ~ '^[A-Za-z][A-Za-z0-9_]*$'"
+        },
+        "setting_scope_closed": {
+          "name": "setting_scope_closed",
+          "value": "\"setting\".\"scope\" IN ('COMPANY', 'PLATFORM')"
+        },
+        "setting_value_type_closed": {
+          "name": "setting_value_type_closed",
+          "value": "\"setting\".\"value_type\" IN ('integer', 'decimal', 'boolean', 'string', 'list', 'object')"
+        },
+        "setting_unit_not_empty": {
+          "name": "setting_unit_not_empty",
+          "value": "length(btrim(\"setting\".\"unit\")) > 0"
+        },
+        "setting_description_not_empty": {
+          "name": "setting_description_not_empty",
+          "value": "length(btrim(\"setting\".\"description\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.audit_event": {
+      "name": "audit_event",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "event_code": {
+          "name": "event_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_bundle": {
+          "name": "actor_bundle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "surface_context": {
+          "name": "surface_context",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_context": {
+          "name": "device_context",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vendor_organization_id": {
+          "name": "vendor_organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responsible_hub_id": {
+          "name": "responsible_hub_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "object_type": {
+          "name": "object_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_id": {
+          "name": "object_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_state": {
+          "name": "previous_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resulting_state": {
+          "name": "resulting_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason_label": {
+          "name": "reason_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approval_id": {
+          "name": "approval_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "before_after": {
+          "name": "before_after",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "related_ids": {
+          "name": "related_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail": {
+          "name": "detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enhanced": {
+          "name": "enhanced",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "serialisation_version": {
+          "name": "serialisation_version",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "audit_event_recorded_idx": {
+          "name": "audit_event_recorded_idx",
+          "columns": [
+            {
+              "expression": "recorded_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_event_object_idx": {
+          "name": "audit_event_object_idx",
+          "columns": [
+            {
+              "expression": "object_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "object_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "audit_event_code_grammar": {
+          "name": "audit_event_code_grammar",
+          "value": "\"audit_event\".\"event_code\" ~ '^[a-z]+\\.[a-z0-9_]+\\.[a-z0-9_]+$'"
+        },
+        "audit_event_actor_type_closed": {
+          "name": "audit_event_actor_type_closed",
+          "value": "\"audit_event\".\"actor_type\" IN ('STAFF', 'RIDER', 'VENDOR_ACCOUNT', 'SYSTEM')"
+        },
+        "audit_event_surface_closed": {
+          "name": "audit_event_surface_closed",
+          "value": "\"audit_event\".\"surface_context\" IN ('OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID', 'SYSTEM')"
+        },
+        "audit_event_object_type_closed": {
+          "name": "audit_event_object_type_closed",
+          "value": "\"audit_event\".\"object_type\" IN ('StaffIdentity', 'RiderIdentity', 'VendorAccount', 'VendorCredential', 'Session', 'MfaFactor', 'MfaChallenge', 'RiderSignInChallenge', 'SetupGrant', 'RecoveryRequest', 'RegisteredDevice', 'HUB')"
+        },
+        "audit_event_outcome_closed": {
+          "name": "audit_event_outcome_closed",
+          "value": "\"audit_event\".\"outcome\" IN ('SUCCEEDED', 'REJECTED', 'FAILED', 'REPLAYED', 'RECONCILED')"
+        },
+        "audit_event_system_has_no_actor_id": {
+          "name": "audit_event_system_has_no_actor_id",
+          "value": "(\"audit_event\".\"actor_type\" = 'SYSTEM') = (\"audit_event\".\"actor_id\" IS NULL)"
+        },
+        "audit_event_reason_is_a_pair": {
+          "name": "audit_event_reason_is_a_pair",
+          "value": "(\"audit_event\".\"reason_code\" IS NULL) = (\"audit_event\".\"reason_label\" IS NULL)"
+        },
+        "audit_event_correlation_bounded": {
+          "name": "audit_event_correlation_bounded",
+          "value": "length(\"audit_event\".\"correlation_id\") BETWEEN 1 AND 128"
+        },
+        "audit_event_structured_are_objects": {
+          "name": "audit_event_structured_are_objects",
+          "value": "(\"audit_event\".\"device_context\" IS NULL OR jsonb_typeof(\"audit_event\".\"device_context\") = 'object')\n        AND (\"audit_event\".\"before_after\" IS NULL OR jsonb_typeof(\"audit_event\".\"before_after\") = 'object')\n        AND (\"audit_event\".\"related_ids\" IS NULL OR jsonb_typeof(\"audit_event\".\"related_ids\") = 'object')\n        AND jsonb_typeof(\"audit_event\".\"detail\") = 'object'"
+        },
+        "audit_event_serialisation_version_positive": {
+          "name": "audit_event_serialisation_version_positive",
+          "value": "\"audit_event\".\"serialisation_version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

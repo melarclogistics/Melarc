@@ -18,6 +18,11 @@ export interface Sandbox {
 
 interface TestFixtures {
   fixtures: Fixtures;
+  /**
+   * The one origin the browser of this test may reach: the plain HTTP Ops origin, or, for the specs of the trusted HTTPS origin
+   * (`https-test.ts`), the HTTPS one. The boundary of the context, and the page's base URL, are this.
+   */
+  browserOrigin: string;
   externalRequests: string[];
   sandbox: Sandbox;
   failureArtifacts: undefined;
@@ -47,8 +52,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: 'worker' },
   ],
 
-  baseURL: async ({ stack }, use) => {
+  browserOrigin: async ({ stack }, use) => {
     await use(stack.origin);
+  },
+
+  baseURL: async ({ browserOrigin }, use) => {
+    await use(browserOrigin);
   },
 
   // eslint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from its first argument's pattern and requires one even when there are none
@@ -62,8 +71,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // The boundary is on the context, so it covers every page in it: the test's page and whatever it opens.
-  context: async ({ context, stack, externalRequests }, use) => {
-    await guardBrowserContext(context, stack.origin, (url) => externalRequests.push(url));
+  context: async ({ browserOrigin, context, externalRequests }, use) => {
+    await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
     await use(context);
   },
 

@@ -1,5 +1,6 @@
 import type { ArtifactSource, StackDescription } from './artifacts.ts';
-import { readNotes, type HarnessDatabase } from './database.ts';
+import { observe, type HarnessDatabase } from './database.ts';
+import type { Person } from './personas.ts';
 
 /**
  * What a test worker needs to reach the stack that global setup started: addresses, the database credentials
@@ -8,10 +9,22 @@ import { readNotes, type HarnessDatabase } from './database.ts';
  */
 export interface StackConnection {
   readonly origin: string;
+  /**
+   * The trusted HTTPS origin in front of `origin` (S0.23): present only when the run was given test certificates
+   * (`MELARC_E2E_TLS_DIR`). The API's `OPS_ORIGIN` is this origin, exactly, so that its CSRF and CORS judgements are made against
+   * the origin the browser really sends.
+   */
+  readonly httpsOrigin?: string;
   readonly apiOrigin: string;
   readonly runDirectory: string;
   readonly captureFile: string;
   readonly database: HarnessDatabase;
+  /** Where the delivery worker's capture adapter writes the messages (a stack of the journeys). */
+  readonly captureDirectory?: string;
+  /** Where the bootstrap commands leave the administrators' one-time secrets (a stack of the journeys). */
+  readonly custodyDirectory?: string;
+  /** The two bootstrap administrators (a stack of the journeys). */
+  readonly administrators?: readonly Person[];
   readonly logFiles: readonly {
     readonly name: string;
     readonly stdout: string;
@@ -33,12 +46,31 @@ export function describeConnection(connection: StackConnection): StackDescriptio
   };
 }
 
+/**
+ * What a person reading a failed run needs to know of the database, from the observations of the database command: for each
+ * bootstrap administrator the state of their authenticators, sessions and grants, and the audit events that name them. Nothing in it is
+ * a secret (the observations read no column that holds one), and the tables themselves are read by no login the harness holds.
+ */
+async function databaseSummaryOf(connection: StackConnection): Promise<unknown> {
+  const summary: Record<string, unknown> = {};
+  for (const person of connection.administrators ?? []) {
+    summary[person.fullName] = {
+      factors: await observe(connection.database.name, 'factors', person.workEmail),
+      sessions: await observe(connection.database.name, 'sessions', person.workEmail),
+      grants: await observe(connection.database.name, 'setup-grants', person.workEmail),
+      lock: await observe(connection.database.name, 'lock', person.workEmail),
+      audit: await observe(connection.database.name, 'audit-codes', person.workEmail),
+    };
+  }
+  return summary;
+}
+
 export function artifactSourceOf(connection: StackConnection): ArtifactSource {
   return {
     info: describeConnection(connection),
     logFiles: connection.logFiles,
     captureFile: connection.captureFile,
-    databaseSummary: async () => ({ notes: await readNotes(connection.database) }),
+    databaseSummary: () => databaseSummaryOf(connection),
   };
 }
 

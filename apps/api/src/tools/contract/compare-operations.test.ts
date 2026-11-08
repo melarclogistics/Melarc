@@ -97,6 +97,13 @@ describe('describing an operation', () => {
     expect(describeIn(CONTRACT, 'vendorSignIn').responses['200']?.setCookiesFor).toBeUndefined();
   });
 
+  it('captures the cookies a response may also set', () => {
+    expect(
+      describeIn(CONTRACT, 'completeStaffMfaSignIn').responses['200']?.setCookiesOptional,
+    ).toEqual(['melarc_trusted_browser']);
+    expect(describeIn(CONTRACT, 'staffSignIn').responses['200']?.setCookiesOptional).toEqual([]);
+  });
+
   // Break caught: the type of principal a response sets its cookies for being left out of the description, so that a
   // code description which gives a staff recovery the vendor's device credential reads as equal to the contract's.
   it('captures the type of principal a response sets its cookies for', () => {
@@ -619,6 +626,31 @@ describe('deliberate drift: headers and cookies', () => {
     expect(everyone[0]?.message).toContain('browserSession');
     expect(codes(riders)).toEqual(['COOKIE_DRIFT']);
     expect(riders[0]?.message).toContain('riderSession');
+  });
+
+  // Break caught: the trusted-browser cookie (a cookie a response only may set) being dropped from the code's description, or added to it,
+  // while the contract says otherwise: the same cookie is named in `x-set-cookies-optional`, and a code that stopped offering to remember
+  // a browser, or one that began to remember it where the contract does not allow, would read as equal.
+  it('reports an optional cookie that the code no longer states, and one it newly states', () => {
+    const optional = [
+      'paths',
+      '/auth/staff/sign-in/mfa',
+      'post',
+      'responses',
+      '200',
+      'x-set-cookies-optional',
+    ] as const;
+    const dropped = driftAfter('completeStaffMfaSignIn', (copy) => {
+      copy.remove([...optional]);
+    });
+    const added = driftAfter('completeStaffMfaSignIn', (copy) => {
+      copy.set([...optional], ['melarc_trusted_browser', 'melarc_vendor_device']);
+    });
+
+    expect(codes(dropped)).toEqual(['COOKIE_DRIFT']);
+    expect(dropped[0]?.message).toContain('melarc_trusted_browser');
+    expect(codes(added)).toEqual(['COOKIE_DRIFT']);
+    expect(added[0]?.message).toContain('melarc_vendor_device');
   });
 
   // Break caught: a recovery that gives the vendor's device credential to every principal, or only to another one.

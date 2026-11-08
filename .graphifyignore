@@ -1,0 +1,11 @@
+# What the local code-graph tool (graphify) does not read, on top of everything .gitignore already excludes.
+# Same syntax as .gitignore. The graph is built under graphify-out/, which is git-ignored.
+
+# Machine output of packages/api-client/scripts/generate.ts: regenerated from contracts/openapi.yaml, never edited by hand.
+/packages/api-client/src/generated/
+
+# drizzle-kit's snapshots of the schema, rewritten on every generate.
+/apps/api/migrations/meta/
+
+# The pnpm lockfile.
+/pnpm-lock.yaml

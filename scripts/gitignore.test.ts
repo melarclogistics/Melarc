@@ -80,6 +80,9 @@ describe('.gitignore', () => {
     'backup.dump',
     'db/prod.dump',
     'nightly/2026-10-06.dump',
+    // The custody bundle of the bootstrap seed (S0.30) holds a setup secret in clear: written outside the checkout, and never committed.
+    'melarc-bootstrap-0123456789abcdef0123456789abcdef.bundle',
+    'custody/melarc-bootstrap-0123456789abcdef0123456789abcdef.bundle',
   ];
 
   it('ignores the keys, credentials, dumps and local settings it must keep out', () => {
@@ -99,11 +102,35 @@ describe('.gitignore', () => {
     ['google-services.json', 'google-services.json'],
     ['GoogleService-Info.plist', 'GoogleService-Info.plist'],
     ['db/prod.dump', '*.dump'],
+    [
+      'custody/melarc-bootstrap-0123456789abcdef0123456789abcdef.bundle',
+      'melarc-bootstrap-*.bundle',
+    ],
   ] as const) {
     it(`ignores ${path} by the pattern ${pattern}`, () => {
       assert.equal(verdicts([path])[0]?.pattern, pattern);
     });
   }
+
+  // Break caught: the output of the local code-graph tool (graphify) reaching a commit or a source package: it is
+  // generated per machine, holds a cache of what it read and is rebuilt from the source, never a source file itself.
+  it('ignores the output folder of the local code-graph tool, and only that folder', () => {
+    const output = [
+      'graphify-out/graph.json',
+      'graphify-out/GRAPH_REPORT.md',
+      'graphify-out/cache/0a1b2c3d.json',
+      'graphify-out/wiki/index.md',
+    ];
+    assert.deepEqual(
+      output.filter((path) => !ignored([path]).includes(path)),
+      [],
+      'not ignored',
+    );
+    assert.deepEqual(
+      ignored(['docs/graphify-out.md', 'src/graphify-outline.ts', '.graphifyignore']),
+      [],
+    );
+  });
 
   // Break caught: a pattern so broad that it hides source, a migration or a committed example.
   it('does not ignore source, migrations, examples or names that only resemble the ignored ones', () => {
@@ -113,6 +140,7 @@ describe('.gitignore', () => {
       'apps/api/migrations/meta/_journal.json',
       'apps/api/.env.example',
       'apps/ops-web/.env.example',
+      'apps/attestation-verifier/.env.example',
       'infrastructure/postgres/.env.example',
       '.github/workflows/ci.yml',
       'pnpm-lock.yaml',
@@ -127,6 +155,7 @@ describe('.gitignore', () => {
       'docs/pgpass.md',
       'docs/google-services.md',
       'google-services.json.example',
+      'apps/attestation-verifier/gradle/wrapper/gradle-wrapper.jar',
       'GoogleService-Info.plist.example',
       'design/assets/brand/logo.svg',
     ];

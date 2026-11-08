@@ -3,7 +3,7 @@ import type { ComponentPropsWithoutRef } from 'react';
 import { Spinner } from '../loading/Spinner';
 import './button.css';
 
-export type ButtonVariant = 'primary' | 'secondary';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger';
 
 export interface ButtonProps extends Omit<
   ComponentPropsWithoutRef<'button'>,
@@ -11,7 +11,10 @@ export interface ButtonProps extends Omit<
 > {
   /** Always stated: a button inside a form submits it unless it says it does not. */
   readonly type: 'button' | 'submit' | 'reset';
-  /** `primary` is the main action of a surface, `secondary` an alternate (DESIGN_SYSTEM section 16). */
+  /**
+   * `primary` is the main action of a surface, `secondary` an alternate, and `danger` the act that does harm (DESIGN_SYSTEM section 16):
+   * an outline in the danger colour, never a fill, whose label names the consequence. The confirmation dialog uses it to confirm.
+   */
   readonly variant?: ButtonVariant;
   /**
    * An action is under way. The button stays focusable and keeps its label, but it ignores activation, so the work is
@@ -21,8 +24,8 @@ export interface ButtonProps extends Omit<
 }
 
 /**
- * The initial Button (COMPONENT_PATTERNS section 4): native `<button>` semantics, medium size. `tertiary` and `danger`
- * and the other sizes are built when a screen first needs them.
+ * The Button (COMPONENT_PATTERNS section 4): native `<button>` semantics, medium size, `primary`, `secondary` and `danger` (built with the
+ * confirmation dialog, S0.41). `tertiary` and the other sizes are built when a screen first needs them.
  */
 export function Button({
   type,

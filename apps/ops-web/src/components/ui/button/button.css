@@ -22,6 +22,11 @@
     border-color var(--motion-fast);
 }
 
+/* A link drawn as a button (ButtonLink) is an anchor: it is not underlined, which is what marks a text link. */
+a.ui-button {
+  text-decoration: none;
+}
+
 .ui-button--primary {
   background: var(--color-action-primary);
   color: var(--color-action-primary-text);
@@ -50,6 +55,25 @@
 }
 
 /*
+ * Danger (COMPONENT_PATTERNS section 4.7; DESIGN_SYSTEM section 4.6, the outline recipe): the danger colour on white, a soft danger fill under the
+ * pointer and the pressed grey when pressed. It is never a filled button, because a fill of that red would be almost the colour of Primary under
+ * the pointer; the label names the consequence and the red is never alone.
+ */
+.ui-button--danger {
+  border-color: var(--color-status-danger-foreground);
+  background: var(--color-surface-default);
+  color: var(--color-status-danger-foreground);
+}
+
+.ui-button--danger:hover {
+  background: var(--color-status-danger-background);
+}
+
+.ui-button--danger:active {
+  background: var(--button-pressed-background);
+}
+
+/*
  * Loading keeps the label and the colours (DESIGN_SYSTEM section 4.6): a button that is not taking input does not change
  * under the pointer, and only the cursor says the work is under way. These come after the hover and pressed fills and
  * are more specific, so they win; a native-disabled button is left to the disabled rule below.
@@ -66,6 +90,11 @@
 .ui-button--secondary[aria-busy='true']:not(:disabled):hover,
 .ui-button--secondary[aria-busy='true']:not(:disabled):active {
   background: var(--color-action-secondary);
+}
+
+.ui-button--danger[aria-busy='true']:not(:disabled):hover,
+.ui-button--danger[aria-busy='true']:not(:disabled):active {
+  background: var(--color-surface-default);
 }
 
 /* Disabled is the native attribute, so the style never appears without the behaviour. */

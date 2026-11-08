@@ -97,11 +97,12 @@ describe('paths and methods no route answers', () => {
 
 describe('malformed request bodies', () => {
   // Break caught: the framework's 400 echoing the body. Nest 12 maps body-parser's SyntaxError to a
-  // BadRequestException whose message, Node's JSON error text, can quote the request body.
+  // BadRequestException whose message, Node's JSON error text, can quote the request body. Since S0.20 the parser's error is
+  // carried to the validation step (admission/body-errors.ts), so it is a route that is reached that answers it.
   it('answer 400 VALIDATION_FAILED without repeating any of the body', async () => {
     const { baseUrl } = await start();
     const result = await answer(
-      await fetch(`${baseUrl}/api/v1/anything`, {
+      await fetch(`${baseUrl}/api/v1/fixture/body/malformed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{"password": "BODY-SECRET", "broken": ',
@@ -119,11 +120,11 @@ describe('malformed request bodies', () => {
 });
 
 describe('request bodies that are not JSON', () => {
-  // Break caught: a form-encoded body being parsed and handed to a handler. Every request body in the contract is
-  // application/json, and a cross-site HTML form can send a form-encoded POST without a preflight, so a parser the
-  // contract never asked for is a way to reach a handler that the JSON-only rule was meant to close.
-  it('are not parsed: the handler sees no body', async () => {
-    const { baseUrl } = await start();
+  // Break caught: a form-encoded body being parsed and handed to a handler, or passed on as no body. Every request body in the
+  // contract is application/json, and a cross-site HTML form can send a form-encoded POST without a preflight, so a body of
+  // another type is refused at transport admission (S0.20) before it is read, and no handler is reached.
+  it('are refused with 415 before they are read: the handler is not reached', async () => {
+    const { baseUrl, logs } = await start();
     const result = await answer(
       await fetch(`${baseUrl}/api/v1/fixture/body/form`, {
         method: 'POST',
@@ -132,8 +133,14 @@ describe('request bodies that are not JSON', () => {
       }),
     );
 
-    expect(result.status).toBe(201);
-    expect(result.body).toEqual({ label: 'form' });
+    expect(result.status).toBe(415);
+    expect(result.body).toEqual({
+      message: 'Unsupported Media Type',
+      request_id: result.requestId,
+    });
+    expect(logs.records().filter((record) => record.msg === 'fixture handler finished')).toEqual(
+      [],
+    );
   });
 
   // Break caught: a JSON body in a charset other than UTF-8 being decoded and handed to a handler. The body

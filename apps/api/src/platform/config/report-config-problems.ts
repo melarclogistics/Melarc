@@ -8,12 +8,16 @@ import type { ConfigProblem } from './load-config.js';
 export function reportConfigProblems(
   problems: readonly ConfigProblem[],
   now: Date = new Date(),
+  who: { readonly service: string; readonly subject: string } = {
+    service: 'melarc-api',
+    subject: 'the API',
+  },
 ): string {
   return `${JSON.stringify({
     level: 'fatal',
     time: now.toISOString(),
-    service: 'melarc-api',
-    msg: 'Invalid configuration: the API will not start',
+    service: who.service,
+    msg: `Invalid configuration: ${who.subject} will not start`,
     problems,
   })}\n`;
 }

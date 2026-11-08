@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ReadinessRegistry } from './readiness.registry.js';
+import { DEFAULT_CHECK_TIMEOUT_MS, ReadinessRegistry } from './readiness.registry.js';
 
 describe('ReadinessRegistry', () => {
   // Break caught: a registry with no checks reporting failure, which would keep a bare API unready.
@@ -111,6 +111,24 @@ describe('ReadinessRegistry', () => {
     expect(await registry.failing(30)).toEqual(['database']);
     expect(await registry.failing(30)).toEqual(['database']);
     expect(calls).toBe(2);
+  });
+
+  // Break caught (F04C): a check told nothing of the deadline it runs under, so it cannot end what it holds (a connection, a
+  // permit) when the registry stops waiting for it.
+  it('tells each check how long it has, the default when the probe names none', async () => {
+    const seen: unknown[] = [];
+    const registry = new ReadinessRegistry();
+    registry.register({
+      name: 'database',
+      check: (options) => {
+        seen.push(options);
+      },
+    });
+
+    await registry.failing(750);
+    await registry.failing();
+
+    expect(seen).toEqual([{ timeoutMs: 750 }, { timeoutMs: DEFAULT_CHECK_TIMEOUT_MS }]);
   });
 
   // Break caught: two checks under one name, so one silently replaces the other.

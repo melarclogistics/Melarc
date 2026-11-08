@@ -1,0 +1,54 @@
+/*
+ * Skeleton (design/COMPONENT_PATTERNS.md section 17): decoration that keeps the layout still while content loads. The loading words are the
+ * loading indicator's. The pulse is the only motion, and it stops under reduced motion.
+ */
+.ui-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.ui-skeleton__line {
+  display: block;
+  height: 0.875rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-border-default);
+  animation: ui-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.ui-skeleton__line:nth-child(3n + 1) {
+  width: 100%;
+}
+
+.ui-skeleton__line:nth-child(3n + 2) {
+  width: 86%;
+}
+
+.ui-skeleton__line:nth-child(3n) {
+  width: 64%;
+}
+
+@keyframes ui-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton__line {
+    animation: none;
+  }
+}
+
+/* Forced colours drop backgrounds: the placeholder keeps a border, so the layout it holds is still visible. */
+@media (forced-colors: active) {
+  .ui-skeleton__line {
+    border: 1px solid GrayText;
+  }
+}

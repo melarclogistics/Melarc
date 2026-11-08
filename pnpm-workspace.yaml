@@ -14,6 +14,14 @@ allowBuilds:
 # Fail the install, instead of only warning, when the active Node.js is outside package.json "engines".
 engineStrict: true
 
+# THE ONE RECORDED OVERRIDE (scripts/dependency-policy.ts, OVERRIDE_EXCEPTIONS; the policy test refuses any other, and refuses this one when
+# it goes stale). @nestjs/platform-express pins multer to exactly 2.4.0 (so do 12.1.3 and 12.2.0), which GHSA-q7qp-rjg7-q26m (denial of
+# service through the asynchronous fileFilter, fixed in multer 2.5.0) affects, and `pnpm audit --audit-level high` is a CI stage. The API
+# has no upload route. REMOVE IT when a @nestjs/platform-express release supplies a patched compatible multer (2.5.0 or later): upgrade
+# that package, delete this block and run pnpm install.
+overrides:
+  '@nestjs/platform-express@12.1.2>multer': 2.5.0
+
 # openapi-typescript (the generator behind packages/api-client) declares typescript ^5.x, and this repository
 # pins 6.0.3 because typescript-eslint does not yet allow 7. The generator was run under 6.0.3 and its output
 # type-checks; the freshness check and generator tests in packages/api-client fail if a TypeScript change ever

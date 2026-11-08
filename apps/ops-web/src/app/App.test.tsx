@@ -1,65 +1,130 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { installFakeApi, signedInApi, type FakeApi } from '../test-support/fake-api';
 import { renderApp } from '../test-support/render-app';
+import { sessionFixture } from '../test-support/session-fixture';
 import { wcagViolations } from '../test-support/wcag';
 
+// The shell is tested as a signed-in person finds it: the landing is behind the session guard (S0.38), so the API says
+// who is signed in. Only the network is replaced; the client, the router and the providers are the real ones.
+let api: FakeApi;
+
+beforeEach(() => {
+  api = installFakeApi(signedInApi(sessionFixture()));
+});
+
 afterEach(() => {
+  expect(api.unhandled).toEqual([]);
+  api.restore();
   vi.restoreAllMocks();
 });
 
+const landing = () => screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' });
+const notFound = () => screen.findByRole('heading', { level: 1, name: 'Page not found' });
+
 describe('the application shell', () => {
-  // Break caught: a shell with no landmarks, so a screen reader user cannot jump to the content.
-  it('has a banner naming the product and one main landmark', () => {
-    renderApp();
+  // Break caught: a frame with no landmarks, so a screen reader user cannot jump to the content, or a banner that does
+  // not name the product: the logo is the only thing that says "Melarc", so it carries the name (DESIGN_SYSTEM 26.1). This is the
+  // neutral frame, which an address that matches no route has (the signed-in screens have a side menu instead, and no banner).
+  it('has a banner naming the product, with the logo, and one main landmark', async () => {
+    renderApp('/no-such-page');
+    await notFound();
 
     const banner = screen.getByRole('banner');
-    expect(within(banner).getByText('Melarc Ops Portal')).toBeVisible();
+    const logo = within(banner).getByRole('img', { name: 'Melarc Logistics' });
+    expect(logo).toBeVisible();
+    expect(logo.getAttribute('src')).toMatch(/melarc-logo-primary.*\.svg/);
+    expect(within(banner).getByText('Ops Portal')).toBeVisible();
     expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 
-  // Break caught: a navigation, user menu or sign-out appearing before any authentication exists.
-  // The Ops Portal specification (surfaces/ops-portal.md §7) says pre-authentication pages render "no
-  // navigation, no user menu, no data", and this build has no session at all.
-  it('presents no navigation, user menu, sign-out or session data', () => {
-    renderApp();
+  // Break caught: the logo made a link or a button (it identifies and does not navigate: DESIGN_SYSTEM 25), or given a
+  // second name by the page, which a screen reader would then read twice.
+  it('does not make the logo a link or announce the name twice', async () => {
+    renderApp('/no-such-page');
+    await notFound();
+
+    const banner = screen.getByRole('banner');
+    expect(within(banner).queryByRole('link')).toBeNull();
+    expect(within(banner).queryByRole('button')).toBeNull();
+    expect(within(banner).getAllByRole('img')).toHaveLength(1);
+    expect(banner.textContent).toBe('Ops Portal');
+  });
+
+  // Break caught: a navigation, user menu or sign-out appearing in the neutral frame. The Ops Portal specification
+  // (surfaces/ops-portal.md §7) says pre-authentication pages render "no navigation, no user menu, no data"; the signed-in
+  // shell with them (S0.42) is drawn only around the signed-in routes, so an address that matches no route, which cannot know
+  // whether a session exists, has none, even for a person who is signed in.
+  it('presents no navigation, user menu or sign-out in the neutral frame', async () => {
+    renderApp('/no-such-page');
+    await screen.findByRole('heading', { level: 1, name: 'Page not found' });
 
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(
       screen.queryByRole('button', { name: /sign|log ?(in|out)|account|profile|menu/i }),
     ).toBeNull();
-    expect(screen.queryByRole('link', { name: /sign|log ?(in|out)|account|profile/i })).toBeNull();
+    expect(
+      within(screen.getByRole('banner')).queryByRole('link', {
+        name: /sign|log ?(in|out)|account|profile/i,
+      }),
+    ).toBeNull();
   });
 
-  // Break caught: a landing that implies working functionality or fabricated operational data.
-  it('says plainly that it is the application shell and offers no workflow', () => {
+  // Break caught: the signed-in landing without the navigation and the sign-out control that every signed-in screen carries
+  // (surfaces/ops-portal.md §7, `/`), or with them inside the main content, or with the neutral frame's banner above the menu.
+  it('carries the navigation and the sign-out control of the authenticated shell on the landing, in the side menu and not in the page', async () => {
+    const { container } = renderApp();
+    await landing();
+
+    const menu = screen.getByRole('complementary', { name: 'Main menu' });
+    const nav = within(menu).getByRole('navigation', { name: 'Primary' });
+    const signOut = within(menu).getByRole('button', { name: 'Sign out' });
+    expect(within(nav).getByRole('link', { name: 'Overview' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('main')).not.toContainElement(menu);
+    expect(container.querySelector('.app-header')).toBeNull();
+    expect(menu).toContainElement(signOut);
+  });
+
+  // Break caught: a landing that implies working functionality or fabricated operational data. It says who is signed
+  // in, in the session's words, and that nothing is waiting; it has no workflow to offer yet.
+  it('is the signed-in landing: who is signed in, and no workflow', async () => {
     renderApp();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
-    expect(screen.getByText(/application shell only/i)).toBeVisible();
+    expect(await landing()).toBeVisible();
+    // The page says who is signed in, and so does the account card of the menu: the page's words are the ones this is about.
+    expect(within(screen.getByRole('main')).getByText('Synthetic Officer')).toBeVisible();
+    expect(screen.getByText('Nothing is waiting.')).toBeVisible();
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
   });
 
   // Break caught: no page title, or two level-one headings, which confuses navigation by heading.
-  it('has one level-one heading and a document title', () => {
+  it('has one level-one heading and a document title', async () => {
     renderApp();
+    await landing();
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(document.title).toBe('Melarc Ops Portal');
   });
 
-  // Break caught: the shell calling the API or a third party, or keeping anything in the browser,
-  // before any workflow exists. Nothing may be fabricated, fetched, cached or stored.
-  it('makes no network request and stores nothing in the browser', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  // Break caught: the shell calling the API for anything but who is signed in, calling a third party, or keeping
+  // anything in the browser. The one request is the session read, to this origin's API; the session itself is an
+  // HttpOnly cookie the page cannot see, so nothing about it may be stored in script-readable storage either.
+  it('reads who is signed in once, makes no other request and stores nothing in the browser', async () => {
     const open = vi.spyOn(XMLHttpRequest.prototype, 'open');
     const { user } = renderApp();
+    await landing();
 
     await user.tab();
     await user.keyboard('{Enter}');
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      api.requests.map((request) => `${request.method} ${new URL(request.url).pathname}`),
+    ).toEqual(['GET /api/v1/auth/session']);
     expect(open).not.toHaveBeenCalled();
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
@@ -68,6 +133,7 @@ describe('the application shell', () => {
 
   it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine', async () => {
     const { container } = renderApp();
+    await landing();
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
@@ -77,6 +143,7 @@ describe('keyboard and focus', () => {
   // that is not first, or that does nothing.
   it('makes the skip link the first tab stop, and it moves focus into the main content', async () => {
     const { user } = renderApp();
+    await landing();
 
     await user.tab();
     const skipLink = screen.getByRole('link', { name: 'Skip to main content' });
@@ -91,6 +158,7 @@ describe('keyboard and focus', () => {
   // announced), or focus stolen on first load.
   it('does not move focus on first load, and moves it to the new page heading after navigation', async () => {
     const { router } = renderApp();
+    await landing();
     expect(document.body).toHaveFocus();
 
     await act(async () => {
@@ -111,7 +179,7 @@ describe('unknown routes', () => {
     expect(document.title).toBe('Page not found · Melarc Ops Portal');
 
     await user.click(screen.getByRole('link', { name: 'Go to the start page' }));
-    expect(screen.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    expect(await landing()).toBeVisible();
   });
 
   it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine', async () => {

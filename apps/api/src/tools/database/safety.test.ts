@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { MIGRATION_ROLE as PLATFORM_MIGRATION_ROLE } from '../../platform/database/technical-roles.js';
 import {
   assertDisposableName,
   assertLocalHost,
@@ -7,6 +8,7 @@ import {
   assertNotDeployedEnvironment,
   assertTestDatabaseName,
   isLoopbackHost,
+  MIGRATION_ROLE,
   UnsafeTargetError,
 } from './safety.js';
 
@@ -133,6 +135,16 @@ describe('assertTestDatabaseName (audit F07)', () => {
     expect(() => {
       assertTestDatabaseName(name);
     }).toThrow(UnsafeTargetError);
+  });
+});
+
+describe('MIGRATION_ROLE', () => {
+  // Break caught: the two spellings of the migration role drifting apart. This file imports nothing (a root script imports it under
+  // Node's type stripping), so the platform's access matrix names the role again; if they differed, the capability only the
+  // migration identity holds (`policy_change`) would be given to a role that no migration runs as.
+  it('is the role the platform names for the migration identity', () => {
+    expect(MIGRATION_ROLE).toBe(PLATFORM_MIGRATION_ROLE);
+    expect(MIGRATION_ROLE).toBe('melarc_migration_elevated');
   });
 });
 

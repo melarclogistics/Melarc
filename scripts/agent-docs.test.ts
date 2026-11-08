@@ -272,6 +272,16 @@ describe('documents nobody links', () => {
     };
     assert.deepEqual(codes(ignored), []);
   });
+
+  // Break caught: the git-ignored output of the local code-graph tool (graphify-out) read as part of the repository, so a
+  // developer who built the graph could no longer run the checks: its reports are generated, and no document owns them.
+  it('do not include the git-ignored output folder of the local graph tool', () => {
+    const generated = {
+      'graphify-out/GRAPH_REPORT.md': '# Graph report\n',
+      'graphify-out/wiki/index.md': '# Wiki\n',
+    };
+    assert.deepEqual(codes(generated), []);
+  });
 });
 
 describe('folders', () => {

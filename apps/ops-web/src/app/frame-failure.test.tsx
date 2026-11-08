@@ -1,7 +1,9 @@
 import { screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { installFakeApi, signedInApi } from '../test-support/fake-api';
 import { renderApp } from '../test-support/render-app';
+import { sessionFixture } from '../test-support/session-fixture';
 import { wcagViolations } from '../test-support/wcag';
 
 const fault = vi.hoisted(() => ({ present: true }));
@@ -20,10 +22,13 @@ vi.mock('../components/SkipLink', () => ({
 beforeEach(() => {
   fault.present = true;
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  // Once the frame is back the landing is behind the session guard, so the API says who is signed in.
+  installFakeApi(signedInApi(sessionFixture()));
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('a failure of the frame itself', () => {

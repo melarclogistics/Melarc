@@ -6,7 +6,8 @@
  * row-level security both enabled and forced (SECURITY_DESIGN.md sections 14.2 and 14.17a;
  * MIGRATION_AND_SEEDING.md section 5.1). No migration may switch that protection off again, hand a table to
  * another owner, name a role in a policy, or open anything to PUBLIC. A cascade, a TRUNCATE or a DELETE grant is
- * refused unless a comment on the statement gives the reason (`-- allow-delete: <reason>`).
+ * refused unless a comment on the statement gives the reason (`-- allow-delete: <reason>`). A policy may admit `SYSTEM`
+ * only through a `WHEN 'SYSTEM'` arm that names one task capability (system-branch.ts), never `SYSTEM` alone.
  *
  * This is a text check, not a parser: it splits the SQL into statements (comments, strings, quoted names and
  * dollar-quoted bodies are read as such, so neither a `--` inside a string nor a `;` inside a body confuses it) and
@@ -14,6 +15,9 @@
  * It cannot see a statement that is built at run time, in an `EXECUTE`; what the database ends up with is checked
  * by catalog-invariants.ts, which does not read SQL at all.
  */
+
+import { scopeProbePolicyProblem, type PolicyCommand } from './scope-probe-rule.js';
+import { policyClauseProblems } from './system-branch.js';
 
 const OWNER_ROLE = 'melarc_owner';
 
@@ -59,6 +63,88 @@ function removesData(statement: string): string | undefined {
     return 'a grant of DELETE, TRUNCATE or ALL';
   }
   return undefined;
+}
+
+/** The command a `CREATE POLICY` is for: the one it says, or ALL when it says none. */
+function policyCommand(afterTable: string): PolicyCommand {
+  const written = /\bfor\s+(all|select|insert|update|delete)\b/i.exec(afterTable)?.[1];
+  return (written?.toLowerCase() as PolicyCommand | undefined) ?? 'all';
+}
+
+/**
+ * Roles and role membership (MIGRATION_AND_SEEDING.md §5.1). A migration that creates or alters a role, or grants a role
+ * to a role, changes who can do what outside any table's policy, so it is flagged and reviewed: a comment on the statement
+ * records the reason, written `-- allow-role: <reason>`. An `ALTER ROLE ... SET` is not a change to the role's powers
+ * (the stored-context rule below reads it). A grant of a role is a `GRANT` with no `ON`: every object privilege has one.
+ */
+const ROLE_STATEMENT = /^(create|alter)\s+(role|user|group)\b/i;
+const ROLE_SETTING =
+  /^alter\s+(?:role|user|group)\s+\S+(?:\s+in\s+database\s+\S+)?\s+(?:set|reset)\b/i;
+const ROLE_GRANT = /^grant\b(?![\s\S]*\bon\b)[\s\S]*\bto\b/i;
+const ROLE_REASON = /allow-role:[ \t]*\S/i;
+
+function changesRoles(statement: string): string | undefined {
+  const role = ROLE_STATEMENT.exec(statement);
+  if (role !== null && !ROLE_SETTING.test(statement)) {
+    return `${(role[1] ?? '').toUpperCase()} ${(role[2] ?? '').toUpperCase()}`;
+  }
+  if (ROLE_GRANT.test(statement)) return 'GRANT of a role to a role';
+  return undefined;
+}
+
+/**
+ * SECURITY DEFINER functions (SECURITY_DESIGN.md §14.6): such a function runs with its owner's powers, so it fixes its own
+ * `search_path`, is revoked from PUBLIC and granted `EXECUTE` to named roles, and builds no statement from what it is
+ * given. All four are read from the migration that creates it, and a function is made a definer only by its CREATE.
+ */
+const CREATE_FUNCTION = new RegExp(
+  String.raw`^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+${QUALIFIED_NAME}`,
+  'i',
+);
+const DEFINER = /\bsecurity\s+definer\b/i;
+const FIXED_SEARCH_PATH = /\bset\s+search_path\s*(?:=|\bto\b)/i;
+const ALTER_TO_DEFINER = /^alter\s+(?:function|procedure)\b[\s\S]*\bsecurity\s+definer\b/i;
+const REVOKE_FROM_PUBLIC = new RegExp(
+  String.raw`^revoke\b[\s\S]*?\bon\s+(?:function|procedure)\s+${QUALIFIED_NAME}[\s\S]*\bfrom\b[\s\S]*\bpublic\b`,
+  'i',
+);
+const GRANT_EXECUTE = new RegExp(
+  String.raw`^grant\s+(?:execute|all)\b[\s\S]*?\bon\s+(?:function|procedure)\s+${QUALIFIED_NAME}[\s\S]*?\bto\s+([\s\S]+)$`,
+  'i',
+);
+const DYNAMIC_SQL = /\bexecute\b/i;
+/** A dollar-quoted body, which is code and not part of the function's attributes. */
+const DOLLAR_BODY = /(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?\1/g;
+
+/**
+ * The three policy tables (SECURITY_DESIGN.md section 13.10a). After the seed, a bundle, its grants and a fixed policy change only
+ * through `melarc.change_role_bundle` and `melarc.change_fixed_policy` (migration 0017, S0.27): the functions that take the exclusive
+ * lock, raise the revision and, for a reduction, the floor, and end the sessions below it in the same transaction. Under forced
+ * row-level security a plain `UPDATE` by the migration login changes no row at all, so a migration that tried would not fail: it
+ * would silently do nothing. The lint turns that into a message. A statement that writes one of the tables directly, at the top
+ * level of a migration or inside a `DO` block, needs a recorded reason (`-- allow-policy-dml: <reason>`): a backfill of a new
+ * column that is not authorization content, for instance. The bodies of functions are not read: a definer function is its own review.
+ */
+const POLICY_TABLE = String.raw`(?:public\s*\.\s*)?"?(?:role_bundle|role_bundle_grant|fixed_permission_policy)"?(?![A-Za-z0-9_$"])`;
+const POLICY_DML = new RegExp(
+  String.raw`^(?:insert\s+into|update(?:\s+only)?|delete\s+from(?:\s+only)?|merge\s+into|truncate(?:\s+table)?(?:\s+only)?)\s+${POLICY_TABLE}`,
+  'i',
+);
+const POLICY_DML_IN_BLOCK = new RegExp(
+  String.raw`\b(?:insert\s+into|update(?:\s+only)?|delete\s+from(?:\s+only)?|merge\s+into)\s+${POLICY_TABLE}`,
+  'i',
+);
+const DO_BLOCK = /^do\b/i;
+const WITH_STATEMENT = /^with\b/i;
+const POLICY_DML_REASON = /allow-policy-dml:[ \t]*\S/i;
+
+function writesPolicyTable(statement: string): boolean {
+  if (POLICY_DML.test(statement)) return true;
+  // A `WITH ... INSERT` or a `DO` block carries the statement inside; a function definition is not read (see above).
+  return (
+    (DO_BLOCK.test(statement) || WITH_STATEMENT.test(statement)) &&
+    POLICY_DML_IN_BLOCK.test(statement)
+  );
 }
 
 const GRANT_TO_PUBLIC = /^grant\b[\s\S]*\bto\s+(?:[^;]*,\s*)?public\b/i;
@@ -203,6 +289,10 @@ export function lintMigrationSql(sql: string): string[] {
   const forced = new Set<string>();
   /** The owner each table is left with: the last `OWNER TO` of the migration decides. */
   const owners = new Map<string, string>();
+  /** The SECURITY DEFINER functions the migration creates, and what it does about each one's EXECUTE. */
+  const definers = new Set<string>();
+  const revokedFromPublic = new Set<string>();
+  const grantedToNamed = new Set<string>();
 
   for (const { text: statement, comments } of statements) {
     // The text of an ordinary string is data, not a statement; a dollar-quoted body is kept, because it can run.
@@ -211,6 +301,54 @@ export function lintMigrationSql(sql: string): string[] {
       problems.push(
         `${removes} has no recorded reason: add a comment "-- allow-delete: <reason>" on the statement`,
       );
+    }
+
+    if (
+      writesPolicyTable(statement.replaceAll(/'(?:[^']|'')*'/g, "''")) &&
+      !POLICY_DML_REASON.test(comments)
+    ) {
+      problems.push(
+        'statement writes a policy table directly: change a bundle with melarc.change_role_bundle and a fixed policy with melarc.change_fixed_policy (SECURITY_DESIGN.md section 13.10a), which raise the revision and the floor and end the sessions in the same transaction; a plain statement changes no row under row-level security. A backfill that is not authorization content records "-- allow-policy-dml: <reason>"',
+      );
+    }
+
+    const roleChange = changesRoles(statement.replaceAll(/'(?:[^']|'')*'/g, "''"));
+    if (roleChange !== undefined && !ROLE_REASON.test(comments)) {
+      problems.push(
+        `${roleChange} has no recorded reason: add a comment "-- allow-role: <reason>" on the statement`,
+      );
+    }
+
+    const createsFunction = CREATE_FUNCTION.exec(statement);
+    const attributes = statement.replaceAll(DOLLAR_BODY, '$$$$');
+    if (createsFunction?.[1] !== undefined && DEFINER.test(attributes)) {
+      const name = normaliseTable(createsFunction[1]);
+      definers.add(name);
+      if (!FIXED_SEARCH_PATH.test(attributes)) {
+        problems.push(
+          `function ${name} is SECURITY DEFINER but does not fix its search_path (add SET search_path = ...)`,
+        );
+      }
+      if (DYNAMIC_SQL.test(statement)) {
+        problems.push(
+          `function ${name} is SECURITY DEFINER and uses EXECUTE, so an argument could become dynamic SQL run with its owner's powers`,
+        );
+      }
+    }
+    if (ALTER_TO_DEFINER.test(statement)) {
+      problems.push(
+        'ALTER FUNCTION ... SECURITY DEFINER: make a function SECURITY DEFINER only in its CREATE statement, which carries its search_path',
+      );
+    }
+    const revokes = REVOKE_FROM_PUBLIC.exec(statement);
+    if (revokes?.[1] !== undefined) revokedFromPublic.add(normaliseTable(revokes[1]));
+    const grantsExecute = GRANT_EXECUTE.exec(statement);
+    if (grantsExecute?.[1] !== undefined) {
+      const named = (grantsExecute[2] ?? '')
+        .split(',')
+        .map((role) => role.replace(/\bwith\s+grant\s+option\b/i, '').trim())
+        .filter((role) => role !== '' && role.toLowerCase() !== 'public');
+      if (named.length > 0) grantedToNamed.add(normaliseTable(grantsExecute[1]));
     }
 
     const creates = CREATED_TABLE.exec(statement);
@@ -227,11 +365,28 @@ export function lintMigrationSql(sql: string): string[] {
       }
     }
 
-    const policy = CREATE_POLICY.exec(statement) ?? ALTER_POLICY.exec(statement);
+    const createdPolicy = CREATE_POLICY.exec(statement);
+    const policy = createdPolicy ?? ALTER_POLICY.exec(statement);
     if (policy !== null && /\bto\b/i.test((policy[3] ?? '').replace(/\brename\s+to\b/gi, ''))) {
       problems.push(
         `policy ${unquote(policy[1] ?? '')} on ${normaliseTable(policy[2] ?? '')} names a role: policies decide on the request context, never on the connecting role`,
       );
+    }
+    // SYSTEM alone is never a condition: each SYSTEM branch of a policy names one capability (GBT-E7). The scope probe
+    // predicate is read-only: it belongs in a policy FOR SELECT, and an ALTER POLICY does not show the command.
+    if (policy !== null) {
+      const command = createdPolicy === null ? undefined : policyCommand(createdPolicy[3] ?? '');
+      const probeProblem = scopeProbePolicyProblem(command, [statement]);
+      if (probeProblem !== undefined) {
+        problems.push(
+          `policy ${unquote(policy[1] ?? '')} on ${normaliseTable(policy[2] ?? '')}: ${probeProblem}`,
+        );
+      }
+      for (const problem of policyClauseProblems(statement, command)) {
+        problems.push(
+          `policy ${unquote(policy[1] ?? '')} on ${normaliseTable(policy[2] ?? '')}: ${problem}`,
+        );
+      }
     }
     if (GRANT_TO_PUBLIC.test(statement)) problems.push('migration grants a privilege to PUBLIC');
     if (DEFAULT_PRIVILEGES.test(statement)) {
@@ -242,6 +397,19 @@ export function lintMigrationSql(sql: string): string[] {
     if (STORED_CONTEXT_SETTING.test(statement)) {
       problems.push(
         'migration stores a melarc.* setting on the database or a role, outside any transaction',
+      );
+    }
+  }
+
+  for (const name of definers) {
+    if (!revokedFromPublic.has(name)) {
+      problems.push(
+        `function ${name} is SECURITY DEFINER but the migration does not revoke EXECUTE from PUBLIC`,
+      );
+    }
+    if (!grantedToNamed.has(name)) {
+      problems.push(
+        `function ${name} is SECURITY DEFINER but the migration grants EXECUTE to no named role`,
       );
     }
   }

@@ -44,7 +44,7 @@
 | **Return initiation**| Senior Ops| `returns.*`| Review, then commit the `ReturnRecord`| Platform Admin| Vendor| `returns.*`|
 | **Return Fee waiver**| Ops requests → **Senior Ops approves**| `returns.waiver.request` → `returns.waiver.approve`| Waive against a seeded category; **free text supplements, never replaces**| Platform Admin| Vendor| **owed** — no return-fee waiver event exists in `audit.md`; `SLICE-006` owes one, enhanced on `pickup.cancellation_charge.waived`'s precedent|
 | **Single-package approval**| Ops requests → **Senior Ops approves**| `pickup.exception.request` → **`pickup.exception.approve`**| Approve the exception. **The fee becomes due on acceptance**| Platform Admin| Vendor| `pickup.request.single_package_approved` **enhanced**|
-| **Reason-catalogue administration**| Senior Ops| `settings.reason.manage`| Create, edit, activate, deactivate and configure behaviour| Platform Admin| —| `settings.reason.catalog_changed` **enhanced**|
+| **Reason-catalogue administration**| Senior Ops; **for the six system-managed identity reason domains, Platform Admin only** (label and active, never the code, domain or permitted operations)| `settings.reason.manage`| Create, edit, activate, deactivate and configure behaviour| Platform Admin| —| `settings.reason.catalog_changed` **enhanced**|
 | **Hub-local sender block**| Senior Ops| `vendor.sender_block.create`| `HUB_LOCAL`, own authorised hub only| Platform Admin| —| `vendor.sender_block.created`|
 | **Platform-wide sender block**| **Platform Admin**| `vendor.sender_block.create`| `PLATFORM_WIDE`, all hubs, **enhanced audit**| —| —| `vendor.sender_block.created` **enhanced**|
 

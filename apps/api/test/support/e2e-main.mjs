@@ -2,97 +2,92 @@
 // refers to it, so production carries no switch for any of this.
 //
 // It starts the real application from the built output, composed the way src/main.ts composes it and with
-// the same signal handling, and adds three routes that exist only here, so that a real browser can take a
-// technical journey through the real Ops origin, the real API and the real database without the API
-// having a business route to do it with:
+// the same signal handling, and adds three routes that exist only here, for the specs of the trusted HTTPS origin (S0.23). They
+// need no session and carry no secret:
 //
-//   POST /api/v1/e2e/notes       writes one row as the API's runtime identity, in a table the harness made
-//   GET  /api/v1/e2e/notes/:id   reads it back
-//   POST /api/v1/e2e/outbound    tries to reach an external provider, to show the sandbox refuses it
+//   POST /api/v1/e2e/cookies/issue   sets the two session cookies of the identity slice, with the product's own cookie writer and
+//                                    random values that protect nothing (it is the engine's handling of the attributes that is under test)
+//   POST /api/v1/e2e/cookies/expire  expires them, as a sign-out does
+//   GET and POST /api/v1/e2e/echo    says what the browser sent that the CSRF guard judges: the Origin, the Fetch Metadata headers,
+//                                    the names (never the values) of the cookies, and whether the CSRF header equals the CSRF cookie
+//
+// The technical journey of the bootstrap (a notes table written through `/api/v1/e2e/notes`, and an outbound call) was retired by S0.45:
+// the integrated journeys are the real screens and the real operations, and the harness reads the database through the database
+// command's observations (`apps/api/src/tools/e2e/arrangements.ts`), not through a table of its own.
 //
 // usage: node --import <outbound-guard.mjs> e2e-main.mjs      (configuration comes from the environment)
 import 'reflect-metadata';
 
 import process from 'node:process';
 
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Inject,
-  NotFoundException,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+
+import { Controller, Get, HttpCode, Post, Req, Res } from '@nestjs/common';
 
 import { AppModule } from '../../dist/app.module.js';
+import {
+  expireBrowserSessionCookies,
+  issueBrowserSessionCookies,
+} from '../../dist/platform/auth/cookies/cookie-writer.js';
 import { createApp } from '../../dist/create-app.js';
 import { loadConfig } from '../../dist/platform/config/load-config.js';
 import { reportConfigProblems } from '../../dist/platform/config/report-config-problems.js';
-import { DatabaseService } from '../../dist/platform/database/database.service.js';
 import { installFaultHandlers } from '../../dist/platform/lifecycle/fault-handlers.js';
 import { listenAndMarkReady } from '../../dist/platform/lifecycle/listen-and-mark-ready.js';
 import { installProcessShutdown } from '../../dist/platform/lifecycle/shutdown-handlers.js';
 import { LOGGER } from '../../dist/platform/platform.tokens.js';
 import { TechnicalEndpoint } from '../../dist/platform/routes/access-declaration.js';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const present = (row) => ({
-  id: row.id,
-  note: row.note,
-  at: row.noted_at.toISOString(),
-  written_by: row.written_by,
-});
-
 /** The routes that exist only here. Decorators are applied by hand: this file is plain JavaScript. */
 class E2eController {
-  constructor(database) {
-    this.database = database;
+  /** The product's own writer sets the cookies, with random values: the browser's handling of the attributes is what is under test. */
+  issueCookies(response) {
+    issueBrowserSessionCookies(response, {
+      session: randomBytes(32).toString('base64url'),
+      csrf: randomBytes(32).toString('base64url'),
+    });
+    return { issued: true };
   }
 
-  async create(body) {
-    const { id, note, at } = body ?? {};
-    if (typeof id !== 'string' || !UUID.test(id)) throw new BadRequestException();
-    if (typeof note !== 'string' || note === '' || note.length > 200)
-      throw new BadRequestException();
-    if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) throw new BadRequestException();
+  expireCookies(response) {
+    expireBrowserSessionCookies(response);
+    return { expired: true };
+  }
 
-    // The API's own pool, so the row is written by the identity the API really connects as.
-    const result = await this.database.db.$client.query(
-      'insert into e2e_harness.notes (id, note, noted_at) values ($1, $2, $3) returning id, note, noted_at, written_by',
-      [id, note, at],
+  /** What the browser sent, as facts a spec can compare. No cookie value is returned: names, and one boolean about two of them. */
+  echo(request) {
+    const header = request.headers.cookie ?? '';
+    const cookies = new Map(
+      header
+        .split(';')
+        .map((each) => each.trim())
+        .filter((each) => each !== '')
+        .map((each) => {
+          const at = each.indexOf('=');
+          return at === -1 ? [each, ''] : [each.slice(0, at), each.slice(at + 1)];
+        }),
     );
-    return present(result.rows[0]);
+    const sent = request.headers['x-csrf-token'];
+    return {
+      method: request.method,
+      origin: request.headers.origin ?? null,
+      secFetchSite: request.headers['sec-fetch-site'] ?? null,
+      secFetchMode: request.headers['sec-fetch-mode'] ?? null,
+      secFetchDest: request.headers['sec-fetch-dest'] ?? null,
+      cookieNames: [...cookies.keys()].toSorted(),
+      csrfHeaderPresent: typeof sent === 'string' && sent !== '',
+      csrfHeaderMatchesCookie:
+        typeof sent === 'string' && sent !== '' && cookies.get('melarc_csrf') === sent,
+    };
   }
 
-  async read(id) {
-    if (!UUID.test(id)) throw new BadRequestException();
-    const result = await this.database.db.$client.query(
-      'select id, note, noted_at, written_by from e2e_harness.notes where id = $1',
-      [id],
-    );
-    if (result.rows.length === 0) throw new NotFoundException();
-    return present(result.rows[0]);
-  }
-
-  async outbound() {
-    try {
-      await globalThis.fetch('https://payments.provider.example/v1/charges', {
-        method: 'POST',
-        body: '{}',
-      });
-      return { reached: true };
-    } catch (error) {
-      return { reached: false, code: error?.cause?.code ?? error?.code ?? 'UNKNOWN' };
-    }
+  /** The same answer to a POST: a route is declared for one method, because the route inventory refuses a handler for every method. */
+  echoPost(request) {
+    return this.echo(request);
   }
 }
 
 Controller('e2e')(E2eController);
-Inject(DatabaseService)(E2eController, undefined, 0);
 
 function route(name, decorators, parameters = []) {
   const descriptor = Object.getOwnPropertyDescriptor(E2eController.prototype, name);
@@ -101,9 +96,18 @@ function route(name, decorators, parameters = []) {
     decorate(E2eController.prototype, name, index);
   });
 }
-route('create', [Post('notes'), HttpCode(201), TechnicalEndpoint()], [Body()]);
-route('read', [Get('notes/:id'), TechnicalEndpoint()], [Param('id')]);
-route('outbound', [Post('outbound'), HttpCode(200), TechnicalEndpoint()]);
+route(
+  'issueCookies',
+  [Post('cookies/issue'), HttpCode(200), TechnicalEndpoint()],
+  [Res({ passthrough: true })],
+);
+route(
+  'expireCookies',
+  [Post('cookies/expire'), HttpCode(200), TechnicalEndpoint()],
+  [Res({ passthrough: true })],
+);
+route('echo', [Get('echo'), TechnicalEndpoint()], [Req()]);
+route('echoPost', [Post('echo'), HttpCode(200), TechnicalEndpoint()], [Req()]);
 
 const loaded = loadConfig(process.env);
 if (!loaded.ok) {
@@ -116,7 +120,10 @@ const app = await createApp({
   config,
   // Added to the application module's own metadata, so these are Nest routes like any other and the startup
   // check that every route is declared still runs.
-  rootModule: (options) => ({ ...AppModule.register(options), controllers: [E2eController] }),
+  rootModule: (options) => {
+    const root = AppModule.register(options);
+    return { ...root, controllers: [E2eController] };
+  },
 });
 const logger = app.get(LOGGER);
 installFaultHandlers(logger, {

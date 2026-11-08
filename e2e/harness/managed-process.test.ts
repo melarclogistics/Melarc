@@ -20,6 +20,21 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
+/**
+ * How long a stop that must succeed waits, after the kill, for a healthy child's exit event. The exit event of a plain
+ * Node server is not instant. Measured on this machine while the whole workspace's tests ran in parallel (30 stops in two
+ * runs of `pnpm test`), it arrived 32 to 192 ms after the stop request, median about 85 ms, while this process's own event
+ * loop never stalled for more than 35 ms in the same runs. So the late exit events are not explained by this process being
+ * slow to notice them, but **the cause of the delay is not established**: twelve busy loops alone did not reproduce it, and
+ * what the operating system was doing during the slow stops was not observed. What is known is the distribution. The earlier
+ * confirmation window of 100 ms after 50 ms of grace (150 ms in all) was shorter than the slowest of those stops: one stop
+ * in fifteen exceeded it in each of the two runs, which is consistent with the two `stopAll` tests below failing
+ * intermittently. 2 000 ms is ten times the worst
+ * stop observed and still finite. It is a budget for these tests only: the harness's own defaults are unchanged, and a
+ * process that really cannot be ended is still reported, after this wait, by name.
+ */
+const EXIT_CONFIRMATION_MS = 2_000;
+
 /** A script a test process runs: a small HTTP server that answers on PORT and says what it was given. */
 function script(name: string, body: string): string {
   const path = join(directory, name);
@@ -232,6 +247,65 @@ describe('a process that does not become ready', () => {
   });
 });
 
+describe('a process with no listener (the delivery worker, S0.45)', () => {
+  const NO_LISTENER = {
+    name: 'worker',
+    command: process.execPath,
+    env: {} as Record<string, string>,
+  };
+
+  // Break caught: a worker that is started and not waited for, so that the first journey asks for a link before the lanes are running,
+  // or one that is waited for by a URL it does not have. It is ready when its output says its lanes are running.
+  it('is returned only once a line of its output matches', async () => {
+    const file = script(
+      'worker.mjs',
+      `setTimeout(() => console.log('{"msg":"delivery worker started"}'), 300); setInterval(() => {}, 1000);`,
+    );
+    const started = Date.now();
+
+    const process_ = await ManagedProcess.start({
+      ...NO_LISTENER,
+      args: [file],
+      logDirectory: join(directory, 'logs'),
+      ready: { log: /delivery worker started/, timeoutMs: 10_000 },
+    });
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    expect(process_.logs().stdout).toContain('delivery worker started');
+  });
+
+  // Break caught: a worker that never says it started being waited for for ever, and left running when the wait ends.
+  it('fails at the deadline, naming the line it waited for, and is stopped', async () => {
+    const file = script('quiet.mjs', 'setInterval(() => {}, 1000);');
+
+    await expect(
+      ManagedProcess.start({
+        ...NO_LISTENER,
+        args: [file],
+        logDirectory: join(directory, 'logs'),
+        ready: { log: /delivery worker started/, timeoutMs: 600 },
+      }),
+    ).rejects.toThrow(
+      /not ready after 600 ms[\s\S]*no line of its output matched \/delivery worker started\//,
+    );
+  });
+
+  // Break caught: a worker that exits at start (a refused configuration) being waited for until the deadline instead of reported at once
+  // with what it wrote.
+  it('fails at once, with its last output, when it exits first', async () => {
+    const file = script('refuses.mjs', `console.error('refused: a setting'); process.exit(1);`);
+
+    await expect(
+      ManagedProcess.start({
+        ...NO_LISTENER,
+        args: [file],
+        logDirectory: join(directory, 'logs'),
+        ready: { log: /delivery worker started/, timeoutMs: 10_000 },
+      }),
+    ).rejects.toThrow(/exited before it was ready[\s\S]*refused: a setting/);
+  });
+});
+
 describe('stopping', () => {
   // Break caught: a stop that returns before the process is gone, so the next step (dropping its database)
   // races a process that still holds connections.
@@ -363,7 +437,9 @@ createServer((request, response) => response.end('ok')).listen(Number(process.en
       await ManagedProcess.start({ ...options(script('two.mjs', SERVER), second), name: 'second' });
       const restore = ignoreSignals(stubborn);
       try {
-        const error = await stopAll({ graceMs: 50, killMs: 100 }).catch((e: unknown) => e);
+        const error = await stopAll({ graceMs: 50, killMs: EXIT_CONFIRMATION_MS }).catch(
+          (e: unknown) => e,
+        );
 
         expect(error).toBeInstanceOf(Error);
         expect((error as Error).message).toContain('fixture');
@@ -486,7 +562,9 @@ createServer((request, response) => response.end('ok')).listen(Number(process.en
       await ManagedProcess.start({ ...options(script('two.mjs', SERVER), second), name: 'second' });
       const signals = failSignals(stubborn);
       try {
-        const error = await stopAll({ graceMs: 50, killMs: 100 }).catch((e: unknown) => e);
+        const error = await stopAll({ graceMs: 50, killMs: EXIT_CONFIRMATION_MS }).catch(
+          (e: unknown) => e,
+        );
 
         expect(error).toBeInstanceOf(ProcessNotStoppedError);
         expect((error as Error).message).toMatch(/1 of 2 processes could not be confirmed ended/);

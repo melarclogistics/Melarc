@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parseEnv } from 'node:util';
+
 import { describe, expect, it } from 'vitest';
 
-import { apiEnvironment, PROTECTED_KEYS } from './api-environment.ts';
+import { apiEnvironment, PROTECTED_KEYS, runKeys } from './api-environment.ts';
 
 const RUNTIME_URL =
   'postgres://melarc_api_runtime:runtime-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
@@ -22,6 +26,78 @@ describe('apiEnvironment', () => {
       HTTP_PORT: '4321',
       DATABASE_URL: RUNTIME_URL,
     });
+  });
+
+  // Break caught: a run that uses a test adapter in a way that proves nothing, such as the in-memory limiter where the
+  // authoritative PostgreSQL one is what an integrated run must exercise (SECURITY_DESIGN.md section 14.12).
+  it('selects the PostgreSQL limiter, the local key custody, the capture sink and the substitute verifier', () => {
+    expect(environment).toMatchObject({
+      RATE_LIMITER: 'postgres',
+      KEY_CUSTODY: 'local',
+      DELIVERY_EMAIL_ADAPTER: 'capture',
+      DELIVERY_SMS_ADAPTER: 'capture',
+      ATTESTATION_VERIFIER: 'substitute',
+    });
+  });
+
+  // Break caught: the harness naming a different set of key settings from the one the API reads, so a run fails at start for a
+  // setting added to the API and not to the harness.
+  it('sets every setting the API example makes required, key material included', () => {
+    const example = parseEnv(
+      readFileSync(resolve(import.meta.dirname, '../../apps/api/.env.example'), 'utf8'),
+    );
+    const required = Object.keys(example).filter(
+      (name) => name.startsWith('KEY_') || ['OPS_ORIGIN', 'VENDOR_ORIGIN'].includes(name),
+    );
+
+    expect(required.length).toBeGreaterThanOrEqual(13);
+    for (const name of required) expect(Object.keys(environment), name).toContain(name);
+  });
+
+  // Break caught: key material that is not a key (a placeholder, a short string), or the same key for two purposes, which the
+  // API refuses at start; or the same keys on every run, which would make them a shared secret.
+  it('gives each purpose a fresh key of its own, as the API reads one, on every call', () => {
+    const again = apiEnvironment({
+      port: 1,
+      runtimeUrl: RUNTIME_URL,
+      captureFile: '/tmp/capture.jsonl',
+    });
+    const keys = (values: Record<string, string>): string[] =>
+      Object.entries(values)
+        .filter(([name]) => /^KEY_.+_MATERIAL$/.test(name))
+        .map(([, value]) => value);
+
+    expect(keys(environment)).toHaveLength(5);
+    for (const value of keys(environment)) expect(value).toMatch(/^1:[A-Za-z0-9_-]{43}$/);
+    expect(new Set([...keys(environment), ...keys(again)]).size).toBe(10);
+  });
+
+  // Break caught (S0.45): the API judging a real browser's `Origin` against a placeholder, so that every sign-in of a journey is refused
+  // `CSRF_VALIDATION_FAILED`. The Ops origin of the run is the one the API is given.
+  it('is given the origin the browser really sends', () => {
+    const served = apiEnvironment({
+      port: 1,
+      runtimeUrl: RUNTIME_URL,
+      captureFile: '/tmp/capture.jsonl',
+      opsOrigin: 'http://127.0.0.1:5199',
+    });
+
+    expect(served.OPS_ORIGIN).toBe('http://127.0.0.1:5199');
+  });
+
+  // Break caught (S0.45): the API and the delivery worker holding different keys for the same purpose, so that the worker could not
+  // open the message the API sealed for it and no link would ever be captured.
+  it('uses the key material it is given, so that the worker can hold the same delivery key', () => {
+    const keys = runKeys();
+    const first = apiEnvironment({
+      port: 1,
+      runtimeUrl: RUNTIME_URL,
+      captureFile: '/tmp/capture.jsonl',
+      keys,
+    });
+
+    for (const [name, value] of Object.entries(keys)) expect(first[name], name).toBe(value);
+    expect(keys.KEY_CREDENTIAL_DELIVERY_MATERIAL).toMatch(/^1:[A-Za-z0-9_-]{43}$/);
   });
 
   // Break caught: the migration credentials reaching the API. It refuses to start with the variable present,
@@ -71,10 +147,15 @@ describe('apiEnvironment', () => {
   it('protects exactly the settings that make a run local, sandboxed and safe', () => {
     expect([...PROTECTED_KEYS].toSorted()).toEqual([
       'APP_ENV',
+      'ATTESTATION_VERIFIER',
       'DATABASE_MIGRATION_URL',
       'DATABASE_URL',
+      'DELIVERY_EMAIL_ADAPTER',
+      'DELIVERY_SMS_ADAPTER',
+      'KEY_CUSTODY',
       'MELARC_E2E_CAPTURE_FILE',
       'NODE_ENV',
+      'RATE_LIMITER',
     ]);
   });
 

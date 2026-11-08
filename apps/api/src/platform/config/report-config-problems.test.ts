@@ -23,4 +23,19 @@ describe('reportConfigProblems', () => {
       problems: PROBLEMS,
     });
   });
+
+  // Break caught (S0.18): the delivery worker's refusal reading as the API's, so that an operator looks for the wrong process.
+  it('names the process it speaks for, and says that process will not start', () => {
+    const output = reportConfigProblems(PROBLEMS, new Date('2026-10-04T12:00:00.000Z'), {
+      service: 'melarc-delivery-worker',
+      subject: 'the delivery worker',
+    });
+
+    expect(JSON.parse(output)).toMatchObject({
+      level: 'fatal',
+      service: 'melarc-delivery-worker',
+      msg: 'Invalid configuration: the delivery worker will not start',
+      problems: PROBLEMS,
+    });
+  });
 });

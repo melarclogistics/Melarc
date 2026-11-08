@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { deployedEnv, randomKey, validEnv } from '../src/test-support/config-env.js';
 import {
   DEADLINES,
   freePort,
@@ -14,6 +15,7 @@ import {
   requireBuild,
   run,
   start,
+  startCommand,
   UNREACHABLE_DATABASE_URL,
   type RunningProcess,
 } from './support/api-process.js';
@@ -158,6 +160,9 @@ describe('startup refusals', () => {
       APP_ENV: 'production',
       HTTP_PORT: String(port),
       DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      // https, as a deployment has, so that the only thing wrong is the mode.
+      OPS_ORIGIN: 'https://ops.melarc.example',
+      VENDOR_ORIGIN: 'https://vendor.melarc.example',
     });
 
     expect(result.code).toBe(1);
@@ -204,6 +209,33 @@ describe('startup refusals', () => {
 
       expect(result.code).toBe(1);
       expect(records(result.stderr)[0]).toMatchObject({ level: 'fatal', msg: 'startup failed' });
+    } finally {
+      await new Promise((resolveClose) => blocker.close(resolveClose));
+    }
+  });
+
+  // Break caught: a failed start that leaves the private metrics endpoint open. It is a handle of its own, so the process never ends, a
+  // restart policy never fires, and a scraper sees the target up while no API listens.
+  it('ends a failed start when the metrics endpoint is on, and leaves nothing listening on its port', async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolveListen) => blocker.listen(0, '127.0.0.1', resolveListen));
+    const { port } = blocker.address() as { port: number };
+    const metricsPort = await freePort();
+    try {
+      const result = await run(MAIN, {
+        NODE_ENV: 'production',
+        APP_ENV: 'local',
+        HTTP_PORT: String(port),
+        METRICS_PORT: String(metricsPort),
+        DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      });
+
+      expect(result.code).toBe(1);
+      expect(records(result.stderr).at(-1)).toMatchObject({
+        level: 'fatal',
+        msg: 'startup failed',
+      });
+      await expect(bounded(`http://127.0.0.1:${String(metricsPort)}/metrics`)).rejects.toThrow();
     } finally {
       await new Promise((resolveClose) => blocker.close(resolveClose));
     }
@@ -320,11 +352,218 @@ describe('the OpenAPI generation command', () => {
     ) as { live: { method: string; path: string }[] };
 
     expect(document.info.title).toContain('derived from the implementation');
-    expect(document.paths).toEqual({});
+    // The three credential setup operations (S0.31), the staff sign-in and its second step (S0.32, S0.33) the read and the end of the caller's own session (S0.34), the four reads of S0.35, the three operations of S0.36, the three of S0.37, the four of the trusted browser (staff-authentication.md §5.8), the thirteen of the vendor and of recovery (S0.47 to S0.51), and the eight of the rider (the roster S0.53a, the three acts on a device S0.53b, S0.53c and S0.58, its enrolment S0.57, the challenge and the sign-in S0.59) are the routes of the product; nothing else is described.
+    expect(Object.keys(document.paths).toSorted()).toEqual([
+      '/auth/recovery/complete',
+      '/auth/recovery/request',
+      '/auth/rider/device/enrol',
+      '/auth/rider/sign-in',
+      '/auth/rider/sign-in/challenge',
+      '/auth/session',
+      '/auth/sessions',
+      '/auth/sessions/{id}/revoke',
+      '/auth/staff/setup/credential',
+      '/auth/staff/setup/mfa',
+      '/auth/staff/setup/mfa/begin',
+      '/auth/staff/sign-in',
+      '/auth/staff/sign-in/mfa',
+      '/auth/staff/trusted-browsers',
+      '/auth/staff/trusted-browsers/{id}',
+      '/auth/vendor/device/enrol',
+      '/auth/vendor/device/grant',
+      '/auth/vendor/devices',
+      '/auth/vendor/devices/{id}/revoke',
+      '/auth/vendor/setup/credential',
+      '/auth/vendor/sign-in',
+      '/ops/riders',
+      '/ops/riders/{riderId}',
+      '/ops/riders/{riderId}/device/register',
+      '/ops/riders/{riderId}/device/reregister',
+      '/ops/riders/{riderId}/device/revoke',
+      '/ops/staff/{id}/credential/recover',
+      '/ops/staff/{id}/credential/setup/reissue',
+      '/ops/staff/{id}/mfa/reset',
+      '/ops/staff/{id}/trusted-browsers',
+      '/ops/staff/{id}/trusted-browsers/revoke',
+      '/ops/vendors',
+      '/ops/vendors/{id}',
+      '/ops/vendors/{id}/credential/recover',
+      '/ops/vendors/{id}/credential/setup/reissue',
+      '/reason-definitions',
+      '/staff-identities',
+      '/staff-identities/{id}',
+      '/staff-identities/{id}/approve',
+      '/staff-role-bundles/assignable',
+    ]);
     expect(inventory.live).toEqual([
+      { method: 'DELETE', path: '/api/v1/auth/session' },
+      { method: 'DELETE', path: '/api/v1/auth/staff/trusted-browsers/:id' },
+      { method: 'GET', path: '/api/v1/auth/session' },
+      { method: 'GET', path: '/api/v1/auth/sessions' },
+      { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
+      { method: 'GET', path: '/api/v1/auth/vendor/devices' },
+      { method: 'GET', path: '/api/v1/ops/riders' },
+      { method: 'GET', path: '/api/v1/ops/riders/:riderId' },
+      { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
+      { method: 'GET', path: '/api/v1/ops/vendors' },
+      { method: 'GET', path: '/api/v1/ops/vendors/:id' },
+      { method: 'GET', path: '/api/v1/reason-definitions' },
+      { method: 'GET', path: '/api/v1/staff-identities' },
+      { method: 'GET', path: '/api/v1/staff-identities/:id' },
+      { method: 'GET', path: '/api/v1/staff-role-bundles/assignable' },
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
+      { method: 'POST', path: '/api/v1/auth/recovery/complete' },
+      { method: 'POST', path: '/api/v1/auth/recovery/request' },
+      { method: 'POST', path: '/api/v1/auth/rider/device/enrol' },
+      { method: 'POST', path: '/api/v1/auth/rider/sign-in' },
+      { method: 'POST', path: '/api/v1/auth/rider/sign-in/challenge' },
+      { method: 'POST', path: '/api/v1/auth/sessions/:id/revoke' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/credential' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa' },
+      { method: 'POST', path: '/api/v1/auth/staff/setup/mfa/begin' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in' },
+      { method: 'POST', path: '/api/v1/auth/staff/sign-in/mfa' },
+      { method: 'POST', path: '/api/v1/auth/vendor/device/enrol' },
+      { method: 'POST', path: '/api/v1/auth/vendor/device/grant' },
+      { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
+      { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
+      { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
+      { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/revoke' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/credential/recover' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/credential/setup/reissue' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/mfa/reset' },
+      { method: 'POST', path: '/api/v1/ops/staff/:id/trusted-browsers/revoke' },
+      { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/recover' },
+      { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/setup/reissue' },
+      { method: 'POST', path: '/api/v1/staff-identities' },
+      { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
     ]);
     expect(existsSync(join(outDir, 'openapi.generated.json'))).toBe(true);
+  });
+});
+
+describe('startup refusals for the settings S0.2 adds', () => {
+  /** A deployment that sets every real adapter and still has no production key custody to name. */
+  const productionEnv = (port: number, overrides: Record<string, string | undefined> = {}) =>
+    deployedEnv('production', {
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      DELIVERY_EMAIL_ADAPTER: 'provider',
+      DELIVERY_EMAIL_ENDPOINT: 'https://email.provider.example/v1',
+      DELIVERY_EMAIL_TIMEOUT_MS: '5000',
+      DELIVERY_SMS_ADAPTER: 'provider',
+      DELIVERY_SMS_ENDPOINT: 'https://sms.provider.example/v1',
+      DELIVERY_SMS_TIMEOUT_MS: '5000',
+      ATTESTATION_VERIFIER: 'service',
+      ATTESTATION_VERIFIER_URL: 'https://verifier.internal.example',
+      ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+      ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+      ...overrides,
+    });
+
+  const secretsIn = (env: Record<string, string>): string[] =>
+    Object.entries(env)
+      .filter(([name]) => /_MATERIAL$|CALLER_SECRET$/.test(name))
+      .flatMap(([, value]) => value.split(',').map((entry) => entry.slice(entry.indexOf(':') + 1)));
+
+  // The proof of DEPLOYMENT_AND_ENVIRONMENTS.md section 12.3 that matters: the real binary, in production, with everything else
+  // real, refuses the local key substitute, exits 1, listens on nothing and prints no key.
+  it('refuses to start in production on the local key custody, and says so without a key', async () => {
+    const port = await freePort();
+    const env = productionEnv(port);
+    const result = await run(MAIN, env);
+
+    expect(result.code).toBe(1);
+    expect(records(result.stderr)[0]).toMatchObject({
+      level: 'fatal',
+      problems: [{ key: 'KEY_CUSTODY', problem: 'invalid' }],
+    });
+    await expect(nothingListening(port)).rejects.toThrow();
+    const secrets = secretsIn(env);
+    expect(secrets).toHaveLength(6);
+    for (const secret of secrets) {
+      expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
+    }
+  });
+
+  // Break caught: a production start that boots with a test adapter selected, which would run credential delivery or
+  // attestation on a stand-in.
+  it.each([
+    [
+      'the capture delivery adapter',
+      {
+        DELIVERY_SMS_ADAPTER: 'capture',
+        DELIVERY_SMS_ENDPOINT: undefined,
+        DELIVERY_SMS_TIMEOUT_MS: undefined,
+      },
+      'DELIVERY_SMS_ADAPTER',
+    ],
+    ['the in-memory limiter', { RATE_LIMITER: 'memory' }, 'RATE_LIMITER'],
+  ])(
+    'refuses to start in production with %s, beside the key custody',
+    async (_label, change, key) => {
+      const port = await freePort();
+      const result = await run(MAIN, productionEnv(port, change));
+
+      expect(result.code).toBe(1);
+      const fatal = records(result.stderr)[0] as { problems: { key: string }[] };
+      expect(fatal.problems.map((problem) => problem.key).toSorted()).toEqual(
+        [key, 'KEY_CUSTODY'].toSorted(),
+      );
+      await expect(nothingListening(port)).rejects.toThrow();
+    },
+  );
+
+  // Break caught: a production start with a key absent, which the design refuses rather than boots degraded.
+  it('refuses to start with a key absent, names the setting, and listens on nothing', async () => {
+    const port = await freePort();
+    const env = validEnv({
+      NODE_ENV: 'production',
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      KEY_PASSWORD_PEPPER_MATERIAL: undefined,
+    });
+    // startCommand adds nothing to the environment it is given, so the key really is absent.
+    const result = await startCommand(process.execPath, [MAIN], env).waitForExit(
+      DEADLINES.finish,
+      `did not finish within ${String(DEADLINES.finish)} ms`,
+    );
+
+    expect(result.code).toBe(1);
+    expect(records(result.stderr)[0]).toMatchObject({
+      level: 'fatal',
+      problems: [{ key: 'KEY_PASSWORD_PEPPER_MATERIAL', problem: 'missing' }],
+    });
+    await expect(nothingListening(port)).rejects.toThrow();
+  });
+
+  // Break caught: a key or a caller secret carried out by the one line the API writes when it is live, or by a request.
+  it('starts with every setting and writes no key or caller secret anywhere', async () => {
+    const port = await freePort();
+    const baseUrl = `http://127.0.0.1:${String(port)}`;
+    const env = validEnv({
+      NODE_ENV: 'production',
+      HTTP_PORT: String(port),
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      ATTESTATION_VERIFIER: 'service',
+      ATTESTATION_VERIFIER_URL: 'http://127.0.0.1:9100',
+      ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
+      ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+      KEY_TOTP_SEED_MATERIAL: `1:${randomKey()},2:${randomKey()}`,
+      KEY_TOTP_SEED_ACTIVE_VERSION: '2',
+    });
+    const running = startCommand(process.execPath, [MAIN], env);
+    await running.waitUntilLive(baseUrl);
+    expect((await bounded(`${baseUrl}/livez`)).status).toBe(200);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+
+    const secrets = secretsIn(env);
+    expect(secrets).toHaveLength(7);
+    for (const secret of secrets) {
+      expect(`${running.stdout}${running.stderr}`).not.toContain(secret);
+    }
   });
 });

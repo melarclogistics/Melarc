@@ -50,6 +50,8 @@ export interface ResponseDescription {
   readonly headers: Readonly<Record<string, HeaderDescription>>;
   /** The cookies the response sets or expires (`x-set-cookies`), sorted. */
   readonly setCookies: readonly string[];
+  /** The cookies the response may also set (`x-set-cookies-optional`), sorted: none is owed. */
+  readonly setCookiesOptional: readonly string[];
   /**
    * The security scheme whose credential a request must have presented to be owed those cookies
    * (`x-set-cookies-for`), or undefined when every caller is.
@@ -304,10 +306,14 @@ function describeResponse(
   const cookies = response['x-set-cookies'];
   const cookiesFor = response['x-set-cookies-for'];
   const cookiesWhen = response['x-set-cookies-when'];
+  const cookiesOptional = response['x-set-cookies-optional'];
   return {
     content: describeContent(model, response.content, where, collect),
     headers,
     setCookies: Array.isArray(cookies) ? sortedUnique(cookies as string[]) : [],
+    setCookiesOptional: Array.isArray(cookiesOptional)
+      ? sortedUnique(cookiesOptional as string[])
+      : [],
     setCookiesFor: typeof cookiesFor === 'string' ? cookiesFor : undefined,
     setCookiesWhen:
       isJsonObject(cookiesWhen) && typeof cookiesWhen.principal_type === 'string'

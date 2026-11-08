@@ -8,17 +8,22 @@
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run --project unit --project process",
-    "test:db": "vitest run --project database",
+    "test:db": "vitest run --project database --project database-alone",
     "start": "node dist/main.js",
     "start:local": "node --env-file=.env dist/main.js",
+    "start:worker": "node dist/delivery-worker-main.js",
+    "start:worker:local": "node --env-file=.env dist/delivery-worker-main.js",
     "openapi:generate": "node dist/tools/generate-openapi.js",
     "contract:check": "node dist/tools/check-contract.js",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:bootstrap": "node dist/tools/db-bootstrap.js",
     "db:migrate": "node dist/tools/db-migrate.js",
+    "db:seed": "node dist/tools/db-seed.js",
     "db:reset": "node dist/tools/db-reset.js",
-    "db:orphans": "node dist/tools/db-orphans.js"
+    "db:orphans": "node dist/tools/db-orphans.js",
+    "bootstrap:seed": "node dist/tools/bootstrap-seed.js",
+    "bootstrap:resume": "node dist/tools/bootstrap-resume.js"
   },
   "dependencies": {
     "@nestjs/common": "12.1.2",
@@ -33,7 +38,7 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "yaml": "2.9.1",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@nestjs/testing": "12.1.2",
@@ -42,7 +47,7 @@
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.11",
     "typescript": "6.0.3",
-    "vite": "8.3.2",
+    "vite": "8.3.3",
     "vitest": "5.0.3"
   }
 }

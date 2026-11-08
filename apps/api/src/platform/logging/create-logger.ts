@@ -4,6 +4,19 @@ import type { AppConfig } from '../config/load-config.js';
 import { redactValue, scrubText } from './redaction.js';
 import { currentRequestContext } from './request-context.js';
 
+export interface CreateServiceLoggerOptions {
+  /** Who is logging, as a log collector tells the processes apart (`melarc-api`, `melarc-delivery-worker`). */
+  readonly service: string;
+  readonly level: AppConfig['logLevel'];
+  readonly appEnv: AppConfig['appEnv'];
+  /**
+   * Defaults to stdout, written synchronously: the fault handlers log a crash and exit at once, and a line that is
+   * still in an asynchronous buffer at that moment is the line that says why. Tests pass an in-memory stream so
+   * they can search every byte logged.
+   */
+  readonly destination?: DestinationStream;
+}
+
 export interface CreateLoggerOptions {
   readonly config: AppConfig;
   /**
@@ -14,12 +27,27 @@ export interface CreateLoggerOptions {
   readonly destination?: DestinationStream;
 }
 
-/** The one logger. Every field of every line passes through central redaction before it is written. */
+/** The API's logger: the one logger below, named for the API. */
 export function createLogger({ config, destination }: CreateLoggerOptions): Logger {
+  return createServiceLogger({
+    service: 'melarc-api',
+    level: config.logLevel,
+    appEnv: config.appEnv,
+    ...(destination === undefined ? {} : { destination }),
+  });
+}
+
+/** The one logger. Every field of every line passes through central redaction before it is written. */
+export function createServiceLogger({
+  service,
+  level,
+  appEnv,
+  destination,
+}: CreateServiceLoggerOptions): Logger {
   return pino(
     {
-      level: config.logLevel,
-      base: { service: 'melarc-api', env: config.appEnv },
+      level,
+      base: { service, env: appEnv },
       timestamp: pino.stdTimeFunctions.isoTime,
       // formatters.log has already reduced every error to its safe form; pino's own err serializer would
       // re-process that and overwrite its type.

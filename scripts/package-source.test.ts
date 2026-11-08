@@ -274,6 +274,11 @@ describe('denyReason', () => {
     ['x/.git/HEAD', /history/],
     ['.claude/settings.local.json', /agent/],
     ['.superpowers/x.md', /agent/],
+    // The custody bundle of the bootstrap (S0.30) holds a setup secret in clear: it is written outside the checkout, and a copy that
+    // finds its way into the tree is refused by its name, whatever its case.
+    ['melarc-bootstrap-0123456789abcdef0123456789abcdef.bundle', /custody bundle/],
+    ['somewhere/else/melarc-bootstrap-0123456789abcdef0123456789abcdef.bundle', /custody bundle/],
+    ['MELARC-BOOTSTRAP-0123456789ABCDEF0123456789ABCDEF.BUNDLE', /custody bundle/],
     ['backup.zip', /archive/],
     ['sub/old.tar.gz', /archive/],
     ['old.tar', /archive/],
@@ -300,6 +305,9 @@ describe('denyReason', () => {
     'design/assets/brand/logo.svg',
     'scripts/build-manifest.ts',
     'distribution/plan.md',
+    'apps/api/src/tools/bootstrap/custody-bundle.ts',
+    'melarc-bootstrap-short.bundle',
+    'docs/bootstrap-bundle.md',
     'src/environment.ts',
     'src/keyboard.ts',
     'docs/keys.md',
@@ -1107,6 +1115,65 @@ describe('packageSource', () => {
     const root = project();
     put(root, { 'scratch-notes.txt': keyBlock() });
     assert.throws(() => packageSource(root, { out: outside() }), /scratch-notes\.txt/);
+  });
+
+  // The first line of a bootstrap custody bundle, as `apps/api/src/tools/bootstrap/custody-bundle.ts` writes it, and a bundle's text.
+  // (A test of the API keeps this literal equal to the one the bootstrap tool writes.)
+  const BUNDLE_FIRST_LINE = 'MELARC-BOOTSTRAP-BUNDLE v1';
+  const bundleText = (lineEnd = '\n'): string =>
+    [
+      BUNDLE_FIRST_LINE,
+      `target: ${'ab'.repeat(16)}`,
+      '',
+      'secret:',
+      'a-throwaway-sentinel-secret',
+    ].join(lineEnd);
+
+  // Break caught: a custody bundle that was copied into the tree under a name that is no bundle's (a note, a backup), which the
+  // refusal by name does not see: it would be packed with a setup secret in clear in it, for an archive that is shared for review.
+  it('refuses a custody bundle that was renamed, names the file and never prints the secret', () => {
+    for (const [path, text] of [
+      ['docs/notes.txt', bundleText()],
+      ['docs/copy.dat', bundleText('\r\n')],
+      ['handover', BUNDLE_FIRST_LINE],
+    ] as const) {
+      const root = repository({ ...sourceFiles, [path]: text });
+      const out = outside();
+      assert.throws(
+        () => packageSource(root, { out }),
+        (error: unknown) => {
+          assert.ok(error instanceof PackageSourceError);
+          assert.ok(error.message.includes(path), path);
+          assert.match(error.message, /custody bundle/);
+          assert.doesNotMatch(error.message, /a-throwaway-sentinel-secret/);
+          return true;
+        },
+        path,
+      );
+      assert.equal(existsSync(out), false, 'no archive is left behind');
+    }
+  });
+
+  it('refuses a custody bundle in an untracked file too', () => {
+    const root = project();
+    put(root, { 'scratch-bundle.txt': bundleText() });
+    assert.throws(() => packageSource(root, { out: outside() }), /scratch-bundle\.txt/);
+  });
+
+  // Break caught: a file that merely mentions the first line of a bundle (the source of the tool, a specification) taken for one.
+  it('packages a file that only mentions the first line of a bundle, or begins with a longer word', () => {
+    const root = repository({
+      ...sourceFiles,
+      'docs/handover.md': `A bundle begins with ${BUNDLE_FIRST_LINE} and is never committed.\n`,
+      'src/magic.ts': `export const MAGIC = '${BUNDLE_FIRST_LINE}';\n`,
+      'docs/other.txt': `${BUNDLE_FIRST_LINE.replace('v1', 'v10')}\nnot a bundle of this layout\n`,
+    });
+    const out = outside();
+    packageSource(root, { out });
+    const paths = readZip(readFileSync(out)).map((e) => e.path);
+    for (const path of ['docs/handover.md', 'src/magic.ts', 'docs/other.txt']) {
+      assert.ok(paths.includes(path), path);
+    }
   });
 
   it('packages a document that only names the header of a key', () => {

@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -6,7 +7,7 @@ import {
   createDatabase,
   dropDatabase,
   listDatabases,
-  readNotes,
+  observe,
   withClient,
 } from '../harness/database.ts';
 import { repositoryPaths } from '../harness/paths.ts';
@@ -87,10 +88,10 @@ test.describe('the lifecycle of a stack', () => {
   });
 
   // Break caught: two stacks sharing a database or a port, so that parallel runs, or a run and a developer's
-  // own stack, corrupt each other's data.
+  // own stack, corrupt each other's data. The first holds the two bootstrap administrators; the second is bare, and must hold nobody.
   test('two stacks at once share nothing', async () => {
     const [first, second] = await Promise.all([
-      startStack({ runDirectory: directory('stack-first') }),
+      startStack({ runDirectory: directory('stack-first'), journeys: true }),
       startStack({ runDirectory: directory('stack-second') }),
     ]);
     try {
@@ -98,33 +99,45 @@ test.describe('the lifecycle of a stack', () => {
       expect(second.origin).not.toBe(first.origin);
       expect(second.apiOrigin).not.toBe(first.apiOrigin);
 
-      const note = {
-        id: '11111111-1111-4111-8111-111111111111',
-        note: 'only in the first',
-        at: '2026-10-05T09:00:00.000Z',
-      };
-      const created = await fetch(`${first.origin}/api/v1/e2e/notes`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(note),
-      });
-
-      expect(created.status).toBe(201);
-      expect(await readNotes(first.database)).toHaveLength(1);
-      expect(await readNotes(second.database)).toEqual([]);
+      const ada = first.administrators?.[0]?.workEmail ?? '';
+      expect(await observe(first.database.name, 'audit-codes', ada)).not.toEqual([]);
+      expect(await observe(second.database.name, 'audit-codes', ada)).toEqual([]);
     } finally {
       await Promise.all([first.stop(), second.stop()]);
     }
   });
 
+  // Break caught (S0.45): a stack of the journeys leaving its worker running, its folders (which hold the administrators' one-time
+  // secrets and the links of every message, in clear) on the disk, or its database behind. They are the first things a killed or a
+  // failed run would leave on a developer's machine.
+  test('a stack of the journeys also ends its worker and removes its folders', async () => {
+    const stack = await startStack({ runDirectory: directory('stack-journeys'), journeys: true });
+    const capture = stack.captureDirectory ?? '';
+    const custody = stack.custodyDirectory ?? '';
+    try {
+      expect(stack.worker?.exited).toBe(false);
+      expect(existsSync(capture)).toBe(true);
+      // One bundle for each administrator, with nothing else beside them.
+      expect(readdirSync(custody)).toHaveLength(2);
+      expect(stack.administrators).toHaveLength(2);
+    } finally {
+      await stack.stop();
+    }
+
+    expect(stack.worker?.exited).toBe(true);
+    expect(existsSync(capture)).toBe(false);
+    expect(existsSync(custody)).toBe(false);
+    expect(await listDatabases()).not.toContain(stack.database.name);
+  });
+
   // Break caught: the API holding the owner's powers. Whatever the API is given must not be able to change the
-  // schema, whatever it writes through the technical route: the runtime role is not the owner.
+  // schema: the runtime role is not the owner.
   test('gives the API a database identity that cannot change the schema', async () => {
     const stack = await startStack({ runDirectory: directory('stack-identity') });
     try {
       const refusal = await withClient(stack.database.runtimeUrl, async (client) => {
         try {
-          await client.query('create table e2e_harness.smuggled (id int)');
+          await client.query('create table public.smuggled (id int)');
           return 'allowed';
         } catch (error) {
           return (error as { code?: string }).code;

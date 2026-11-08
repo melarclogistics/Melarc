@@ -6,7 +6,12 @@ export class UnsafeTargetError extends Error {
   }
 }
 
-/** The role migrations run as (SECURITY_DESIGN.md §14.17a). */
+/**
+ * The role migrations run as (SECURITY_DESIGN.md §14.17a). This file imports nothing, because a root script imports it under
+ * Node's own type stripping (`scripts/infra-check.test.ts`), which resolves no `.js` specifier to a `.ts` file and would pull in
+ * the whole configuration. `platform/database/technical-roles.ts` names the same role for the access matrix, and a test holds the
+ * two equal.
+ */
 export const MIGRATION_ROLE = 'melarc_migration_elevated';
 
 /**

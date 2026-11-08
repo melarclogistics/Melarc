@@ -64,7 +64,7 @@ projection that answers *may this vendor book today* without disclosing why not)
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
 | Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Create the vendor record and its shared portal account| `vendor.organization.create` — own hub|
-| Melarc Ops| **Hub Senior Ops**, Platform Admin| Approve **or reject** operational activation| `vendor.organization.approve` — own hub, **creator ≠ approver**|
+| Melarc Ops| **Hub Senior Ops**, Platform Admin| Approve **or reject** operational activation| `vendor.organization.approve` — own hub, **creator ≠ approver, a Platform Admin excepted**|
 | Melarc Ops| **Platform Admin only**| Enable or disable the account allowance| `vendor.allowance.enable` / `.disable` — **all hubs**|
 | Melarc Vendor| Vendor account| Nothing in this feature. **No self-registration and no tenant administration** (§29.1, §35.12.1)| —|
 | Melarc Rider| Rider| **N/A.** Not a party to vendor administration| —|
@@ -115,7 +115,7 @@ elsewhere.*
 
 | Situation| Behaviour|
 |---|---|
-| The creator tries to decide their own record| Refused — **`SELF_APPROVAL_FORBIDDEN`** (§29.2.3, §35.12.2, `MSC-DEC-135`). The same code every other same-actor exclusion returns; one uniform rule keeps one code|
+| A creator below the Platform Admin tier tries to decide their own record| Refused — **`SELF_APPROVAL_FORBIDDEN`** (§29.2.3, §35.12.2, `MSC-DEC-135`). The same code every other same-actor exclusion returns; one uniform rule keeps one code. A Platform Admin creator may decide their own record ([permissions.md](../../contracts/permissions.md) §6)|
 | Senior Ops at another hub tries to decide| Refused — `PERMISSION_DENIED`. `vendor.organization.approve` is **own hub**|
 | Senior Ops tries to enable the allowance| Refused — `PERMISSION_DENIED`. `vendor.allowance.enable` is **Platform Admin only, all hubs** (§35.12.3)|
 | Either allowance call arrives with no reason| Refused — `REASON_REQUIRED` (§29.2.4–5)|
@@ -236,13 +236,14 @@ And no administrator-supplied secret was accepted in the request.
 ```
 **Governs:** §29.2.1, domain-model.md §6.8, `MSC-DEC-265` · **Surface:** API · **Test level:** integration
 
-### `AC-VENDOR-03` — the creator cannot decide their own record
+### `AC-VENDOR-03` — a creator below the Platform Admin tier cannot decide their own record
 
 ```text
-Given a VendorOrganization in PENDING_SENIOR_OPS_REVIEW created by actor A,
+Given a VendorOrganization in PENDING_SENIOR_OPS_REVIEW created by actor A, whose grant of vendor.organization.approve is below tier P,
 When actor A calls decideVendorOrganization holding vendor.organization.approve,
 Then the call is refused with SELF_APPROVAL_FORBIDDEN,
-And the record stays in PENDING_SENIOR_OPS_REVIEW.
+And the record stays in PENDING_SENIOR_OPS_REVIEW,
+And when the creator is a Platform Admin the same call is accepted (permissions.md section 6).
 ```
 **Governs:** §29.2.3, §35.12.2, `MSC-DEC-135` · **Surface:** API · **Test level:** integration
 

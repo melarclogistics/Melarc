@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { appWith, startTestApp, TEST_CONFIG, type TestApp } from '../../test-support/test-app.js';
+import { INERT_DEADLINES } from '../config/inert-config.js';
 import type { AppConfig, DatabaseConfig } from '../config/load-config.js';
 import { gracefulShutdown } from '../lifecycle/graceful-shutdown.js';
 import { DATABASE_POOL } from '../platform.tokens.js';
@@ -14,6 +15,7 @@ import { PostgresUrlError } from './postgres-url.js';
 const UNREACHABLE_DATABASE: DatabaseConfig = {
   url: 'postgres://melarc_api_runtime:URL-PASSWORD-VALUE@127.0.0.1:1/melarc_unreachable',
   poolMax: 2,
+  deadlines: INERT_DEADLINES,
 };
 
 const UNREACHABLE: AppConfig = { ...TEST_CONFIG, database: UNREACHABLE_DATABASE };
@@ -74,7 +76,8 @@ describe('the database module', () => {
     });
     expect(
       running.logs.records().find((record) => record.msg === 'readiness check failing'),
-    ).toMatchObject({ level: 'warn', checks: ['database'] });
+      // Every check that reads the database fails with it: the fixed policy since the build declares a Vendor revision (S0.48).
+    ).toMatchObject({ level: 'warn', checks: ['database', 'fixed-policy', 'reference-data'] });
     const everything = `${running.logs.text()}${JSON.stringify(ready)}`;
     for (const secret of ['URL-PASSWORD-VALUE', 'melarc_unreachable']) {
       expect(everything).not.toContain(secret);
@@ -93,6 +96,13 @@ describe('the database module', () => {
         database: 'melarc_unreachable',
         password: 'URL-PASSWORD-VALUE',
         max: 2,
+      });
+      // Every connection starts with the server's time bounds (S0.6), and takes at most the acquire timeout to be made.
+      expect(pool.options).toMatchObject({
+        statement_timeout: INERT_DEADLINES.statementTimeoutMs,
+        lock_timeout: INERT_DEADLINES.lockTimeoutMs,
+        idle_in_transaction_session_timeout: INERT_DEADLINES.idleInTransactionTimeoutMs,
+        connectionTimeoutMillis: INERT_DEADLINES.acquireTimeoutMs,
       });
       expect(pool.options).not.toHaveProperty('connectionString');
     } finally {

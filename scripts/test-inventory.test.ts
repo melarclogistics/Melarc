@@ -265,10 +265,47 @@ describe('the Playwright configuration', () => {
       'a testMatch pattern that is not a string',
     );
     assert.equal(
-      readPlaywrightConfig("testDir: 'a', testIgnore: 'b'").unreadable.length,
+      readPlaywrightConfig("testDir: 'a', testIgnore: IGNORED").unreadable.length,
       1,
-      'a testIgnore',
+      'a testIgnore that is not a string literal',
     );
+    assert.equal(
+      readPlaywrightConfig("testDir: 'a', projects: [{ name: 'p', testIgnore: 'b' }]").unreadable
+        .length,
+      0,
+      'a testIgnore given as a string literal is read',
+    );
+  });
+
+  // Break caught (S0.23): an ignore applied to the whole configuration, so that a spec one project ignores and another runs is
+  // reported as run by nobody, or a spec that every project ignores is reported as run.
+  it('reads an ignore as the ignore of its own project', () => {
+    const config = `testDir: './tests', projects: [
+      { name: 'plain', testMatch: '**/*.spec.ts', testIgnore: '**/https-*' },
+      { name: 'https', testMatch: '**/https-*.spec.ts' },
+    ]`;
+    const facts = readPlaywrightConfig(config);
+
+    assert.equal(
+      playwrightRuns(facts, 'tests/shell.spec.ts'),
+      true,
+      'a plain spec, by the plain project',
+    );
+    assert.equal(
+      playwrightRuns(facts, 'tests/https-trust.spec.ts'),
+      true,
+      'an HTTPS spec, by the project that does not ignore it',
+    );
+
+    const ignoredEverywhere = readPlaywrightConfig(
+      `testDir: './tests', projects: [{ name: 'plain', testMatch: '**/*.spec.ts', testIgnore: '**/https-*' }]`,
+    );
+    assert.equal(
+      playwrightRuns(ignoredEverywhere, 'tests/https-trust.spec.ts'),
+      false,
+      'a spec that the only project ignores is run by nobody',
+    );
+    assert.equal(playwrightRuns(ignoredEverywhere, 'tests/shell.spec.ts'), true);
   });
 });
 

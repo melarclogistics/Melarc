@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 
+import { validEnv } from '../../src/test-support/config-env.js';
+
 const API_ROOT = resolve(import.meta.dirname, '../..');
 export const MAIN = resolve(API_ROOT, 'dist/main.js');
 export const OPENAPI_COMMAND = resolve(API_ROOT, 'dist/tools/generate-openapi.js');
@@ -12,7 +14,14 @@ export const E2E_DATABASE = resolve(API_ROOT, 'dist/tools/e2e-database.js');
 export const DB_BOOTSTRAP = resolve(API_ROOT, 'dist/tools/db-bootstrap.js');
 export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
+export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
+/** The two bootstrap commands (S0.30): processes an operator starts as the provisioning login, which nothing in the application runs. */
+export const BOOTSTRAP_SEED = resolve(API_ROOT, 'dist/tools/bootstrap-seed.js');
+export const BOOTSTRAP_RESUME = resolve(API_ROOT, 'dist/tools/bootstrap-resume.js');
+/** The delivery worker's entry point, and a test-only entry that composes it with a provider that stalls (S0.18). */
+export const WORKER_MAIN = resolve(API_ROOT, 'dist/delivery-worker-main.js');
+export const WORKER_FIXTURE = resolve(API_ROOT, 'test/support/worker-process-fixture.mjs');
 /** A test-only entry point: the real application plus something that refuses to shut down. */
 export const SHUTDOWN_FIXTURE = resolve(API_ROOT, 'test/support/shutdown-fixture.mjs');
 
@@ -34,12 +43,17 @@ export const UNREACHABLE_DATABASE_URL =
  * timed out, and it does not stop what the test started. Every deadline here is shorter than that, and
  * so is the sum of the ones the longest test waits for in turn, so a helper fails first, says what it was
  * waiting for, and has already killed its process. api-process.test.ts holds the sum to the real timeout.
+ *
+ * They guard against a hang; they do not measure speed. A start or a finish may take 20 seconds (the
+ * owner's decision of 27 October 2026, SLICE-000 plan 7.48): on an idle Windows workstation a refusal
+ * exits in about 2 seconds and a tool, or the API's first answer, takes 4 to 5, and a busy one missed
+ * the 8 seconds these were before. Changing them is the owner's decision, never a way to get a test green.
  */
 export const DEADLINES = {
   /** A script that is expected to finish by itself, such as a startup refusal. */
-  finish: 8_000,
+  finish: 20_000,
   /** The API answering /readyz after it starts. */
-  ready: 8_000,
+  ready: 20_000,
   /** One /readyz request. */
   request: 1_000,
   /** A process ending after a stop signal it is expected to handle. */
@@ -58,17 +72,21 @@ export function requireBuild(): void {
     DB_BOOTSTRAP,
     DB_MIGRATE,
     DB_RESET,
+    DB_SEED,
     DB_ORPHANS,
+    BOOTSTRAP_SEED,
+    BOOTSTRAP_RESUME,
+    WORKER_MAIN,
     BUILT_SHUTDOWN_HANDLERS,
   ]) {
     if (!existsSync(script)) {
       throw new Error(`${script} does not exist. Build first: pnpm --filter @melarc/api build`);
     }
   }
-  if (!existsSync(SHUTDOWN_FIXTURE)) {
-    throw new Error(
-      `${SHUTDOWN_FIXTURE} does not exist: the test fixture is part of the repository.`,
-    );
+  for (const fixture of [SHUTDOWN_FIXTURE, WORKER_FIXTURE]) {
+    if (!existsSync(fixture)) {
+      throw new Error(`${fixture} does not exist: the test fixture is part of the repository.`);
+    }
   }
 }
 
@@ -83,6 +101,21 @@ export async function freePort(): Promise<number> {
     }),
   );
   return port;
+}
+
+/** The four settings every API process test names for itself, so that a test about one of them can leave it out. */
+const NAMED_BY_TESTS: readonly string[] = ['NODE_ENV', 'APP_ENV', 'HTTP_PORT', 'DATABASE_URL'];
+
+/**
+ * What the API needs to start beyond what a test names: the origins and the key material, which no test about something else
+ * should have to repeat. Added only when the script is the API itself (never to a database tool), and a test's own value
+ * always wins. The four settings the tests name are never defaulted here, so "APP_ENV is missing" is still a test one can write.
+ */
+export function apiSettings(script: string, env: Record<string, string>): Record<string, string> {
+  if (script !== MAIN && script !== SHUTDOWN_FIXTURE) return env;
+  const defaults = validEnv();
+  for (const name of NAMED_BY_TESTS) Reflect.deleteProperty(defaults, name);
+  return { ...defaults, ...env };
 }
 
 /** Only what a test passes, plus what Windows needs before network code will start at all. */
@@ -316,7 +349,7 @@ export function start(
   env: Record<string, string>,
   args: string[] = [],
 ): RunningProcess {
-  return startCommand(process.execPath, [script, ...args], env);
+  return startCommand(process.execPath, [script, ...args], apiSettings(script, env));
 }
 
 /** Runs a script that is expected to finish by itself, and fails clearly, killing it, if it does not. */

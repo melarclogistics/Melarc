@@ -1,0 +1,55 @@
+/*
+ * The mark and the name of the product on Ink (design/COMPONENT_PATTERNS.md section 12.6). The tile is white because the symbol is black and
+ * red and black is Ink; the name is shell.text (16.27:1) and the application's name under it shell.text.subtle (6.32:1).
+ */
+/* The name goes under the mark when it does not fit beside it (enlarged text), instead of being crushed into a column of single letters. */
+.ui-brand-lockup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  color: var(--shell-text);
+}
+
+.ui-brand-lockup__mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-10);
+  height: var(--space-10);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+}
+
+.ui-brand-lockup__mark img {
+  display: block;
+  width: auto;
+  height: var(--space-6);
+}
+
+.ui-brand-lockup__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-brand-lockup__name {
+  font-size: var(--text-label-md-size);
+  font-weight: 700;
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-brand-lockup__app {
+  color: var(--shell-text-subtle);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line-height);
+}
+
+/* Forced colours drop the white tile: it keeps an edge, so the mark is still set apart. */
+@media (forced-colors: active) {
+  .ui-brand-lockup__mark {
+    border: 1px solid CanvasText;
+  }
+}

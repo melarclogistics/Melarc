@@ -12,6 +12,7 @@ import {
   type Type,
 } from '@nestjs/common';
 import { ContractOperation } from '../platform/contract/contract-operation.js';
+import { DescribeSecurity } from '../platform/openapi/operation-statements.js';
 import {
   ApiBody,
   ApiExcludeEndpoint,
@@ -137,6 +138,8 @@ function describeRead(options: ReadOptions = {}): MethodDecorator {
   } = options;
   return applyDecorators(
     bound ? ContractOperation('getWidget') : ApiOperation({ operationId: 'getWidget' }),
+    // The fixture contract says `security: []` for this operation: it is anonymous, which is stated, not inherited.
+    DescribeSecurity(),
     ApiParam({ name: 'id', format: 'uuid', type: String }),
     ApiExtension('x-permission', permission),
     ApiResponse({
@@ -170,7 +173,8 @@ function describeCreate(options: CreateOptions = {}): MethodDecorator {
       ? [ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY })]
       : []),
     ApiBody(body),
-    ...(security === null ? [] : [ApiSecurity(security)]),
+    // `null` is an operation open to anyone: an explicit empty requirement, since stating nothing inherits the default posture.
+    security === null ? DescribeSecurity() : ApiSecurity(security),
     ApiQuery({ name: 'dry_run', required: false, type: Boolean }),
     ApiExtension('x-permission', 'widget.create'),
     ApiResponse({ status: 201, type: WidgetDto }),
@@ -463,6 +467,7 @@ function describeGadgets(
 ): MethodDecorator {
   return applyDecorators(
     ContractOperation('listGadgets'),
+    DescribeSecurity(),
     ApiQuery({
       name: 'ids',
       required: false,
@@ -587,7 +592,7 @@ export const GADGET_CONTRACT = {
   },
 } as const;
 
-/** The security schemes `FIXTURE_CONTRACT` defines, which the application's own description does not yet carry. */
+/** The security schemes `FIXTURE_CONTRACT` defines: the two of the platform's four that its operations use, with the same facts. */
 export const FIXTURE_SECURITY_SCHEMES = {
   browserSession: { type: 'apiKey', in: 'cookie', name: 'melarc_session' },
   riderSession: { type: 'http', scheme: 'bearer' },

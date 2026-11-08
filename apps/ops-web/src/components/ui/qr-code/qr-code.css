@@ -1,0 +1,20 @@
+/*
+ * QrCode (S0.39c). A scanner needs a dark code on a light quiet zone, so this is one of the places where the colours are
+ * not the interface's and do not follow the user's: black on white, and forced colours leave it alone. The size is the
+ * picture's own (four pixels to a module) and shrinks, keeping its proportions, only when the container is narrower.
+ */
+.ui-qr {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border-default);
+  forced-color-adjust: none;
+}
+
+.ui-qr__background {
+  fill: var(--white);
+}
+
+.ui-qr__modules {
+  fill: var(--black);
+}

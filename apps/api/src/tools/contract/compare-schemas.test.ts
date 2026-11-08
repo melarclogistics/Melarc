@@ -289,6 +289,27 @@ describe('compositions and rules the comparator does not model', () => {
     expect(codes(drift({ allOf: [{ type: 'object' }] }, {}))).toEqual(['SCHEMA_COMPOSITION']);
   });
 
+  // Break caught: a wrapper that only closes one record (the ordinary session projection) hiding which field
+  // differs behind a bare "the branches differ".
+  it('compares the record inside a single-branch allOf, so the field that differs is named', () => {
+    const wrapped = (required: string[]) => ({
+      allOf: [{ type: 'object', required, properties: { a: { type: 'string' } } }],
+      unevaluatedProperties: false,
+    });
+    const findings = drift(wrapped(['a']), wrapped([]));
+
+    expect(codes(findings)).toEqual(['SCHEMA_REQUIRED']);
+    expect(findings[0]?.at).toBe('body');
+  });
+
+  it('still reports a closing rule that one side does not have, beside a single-branch allOf', () => {
+    const record = { type: 'object', properties: { a: { type: 'string' } } };
+
+    expect(
+      codes(drift({ allOf: [record], unevaluatedProperties: false }, { allOf: [record] })),
+    ).toEqual(['SCHEMA_UNMODELLED']);
+  });
+
   it('does not depend on the order of the branches', () => {
     expect(
       drift(

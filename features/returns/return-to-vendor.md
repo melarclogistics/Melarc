@@ -112,7 +112,7 @@ elsewhere.*
 **Waiver, where requested**, runs alongside step 2–7 rather than inside them: Ops requests a
 waiver (`returns.waiver.request`) naming a `ReturnFeeWaiverReason` and proposing
 `waiver_amount_minor`; a different Senior Ops or Platform Admin approves or rejects it as a whole
-(`returns.waiver.approve`, approver ≠ requester) — **Senior Ops discretion, no formula**.
+(`returns.waiver.approve`, approver ≠ requester, a Platform Admin excepted) — **Senior Ops discretion, no formula**.
 An `APPROVED` waiver sets `effective_return_fee_minor` to `return_fee_minor −
 waiver_amount_minor` — zero for a full waiver — if this resolves before step 6, the payment gate
 checks the reduced amount for the immediate-demand path.
@@ -184,7 +184,7 @@ checks the reduced amount for the immediate-demand path.
 | `returns.initiate`| Ops Staff, Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
 | `returns.close`| Rider, Ops Staff, Senior Ops, Platform Admin| Rider: assigned return · Ops: own hub| permissions.md §7 — new this pass|
 | `returns.waiver.request`| Ops Staff, Senior Ops, Platform Admin| own hub| permissions.md §7 — existing|
-| `returns.waiver.approve`| Senior Ops, Platform Admin| own hub, approver ≠ requester| permissions.md §7 — existing|
+| `returns.waiver.approve`| Senior Ops, Platform Admin| own hub, approver ≠ requester (a Platform Admin excepted)| permissions.md §7 — existing|
 | `returns.read`| Ops Staff, Senior Ops, Platform Admin, Vendor| own hub · own record| permissions.md §7 — existing|
 
 **Two permission keys implement the existing routing authority** — the actors are already named by
@@ -277,7 +277,7 @@ And waiver_status reads NOT_REQUESTED — unlike Redelivery.chargeable, nothing 
 ```
 **Governs:** `MSC-DEC-231`, domain-model.md §6.14 · **Surface:** API · **Test level:** integration
 
-### `AC-RETURN-05` — full waiver requires a different approver
+### `AC-RETURN-05` — full waiver requires a different approver, unless the approver is a Platform Admin
 
 ```text
 Given a ReturnRecord with return_fee_minor 2000 and waiver_status REQUESTED by Senior Ops A

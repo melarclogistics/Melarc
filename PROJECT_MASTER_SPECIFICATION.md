@@ -598,7 +598,7 @@ The Rider-column value on "Confirm/dispute own collection" ("Ad-hoc code-entry p
 
 ## 11.5 Remaining permission work
 
-Architecture is closed: permissions, not role names, are the backend enforcement primitive; roles are bundles; maker-checker actions use one uniform create/approve/same-actor-exclusion pattern; and Melarc Vendor/Rider stay on one fixed bundle each in Version 1.
+Architecture is closed: permissions, not role names, are the backend enforcement primitive; roles are bundles; maker-checker actions use one uniform create/approve/same-actor-exclusion pattern, from which a Platform Admin alone is excepted (Section 11.6); and Melarc Vendor/Rider stay on one fixed bundle each in Version 1.
 
 Bundle boundaries for every function named in Section 8.1 are also closed: Finance/Reconciliation, Auditor, Executive/Report-consumer, and Fleet Manager are confirmed dedicated bundles (Section 11.3); Customer Support and Warehouse Supervisor deliberately stay inside Ops Staff/Senior Ops rather than getting one.
 
@@ -617,7 +617,7 @@ Every permission is a globally unique key of the form `<domain>.<action>`, or `<
 
 A held permission is further constrained by a **scope** attached to the grant rather than encoded in the key: a hub scope (none / own hub / all hubs), an ownership scope (own record / assigned record / any record), a state precondition evaluated jointly with the canonical state machine (Section 36), and an optional time-bounded window reusing the Section 30.5 temporary-assignment pattern. This is the formal model behind the permission/responsible-hub-scope/vendor-record-ownership/rider-assignment/current-state/temporary-authority language already confirmed at Section 11.1 and Section 37.1.
 
-Maker-checker actions are represented as a `*.create` (or `*.request`) permission plus a `*.approve` permission, with one constraint enforced uniformly: the approver may not be the actor who created the same record.
+Maker-checker actions are represented as a `*.create` (or `*.request`) permission plus a `*.approve` permission, with one constraint enforced uniformly: the approver may not be the actor who created the same record, **except a Platform Admin**. The highest authority needs no second person (Product Owner decision, 25 October 2026): an approver whose acting grant is at the Platform Admin tier (permissions.md Section 5) may approve or reject a record they made. The exception is the tier of the grant that authorizes the act, never a role's name, and it lifts the same-actor exclusion and nothing else: the permission, the scope, the state, the reason and the tier a privileged target needs still apply, and the audit event keeps both identities. It does not lift a rule that a person may not act on themselves, such as resetting one's own authenticator.
 
 The Section 11.3 bundles nest strictly for hub-operational authority, verified against the Section 11.4 matrix: the Senior Ops bundle is the Ops Staff bundle plus discrepancy adjudication, price-correction approval, hub-scoped force-extension, courier-registry management, and reason-pill management; for that same hub-operational authority, the Platform Admin bundle is the Senior Ops bundle plus single-package-exception approval. This nesting statement is illustrative of the operational-authority ladder, not an exhaustive list of every Platform-Admin-only permission — Platform Admin additionally holds company-wide-only authorities with no Senior Ops equivalent (global settings and account-allowance approval, Section 11.3; retention-settings sole authority, `MSC-DEC-150–152`; direct vendor-suspension override, `MSC-DEC-168`; pricing-structure approval alongside Senior Ops, `MSC-DEC-167`), enumerated in full only by the Section 11.6 permission catalog. This nesting is what makes a new bundle additive rather than a rewrite: a new job family (Section 11.5) is a new bundle definition composed from the existing permission catalog, not a new authorization code path.
 
@@ -1883,7 +1883,7 @@ Vendor administration is an internal Melarc Ops capability for managing a custom
 
 1. Authorized Ops creates the registered vendor record and initial shared portal account.
 2. Hub Senior Ops independently approves or rejects operational activation.
-3. The creator cannot approve the same record.
+3. The creator cannot approve the same record, unless the creator is a Platform Admin (Section 11.6).
 4. Platform Admin may enable the global vendor account allowance and weekly statement terms after basic verification and with a recorded reason; no mandatory probation threshold applies.
 5. Platform Admin may later disable the allowance with a mandatory reason. Until activation, or after disablement, vendor-paid and split vendor portions calculated at itemization require payment before the affected order becomes dispatch-ready, while existing confirmed itemized orders and outstanding obligations remain valid.
 
@@ -1984,7 +1984,7 @@ Payroll and staff compensation are deferred. Fleet, fuel, and maintenance are co
 
 ## 30.8 Onboarding authority
 
-Creating and activating a new staff or rider profile uses a maker-checker pattern: an Ops Staff, Senior Ops, or Platform Admin user creates the profile, and a Senior Ops or Platform Admin independently approves it before it becomes active; the creator cannot approve their own profile creation.
+Creating and activating a new staff or rider profile uses a maker-checker pattern: an Ops Staff, Senior Ops, or Platform Admin user creates the profile, and a Senior Ops or Platform Admin independently approves it before it becomes active; the creator cannot approve their own profile creation, unless the creator is a Platform Admin, who needs no second person (Section 11.6).
 
 ## 30.9 Suspension authority and in-progress work
 
@@ -2494,7 +2494,7 @@ The following rules consolidate the product's strongest behavioural constraints.
 ## 35.12 Vendor administration rules
 
 1. A registered vendor organization is created by authorized Ops and operationally approved or rejected by hub Senior Ops; public self-registration is not a Version 1 path.
-2. The creator and operational approver must be different actors.
+2. The creator and operational approver must be different actors, unless the creator is a Platform Admin (Section 11.6).
 3. Operational activation and financial account allowance are separate decisions.
 4. Until Platform Admin enables account allowance, every vendor-paid amount calculated at itemization must be paid before the affected order can be confirmed as dispatch-ready.
 5. Version 1 uses one shared Melarc Vendor login per organization and no individual vendor-user roles.
@@ -2782,7 +2782,7 @@ The fleet state model must distinguish a pending breakdown incident from a confi
 
 ## 37.4 Maker-checker and privileged actions
 
-Examples include Ops-created/Senior-Ops-approved vendor activation, Platform-Admin financial allowance, Platform-Admin one-package exception approval, Senior-Ops price correction, hub setting/zone proposals approved by Platform Admin, two-hub temporary staff assignment approval, and Senior-Ops return-fee waiver approval. The requester cannot approve the same maker-checker action. Every instance uses the same enforcement shape: a `*.create` permission, a `*.approve` permission, and one constraint that the approver may not be the record's creator.
+Examples include Ops-created/Senior-Ops-approved vendor activation, Platform-Admin financial allowance, Platform-Admin one-package exception approval, Senior-Ops price correction, hub setting/zone proposals approved by Platform Admin, two-hub temporary staff assignment approval, and Senior-Ops return-fee waiver approval. The requester cannot approve the same maker-checker action. Every instance uses the same enforcement shape: a `*.create` permission, a `*.approve` permission, and one constraint that the approver may not be the record's creator, unless the approver is a Platform Admin (Section 11.6).
 
 ## 37.5 Shared vendor credential risk
 
@@ -3217,7 +3217,7 @@ And no pickup request is confirmed or manifested.
 Given an operations user has drafted a one-package request,
 When an authorized approver accepts the exception with a reason,
 Then the request becomes eligible for the approved confirmation path,
-And the drafting user cannot approve their own exception where maker-checker applies,
+And a drafting user who is not a Platform Admin cannot approve their own exception where maker-checker applies,
 And the approval is audited.
 ```
 

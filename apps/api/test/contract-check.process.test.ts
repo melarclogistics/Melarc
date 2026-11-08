@@ -24,7 +24,7 @@ describe('the contract conformance command, run as CI runs it', () => {
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('no findings');
-    expect(result.stdout).toMatch(/0 operations? in the implemented scope/);
+    expect(result.stdout).toMatch(/42 operations? in the implemented scope/);
   });
 
   // Break caught: a check that exits 0 whatever it finds, which would make it decoration. A scope that

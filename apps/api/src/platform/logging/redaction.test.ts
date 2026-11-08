@@ -34,6 +34,8 @@ const SENSITIVE_KEYS = [
   'SetupGrantToken',
   'recovery_token',
   'melarc_vendor_device',
+  // The trusted-browser credential (staff-authentication.md section 5.8) has no sensitive word in its name.
+  'melarc_trusted_browser',
   'device_credential',
   'session_token',
   // The session credential is the `melarc_session` cookie (contracts/openapi.yaml, x-cookies).
@@ -50,6 +52,10 @@ const SENSITIVE_KEYS = [
   'recovery_code',
   'sig',
   'SIG',
+  // Key material, which a configuration object carries per purpose (S0.2).
+  'material',
+  'key_material',
+  'KEY_TOTP_SEED_MATERIAL',
 ];
 
 describe('redactValue: sensitive keys', () => {

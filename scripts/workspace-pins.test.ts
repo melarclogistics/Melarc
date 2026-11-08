@@ -18,8 +18,22 @@ const NODE_SETUP: Step = {
   with: { 'node-version-file': '.node-version', cache: 'pnpm' },
 };
 const FROZEN_INSTALL: Step = { run: 'pnpm install --frozen-lockfile' };
+const JAVA_SETUP: Step = {
+  uses: `actions/setup-java@${SHA}`,
+  with: { distribution: 'temurin', 'java-version-file': '.java-version' },
+};
 
+const isJavaSetup = (step: Step): boolean =>
+  typeof step.uses === 'string' && step.uses.startsWith('actions/setup-java@');
+
+/** A workflow of one job with these steps, and the JDK setup the verifier's job has unless one of the steps is a JDK setup already. */
 function workflowOf(...steps: Step[]): string {
+  const all = steps.some(isJavaSetup) ? steps : [...steps, JAVA_SETUP];
+  return stringify({ name: 'CI', jobs: { checks: { 'runs-on': 'ubuntu-24.04', steps: all } } });
+}
+
+/** The same without the JDK setup that `workflowOf` adds. */
+function workflowExactly(...steps: Step[]): string {
   return stringify({ name: 'CI', jobs: { checks: { 'runs-on': 'ubuntu-24.04', steps } } });
 }
 
@@ -27,6 +41,7 @@ const GOOD_PACKAGE_JSON = { packageManager: 'pnpm@11.1.3', engines: { node: '^24
 
 const GOOD: PinInputs = {
   nodeVersionFile: '24.15.0\n',
+  javaVersionFile: '21.0.12\n',
   packageJson: GOOD_PACKAGE_JSON,
   ciWorkflow: workflowOf(CHECKOUT, PNPM_SETUP, NODE_SETUP, FROZEN_INSTALL),
 };
@@ -130,6 +145,76 @@ describe('package manager pin', () => {
   it('rejects a non-string packageManager', () => {
     const packageJson = { ...GOOD_PACKAGE_JSON, packageManager: 11 };
     assert.deepEqual(codesFor({ packageJson }), ['PACKAGE_MANAGER_FORMAT']);
+  });
+});
+
+describe('JDK pin', () => {
+  // Break caught: .java-version loosened to a floating spec, so the JDK of CI and the JDK of a developer drift apart (the device-key vectors
+  // are regenerated on this JDK, and its security API is what the Rider app is held to).
+  for (const floating of [
+    '21',
+    '21.0',
+    'lts',
+    'temurin-21',
+    '21.0.12+8',
+    '21.0.12.1',
+    'v21.0.12',
+    '^21.0.12',
+    '',
+  ]) {
+    it(`rejects non-exact .java-version ${JSON.stringify(floating)}`, () => {
+      assert.deepEqual(codesFor({ javaVersionFile: `${floating}\n` }), ['JAVA_VERSION_FORMAT']);
+    });
+  }
+
+  it('accepts an exact version, with or without a final newline', () => {
+    assert.deepEqual(codesFor({ javaVersionFile: '21.0.12\n' }), []);
+    assert.deepEqual(codesFor({ javaVersionFile: '25.0.1' }), []);
+  });
+});
+
+describe('CI JDK setup', () => {
+  const steps = [CHECKOUT, PNPM_SETUP, NODE_SETUP, FROZEN_INSTALL];
+
+  // Break caught: the verifier's job builds with whatever JDK the runner image carries, or one that CI alone names.
+  const drifted: [label: string, inputs: Record<string, unknown>][] = [
+    ['a hard-coded java-version', { distribution: 'temurin', 'java-version': '21' }],
+    [
+      'a different version file',
+      { distribution: 'temurin', 'java-version-file': '.tool-versions' },
+    ],
+    [
+      'java-version beside the version file',
+      { distribution: 'temurin', 'java-version-file': '.java-version', 'java-version': '17' },
+    ],
+    ['another distribution', { distribution: 'zulu', 'java-version-file': '.java-version' }],
+    ['no distribution', { 'java-version-file': '.java-version' }],
+    ['no version input at all', { distribution: 'temurin' }],
+  ];
+  for (const [label, inputs] of drifted) {
+    it(`rejects setup-java with ${label}`, () => {
+      const step = { ...JAVA_SETUP, with: inputs };
+      assert.deepEqual(codesFor({ ciWorkflow: workflowOf(...steps, step) }), ['CI_JAVA_PIN']);
+    });
+  }
+
+  it('rejects a workflow without a setup-java step', () => {
+    assert.deepEqual(codesFor({ ciWorkflow: workflowExactly(...steps) }), ['CI_JAVA_PIN']);
+  });
+
+  // Break caught: a second job added later with its own JDK.
+  it('rejects when only one of several setup-java steps drifts', () => {
+    const step = { ...JAVA_SETUP, with: { distribution: 'temurin', 'java-version': '21' } };
+    assert.deepEqual(codesFor({ ciWorkflow: workflowOf(...steps, JAVA_SETUP, step) }), [
+      'CI_JAVA_PIN',
+    ]);
+  });
+
+  it('requires the action to be pinned to a commit like every other', () => {
+    const floating = { ...JAVA_SETUP, uses: 'actions/setup-java@v6' };
+    assert.deepEqual(codesFor({ ciWorkflow: workflowOf(...steps, floating) }), [
+      'CI_ACTION_UNPINNED',
+    ]);
   });
 });
 
@@ -314,6 +399,7 @@ describe('CI workflow pins', () => {
   it('reports an empty workflow file', () => {
     assert.deepEqual(codesFor({ ciWorkflow: '' }).toSorted(), [
       'CI_FROZEN_INSTALL',
+      'CI_JAVA_PIN',
       'CI_NODE_PIN',
       'CI_PNPM_PIN',
     ]);
@@ -414,6 +500,7 @@ describe('reading the pin sources from a repository', () => {
     directories.push(root);
     const everything = {
       '.node-version': '24.15.0\n',
+      '.java-version': '21.0.12\n',
       'package.json': JSON.stringify(GOOD_PACKAGE_JSON),
       ...files,
     };

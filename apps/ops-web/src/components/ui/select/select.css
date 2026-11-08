@@ -1,0 +1,39 @@
+/*
+ * Select (design/COMPONENT_PATTERNS.md section 7.9), the Input's recipe on a native <select> (DESIGN_SYSTEM section 4.6): the boundary is
+ * border.control, 3:1 on every light surface; the height is a minimum in rem so enlarged text grows the control. The browser draws the
+ * arrow and the picker, so they are the platform's and nothing here is an image.
+ */
+.ui-select {
+  display: block;
+  width: 100%;
+  min-height: var(--control-height-md);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-select:hover {
+  border-color: var(--color-border-strong);
+}
+
+/*
+ * The states below share a specificity, so their order is their precedence: hover, then invalid, then disabled. An invalid select shows
+ * its danger border, with the Field's icon and message, and a disabled one gives up its colours.
+ */
+.ui-select[aria-invalid='true'] {
+  padding: calc(var(--space-2) - 1px) calc(var(--space-3) - 1px);
+  border-width: 2px;
+  border-color: var(--color-status-danger-foreground);
+}
+
+.ui-select:disabled {
+  border-color: var(--color-border-disabled);
+  background: var(--color-surface-disabled);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}

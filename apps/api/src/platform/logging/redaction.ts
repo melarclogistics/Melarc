@@ -34,10 +34,21 @@ const SENSITIVE_SUBSTRINGS = [
   'totp',
   // The session credential is the `melarc_session` cookie, and a session id is as good as the credential.
   'session',
+  // Key material (S0.2): the `material` of a purpose, or `KEY_..._MATERIAL`. It holds no other sensitive word.
+  'material',
 ];
 
 /** Short words that count only as a whole key: they sit inside ordinary ones ("shipping", "footprint"). */
-const SENSITIVE_WHOLE_KEYS = new Set(['pin', 'otp', 'seed', 'sig', 'melarcvendordevice']);
+const SENSITIVE_WHOLE_KEYS = new Set([
+  'pin',
+  'otp',
+  'seed',
+  'sig',
+  'melarcvendordevice',
+  // The trusted-browser credential is the `melarc_trusted_browser` cookie (staff-authentication.md section 5.8): a credential that stands in
+  // for a code, so as good as a session for the second step. It holds no other sensitive word.
+  'melarctrustedbrowser',
+]);
 
 function isSensitiveKey(key: string): boolean {
   const normalised = key.toLowerCase().replace(/[^a-z0-9]/g, '');

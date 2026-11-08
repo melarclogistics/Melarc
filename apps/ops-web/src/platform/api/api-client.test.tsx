@@ -4,9 +4,14 @@ import { render } from '@testing-library/react';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { AppProviders } from '../../app/providers';
+import { SessionBoundary } from '../session/session-boundary';
+import { SessionStore } from '../session/session-store';
 import { ApiClientProvider, useApiClient } from './api-client';
 
 const ID = '0190d7c2-7a3e-7c1e-9d2a-3f4b5c6d7e8f';
+
+/** The boundary a provider is given: a session store of its own and nobody to tell. */
+const boundary = new SessionBoundary({ store: new SessionStore(), onEnded: () => undefined });
 
 /** Reports the API client the component can see each time it renders. */
 function Probe({ onClient }: { readonly onClient: (client: BrowserApiClient) => void }) {
@@ -30,7 +35,7 @@ describe('ApiClientProvider', () => {
     const seen: BrowserApiClient[] = [];
 
     render(
-      <ApiClientProvider>
+      <ApiClientProvider boundary={boundary}>
         <Probe onClient={(client) => seen.push(client)} />
       </ApiClientProvider>,
     );
@@ -44,7 +49,7 @@ describe('ApiClientProvider', () => {
     const seen: BrowserApiClient[] = [];
     // A new element each time: re-rendering the very same element object would make React skip the work.
     const tree = () => (
-      <ApiClientProvider>
+      <ApiClientProvider boundary={boundary}>
         <Probe onClient={(client) => seen.push(client)} />
       </ApiClientProvider>
     );
@@ -62,7 +67,7 @@ describe('ApiClientProvider', () => {
 
     for (let instance = 0; instance < 2; instance += 1) {
       const { unmount } = render(
-        <ApiClientProvider>
+        <ApiClientProvider boundary={boundary}>
           <Probe onClient={(client) => seen.push(client)} />
         </ApiClientProvider>,
       );
