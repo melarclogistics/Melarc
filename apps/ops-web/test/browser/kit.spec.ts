@@ -1568,6 +1568,36 @@ test.describe('the composed examples in a browser', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'The run' })).toBeFocused();
   });
 
+  // Break caught (WCAG 1.4.4): a template that reads the window's width where it should read its own room. A media query's rem is the browser's own and does not see text enlarged through the
+  // root's size, so a form beside its 22rem rail, or a table and a panel, would be crushed to a strip at 200% text on a laptop; a container query counts the enlarged text.
+  for (const group of ['example-form', 'example-record', 'example-builder'] as const) {
+    test(`${group} keeps its room at 200% text on a laptop: no sideways scrolling, no field squeezed to a strip`, async ({
+      page,
+    }) => {
+      await openKit(page, group, { width: 1280 });
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = '200%';
+      });
+
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+      // The narrowest control of the page is wider than a word's width: nothing is a strip.
+      const narrowest = await page.evaluate(() => {
+        const widths = [
+          ...document.querySelectorAll<HTMLElement>('main input, main select, main textarea'),
+        ]
+          .filter(
+            (element) =>
+              element.getClientRects().length > 0 &&
+              element.getAttribute('type') !== 'checkbox' &&
+              element.getAttribute('type') !== 'radio',
+          )
+          .map((element) => element.getBoundingClientRect().width);
+        return widths.length === 0 ? 1000 : Math.min(...widths);
+      });
+      expect(narrowest).toBeGreaterThan(120);
+    });
+  }
+
   // Break caught: a hub-floor task whose targets are smaller than 56px on the tablet, or one that shows the sender's declared count before the count is sent.
   test('the tablet blind count has 56px rows and targets, and shows no declared count', async ({
     page,

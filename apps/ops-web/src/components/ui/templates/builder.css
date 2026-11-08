@@ -1,9 +1,10 @@
 /*
- * Builder (design/COMPONENT_PATTERNS.md, *Builder*; PRODUCT_DESIGN_DIRECTION section 6.4): the run's own fields above two panes, the pool and the run. From 80rem the panes are side by
+ * Builder (design/COMPONENT_PATTERNS.md, *Builder*; PRODUCT_DESIGN_DIRECTION section 6.4): the run's own fields above two panes, the pool and the run. Where the page's own room has 60rem (a container query, so that enlarged text is counted) the panes are side by
  * side and the run (24rem) stays in view beside the pool; below that (the hub-floor tablet at 768px among it) they are one column, the pool first, with a button in the pool's header
  * that goes to the run. A refusal and a stale flag are on the row they name, in words with an icon, never by colour alone. Every size is a token or a rem.
  */
 .ui-builder {
+  container: builder / inline-size;
   min-width: 0;
 }
 
@@ -30,7 +31,7 @@
   align-items: start;
 }
 
-@media (min-width: 80rem) {
+@container builder (min-width: 60rem) {
   .ui-builder__panes {
     grid-template-columns: minmax(0, 1fr) 24rem;
   }

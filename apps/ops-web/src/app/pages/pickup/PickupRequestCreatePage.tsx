@@ -2,8 +2,6 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 
 import { FormPage } from '../../../components/FormPage';
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
@@ -14,12 +12,14 @@ import { ForbiddenState } from '../../../components/ui/forbidden-state/Forbidden
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { pesewasFromCedis } from '../../../components/ui/money/money-value';
 import { Picker, type PickerOption } from '../../../components/ui/picker/Picker';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
 import type { ReadQuery } from '../../../components/ui/read-state/ReadState';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
+import { TaskForm, TaskFormSection } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import { useActiveHub } from '../../../platform/hub/active-hub';
@@ -726,6 +726,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
     ...EMPTY,
     hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : (activeHub ?? ''),
   }));
+  /** The values the form began with: it is unsaved once any has been changed. */
+  const [initialValues] = useState(values);
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);
   const form = useRef<HTMLFormElement>(null);
@@ -829,27 +831,70 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
   const vendorId = values.vendor?.value;
 
   return (
-    <form
-      ref={form}
-      noValidate
-      aria-busy={command.phase === 'sending' ? true : undefined}
+    <TaskForm
+      header={{
+        title: 'Book a pickup',
+        description:
+          'Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked.',
+      }}
+      formRef={form}
+      busy={command.phase === 'sending'}
+      dirty={values !== initialValues}
       onSubmit={send}
-    >
-      {command.phase === 'unknown' ? (
-        <Alert variant="danger" announce>
-          <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
-          {command.problem === undefined ? null : <p>{command.problem.message}</p>}
-        </Alert>
-      ) : null}
-      {command.phase === 'refused' && command.problem !== undefined && !belongsToAField ? (
-        <Alert variant="danger" announce>
-          <p>{command.problem.message}</p>
-          {command.problem.reference === undefined ? null : (
-            <p>Reference: {command.problem.reference}</p>
+      alerts={
+        <>
+          {command.phase === 'unknown' ? (
+            <Alert variant="danger" announce>
+              <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
+              {command.problem === undefined ? null : <p>{command.problem.message}</p>}
+            </Alert>
+          ) : null}
+          {command.phase === 'refused' && command.problem !== undefined && !belongsToAField ? (
+            <Alert variant="danger" announce>
+              <p>{command.problem.message}</p>
+              {command.problem.reference === undefined ? null : (
+                <p>Reference: {command.problem.reference}</p>
+              )}
+            </Alert>
+          ) : null}
+        </>
+      }
+      summary={{
+        title: 'After you book',
+        children: (
+          <>
+            <p>The booking waits for an Ops officer to confirm it.</p>
+            <p>
+              The server works out an indicative estimate and shows it once the booking is made: an
+              estimate, not a price.
+            </p>
+          </>
+        ),
+      }}
+      actions={
+        <>
+          {command.phase === 'unknown' ? (
+            <Button
+              key="retry"
+              type="button"
+              data-recovery
+              onClick={() => {
+                void command.retry();
+              }}
+            >
+              Try again
+            </Button>
+          ) : (
+            <>
+              <Button key="submit" type="submit" loading={command.phase === 'sending'}>
+                Book the pickup
+              </Button>
+              <Link to="/pickup-requests">Cancel</Link>
+            </>
           )}
-        </Alert>
-      ) : null}
-
+        </>
+      }
+    >
       <RadioGroup
         legend="What is being booked"
         name="intent"
@@ -874,8 +919,7 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
       ) : null}
 
       {intent === 'OWN_PACKAGES' || intent === 'COLLECT_FOR_VENDOR' ? (
-        <section className="pickup-form-section" aria-labelledby="booking-vendor">
-          <h2 id="booking-vendor">The vendor</h2>
+        <TaskFormSection title="The vendor">
           <VendorPicker
             value={values.vendor}
             error={errorOf('vendor').error}
@@ -884,12 +928,11 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               change({ vendor, locationId: '', destination: '' }, 'vendor', 'destination');
             }}
           />
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === 'OWN_PACKAGES' && vendorId !== undefined ? (
-        <section className="pickup-form-section" aria-labelledby="booking-own">
-          <h2 id="booking-own">Where the parcels are</h2>
+        <TaskFormSection title="Where the parcels are">
           <SavedLocations vendorId={vendorId}>
             {(locations) =>
               locations.length === 0 ? (
@@ -939,13 +982,12 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
           {text('goods', 'What is being sent today', {
             help: 'Optional for a vendor’s own packages: its goods profile already says what it sends.',
           })}
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === 'COLLECT_FOR_VENDOR' && vendorId !== undefined ? (
         <>
-          <section className="pickup-form-section" aria-labelledby="booking-point">
-            <h2 id="booking-point">Where the parcel is collected from</h2>
+          <TaskFormSection title="Where the parcel is collected from">
             {text('pointName', 'Person or business holding the parcel', { required: true })}
             {text('pointPhone', 'Their phone', {
               required: true,
@@ -954,9 +996,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
             })}
             {text('pointAddress', 'Their address', { required: true })}
             {optionalText('pointLandmark', 'Landmark', 'Optional. What people find it by.')}
-          </section>
-          <section className="pickup-form-section" aria-labelledby="booking-item">
-            <h2 id="booking-item">What is collected</h2>
+          </TaskFormSection>
+          <TaskFormSection title="What is collected">
             {text('referenceName', 'Name the seller holds it under', { required: true })}
             {optionalText(
               'sellerOrder',
@@ -970,9 +1011,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               The rider collects the item and pays the seller nothing: this is not a
               cash-on-delivery purchase.
             </p>
-          </section>
-          <section className="pickup-form-section" aria-labelledby="booking-destination">
-            <h2 id="booking-destination">Where the parcel goes</h2>
+          </TaskFormSection>
+          <TaskFormSection title="Where the parcel goes">
             <SavedLocations vendorId={vendorId}>
               {(locations) => (
                 <Field label="Destination" required {...errorOf('destination')}>
@@ -1000,13 +1040,12 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               inputMode: 'tel',
               help: 'Include the country code, for example +233 24 000 0000.',
             })}
-          </section>
+          </TaskFormSection>
         </>
       ) : null}
 
       {intent === 'ADHOC_SENDER' ? (
-        <section className="pickup-form-section" aria-labelledby="booking-hub">
-          <h2 id="booking-hub">Where it is booked</h2>
+        <TaskFormSection title="Where it is booked">
           <Field
             label="Hub"
             required={hubs.length > 0}
@@ -1033,12 +1072,11 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               ))}
             </Select>
           </Field>
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === 'ADHOC_SENDER' ? (
-        <section className="pickup-form-section" aria-labelledby="booking-sender">
-          <h2 id="booking-sender">The sender</h2>
+        <TaskFormSection title="The sender">
           <RadioGroup
             legend="Has the sender used Melarc before?"
             name="sender-source"
@@ -1101,13 +1139,12 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
             inputMode: 'tel',
             help: 'Include the country code, for example +233 24 000 0000.',
           })}
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === null ? null : (
         <>
-          <section className="pickup-form-section" aria-labelledby="booking-when">
-            <h2 id="booking-when">When and how many</h2>
+          <TaskFormSection title="When and how many">
             <Field
               label="Service date"
               required
@@ -1134,10 +1171,9 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               'Optional. Include the country code.',
               'tel',
             )}
-          </section>
+          </TaskFormSection>
 
-          <section className="pickup-form-section" aria-labelledby="booking-payer">
-            <h2 id="booking-payer">Who pays</h2>
+          <TaskFormSection title="Who pays">
             <p className="pickup-form-note">
               The booking records who is meant to pay, never a price: the price is set when the
               parcels are itemized.
@@ -1194,10 +1230,9 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
                   : null}
               </>
             ) : null}
-          </section>
+          </TaskFormSection>
 
-          <section className="pickup-form-section" aria-labelledby="booking-value">
-            <h2 id="booking-value">Declared value</h2>
+          <TaskFormSection title="Declared value">
             {text('declaredValue', 'Declared value of the goods, in cedis', {
               inputMode: 'decimal',
               help: 'Optional. A value above the hub’s limit for declarations needs the sender’s acknowledgement of the liability cap.',
@@ -1214,32 +1249,10 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
                 }}
               />
             )}
-          </section>
+          </TaskFormSection>
         </>
       )}
-
-      <div className="ui-form-page__actions">
-        {command.phase === 'unknown' ? (
-          <Button
-            key="retry"
-            type="button"
-            data-recovery
-            onClick={() => {
-              void command.retry();
-            }}
-          >
-            Try again
-          </Button>
-        ) : (
-          <>
-            <Button key="submit" type="submit" loading={command.phase === 'sending'}>
-              Book the pickup
-            </Button>
-            <Link to="/pickup-requests">Cancel</Link>
-          </>
-        )}
-      </div>
-    </form>
+    </TaskForm>
   );
 }
 
@@ -1302,23 +1315,25 @@ export function PickupRequestCreatePage() {
   return (
     <>
       <title>Book a pickup · Melarc Ops Portal</title>
-      <PageHeader
-        title="Book a pickup"
-        description="Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked."
-      />
-      <FormPage>
-        {booked === undefined ? (
-          <BookingForm key={form} onBooked={setBooked} />
-        ) : (
-          <Booked
-            request={booked}
-            onAnother={() => {
-              setBooked(undefined);
-              setForm((count) => count + 1);
-            }}
+      {booked === undefined ? (
+        <BookingForm key={form} onBooked={setBooked} />
+      ) : (
+        <>
+          <PageHeader
+            title="Book a pickup"
+            description="Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked."
           />
-        )}
-      </FormPage>
+          <FormPage>
+            <Booked
+              request={booked}
+              onAnother={() => {
+                setBooked(undefined);
+                setForm((count) => count + 1);
+              }}
+            />
+          </FormPage>
+        </>
+      )}
     </>
   );
 }

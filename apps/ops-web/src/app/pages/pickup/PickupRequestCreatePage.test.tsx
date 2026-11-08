@@ -894,3 +894,54 @@ describe('Enter in the date field', () => {
     expect(creates()).toHaveLength(1);
   });
 });
+
+/**
+ * The booking is drawn by the task form template (redesign step R6): sections under headings of their own, a rail of what the server does with the booking, and a guard against
+ * leaving a form that holds what was entered. The booking's own rules are the tests above; these hold the frame.
+ */
+describe('booking: the task form', () => {
+  it('draws the sections of what was chosen under headings of their own, and a rail that says what happens next', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Book a pickup' })).toBeVisible();
+    for (const heading of ['Where it is booked', 'The sender', 'When and how many', 'Who pays']) {
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeVisible();
+    }
+    const rail = screen.getByRole('complementary', { name: 'After you book' });
+    expect(
+      within(rail).getByText('The booking waits for an Ops officer to confirm it.'),
+    ).toBeVisible();
+    // The booking states no price and the rail works none out: the estimate is the server's, once the booking is made.
+    expect(within(rail).getByText(/an estimate, not a price/)).toBeVisible();
+    expect(rail.textContent).not.toMatch(/GH₵|GHS|\d+\.\d\d/);
+  });
+
+  // Break caught: a form that loses what was typed to a link, without a word.
+  it('asks before the application leaves a form that holds what was entered, and the safe answer is to stay', async () => {
+    const { user, router } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    const question = await screen.findByRole('alertdialog', { name: 'Leave this page?' });
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe(PATH);
+    await user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.getByRole('radio', { name: 'A walk-in sender' })).toBeChecked();
+  });
+
+  it('asks nothing of a form that holds nothing entered', async () => {
+    const { router } = open();
+    await screen.findByRole('radio', { name: 'A walk-in sender' });
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+});

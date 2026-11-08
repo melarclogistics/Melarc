@@ -153,7 +153,7 @@ export interface BuilderProps {
 
 /**
  * The builder template (PRODUCT_DESIGN_DIRECTION section 6.4; COMPONENT_PATTERNS, *Builder*): putting a run together from a pool, the pickup run and the delivery run. Two panes: the **pool**
- * (the rows to choose from, with their filters and freshness) and the **run** (what was chosen, in order, its totals and its actions, which stays in view beside the pool from 80rem
+ * (the rows to choose from, with their filters and freshness) and the **run** (what was chosen, in order, its totals and its actions, which stays in view beside the pool where the page's own room has 60rem
  * and follows it below, with a way to jump to it). **One hub per build**, which the page's `setup` holds and the pool obeys. **A refusal is shown on the row it names and a stale row
  * is flagged and never dropped silently** (`BuilderRunList`). The totals are the server's and a missing one is not 0. Leaving with a choice that was not sent asks first. It owns the
  * structure and decides nothing: which rows may be chosen, in what order they go and what the server accepts are the page's and the server's.

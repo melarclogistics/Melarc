@@ -1,9 +1,12 @@
 /*
- * TaskForm (design/COMPONENT_PATTERNS.md, *TaskForm*; PRODUCT_DESIGN_DIRECTION section 6.3): the sections in one column, each a grid of two columns on a desk and one at 768px and
- * below (`48rem`, which enlarged text reaches sooner), the summary rail beside them from 80rem up (it is sticky there and follows the sections below that), and the form's actions
- * at the foot of the sections, wrapping so that nothing is clipped at 320px or at 200% text. Every size is a token or a rem.
+ * TaskForm (design/COMPONENT_PATTERNS.md, *TaskForm*; PRODUCT_DESIGN_DIRECTION section 6.3): the sections in one column, each a grid of two columns where the form's own room has 34rem and one
+ * below that, the summary rail beside them where the page has 60rem (it is sticky there and follows the sections below that), and the form's actions at the foot of the sections,
+ * wrapping so that nothing is clipped at 320px or at 200% text. **The room is the container's, not the window's**: a query on the window's width does not see text enlarged by the
+ * root's size (the rem of a media query is the browser's own), so a form beside a 22rem rail would be crushed at 200% text; a container query reads the room the form is in, in
+ * the rem the page is drawn in. Every size is a token or a rem.
  */
 .ui-task-form {
+  container: task-form / inline-size;
   min-width: 0;
 }
 
@@ -14,13 +17,14 @@
   align-items: start;
 }
 
-@media (min-width: 80rem) {
+@container task-form (min-width: 60rem) {
   .ui-task-form[data-rail] .ui-task-form__layout {
     grid-template-columns: minmax(0, 1fr) 22rem;
   }
 }
 
 .ui-task-form__form {
+  container: task-form-main / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -68,9 +72,19 @@
   gap: var(--space-4) var(--space-5);
 }
 
-@media (min-width: 48.0625rem) {
+/* What the section holds takes the whole row (a group of choices, a picker, a note), and a field takes half of it, beside the next, unless the page wraps it in `TaskFormWide`. */
+.ui-task-form__grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+@container task-form-main (min-width: 34rem) {
   .ui-task-form__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ui-task-form__grid > .ui-field {
+    grid-column: auto;
   }
 }
 
@@ -92,12 +106,12 @@
   gap: var(--space-3) var(--space-4);
 }
 
-/* The rail stays in view while the sections scroll beside it (from 80rem, which leaves the form 36rem beside the shell’s sidebar; below that it follows them). */
+/* The rail stays in view while the sections scroll beside it (where the page has 60rem, which leaves the form 36rem; below that it follows them). */
 .ui-task-form__rail {
   min-width: 0;
 }
 
-@media (min-width: 80rem) {
+@container task-form (min-width: 60rem) {
   .ui-task-form__rail {
     position: sticky;
     top: var(--space-4);
