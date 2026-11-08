@@ -9,7 +9,7 @@
 kotlin = "2.4.21"
 androidx-annotation = "1.9.1"
 cbor = "0.9"
-errorprone = "2.41.0"
+errorprone = "2.52.0"
 protobuf = "4.28.3"
 bouncycastle = "1.86"
 coroutines = "1.10.2"
