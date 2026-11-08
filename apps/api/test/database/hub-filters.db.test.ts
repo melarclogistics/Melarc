@@ -2349,12 +2349,10 @@ describe('AC-HUBF-07: an identifier that is not an identifier is VALIDATION_FAIL
     const refused = [403, 'PERMISSION_DENIED'];
     const noSession = [401, 'SESSION_INVALID'];
     const invalid = [400, 'VALIDATION_FAILED'];
-    // A Rider is served the list of requests and is shown none of them (hub-filters.md section 3): an empty page, so that a bad value is judged.
+    // A Rider is not served the list of requests (the task A3.1 of 7 November 2026; hub-filters.md section 3): its bearer credential is not one the
+    // read reads, so it is answered as a request with no usable session, with or without a value, and a bad value is never judged for it.
     const riderRequests = await riderOne.client.get(REQUESTS);
-    expect([riderRequests.status, riderRequests.json()]).toEqual([
-      200,
-      { items: [], next_page_token: null },
-    ]);
+    expect(outcomeOf(riderRequests)).toEqual(noSession);
 
     const expectations: readonly [string, TestClient, Record<string, unknown>][] = [
       [
@@ -2391,7 +2389,7 @@ describe('AC-HUBF-07: an identifier that is not an identifier is VALIDATION_FAIL
         'a Rider’s bearer credential',
         riderOne.client,
         {
-          listPickupRequests: invalid,
+          listPickupRequests: noSession,
           listPickupManifests: invalid,
           listNotifications: noSession,
           getQueueSummary: noSession,

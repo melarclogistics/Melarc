@@ -1073,6 +1073,18 @@ describe('the commands it runs', () => {
     assert.equal(env.MELARC_BROWSER_SHARD, undefined);
     assert.equal(env.MELARC_BROWSERS, 'firefox', 'only the shard is taken out');
   });
+
+  // Break caught (task CI.2): the shard of the database tests, or the switch that leaves out the tests whose bounds are wall-clock time,
+  // left in the shell (from reproducing a job of CI) reaching the database run: "passed" for a part of the files the change reaches.
+  it('passes no MELARC_DB_SHARD and no MELARC_SKIP_TIMING_TESTS, which would cut the database run to a part of the files chosen', () => {
+    const env = childEnvironment(
+      { MELARC_DB_SHARD: '2/8', MELARC_SKIP_TIMING_TESTS: '1', MELARC_DB_WORKERS: '2' },
+      3,
+    );
+    assert.equal(env.MELARC_DB_SHARD, undefined);
+    assert.equal(env.MELARC_SKIP_TIMING_TESTS, undefined);
+    assert.equal(env.MELARC_DB_WORKERS, '2', 'only the two variables of the CI jobs are taken out');
+  });
 });
 
 describe('what a run reports and records', () => {

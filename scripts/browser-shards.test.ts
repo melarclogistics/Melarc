@@ -15,6 +15,7 @@ import {
 } from './browser-shards.ts';
 import {
   BROWSERS,
+  PULL_REQUEST_SKIP,
   RUN_EVENTS,
   browserJobsOf,
   jobRunsOn,
@@ -296,7 +297,8 @@ describe('the browser jobs of a workflow, and what each kind of run runs of them
     strategy: { 'fail-fast': false, matrix: { include: entries } },
     steps: [step],
   });
-  const CONDITION = "github.event_name != 'pull_request'";
+  // The job's condition is the plan's answer and the event (task CI.2): `needs.plan.outputs.run == 'true' && github.event_name != 'pull_request'`.
+  const CONDITION = PULL_REQUEST_SKIP;
   const of = (...engines: string[]): BrowserShard[] =>
     GOOD.filter((entry) => engines.includes(entry.engine));
   /** The workflow of the decision: Chromium in a job every run makes, Firefox and WebKit in a job a pull request does not. */
@@ -700,7 +702,7 @@ describe('this repository: what each kind of run runs of the browser tests', () 
       assert.ok(workflow.includes(line), line);
       return workflow.replace(line, '');
     };
-    const CONDITION_LINE = "    if: github.event_name != 'pull_request'\n";
+    const CONDITION_LINE = `    if: ${PULL_REQUEST_SKIP}\n`;
     const ON_MAIN = 'on a push to main, in the nightly run, in a manual run';
     const check = async (
       text: string,

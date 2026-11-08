@@ -3,6 +3,9 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { databaseShard, databaseShardOption } from '../test/database-shard.js';
+import { TIMING_SENSITIVE_TESTS, skipsTimingTests } from '../test/timing-sensitive-tests.js';
+
 import {
   ALONE_MARK,
   SANCTIONED,
@@ -231,5 +234,87 @@ describe('stringLiterals', () => {
     expect(stringLiterals("const a = 'it\\'s';").map((literal) => literal.text)).toEqual([
       "it\\'s",
     ]);
+  });
+});
+
+describe('the tests whose bounds are wall-clock time, which a pull request leaves out (task CI.2)', () => {
+  const alone = filesOf(join(DATABASE_TESTS, 'alone'), 'test/database/alone');
+  const claimed = alone
+    .filter((file) => /^\/\/ Runs alone:.*wall-clock/.test(file.text.split('\n')[0] ?? ''))
+    .map((file) => file.path);
+
+  // Break caught: a new test of wall-clock bounds left running on a pull request (a loaded runner then fails it for a reason that is not the code's), or a
+  // file left out of a pull request's run for another reason than the one its own first line gives.
+  it('are the files whose first line says that their bounds are wall-clock time, and no other', () => {
+    // A check over nothing passes: the folder holds several such files.
+    expect(claimed.length).toBeGreaterThan(3);
+    expect(claimed.toSorted()).toEqual([...TIMING_SENSITIVE_TESTS].toSorted());
+  });
+
+  // Break caught: the switch read loosely (`true`, `yes`, a blank), so that a variable set for another reason leaves the tests out, or the project not reading the list.
+  it('are left out by the variable set to 1 and by nothing else, in the one project that holds them', () => {
+    expect(skipsTimingTests({ MELARC_SKIP_TIMING_TESTS: '1' })).toBe(true);
+    for (const value of [undefined, '', '0', 'true', 'yes', ' 1']) {
+      expect(skipsTimingTests({ MELARC_SKIP_TIMING_TESTS: value }), String(value)).toBe(false);
+    }
+    expect(skipsTimingTests({})).toBe(false);
+    const config = readFileSync(join(API, 'vitest.config.ts'), 'utf8');
+    const alone = config.slice(config.indexOf("name: 'database-alone'"));
+    expect(alone).toMatch(
+      /skipsTimingTests\(process\.env\)\s*\?\s*\[\.\.\.configDefaults\.exclude, \.\.\.TIMING_SENSITIVE_TESTS\]/,
+    );
+    expect(config.slice(0, config.indexOf("name: 'database-alone'"))).not.toContain(
+      'skipsTimingTests(process.env)',
+    );
+  });
+});
+
+describe('the shard of the database tests, which the job of a shard sets (task CI.2)', () => {
+  // Break caught: a malformed shard read as no shard (a job that runs every file in a job of a quarter of the time), or as some shard (a job that
+  // runs part of the files and says nothing): each is refused and says what to use.
+  it('is read as <shard>/<shards> and refuses everything else', () => {
+    expect(databaseShard({})).toBeUndefined();
+    expect(databaseShard({ MELARC_DB_SHARD: '' })).toBeUndefined();
+    expect(databaseShard({ MELARC_DB_SHARD: '2/4' })).toBe('2/4');
+    expect(databaseShard({ MELARC_DB_SHARD: '16/16' })).toBe('16/16');
+    for (const value of [
+      '0/4',
+      '5/4',
+      '1/0',
+      '1/17',
+      '1',
+      'a/b',
+      '1/2/3',
+      ' 1/2',
+      '1/2 ',
+      '01/2',
+      '1/02',
+      '-1/4',
+      '1.5/4',
+    ]) {
+      expect(() => databaseShard({ MELARC_DB_SHARD: value }), value).toThrow(
+        /use <shard>\/<shards>/,
+      );
+    }
+  });
+
+  // Break caught: the shard handed to the unit and process projects too, or not handed to Vitest at all: the variable is read once, for the whole
+  // run, by the one line that says so, and the two database projects are the only ones a job of a shard runs.
+  it('is handed to Vitest by the one line of the configuration that reads it', () => {
+    const config = readFileSync(join(API, 'vitest.config.ts'), 'utf8');
+    expect(config.match(/databaseShardOption\(process\.env\)/g)).toHaveLength(1);
+    expect(config).toMatch(/\n {4}\.\.\.databaseShardOption\(process\.env\),\n/);
+    expect(config.indexOf('...databaseShardOption(process.env)')).toBeLessThan(
+      config.indexOf('projects: ['),
+    );
+    // The option is a setting only when a shard is asked for.
+    expect(databaseShardOption({})).toEqual({});
+    expect(databaseShardOption({ MELARC_DB_SHARD: '3/8' })).toEqual({ shard: '3/8' });
+    const scripts = JSON.parse(readFileSync(join(API, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(scripts.scripts['test:db']).toBe(
+      'vitest run --project database --project database-alone',
+    );
   });
 });

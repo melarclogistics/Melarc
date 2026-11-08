@@ -1408,6 +1408,22 @@ describe('what the command line starts', () => {
     assert.equal(env.MELARC_BROWSERS, 'chromium', 'only the shard is taken out');
   });
 
+  // Break caught (task CI.2): a `MELARC_DB_SHARD` or a `MELARC_SKIP_TIMING_TESTS` left in the owner's shell (from reproducing a job of CI)
+  // reaching the database stage, which the API's configuration would then run as one shard of its files, or without the tests whose bounds
+  // are wall-clock time: a gate that is green for a part of the database tests.
+  it('passes no MELARC_DB_SHARD and no MELARC_SKIP_TIMING_TESTS, which would make the database stage run a part of its files', () => {
+    const base = {
+      PATH: '/bin',
+      MELARC_DB_SHARD: '2/8',
+      MELARC_SKIP_TIMING_TESTS: '1',
+      MELARC_DB_WORKERS: '3',
+    };
+    const env = gateEnvironment(base);
+    assert.equal(env.MELARC_DB_SHARD, undefined);
+    assert.equal(env.MELARC_SKIP_TIMING_TESTS, undefined);
+    assert.equal(env.MELARC_DB_WORKERS, '3', 'only the two variables of the CI jobs are taken out');
+  });
+
   // Break caught: an agent starting the hour-long gate the owner did not ask for; or the owner's own terminal, which Claude Code does
   // not mark, being asked for a flag.
   it('refuses an agent that does not say the owner asked, and asks nothing of the owner', () => {

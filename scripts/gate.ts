@@ -114,8 +114,14 @@ const CHECKS: readonly Check[] = [
 /** The dependency audit: a test stage of the gate, and a lane of the precheck, since it takes seconds (the owner's decision of 27 October 2026). */
 const AUDIT = 'pnpm audit --audit-level high';
 
-/** What CI runs that this script does not, and why: the HTTPS run makes a certificate authority and refuses to run on a developer machine. */
-export const CI_ONLY_COMMANDS: readonly string[] = ['pnpm run test:e2e:https'];
+/**
+ * What CI runs that this script does not, and why: the HTTPS run makes a certificate authority and refuses to run on a developer machine, and the
+ * plan of the run (task CI.2) asks GitHub whether the nightly run has anything to test, which only a run of the workflow has to decide.
+ */
+export const CI_ONLY_COMMANDS: readonly string[] = [
+  'pnpm run test:e2e:https',
+  'node scripts/ci-plan.ts',
+];
 
 /** The stages of the gate, in order: every cheap check, then the tests. The unit stage is the profile's. */
 export function gateStages(profile: Profile): Stage[] {
@@ -169,12 +175,16 @@ export function childEnvironment(base: NodeJS.ProcessEnv, uncached: boolean): No
  * (`MELARC_TEST_WORKERS`, 4 when unset: at Vitest's default this 16 GB workstation ran out of memory and lost tests that pass alone),
  * and Vitest applies `VITEST_MAX_WORKERS` to every project after its configuration, which would run the API's one-at-a-time projects
  * several at a time (the API's configuration refuses it). Nor does it pass `MELARC_BROWSER_SHARD`, with which the Ops Portal's
- * configuration runs one shard of its browser tests (each job of CI runs one): a gate runs the whole of every stage.
+ * configuration runs one shard of its browser tests (each job of CI runs one): a gate runs the whole of every stage. The same for
+ * `MELARC_DB_SHARD` (one shard of the database tests) and `MELARC_SKIP_TIMING_TESTS` (the job of a pull request leaves out the tests
+ * whose bounds are wall-clock time): a gate runs every file, those included (task CI.2).
  */
 export function gateEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = childEnvironment(base, true);
   delete env.VITEST_MAX_WORKERS;
   delete env.MELARC_BROWSER_SHARD;
+  delete env.MELARC_DB_SHARD;
+  delete env.MELARC_SKIP_TIMING_TESTS;
   return env;
 }
 

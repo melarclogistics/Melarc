@@ -9,12 +9,21 @@ import { aggregate, parseArguments } from './ci-aggregate.ts';
 import {
   AGGREGATE_JOB,
   BROWSERS,
+  DATABASE_SHARD_VARIABLE,
+  PLAN_JOB,
+  FAILURE_UPLOAD_CONDITION,
   MATRIX_BROWSERS,
   MATRIX_ENGINE,
   MATRIX_SHARD,
+  PLAN_COMMAND,
+  PLANNED_RUN,
   PULL_REQUEST_SKIP,
   REQUIRED_COMMANDS,
+  TIMED_COMMANDS,
+  TIMING_SKIP_VALUE,
+  TIMING_SKIP_VARIABLE,
   browserMatrix,
+  databaseMatrix,
   findPostgresImageProblems,
   findWorkflowProblems,
   httpsMatrix,
@@ -26,6 +35,7 @@ type Json = Record<string, unknown>;
 
 /** The jobs of the fixture workflow, by id. */
 interface Jobs {
+  plan: Json;
   static: Json;
   unit: Json;
   database: Json;
@@ -48,7 +58,23 @@ const CHECKOUT = {
   with: { ref: GITHUB_SHA, 'persist-credentials': false },
 };
 const SETUP = { name: 'Set up', uses: './.github/actions/setup' };
-const run = (command: string): Json => ({ name: command, run: command });
+/** The limit of a test step's own: two minutes below the 10 of the fixture's jobs, which is the most the rule allows. */
+const STEP_LIMIT = 8;
+/** A step that runs a command; a step that runs tests has a timeout of its own, as the rules require. */
+const run = (command: string): Json => ({
+  name: command,
+  run: command,
+  ...(TIMED_COMMANDS.includes(command) ? { 'timeout-minutes': STEP_LIMIT } : {}),
+});
+/** The cache of the browsers an install step downloads, keyed as the rules require: the system, the lockfile and the browsers. */
+const cacheOf = (browsers: string): Json => ({
+  name: 'Cache the browsers',
+  uses: `actions/cache@${SHA}`,
+  with: {
+    path: '~/.cache/ms-playwright',
+    key: `playwright-\${{ runner.os }}-${browsers}-\${{ hashFiles('pnpm-lock.yaml') }}`,
+  },
+});
 
 const REHEARSAL = {
   name: 'Rehearse a failing check',
@@ -57,7 +83,7 @@ const REHEARSAL = {
 };
 const DIAGNOSTICS = {
   name: 'Keep diagnostics',
-  if: 'failure()',
+  if: FAILURE_UPLOAD_CONDITION,
   uses: `actions/upload-artifact@${SHA}`,
   with: {
     name: `melarc-diagnostics-${GITHUB_SHA}`,
@@ -86,13 +112,20 @@ const SINGLE_STEP_COMMANDS = REQUIRED_COMMANDS.filter((command) => command !== B
 const INSTALL_BROWSERS = `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_BROWSERS}`;
 /** The HTTPS shards, as the harness cuts them: the browsers of each shard's runs. */
 const HTTPS_ENTRIES: Json[] = [
-  { shard: 1, shards: 2, browsers: 'chromium webkit' },
-  { shard: 2, shards: 2, browsers: 'firefox' },
+  { shard: 1, shards: 3, browsers: 'chromium' },
+  { shard: 2, shards: 3, browsers: 'firefox' },
+  { shard: 3, shards: 3, browsers: 'webkit' },
+];
+/** The database shards: a literal matrix of the shard and the number of shards, in the one job that runs the database tests. */
+const DATABASE_ENTRIES: Json[] = [
+  { shard: 1, shards: 3 },
+  { shard: 2, shards: 3 },
+  { shard: 3, shards: 3 },
 ];
 /** The HTTPS job keeps its own artifact for each shard. */
 const HTTPS_DIAGNOSTICS = {
   name: 'Keep the failure diagnostics',
-  if: 'failure()',
+  if: FAILURE_UPLOAD_CONDITION,
   uses: `actions/upload-artifact@${SHA}`,
   with: {
     name: `melarc-https-diagnostics-${GITHUB_SHA}-\${{ matrix.shard }}`,
@@ -106,7 +139,7 @@ const INSTALL_CHROMIUM = 'pnpm --filter @melarc/e2e exec playwright install --wi
 /** Every job of the browser matrix has its own artifact name, or two failed shards would upload under one. */
 const SHARD_DIAGNOSTICS = {
   name: 'Keep the browser diagnostics',
-  if: 'failure()',
+  if: FAILURE_UPLOAD_CONDITION,
   uses: `actions/upload-artifact@${SHA}`,
   with: {
     name: `melarc-browser-diagnostics-${GITHUB_SHA}-${MATRIX_ENGINE}-\${{ matrix.shard }}`,
@@ -134,6 +167,7 @@ function shardEntries(
 /** The one job a pull request does not run: the Firefox and WebKit shards of the browser tests. */
 const OTHER_ENGINES = 'browser-firefox-webkit';
 const JOB_IDS = [
+  'plan',
   'static',
   'unit',
   'database',
@@ -145,14 +179,32 @@ const JOB_IDS = [
   'verifier',
 ];
 /** The command of the verdict, with the one allowance and every job named. */
-const AGGREGATE_COMMAND = `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
+const AGGREGATE_COMMAND = `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
 
+/** A job that waits for the plan and runs when it says so, as every job but the plan and the verdict does. */
 function job(steps: Json[]): Json {
   return {
     name: 'A job',
+    needs: 'plan',
+    if: PLANNED_RUN,
     'runs-on': 'ubuntu-24.04',
     'timeout-minutes': 10,
     steps: [CHECKOUT, SETUP, ...steps],
+  };
+}
+
+/** The job that decides whether the run is to run. */
+function planJob(): Json {
+  return {
+    name: 'Plan the run',
+    'runs-on': 'ubuntu-24.04',
+    'timeout-minutes': 5,
+    permissions: { contents: 'read', actions: 'read' },
+    outputs: { run: '${{ steps.plan.outputs.run }}' },
+    steps: [
+      CHECKOUT,
+      { name: 'Decide', id: 'plan', env: { GH_TOKEN: '${{ github.token }}' }, run: PLAN_COMMAND },
+    ],
   };
 }
 
@@ -160,6 +212,7 @@ function job(steps: Json[]): Json {
 function browserJob(entries: Json[]): Json {
   return {
     ...job([
+      cacheOf(MATRIX_ENGINE),
       run(INSTALL_ENGINE),
       {
         ...run(BROWSER_TESTS),
@@ -177,11 +230,12 @@ function goodShared(): Json {
     on: {
       push: { branches: ['main'] },
       pull_request: null,
-      schedule: [{ cron: '17 2 * * *' }],
+      schedule: [{ cron: '17 2 * * 1-5' }],
       workflow_dispatch: { inputs: { 'rehearse-failure': { type: 'boolean', default: false } } },
     },
     permissions: { contents: 'read' },
     jobs: {
+      plan: planJob(),
       static: job([
         run('pnpm run format:check'),
         run('pnpm run lint'),
@@ -192,10 +246,22 @@ function goodShared(): Json {
         REHEARSAL,
       ]),
       unit: job([run('pnpm run test')]),
-      database: job([run('pnpm run test:db')]),
+      database: {
+        ...job([
+          {
+            ...run('pnpm run test:db'),
+            env: {
+              [TIMING_SKIP_VARIABLE]: TIMING_SKIP_VALUE,
+              [DATABASE_SHARD_VARIABLE]: MATRIX_SHARD,
+            },
+          },
+        ]),
+        strategy: { 'fail-fast': false, matrix: { include: DATABASE_ENTRIES } },
+      },
       integrated: job([
         run('pnpm run build'),
         run('pnpm run contract:check'),
+        cacheOf('chromium'),
         run(INSTALL_CHROMIUM),
         run('pnpm run test:e2e'),
         DIAGNOSTICS,
@@ -205,6 +271,7 @@ function goodShared(): Json {
       ]),
       https: {
         ...job([
+          cacheOf(MATRIX_BROWSERS),
           run(INSTALL_BROWSERS),
           run('sudo apt-get install --no-install-recommends --yes libnss3-tools'),
           { ...run(HTTPS_TESTS), env: { MELARC_HTTPS_SHARD: MATRIX_SHARD } },
@@ -261,6 +328,13 @@ function codesWith(change: (workflow: Json, jobs: Jobs) => void): string[] {
   return codes(workflowWith(change));
 }
 
+/**
+ * The codes without the cache rule's: a test that alters an install step (to prove the install rule) leaves the key of the cache before it
+ * naming other browsers than the step installs, which the cache rule reports on its own; its tests are in "the cache of the browsers" below.
+ */
+const withoutCache = (found: string[]): string[] =>
+  found.filter((code) => code !== 'BROWSER_CACHE');
+
 const stepsOf = (target: Json): Json[] => target.steps as Json[];
 
 function stepAt(target: Json, index: number): Json {
@@ -282,6 +356,7 @@ function stepRunning(target: Json, script: string): Json {
 }
 
 const allJobs = (jobs: Jobs): Json[] => [
+  jobs.plan,
   jobs.static,
   jobs.unit,
   jobs.database,
@@ -472,22 +547,22 @@ describe('the aggregate job', () => {
   // that nothing skips would let a failure of its own be taken for a skip; a job skipped that the verdict does not allow turns every pull
   // request red. The allowance is one option, naming exactly the jobs that carry the one condition.
   const allowances: [label: string, command: string][] = [
-    ['no allowance', `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`],
+    ['no allowance', `node scripts/ci-aggregate.ts --plan=plan ${JOB_IDS.join(' ')}`],
     [
       'another job allowed',
-      `node scripts/ci-aggregate.ts --skipped-on-pull-request=unit ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=unit ${JOB_IDS.join(' ')}`,
     ],
     [
       'the job and another allowed',
-      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES},browser-chromium ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES},browser-chromium ${JOB_IDS.join(' ')}`,
     ],
     [
       'the allowance given twice',
-      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
     [
       'a job that does not exist allowed',
-      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES},ghost ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES},ghost ${JOB_IDS.join(' ')}`,
     ],
   ];
   for (const [label, command] of allowances) {
@@ -629,7 +704,7 @@ describe('the runners', () => {
       codesWith((_, jobs) => {
         jobs.unit = { uses: './.github/workflows/other.yml', 'timeout-minutes': 5 };
       }).toSorted(),
-      ['CHECKOUT_MISSING', 'COMMAND_MISSING', 'RUNNER_DRIFT'],
+      ['CHECKOUT_MISSING', 'COMMAND_MISSING', 'JOB_CONDITIONAL', 'JOB_NOT_PLANNED', 'RUNNER_DRIFT'],
     );
   });
 
@@ -716,8 +791,8 @@ describe('mandatory failures propagate', () => {
     it(`rejects timeout-minutes ${JSON.stringify(timeout)}`, () => {
       assert.deepEqual(
         codesWith((_, jobs) => {
-          if (timeout === undefined) Reflect.deleteProperty(jobs.unit, 'timeout-minutes');
-          else jobs.unit['timeout-minutes'] = timeout;
+          if (timeout === undefined) Reflect.deleteProperty(jobs.audit, 'timeout-minutes');
+          else jobs.audit['timeout-minutes'] = timeout;
         }),
         ['JOB_NO_TIMEOUT'],
       );
@@ -731,7 +806,7 @@ describe('mandatory failures propagate', () => {
     it(`accepts timeout-minutes ${String(timeout)}, an edge of the allowed range`, () => {
       assert.deepEqual(
         codesWith((_, jobs) => {
-          jobs.unit['timeout-minutes'] = timeout;
+          jobs.audit['timeout-minutes'] = timeout;
         }),
         [],
       );
@@ -785,6 +860,20 @@ describe('the composite actions the jobs use', () => {
   });
 });
 
+/**
+ * What else is reported when the step of one command is altered, because another rule holds the same step: the plan's step is the plan
+ * (checkPlan), and the database step is the one that carries the variables of its shard and of the timing tests, which a step that no
+ * longer is the command alone may not set.
+ */
+const ALSO_WHEN_ALTERED: Readonly<Record<string, readonly string[]>> = {
+  [PLAN_COMMAND]: ['PLAN_DRIFT'],
+  'pnpm run test:db': ['TIMING_SKIP_DRIFT', 'DATABASE_SHARD_ENV'],
+};
+/** And when the step is taken out: the plan job then has no step that runs the plan. */
+const ALSO_WHEN_REMOVED: Readonly<Record<string, readonly string[]>> = {
+  [PLAN_COMMAND]: ['PLAN_DRIFT'],
+};
+
 describe('mandatory commands', () => {
   // Break caught: a check deleted from the workflow (or its name changed so it runs something else), leaving a
   // pipeline that is green because it asks less.
@@ -793,7 +882,7 @@ describe('mandatory commands', () => {
       const found = codesWith((_, jobs) => {
         for (const target of allJobs(jobs)) target.steps = withoutScript(target, command);
       });
-      assert.deepEqual(found, ['COMMAND_MISSING']);
+      assert.deepEqual(found, ['COMMAND_MISSING', ...(ALSO_WHEN_REMOVED[command] ?? [])]);
     });
   }
 
@@ -845,7 +934,7 @@ describe('mandatory commands', () => {
           codesWith((_, jobs) => {
             runningStep(jobs, command).run = script(command);
           }),
-          ['COMMAND_MISSING'],
+          ['COMMAND_MISSING', ...(ALSO_WHEN_ALTERED[command] ?? [])],
           label,
         );
       }
@@ -1163,9 +1252,11 @@ describe('the browser matrix', () => {
     ] as const) {
       it(`requires the install step of ${id} to install the engine of the entry alone: not ${label}`, () => {
         assert.deepEqual(
-          codesOf((jobs) => {
-            installStep(jobs, id).run = script;
-          }),
+          withoutCache(
+            codesOf((jobs) => {
+              installStep(jobs, id).run = script;
+            }),
+          ),
           ['BROWSER_INSTALL_DRIFT'],
         );
       });
@@ -1208,14 +1299,16 @@ describe('the browser matrix', () => {
         ['BROWSER_INSTALL_DRIFT'],
       );
       assert.deepEqual(
-        codesOf((jobs) => {
-          const [install] = stepsOf(jobs[id]).splice(
-            stepsOf(jobs[id]).findIndex((step) => step.run === INSTALL_ENGINE),
-            1,
-          );
-          assert.ok(install !== undefined);
-          stepsOf(jobs.unit).push(install);
-        }),
+        withoutCache(
+          codesOf((jobs) => {
+            const [install] = stepsOf(jobs[id]).splice(
+              stepsOf(jobs[id]).findIndex((step) => step.run === INSTALL_ENGINE),
+              1,
+            );
+            assert.ok(install !== undefined);
+            stepsOf(jobs.unit).push(install);
+          }),
+        ),
         ['BROWSER_INSTALL_DRIFT'],
       );
     });
@@ -1464,7 +1557,7 @@ describe('what each kind of run runs of the browser tests', () => {
   // verdict that waits for them): the engines run on a pull request must be Chromium alone.
   it('rejects the Firefox and WebKit shards without the condition, which would run them on a pull request', () => {
     const problems = found((jobs) => {
-      Reflect.deleteProperty(jobs[OTHER_ENGINES], 'if');
+      jobs[OTHER_ENGINES].if = PLANNED_RUN;
     });
     assert.deepEqual(problems.map((problem) => problem.code).toSorted(), [
       'AGGREGATE_SKIP_DRIFT',
@@ -1478,8 +1571,8 @@ describe('what each kind of run runs of the browser tests', () => {
 
   it('rejects the same when the allowance is taken off the verdict as well, and says which run', () => {
     const problems = found((jobs) => {
-      Reflect.deleteProperty(jobs[OTHER_ENGINES], 'if');
-      stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`;
+      jobs[OTHER_ENGINES].if = PLANNED_RUN;
+      stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts --plan=plan ${JOB_IDS.join(' ')}`;
     });
     assert.deepEqual(
       problems.map((problem) => problem.code),
@@ -1633,13 +1726,14 @@ describe('the HTTPS journeys', () => {
     return httpsMatrix(jobs.https).faults;
   };
 
-  it('is accepted as the fixture has it: both shards, each with the browsers of its runs', () => {
+  it('is accepted as the fixture has it: all three shards, each with the browsers of its runs', () => {
     const jobs = good().jobs as Jobs;
     const matrix = httpsMatrix(jobs.https);
     assert.deepEqual(matrix.faults, []);
     assert.deepEqual(matrix.shards, [
-      { shard: 1, shards: 2, browsers: ['chromium', 'webkit'] },
-      { shard: 2, shards: 2, browsers: ['firefox'] },
+      { shard: 1, shards: 3, browsers: ['chromium'] },
+      { shard: 2, shards: 3, browsers: ['firefox'] },
+      { shard: 3, shards: 3, browsers: ['webkit'] },
     ]);
   });
 
@@ -1699,9 +1793,11 @@ describe('the HTTPS journeys', () => {
   ] as const) {
     it(`requires the install step to install the browsers of the entry alone: not ${label}`, () => {
       assert.deepEqual(
-        codesOf((jobs) => {
-          stepRunning(jobs.https, INSTALL_BROWSERS).run = script;
-        }),
+        withoutCache(
+          codesOf((jobs) => {
+            stepRunning(jobs.https, INSTALL_BROWSERS).run = script;
+          }),
+        ),
         ['BROWSER_INSTALL_DRIFT'],
       );
     });
@@ -1809,7 +1905,7 @@ describe('the HTTPS journeys', () => {
     ],
     ['no browser', (entry: Json) => void (entry.browsers = '')],
     ['a shard that is text', (entry: Json) => void (entry.shard = '1')],
-    ['a shard beyond its number', (entry: Json) => void (entry.shard = 3)],
+    ['a shard beyond its number', (entry: Json) => void (entry.shard = 4)],
     ['shard 0', (entry: Json) => void (entry.shard = 0)],
   ] as const) {
     it(`rejects ${label}, and the place it leaves empty`, () => {
@@ -1828,24 +1924,24 @@ describe('the HTTPS journeys', () => {
       matrixOf(jobs).include = entriesOf(jobs).filter((entry) => entry.shard !== 2);
     });
     assert.deepEqual(faults, [
-      'the HTTPS run has no entry for shard 2 of 2, so the tests of that shard are never run',
+      'the HTTPS run has no entry for shard 2 of 3, so the tests of that shard are never run',
     ]);
   });
 
   it('rejects a shard listed twice, and shards that disagree on the total', () => {
     assert.match(
       faultsAfter((jobs) => {
-        entriesOf(jobs).push({ shard: 2, shards: 2, browsers: 'firefox' });
+        entriesOf(jobs).push({ shard: 2, shards: 3, browsers: 'firefox' });
       })[0] ?? '',
-      /lists shard 2 of 2 more than once/,
+      /lists shard 2 of 3 more than once/,
     );
     assert.match(
       faultsAfter((jobs) => {
         const entry = entriesOf(jobs)[1];
         assert.ok(entry !== undefined);
-        entry.shards = 3;
+        entry.shards = 4;
       })[0] ?? '',
-      /disagree on the number of shards \(2, 3\)/,
+      /disagree on the number of shards \(3, 4\)/,
     );
   });
 });
@@ -2191,7 +2287,7 @@ describe('triggers and permissions', () => {
   it('accepts a schedule of several entries, so long as one is a cron', () => {
     assert.deepEqual(
       codesWith((workflow) => {
-        (workflow.on as Json).schedule = [{ cron: '17 2 * * *' }, { cron: '17 14 * * 1-5' }];
+        (workflow.on as Json).schedule = [{ cron: '17 2 * * 1-5' }, { cron: '17 14 * * MON-FRI' }];
       }),
       [],
     );
@@ -2398,13 +2494,29 @@ describe('this repository', () => {
     const notOnPullRequest = ids.filter((id) => jobRecord(id).if === PULL_REQUEST_SKIP);
     assert.deepEqual(notOnPullRequest, ['browser-firefox-webkit']);
     assert.deepEqual(command.skippedOnPullRequest, notOnPullRequest);
+    // The plan the verdict reads is the job that decides, and every job but the plan waits for it and has its condition.
+    assert.equal(command.plan, PLAN_JOB);
+    for (const id of ids.filter((name) => name !== PLAN_JOB)) {
+      assert.ok(
+        [PLANNED_RUN, PULL_REQUEST_SKIP].includes(String(jobRecord(id).if)),
+        `${id} has the plan's condition`,
+      );
+      assert.equal(jobRecord(id).needs, PLAN_JOB, id);
+    }
 
     for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
       const judged = (result: (id: string) => string) =>
         aggregate(
-          JSON.stringify(Object.fromEntries(ids.map((id) => [id, { result: result(id) }]))),
+          JSON.stringify(
+            Object.fromEntries(
+              ids.map((id) => [
+                id,
+                { result: result(id), outputs: id === command.plan ? { run: 'true' } : {} },
+              ]),
+            ),
+          ),
           command.jobs,
-          { event, skippedOnPullRequest: command.skippedOnPullRequest },
+          { event, skippedOnPullRequest: command.skippedOnPullRequest, plan: command.plan },
         ).problems.map((problem) => `${problem.code} ${problem.job ?? ''}`);
       assert.deepEqual(
         judged(() => 'success'),
@@ -2454,3 +2566,570 @@ function scriptsOf(packageJson: string): string[] {
   const scripts = isRecord(parsed) ? parsed.scripts : undefined;
   return isRecord(scripts) ? Object.keys(scripts) : [];
 }
+
+// Task CI.2 (the Product Owner's decisions of 7 November 2026): the plan of the run, a timeout on every test step, the diagnostics kept on a
+// cancellation, the browsers cached, the timing tests left out of a pull request, the database tests in shards, and a weekday nightly run.
+describe('the plan of the run', () => {
+  const OTHERS = JOB_IDS.filter((id) => id !== PLAN_JOB);
+  const PLANNED_ONLY = OTHERS.filter((id) => id !== OTHER_ENGINES);
+  const planStep = (jobs: Jobs): Json => stepRunning(jobs.plan, PLAN_COMMAND);
+
+  it('is a mandatory command of the workflow', () => {
+    assert.ok(REQUIRED_COMMANDS.includes(PLAN_COMMAND));
+  });
+
+  // Break caught: the plan taken out, leaving the verdict with a job that does not exist, and every other job with an answer nobody gives.
+  it('requires the plan job', () => {
+    const found = codesWith((_, jobs) => {
+      Reflect.deleteProperty(jobs, 'plan');
+    });
+    assert.ok(found.includes('PLAN_MISSING'), found.join(', '));
+  });
+
+  // Break caught: the plan changed so that it cannot ask GitHub (no `actions: read`: the question is refused, every night runs, and nothing
+  // says so), or that its answer is not the job's output, or that it holds more than it needs.
+  for (const [label, change] of [
+    ['a need of its own', (jobs: Jobs) => void (jobs.plan.needs = 'static')],
+    ['no output', (jobs: Jobs) => void Reflect.deleteProperty(jobs.plan, 'outputs')],
+    [
+      'an output that is another expression',
+      (jobs: Jobs) => void (jobs.plan.outputs = { run: 'true' }),
+    ],
+    [
+      'an output of another step',
+      (jobs: Jobs) => void (jobs.plan.outputs = { run: '${{ steps.other.outputs.run }}' }),
+    ],
+    [
+      'no permission of its own',
+      (jobs: Jobs) => void Reflect.deleteProperty(jobs.plan, 'permissions'),
+    ],
+    ['no actions: read', (jobs: Jobs) => void (jobs.plan.permissions = { contents: 'read' })],
+    [
+      'a permission beyond the two',
+      (jobs: Jobs) =>
+        void (jobs.plan.permissions = { contents: 'read', actions: 'read', checks: 'read' }),
+    ],
+    ['a step that is not id: plan', (jobs: Jobs) => void (planStep(jobs).id = 'decide')],
+    ['no token', (jobs: Jobs) => void Reflect.deleteProperty(planStep(jobs), 'env')],
+    [
+      'another token',
+      (jobs: Jobs) => void (planStep(jobs).env = { GH_TOKEN: '${{ secrets.TOKEN }}' }),
+    ],
+  ] as const) {
+    it(`rejects a plan with ${label}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          change(jobs);
+        }),
+        ['PLAN_DRIFT'],
+      );
+    });
+  }
+
+  // Break caught: the plan that can be skipped (it would skip the answer too: every job would be skipped for nothing).
+  it('does not allow a condition on the plan', () => {
+    for (const condition of [PLANNED_RUN, "github.event_name == 'schedule'", 'always()']) {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          jobs.plan.if = condition;
+        }),
+        ['JOB_CONDITIONAL'],
+        condition,
+      );
+    }
+  });
+
+  for (const id of OTHERS) {
+    // Break caught: a job that does not wait for the plan (it starts at once and never reads the answer, so a night that stands down still runs
+    // it), or one that waits for others besides (it is delayed by them for nothing).
+    it(`requires ${id} to wait for the plan alone`, () => {
+      for (const needs of [undefined, 'static', ['plan', 'static'], [], ['static']]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            const target = (jobs as unknown as Record<string, Json>)[id];
+            assert.ok(target !== undefined);
+            if (needs === undefined) Reflect.deleteProperty(target, 'needs');
+            else target.needs = needs;
+          }),
+          ['JOB_NOT_PLANNED'],
+          JSON.stringify(needs),
+        );
+      }
+    });
+  }
+
+  for (const id of PLANNED_ONLY) {
+    // Break caught: a job that ignores the plan's answer, or reads it wrongly (`!= 'false'` is true when the answer is missing).
+    it(`requires exactly the plan's condition on ${id}`, () => {
+      // A condition that is not the plan's leaves the job's engines run by no kind of run, which the browser rules report too: that is not what
+      // this proves, so those reports are set aside for the Chromium job.
+      for (const condition of [
+        undefined,
+        "needs.plan.outputs.run != 'false'",
+        'needs.plan.outputs.run',
+        "needs.plan.outputs.run == 'true' || always()",
+        'always()',
+        "needs.plan.outputs.run == 'true' && github.event_name != 'pull_request'",
+        "github.event_name != 'pull_request'",
+      ]) {
+        const found = codesWith((_, jobs) => {
+          const target = (jobs as unknown as Record<string, Json>)[id];
+          assert.ok(target !== undefined);
+          if (condition === undefined) Reflect.deleteProperty(target, 'if');
+          else target.if = condition;
+        });
+        assert.deepEqual(
+          found.filter((code) => id !== 'browser-chromium' || code !== 'BROWSER_ENGINES_DRIFT'),
+          ['JOB_CONDITIONAL'],
+          String(condition),
+        );
+      }
+    });
+  }
+
+  // Break caught: the verdict not told which job is the plan, so that a night that stands down is red; or told another job, whose output
+  // would then decide whether the skips are allowed.
+  for (const [label, command] of [
+    [
+      'no plan',
+      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'another job as the plan',
+      `node scripts/ci-aggregate.ts --plan=static --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'an empty plan',
+      `node scripts/ci-aggregate.ts --plan= --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'the plan twice',
+      `node scripts/ci-aggregate.ts --plan=plan --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+  ] as const) {
+    it(`requires the verdict to name the plan once, as --plan=plan: not ${label}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.ci, 1).run = command;
+        }),
+        ['AGGREGATE_PLAN_DRIFT'],
+      );
+    });
+  }
+
+  it('accepts the verdict with the options in the other order', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        stepAt(jobs.ci, 1).run =
+          `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} --plan=plan ${JOB_IDS.join(' ')}`;
+      }),
+      [],
+    );
+  });
+});
+
+describe('the weekday nightly run', () => {
+  // Break caught: the nightly run on every day, or on days another than Monday to Friday (the Product Owner's decision of 7 November 2026).
+  for (const cron of [
+    '17 2 * * *',
+    '17 2 * * 0-6',
+    '17 2 * * 1,2,3,4,5',
+    '17 2 * * 6',
+    '17 2 * * 1-6',
+    '17 2 * *',
+  ]) {
+    it(`rejects the cron ${JSON.stringify(cron)}`, () => {
+      assert.deepEqual(
+        codesWith((workflow) => {
+          (workflow.on as Json).schedule = [{ cron }];
+        }),
+        ['NIGHTLY_WEEKDAYS'],
+      );
+    });
+  }
+
+  it('rejects a second cron that runs on other days, beside the right one', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        (workflow.on as Json).schedule = [{ cron: '17 2 * * 1-5' }, { cron: '17 3 * * *' }];
+      }),
+      ['NIGHTLY_WEEKDAYS'],
+    );
+  });
+
+  for (const cron of ['17 2 * * 1-5', '0 0 * * mon-fri', '5 4 * 1-6 MON-FRI']) {
+    it(`accepts the cron ${JSON.stringify(cron)}`, () => {
+      assert.deepEqual(
+        codesWith((workflow) => {
+          (workflow.on as Json).schedule = [{ cron }];
+        }),
+        [],
+      );
+    });
+  }
+
+  it('keeps the manual trigger: a run by hand is there for the other days', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        Reflect.deleteProperty(workflow.on as Json, 'workflow_dispatch');
+      }).toSorted(),
+      ['REHEARSAL_MISSING'],
+    );
+  });
+});
+
+describe('the timeout of a test step', () => {
+  /** The jobs that have a step running tests, with the step and the limit of the job. */
+  const timed = (jobs: Jobs): { id: string; step: Json; limit: number }[] =>
+    Object.entries(jobs as unknown as Record<string, Json>).flatMap(([id, target]) =>
+      stepsOf(target)
+        .filter((step) => typeof step.run === 'string' && TIMED_COMMANDS.includes(step.run))
+        .map((step) => ({ id, step, limit: Number(target['timeout-minutes']) })),
+    );
+
+  it('is held by every command that runs tests, and by the ones the fixture has', () => {
+    const jobs = good().jobs as Jobs;
+    const commands = new Set(timed(jobs).map(({ step }) => step.run));
+    assert.deepEqual([...commands].toSorted(), [...TIMED_COMMANDS].toSorted());
+    assert.ok(timed(jobs).every(({ step, limit }) => step['timeout-minutes'] === limit - 2));
+  });
+
+  // Break caught: a step with no limit of its own, so that a hung suite is cut by the job's limit, which cancels the job and the steps that
+  // would keep the evidence with it; or a limit that is not below the job's by the margin.
+  for (const command of TIMED_COMMANDS) {
+    for (const [label, value] of [
+      ['no timeout', undefined],
+      ['0', 0],
+      ['a negative one', -1],
+      ['text', '8'],
+      ['true', true],
+      ['the job limit less one', 9],
+      ['the job limit', 10],
+      ['more than the job limit', 30],
+    ] as const) {
+      it(`rejects ${label} on the step that runs ${command}`, () => {
+        const found = codesWith((_, jobs) => {
+          const holders = timed(jobs).filter(({ step }) => step.run === command);
+          assert.ok(holders.length > 0, command);
+          for (const { step } of holders) {
+            if (value === undefined) Reflect.deleteProperty(step, 'timeout-minutes');
+            else step['timeout-minutes'] = value;
+          }
+        });
+        assert.ok(
+          found.length > 0 && found.every((code) => code === 'STEP_TIMEOUT'),
+          found.join(', '),
+        );
+      });
+    }
+
+    it(`accepts the edges, 1 and the job limit less two, on the step that runs ${command}`, () => {
+      for (const value of [1, 8]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            for (const { step } of timed(jobs).filter((holder) => holder.step.run === command)) {
+              step['timeout-minutes'] = value;
+            }
+          }),
+          [],
+          String(value),
+        );
+      }
+    });
+  }
+
+  it('is measured against the limit of its own job', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        for (const { step } of timed(jobs).filter(
+          (holder) => holder.step.run === 'pnpm run test',
+        )) {
+          step['timeout-minutes'] = 18;
+        }
+        jobs.unit['timeout-minutes'] = 20;
+      }),
+      [],
+    );
+  });
+});
+
+describe('the diagnostics a failed or cancelled job keeps', () => {
+  // Break caught: the upload that waits for `failure()` alone, which a job that is cancelled (its limit reached, a run cancelled by a newer
+  // push) never reaches: the diagnostics of exactly the run that hung are lost.
+  for (const condition of [
+    'failure()',
+    'cancelled()',
+    'always()',
+    'success()',
+    'cancelled() || failure()',
+    'failure() || cancelled() ',
+  ]) {
+    it(`rejects the upload condition ${JSON.stringify(condition)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepNamed(jobs.integrated, 'Keep diagnostics').if = condition;
+        }),
+        ['STEP_CONDITIONAL'],
+      );
+    });
+  }
+
+  it('is as the workflow states it', () => {
+    assert.equal(FAILURE_UPLOAD_CONDITION, 'failure() || cancelled()');
+  });
+});
+
+describe('the cache of the browsers', () => {
+  const CACHED = [
+    ['integrated', 'chromium'],
+    ['https', MATRIX_BROWSERS],
+    ['browser-chromium', MATRIX_ENGINE],
+    [OTHER_ENGINES, MATRIX_ENGINE],
+  ] as const;
+  const cacheStep = (jobs: Jobs, id: string): Json =>
+    stepNamed((jobs as unknown as Record<string, Json>)[id] ?? {}, 'Cache the browsers');
+  const withOf = (step: Json): Json => step.with as Json;
+
+  for (const [id, browsers] of CACHED) {
+    // Break caught: the cache taken out (every run downloads the browsers again), made after the install (it restores what was just
+    // downloaded), or put on another path (it keeps nothing the install uses).
+    it(`requires the cache before the install in ${id}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          const target = (jobs as unknown as Record<string, Json>)[id];
+          assert.ok(target !== undefined);
+          target.steps = stepsOf(target).filter((step) => step.name !== 'Cache the browsers');
+        }),
+        ['BROWSER_CACHE'],
+      );
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          const target = (jobs as unknown as Record<string, Json>)[id];
+          assert.ok(target !== undefined);
+          const steps = stepsOf(target);
+          const [cache] = steps.splice(
+            steps.findIndex((step) => step.name === 'Cache the browsers'),
+            1,
+          );
+          assert.ok(cache !== undefined);
+          steps.push(cache);
+        }),
+        ['BROWSER_CACHE'],
+      );
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          withOf(cacheStep(jobs, id)).path = '~/.cache/other';
+        }),
+        ['BROWSER_CACHE'],
+      );
+    });
+
+    // Break caught: a key that does not say what the cache holds: no system (a cache of one runner image restored on another), no lockfile
+    // (a new Playwright version restores the old browsers for good), or not the browsers (two engines under one key: the second finds a
+    // cache without its browser, and saves nothing).
+    for (const part of ['${{ runner.os }}', "hashFiles('pnpm-lock.yaml')", browsers]) {
+      it(`requires ${part} in the key of the cache of ${id}`, () => {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            const cache = withOf(cacheStep(jobs, id));
+            cache.key = String(cache.key).replace(part, 'x');
+          }),
+          ['BROWSER_CACHE'],
+        );
+      });
+    }
+
+    it(`accepts a restore key beside the key in ${id}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          withOf(cacheStep(jobs, id))['restore-keys'] = 'playwright-';
+        }),
+        [],
+      );
+    });
+  }
+});
+
+describe('the timing tests a pull request leaves out', () => {
+  const databaseStep = (jobs: Jobs): Json => stepRunning(jobs.database, 'pnpm run test:db');
+
+  it('is as the fixture has it, and its variable is the one the API reads', () => {
+    assert.equal(TIMING_SKIP_VARIABLE, 'MELARC_SKIP_TIMING_TESTS');
+    assert.equal(
+      (databaseStep(good().jobs as Jobs).env as Json)[TIMING_SKIP_VARIABLE],
+      TIMING_SKIP_VALUE,
+    );
+  });
+
+  // Break caught: the switch not set (a pull request runs the tests that a loaded runner fails for a reason that is not the code's), set to
+  // something else (always on, or only on one event), or set for the pull request by the wrong test.
+  for (const value of [
+    undefined,
+    '',
+    '1',
+    "${{ github.event_name == 'push' && '1' || '' }}",
+    "${{ github.event_name != 'pull_request' && '1' || '' }}",
+    "${{ github.event_name == 'pull_request' && 'true' || '' }}",
+  ]) {
+    it(`requires the switch to be ${TIMING_SKIP_VALUE}, not ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          const env = databaseStep(jobs).env as Json;
+          if (value === undefined) Reflect.deleteProperty(env, TIMING_SKIP_VARIABLE);
+          else env[TIMING_SKIP_VARIABLE] = value;
+        }),
+        ['TIMING_SKIP_DRIFT'],
+      );
+    });
+  }
+
+  // Break caught: the switch set where it holds for more than the database tests, or for every run, so that a push to main and the nightly
+  // run leave the timing tests out too and nothing ever runs them.
+  it('is set by that step alone: not by the workflow, a job or another step', () => {
+    for (const change of [
+      (workflow: Json) => void (workflow.env = { [TIMING_SKIP_VARIABLE]: '1' }),
+      (_: Json, jobs: Jobs) => void (jobs.database.env = { [TIMING_SKIP_VARIABLE]: '1' }),
+      (_: Json, jobs: Jobs) => void (jobs.unit.env = { [TIMING_SKIP_VARIABLE]: '1' }),
+      (_: Json, jobs: Jobs) => void (stepAt(jobs.unit, 2).env = { [TIMING_SKIP_VARIABLE]: '1' }),
+    ]) {
+      const found = codesWith((workflow, jobs) => {
+        change(workflow, jobs);
+      });
+      assert.deepEqual(found, ['TIMING_SKIP_DRIFT']);
+    }
+  });
+});
+
+describe('the database tests, in shards', () => {
+  const databaseStep = (jobs: Jobs): Json => stepRunning(jobs.database, 'pnpm run test:db');
+  const strategyOf = (jobs: Jobs): Json => jobs.database.strategy as Json;
+  const matrixOf = (jobs: Jobs): Json => strategyOf(jobs).matrix as Json;
+  const entriesOf = (jobs: Jobs): Json[] => matrixOf(jobs).include as Json[];
+  const faultsAfter = (change: (jobs: Jobs) => void): string[] => {
+    const jobs = good().jobs as Jobs;
+    change(jobs);
+    return databaseMatrix(jobs.database).faults;
+  };
+
+  it('is accepted as the fixture has it: three shards, each once', () => {
+    const matrix = databaseMatrix((good().jobs as Jobs).database);
+    assert.deepEqual(matrix.faults, []);
+    assert.deepEqual(matrix.shards, [
+      { shard: 1, shards: 3 },
+      { shard: 2, shards: 3 },
+      { shard: 3, shards: 3 },
+    ]);
+  });
+
+  // Break caught: the shard not handed to the tests, or handed wrongly: every job runs every database test (about 45 minutes, far beyond the
+  // job's limit), or the same part of them.
+  for (const value of [
+    undefined,
+    '',
+    '1/3',
+    '${{ matrix.shard }}',
+    '${{ matrix.shards }}/${{ matrix.shard }}',
+    '${{ vars.SHARD }}',
+  ]) {
+    it(`requires ${DATABASE_SHARD_VARIABLE} to be ${MATRIX_SHARD}, not ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          const env = databaseStep(jobs).env as Json;
+          if (value === undefined) Reflect.deleteProperty(env, DATABASE_SHARD_VARIABLE);
+          else env[DATABASE_SHARD_VARIABLE] = value;
+        }),
+        ['DATABASE_SHARD_ENV'],
+      );
+    });
+  }
+
+  // Break caught: the variable set where another command reads it: the unit job would run a part of its tests and be green.
+  it('is set by the database step alone', () => {
+    for (const change of [
+      (workflow: Json) => void (workflow.env = { [DATABASE_SHARD_VARIABLE]: '1/3' }),
+      (_: Json, jobs: Jobs) => void (jobs.unit.env = { [DATABASE_SHARD_VARIABLE]: '1/3' }),
+      (_: Json, jobs: Jobs) =>
+        void (stepAt(jobs.unit, 2).env = { [DATABASE_SHARD_VARIABLE]: '1/3' }),
+    ]) {
+      assert.deepEqual(
+        codesWith((workflow, jobs) => {
+          change(workflow, jobs);
+        }),
+        ['DATABASE_SHARD_ENV'],
+      );
+    }
+  });
+
+  // Break caught: the job made one job again (the whole suite, longer than a job may last), or a matrix the check cannot read.
+  for (const [label, change] of [
+    [
+      'a job that is not a matrix',
+      (jobs: Jobs) => void Reflect.deleteProperty(jobs.database, 'strategy'),
+    ],
+    [
+      'a matrix computed by an expression',
+      (jobs: Jobs) => void (strategyOf(jobs).matrix = '${{ fromJSON(x) }}'),
+    ],
+    ['fail-fast left true', (jobs: Jobs) => void (strategyOf(jobs)['fail-fast'] = true)],
+    ['an exclude beside the list', (jobs: Jobs) => void (matrixOf(jobs).exclude = [{ shard: 2 }])],
+    ['an empty list', (jobs: Jobs) => void (matrixOf(jobs).include = [])],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          change(jobs);
+        }),
+        ['DATABASE_SHARDS_DRIFT'],
+      );
+    });
+  }
+
+  // Each of these entries is faulted and, not being counted, leaves its place empty: two faults.
+  for (const [label, change] of [
+    ['an entry with a key of its own', (entry: Json) => void (entry.os = 'ubuntu-24.04')],
+    [
+      'an entry with the browsers of the HTTPS matrix',
+      (entry: Json) => void (entry.browsers = 'webkit'),
+    ],
+    ['a shard that is text', (entry: Json) => void (entry.shard = '1')],
+    ['a shard beyond its number', (entry: Json) => void (entry.shard = 4)],
+    ['shard 0', (entry: Json) => void (entry.shard = 0)],
+    ['a number of shards that is text', (entry: Json) => void (entry.shards = '3')],
+  ] as const) {
+    it(`rejects ${label}, and the place it leaves empty`, () => {
+      const faults = faultsAfter((jobs) => {
+        const entry = entriesOf(jobs)[0];
+        assert.ok(entry !== undefined);
+        change(entry);
+      });
+      assert.ok(faults.length >= 2, faults.join(' | '));
+    });
+  }
+
+  // Break caught (the failure to show): a shard dropped from the matrix leaves the files it holds to no job.
+  it('rejects a dropped shard, and says which', () => {
+    const faults = faultsAfter((jobs) => {
+      matrixOf(jobs).include = entriesOf(jobs).filter((entry) => entry.shard !== 2);
+    });
+    assert.deepEqual(faults, [
+      'the database tests has no entry for shard 2 of 3, so the tests of that shard are never run',
+    ]);
+  });
+
+  it('rejects a shard listed twice, and shards that disagree on the total', () => {
+    assert.match(
+      faultsAfter((jobs) => {
+        entriesOf(jobs).push({ shard: 2, shards: 3 });
+      })[0] ?? '',
+      /lists shard 2 of 3 more than once/,
+    );
+    assert.match(
+      faultsAfter((jobs) => {
+        const entry = entriesOf(jobs)[1];
+        assert.ok(entry !== undefined);
+        entry.shards = 4;
+      })[0] ?? '',
+      /disagree on the number of shards \(3, 4\)/,
+    );
+  });
+});

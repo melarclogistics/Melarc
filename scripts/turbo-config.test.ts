@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { parse } from 'yaml';
+
 import { workspaceDirectories } from './test-inventory.ts';
 
 const repositoryRoot = resolve(import.meta.dirname, '..');
@@ -97,6 +99,44 @@ describe('turbo.json', () => {
     assert.ok(passed.includes('MELARC_BROWSER_SHARD'));
     assert.ok(passed.includes('PLAYWRIGHT_BROWSERS_PATH'));
     assert.equal(task.cache, false, 'a browser run is never replayed from the cache');
+  });
+
+  // Break caught (task CI.2): the shard of the database tests, and the switch that leaves the timing tests out of a pull request, dropped by
+  // Turborepo's strict environment. CI would set them, and every database job would run every file, with the timing tests, for as long as
+  // the unsharded run took, and with nothing saying so.
+  it('passes the shard of the database tests and the timing switch through to them', () => {
+    const task = turbo.tasks?.['test:db'];
+    assert.ok(task !== undefined, 'test:db is a task');
+    const passed = task.passThroughEnv ?? [];
+    assert.ok(passed.includes('MELARC_DB_SHARD'));
+    assert.ok(passed.includes('MELARC_SKIP_TIMING_TESTS'));
+    assert.equal(task.cache, false, 'a database run is never replayed from the cache');
+  });
+
+  // Break caught: any variable the workflow gives a step that runs a Turborepo task but the task does not pass through: Turborepo's strict
+  // environment would drop it, the step would run without it, and the run would still be green. A MELARC_ variable on a step of the
+  // workflow is for the command of that step, so it is held to the task's list here, for every step, not only for the ones known today.
+  it('passes through every MELARC_ variable the workflow sets on a step that runs a task', () => {
+    const text = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8');
+    const workflow = parse(text) as { jobs: Record<string, { steps?: Record<string, unknown>[] }> };
+    let checked = 0;
+    for (const [id, job] of Object.entries(workflow.jobs)) {
+      for (const step of job.steps ?? []) {
+        const match =
+          typeof step.run === 'string' ? /^pnpm run (\S+)$/.exec(step.run.trim()) : null;
+        const task = match?.[1] === undefined ? undefined : turbo.tasks?.[match[1]];
+        const env = typeof step.env === 'object' && step.env !== null ? Object.keys(step.env) : [];
+        if (task === undefined) continue;
+        for (const name of env.filter((variable) => variable.startsWith('MELARC_'))) {
+          checked += 1;
+          assert.ok(
+            (task.passThroughEnv ?? []).includes(name),
+            `${id}: ${name} is set on "${String(step.run).trim()}" but turbo.json does not pass it through to the task`,
+          );
+        }
+      }
+    }
+    assert.ok(checked >= 4, 'the workflow is expected to set several variables on such steps');
   });
 
   // Break caught (the first hosted run, 12 October 2026): the variables that say "this is a GitHub-hosted runner" dropped by Turborepo's

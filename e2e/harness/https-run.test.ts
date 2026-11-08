@@ -35,11 +35,13 @@ const MATERIAL: MintResult = {
   notes: [],
 };
 
-/** The projects of the first run: Chromium, and WebKit's refusal while the system store lacks the CA. */
-const CHROMIUM_RUN = ['https-chromium', 'https-chromium-secret', 'https-webkit-control'] as const;
+/** The projects of the first run: Chromium, which trusts the CA by a store of its own. */
+const CHROMIUM_RUN = ['https-chromium', 'https-chromium-secret'] as const;
 /** The projects of the second run: Firefox, on a stack of its own (audit G01). */
 const FIREFOX_RUN = ['https-firefox', 'https-firefox-secret'] as const;
-/** The projects of the third run: WebKit's proofs that need its trust, with the CA in the system store. */
+/** The projects of the third run: WebKit's refusal of the origin while the system store lacks the CA (task CI.2: a run of its own, in front of the proofs). */
+const CONTROL_RUN = ['https-webkit-control'] as const;
+/** The projects of the fourth run: WebKit's proofs that need its trust, with the CA in the system store. */
 const WEBKIT_RUN = ['https-webkit', 'https-webkit-secret'] as const;
 
 /**
@@ -49,7 +51,8 @@ const WEBKIT_RUN = ['https-webkit', 'https-webkit-secret'] as const;
  */
 const CHROMIUM_OUT = 'test-results/https-1-chromium';
 const FIREFOX_OUT = 'test-results/https-2-firefox';
-const WEBKIT_OUT = 'test-results/https-3-webkit-system-store';
+const CONTROL_OUT = 'test-results/https-3-webkit-refusal';
+const WEBKIT_OUT = 'test-results/https-4-webkit-system-store';
 
 const args = (projects: readonly string[], output: string) => [
   'test',
@@ -172,6 +175,7 @@ describe('what it does, in order', () => {
       `mint ${TLS}`,
       `playwright ${CHROMIUM_RUN.join(',')}`,
       `playwright ${FIREFOX_RUN.join(',')}`,
+      `playwright ${CONTROL_RUN.join(',')}`,
       `system-trust install ${CA}`,
       `playwright ${WEBKIT_RUN.join(',')}`,
       'system-trust remove',
@@ -180,6 +184,7 @@ describe('what it does, in order', () => {
     expect(run.runs.map((call) => call.args)).toEqual([
       args(CHROMIUM_RUN, CHROMIUM_OUT),
       args(FIREFOX_RUN, FIREFOX_OUT),
+      args(CONTROL_RUN, CONTROL_OUT),
       args(WEBKIT_RUN, WEBKIT_OUT),
     ]);
     for (const call of run.runs) {
@@ -188,7 +193,7 @@ describe('what it does, in order', () => {
     }
   });
 
-  it('is three runs, the last with the CA in the system store, and every HTTPS project in exactly one', () => {
+  it('is four runs, the last with the CA in the system store, and every HTTPS project in exactly one', () => {
     expect(HTTPS_PHASES).toEqual([
       {
         id: 'chromium',
@@ -205,6 +210,13 @@ describe('what it does, in order', () => {
         output: FIREFOX_OUT,
       },
       {
+        id: 'webkit-refusal',
+        name: expect.any(String) as string,
+        projects: CONTROL_RUN,
+        systemTrust: false,
+        output: CONTROL_OUT,
+      },
+      {
         id: 'webkit',
         name: expect.any(String) as string,
         projects: WEBKIT_RUN,
@@ -212,7 +224,12 @@ describe('what it does, in order', () => {
         output: WEBKIT_OUT,
       },
     ]);
-    expect(HTTPS_PROJECTS).toEqual([...CHROMIUM_RUN, ...FIREFOX_RUN, ...WEBKIT_RUN]);
+    expect(HTTPS_PROJECTS).toEqual([
+      ...CHROMIUM_RUN,
+      ...FIREFOX_RUN,
+      ...CONTROL_RUN,
+      ...WEBKIT_RUN,
+    ]);
     expect(new Set(HTTPS_PROJECTS).size).toBe(HTTPS_PROJECTS.length);
   });
 
@@ -295,6 +312,7 @@ describe('where the system store may not be changed', () => {
       `mint ${TLS}`,
       `playwright ${CHROMIUM_RUN.join(',')}`,
       `playwright ${FIREFOX_RUN.join(',')}`,
+      `playwright ${CONTROL_RUN.join(',')}`,
       `playwright ${WEBKIT_RUN.join(',')}`,
       'remove /tmp/run',
     ]);
@@ -390,6 +408,7 @@ describe('how it ends', () => {
       `mint ${TLS}`,
       `playwright ${CHROMIUM_RUN.join(',')}`,
       `playwright ${FIREFOX_RUN.join(',')}`,
+      `playwright ${CONTROL_RUN.join(',')}`,
       `system-trust install ${CA}`,
       'system-trust remove',
       'remove /tmp/run',
@@ -436,7 +455,7 @@ describe('what a failure leaves behind', () => {
   // and the artifact said nothing of what had failed. Playwright removes the output directory of every project it runs at the start of a
   // run; each run therefore writes to a directory of its own, and none is inside another or inside the plain run's.
   it('gives each run an output directory of its own, none inside another and none the plain run’s', () => {
-    expect(outputs).toEqual([CHROMIUM_OUT, FIREFOX_OUT, WEBKIT_OUT]);
+    expect(outputs).toEqual([CHROMIUM_OUT, FIREFOX_OUT, CONTROL_OUT, WEBKIT_OUT]);
     expect(new Set(outputs).size).toBe(outputs.length);
     const plain = posix.normalize(String(config.outputDir));
     for (const output of outputs) {
@@ -459,6 +478,7 @@ describe('what a failure leaves behind', () => {
     ).toEqual([
       [`--output=${CHROMIUM_OUT}`],
       [`--output=${FIREFOX_OUT}`],
+      [`--output=${CONTROL_OUT}`],
       [`--output=${WEBKIT_OUT}`],
     ]);
   });
@@ -487,13 +507,15 @@ describe('what it says of each run, and of all of them', () => {
 
     runHttpsSuite(run.deps);
 
-    expect(said(run)).toContain('HTTPS run 1 of 3 ended with exit status 0.');
-    expect(said(run)).toContain('HTTPS run 2 of 3 ended with exit status 0.');
-    expect(said(run)).toContain('HTTPS run 3 of 3 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 1 of 4 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 2 of 4 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 3 of 4 ended with exit status 0.');
+    expect(said(run)).toContain('HTTPS run 4 of 4 ended with exit status 0.');
     expect(said(run)).toContain('HTTPS run summary:');
-    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
-    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
+    expect(said(run)).toContain(`run 1 of 4: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 4: exit status 0; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: exit status 0; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 0; output ${WEBKIT_OUT}`);
     expect(said(run)).toContain('overall exit status 0');
     expect(run.out.at(-1)).toBe('  overall exit status 0');
   });
@@ -505,13 +527,15 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain('HTTPS run 1 of 3 ended with exit status 1.');
-    expect(said(run)).toContain('HTTPS run 2 of 3 ended with exit status 1.');
-    expect(said(run)).toContain('HTTPS run 3 of 3 ended with exit status 2.');
-    expect(said(run)).toContain(`run 1 of 3: exit status 1; output ${CHROMIUM_OUT}`);
-    expect(said(run)).toContain(`run 2 of 3: exit status 1; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: exit status 2; output ${WEBKIT_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 3');
+    expect(said(run)).toContain('HTTPS run 1 of 4 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 2 of 4 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 3 of 4 ended with exit status 1.');
+    expect(said(run)).toContain('HTTPS run 4 of 4 ended with exit status 2.');
+    expect(said(run)).toContain(`run 1 of 4: exit status 1; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 4: exit status 1; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: exit status 1; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 2; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 4');
   });
 
   it('names Firefox’s run when only it failed, and runs WebKit’s after it', () => {
@@ -521,10 +545,11 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
-    expect(said(run)).toContain(`run 2 of 3: exit status 1; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 3');
+    expect(said(run)).toContain(`run 1 of 4: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 4: exit status 1; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: exit status 0; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 0; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 2 of 4');
   });
 
   it('names the last run when only it failed', () => {
@@ -532,9 +557,22 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: exit status 1; output ${WEBKIT_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 3 of 3');
+    expect(said(run)).toContain(`run 3 of 4: exit status 0; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 1; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 4 of 4');
+  });
+
+  // Break caught: the refusal's run reported as the proofs', or the failure of the control lost to the run that followed it: the refusal is a run of its own.
+  it('names WebKit’s refusal when only it failed, and still makes WebKit’s proofs after it', () => {
+    const run = harness({
+      playwright: (projects) => (projects.includes('https-webkit-control') ? 1 : 0),
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(1);
+
+    expect(said(run)).toContain(`run 3 of 4: exit status 1; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 0; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 3 of 4');
   });
 
   it('says that a run that threw did not complete, and that the next ones were not run', () => {
@@ -547,11 +585,12 @@ describe('what it says of each run, and of all of them', () => {
     expect(runHttpsSuite(run.deps)).toBe(1);
 
     expect(said(run)).toContain(
-      `run 1 of 3: did not complete (an error stopped it; see above); output ${CHROMIUM_OUT}`,
+      `run 1 of 4: did not complete (an error stopped it; see above); output ${CHROMIUM_OUT}`,
     );
-    expect(said(run)).toContain(`run 2 of 3: not run; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 3');
+    expect(said(run)).toContain(`run 2 of 4: not run; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: not run; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: not run; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 1 of 4');
   });
 
   it('says that WebKit’s run was not run when the CA could not be put in the system store', () => {
@@ -563,10 +602,11 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
-    expect(said(run)).toContain(`run 2 of 3: exit status 0; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
-    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 3 of 3');
+    expect(said(run)).toContain(`run 1 of 4: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 4: exit status 0; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: exit status 0; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: not run; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 1, from run 4 of 4');
   });
 
   it('says that no run was made when the CA could not be made', () => {
@@ -578,9 +618,10 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 1 of 3: not run; output ${CHROMIUM_OUT}`);
-    expect(said(run)).toContain(`run 2 of 3: not run; output ${FIREFOX_OUT}`);
-    expect(said(run)).toContain(`run 3 of 3: not run; output ${WEBKIT_OUT}`);
+    expect(said(run)).toContain(`run 1 of 4: not run; output ${CHROMIUM_OUT}`);
+    expect(said(run)).toContain(`run 2 of 4: not run; output ${FIREFOX_OUT}`);
+    expect(said(run)).toContain(`run 3 of 4: not run; output ${CONTROL_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: not run; output ${WEBKIT_OUT}`);
     expect(run.out.at(-1)).toBe('  overall exit status 1, no run was made (see above)');
   });
 
@@ -594,7 +635,7 @@ describe('what it says of each run, and of all of them', () => {
 
     expect(runHttpsSuite(run.deps)).toBe(1);
 
-    expect(said(run)).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
+    expect(said(run)).toContain(`run 4 of 4: exit status 0; output ${WEBKIT_OUT}`);
     expect(run.out.at(-1)).toBe(
       '  overall exit status 1, from taking the CA out of the system trust store (see above)',
     );
@@ -667,9 +708,9 @@ describe('the projects it runs, and the ones it leaves to the plain run', () => 
 });
 
 // The run is made as the jobs of a matrix in CI, a shard of its runs in each (`MELARC_HTTPS_SHARD`, https-shards.ts; the Product Owner's
-// decision of 7 November 2026), because in one job the three runs were longer than a job may last. A run is never cut: its journeys are
-// one story on one stack. And WebKit's refusal, which is a control only while the CA is not in the system store, and WebKit's other proofs,
-// which need it there, are made by one job, in that order.
+// decision of 7 November 2026), because in one job the runs were longer than a job may last, and in three jobs (task CI.2, with WebKit's refusal
+// a run of its own) no shard is estimated above 20 minutes. A run is never cut: its journeys are one story on one stack. And WebKit's refusal,
+// which is a control only while the CA is not in the system store, and WebKit's other proofs, which need it there, are made by one job, in that order.
 describe('the shards of the run, which CI makes in jobs of their own', () => {
   const shardRun = (value: string, options: Parameters<typeof harness>[0] = {}) =>
     harness({ ...options, environment: { CI: 'true', PATH: '/bin', MELARC_HTTPS_SHARD: value } });
@@ -679,9 +720,6 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
     'make-directory',
     `mint ${TLS}`,
     `playwright ${CHROMIUM_RUN.join(',')}`,
-    `system-trust install ${CA}`,
-    `playwright ${WEBKIT_RUN.join(',')}`,
-    'system-trust remove',
     'remove /tmp/run',
   ];
   const SECOND = [
@@ -690,12 +728,21 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
     `playwright ${FIREFOX_RUN.join(',')}`,
     'remove /tmp/run',
   ];
+  const THIRD = [
+    'make-directory',
+    `mint ${TLS}`,
+    `playwright ${CONTROL_RUN.join(',')}`,
+    `system-trust install ${CA}`,
+    `playwright ${WEBKIT_RUN.join(',')}`,
+    'system-trust remove',
+    'remove /tmp/run',
+  ];
 
   // Break caught: a run in no shard (its proofs never made, and nothing says so), or in two (made twice, on two runners).
-  it('cuts the run into two shards and puts every run in exactly one', () => {
+  it('cuts the run into three shards and puts every run in exactly one', () => {
     const ids = HTTPS_PHASES.map((phase) => phase.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(HTTPS_SHARDS).toHaveLength(2);
+    expect(HTTPS_SHARDS).toHaveLength(3);
     expect(HTTPS_SHARDS.flatMap((shard) => shard.phases).toSorted()).toEqual(ids.toSorted());
   });
 
@@ -732,22 +779,35 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
     }
   });
 
-  it('makes the runs of the first shard in order, with the CA in the system store only for WebKit’s proofs', () => {
-    const run = shardRun('1/2');
+  // Break caught: the shard of WebKit making its runs in the other order (the proofs with the CA in the system store, and then the refusal, which the
+  // store has made a pass), or the CA left in the store when the shard ends.
+  it('makes the runs of the third shard in order, with the CA in the system store only for WebKit’s proofs', () => {
+    const run = shardRun('3/3');
 
     expect(runHttpsSuite(run.deps)).toBe(0);
 
-    expect(run.events).toEqual(FIRST);
+    expect(run.events).toEqual(THIRD);
     expect(run.runs.map((call) => call.args)).toEqual([
-      args(CHROMIUM_RUN, CHROMIUM_OUT),
+      args(CONTROL_RUN, CONTROL_OUT),
       args(WEBKIT_RUN, WEBKIT_OUT),
     ]);
     for (const call of run.runs) expect(call.environment.MELARC_E2E_TLS_DIR).toBe(TLS);
   });
 
+  // Break caught: the shard of Chromium touching the system store (a `sudo` and a CA machine-wide that nothing of this shard needs).
+  it('makes the run of the first shard and never touches the system store', () => {
+    const run = shardRun('1/3');
+
+    expect(runHttpsSuite(run.deps)).toBe(0);
+
+    expect(run.events).toEqual(FIRST);
+    expect(run.runs.map((call) => call.args)).toEqual([args(CHROMIUM_RUN, CHROMIUM_OUT)]);
+    expect(run.out.join('\n')).not.toMatch(/system trust store/);
+  });
+
   // Break caught: the shard of Firefox touching the system store (a `sudo` and a CA machine-wide that nothing of this shard needs).
   it('makes the run of the second shard and never touches the system store', () => {
-    const run = shardRun('2/2');
+    const run = shardRun('2/3');
 
     expect(runHttpsSuite(run.deps)).toBe(0);
 
@@ -758,8 +818,8 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
 
   // Break caught: the shards together making something other than the run: a run twice, or one not at all, with the numbers and the
   // directories of the unsharded run kept.
-  it('makes, between the two shards, exactly the three runs of the whole', () => {
-    const calls = [shardRun('1/2'), shardRun('2/2')].flatMap((run) => {
+  it('makes, between the three shards, exactly the four runs of the whole', () => {
+    const calls = [shardRun('1/3'), shardRun('2/3'), shardRun('3/3')].flatMap((run) => {
       runHttpsSuite(run.deps);
       return run.runs.map((call) => JSON.stringify(call.args));
     });
@@ -771,40 +831,51 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
   });
 
   it('says which shard it is and which runs it makes, and that the others are not in it', () => {
-    const run = shardRun('1/2');
+    const run = shardRun('3/3');
 
     runHttpsSuite(run.deps);
 
     const said = run.out.join('\n');
     expect(said).toContain(
-      'HTTPS shard 1 of 2 (Chromium, and WebKit with the CA in the system store): makes run 1 and 3 of 3',
+      'HTTPS shard 3 of 3 (WebKit, its refusal first and then its proofs with the CA in the system store): makes run 3 and 4 of 4',
     );
-    expect(said).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
     expect(said).toContain(
-      `run 2 of 3: not in this shard (made by the job of another shard); output ${FIREFOX_OUT}`,
+      `run 1 of 4: not in this shard (made by the job of another shard); output ${CHROMIUM_OUT}`,
     );
-    expect(said).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
+    expect(said).toContain(
+      `run 2 of 4: not in this shard (made by the job of another shard); output ${FIREFOX_OUT}`,
+    );
+    expect(said).toContain(`run 3 of 4: exit status 0; output ${CONTROL_OUT}`);
+    expect(said).toContain(`run 4 of 4: exit status 0; output ${WEBKIT_OUT}`);
     expect(run.out.at(-1)).toBe('  overall exit status 0');
   });
 
   // Break caught: a failure of a run of the shard lost to the runs that were not in it, or a run of another shard counted as a failure of
   // this one: the status is the first failing run of the shard's own, said by its number.
   it('exits with the status of the first of its own runs that failed, and counts no other shard’s run', () => {
-    const second = shardRun('2/2', { playwright: () => 1 });
+    const second = shardRun('2/3', { playwright: () => 1 });
     expect(runHttpsSuite(second.deps)).toBe(1);
-    expect(second.out.at(-1)).toBe('  overall exit status 1, from run 2 of 3');
+    expect(second.out.at(-1)).toBe('  overall exit status 1, from run 2 of 4');
 
-    const first = shardRun('1/2', {
+    const third = shardRun('3/3', {
       playwright: (projects) => (projects.includes('https-webkit') ? 3 : 0),
     });
-    expect(runHttpsSuite(first.deps)).toBe(3);
-    expect(first.out.at(-1)).toBe('  overall exit status 3, from run 3 of 3');
-    expect(first.events).toContain('system-trust remove');
+    expect(runHttpsSuite(third.deps)).toBe(3);
+    expect(third.out.at(-1)).toBe('  overall exit status 3, from run 4 of 4');
+    expect(third.events).toContain('system-trust remove');
+
+    // The refusal fails and the proofs pass: the shard's status is the refusal's, said by its number, and the proofs were still made.
+    const refused = shardRun('3/3', {
+      playwright: (projects) => (projects.includes('https-webkit-control') ? 1 : 0),
+    });
+    expect(runHttpsSuite(refused.deps)).toBe(1);
+    expect(refused.out.at(-1)).toBe('  overall exit status 1, from run 3 of 4');
+    expect(refused.runs).toHaveLength(2);
   });
 
   // Break caught: a value that is not a shard read as "no shard", so that a typo in the workflow makes the whole run in every job and
   // the job no longer fits its limit. Refused before a directory, a CA or a browser is made.
-  it.each(['0/2', '3/2', '2', 'a/b', '1/0', '1/2/3', '-1/2', '1.5/2', '01/2', '1/', '/2', '1 / 2'])(
+  it.each(['0/3', '4/3', '2', 'a/b', '1/0', '1/3/4', '-1/3', '1.5/3', '01/3', '1/', '/3', '1 / 3'])(
     'refuses %j as a shard and makes nothing',
     (value) => {
       const run = shardRun(value);
@@ -818,7 +889,7 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
 
   // Break caught: a workflow that cuts the run into more or fewer shards than the harness does (a shard that makes nothing, or a run no
   // job makes): refused, and said, before anything is made.
-  it.each(['1/1', '1/3', '2/3', '3/3'])(
+  it.each(['1/1', '1/2', '2/2', '1/4', '4/4'])(
     'refuses %j, the total not being the shards of this harness',
     (value) => {
       const run = shardRun(value);
@@ -827,7 +898,7 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
 
       expect(run.events).toEqual([]);
       expect(run.err.join('\n')).toMatch(
-        /cuts the run into 2 shards .* the workflow and the harness disagree/,
+        /cuts the run into 3 shards .* the workflow and the harness disagree/,
       );
     },
   );
@@ -836,10 +907,10 @@ describe('the shards of the run, which CI makes in jobs of their own', () => {
     for (const value of ['', '   ']) {
       const run = shardRun(value);
       expect(runHttpsSuite(run.deps)).toBe(0);
-      expect(run.runs).toHaveLength(3);
+      expect(run.runs).toHaveLength(4);
       expect(run.out.join('\n')).not.toMatch(/shard/);
     }
-    const padded = shardRun(' 2/2 ');
+    const padded = shardRun(' 2/3 ');
     expect(runHttpsSuite(padded.deps)).toBe(0);
     expect(padded.events).toEqual(SECOND);
   });

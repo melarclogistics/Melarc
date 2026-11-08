@@ -21,6 +21,8 @@
       "passThroughEnv": [
         "MELARC_TEST_WORKERS",
         "MELARC_DB_WORKERS",
+        "MELARC_DB_SHARD",
+        "MELARC_SKIP_TIMING_TESTS",
         "JAVA_HOME",
         "MELARC_PG_HOST",
         "MELARC_PG_PORT",
