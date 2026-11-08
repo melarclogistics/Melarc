@@ -157,7 +157,27 @@ jobs:
           distribution: temurin
           java-version-file: .java-version
 
+      # JIT is off on this disposable server. The row-level-security policies of this line chain through many tables, which puts the planner's
+      # estimated cost of a rider-roster read near 6.5 million although the plan itself runs in microseconds on a handful of rows. That is above
+      # PostgreSQL's JIT thresholds, so the server compiled 444 functions for each such read: 3.99 s on this runner's four CPUs (auto_explain, hosted
+      # run of 8 November 2026), against the 5 s statement time-out. With three test files at a time the read failed in four runs of four; with
+      # JIT off and the same three it passed in two of two. This changes the CI server only: whether the production database should do the same, or
+      # the policies should cost less to plan, is the owner's decision (see the pull request that added this step).
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
+
+      # Two test files at a time (MELARC_DB_WORKERS, default 3): the runner has four CPUs, which the server shares with the test processes. At three,
+      # a rare separate failure showed once in a test that waits on a lock (which has since been given longer deadlines of its own); two passed three
+      # runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin under
+      # its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
       - name: Database tests
+        env:
+          MELARC_DB_WORKERS: '2'
         run: pnpm run test:db
 
   integrated:
