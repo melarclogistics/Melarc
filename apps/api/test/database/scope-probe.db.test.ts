@@ -46,21 +46,6 @@ let database: TestDatabase;
 let pool: pg.Pool;
 let service: DatabaseService;
 
-/**
- * The one test below that holds a table lock on purpose (the probe waiting) polls for up to 500 times 20 ms and commits when it has seen the
- * probe wait. With the development defaults (lock time-out 2 s, transaction budget 10 s) that is a race against the application's own
- * time-out: on a loaded runner a stalled event loop missed the window, the probe's read was ended by `lock_timeout` (55P03) before the
- * test could see it wait, the poll then found nothing until the 10 s budget ran out, and the test failed with `BudgetExpiredError` (twice in
- * the hosted runs of 8 November 2026, on two branches). A test that holds a lock waits as long as the test needs, as its siblings do
- * (session-store.db.test.ts); the time-outs that are being tested elsewhere are not this file's business.
- */
-const PATIENT_DEADLINES = Object.freeze({
-  ...INERT_DEADLINES,
-  lockTimeoutMs: 15_000,
-  statementTimeoutMs: 30_000,
-  transactionTimeoutMs: 60_000,
-});
-
 const existingRecordHub = createScopeProbe({
   hub_record: { schema: 'rls_fixture', table: 'hub_records' },
 });
@@ -76,14 +61,14 @@ beforeAll(async () => {
   pool = createPool({
     url: database.urlFor(API_RUNTIME_ROLE),
     poolMax: 1,
-    deadlines: PATIENT_DEADLINES,
+    deadlines: INERT_DEADLINES,
   });
   service = new DatabaseService(
     pool,
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
-    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1, { deadlines: PATIENT_DEADLINES }),
+    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1),
   );
 });
 
@@ -206,8 +191,14 @@ describe('the scope probe as staff (SECURITY_DESIGN.md §14.4b)', () => {
       await admin.query('begin');
       await admin.query('lock table rls_fixture.hub_records in access exclusive mode');
 
+      // `admin` is inside a transaction (it holds the table lock in it), and PostgreSQL keeps what `pg_stat_activity` showed at the first read
+      // for the rest of a transaction. When this poll's first read came just before the probe began to wait (the two race at the start), every
+      // later read showed the same, the wait was never seen, and the test failed after 10 s although the probe had waited on the lock the whole
+      // time (hosted runs of 8 November 2026, on several branches; the server's log showed the wait, and a run of this same sequence on PostgreSQL
+      // 18.6 showed 0 waiting backends before and 1 after `pg_stat_clear_snapshot()`). So each read asks for a fresh snapshot.
       const waitUntilBlocked = async () => {
         for (let attempt = 0; attempt < 500; attempt += 1) {
+          await admin.query('select pg_stat_clear_snapshot()');
           const { rows } = await admin.query(
             `select 1 from pg_stat_activity
               where datname = $1 and usename = $2 and wait_event_type = 'Lock'
