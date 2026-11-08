@@ -230,6 +230,17 @@ jobs:
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
 
+      # JIT is off on this disposable server too, as in the database job (the evidence is in the comment of the step there). In the first
+      # hosted run of this line the journeys' list reads (GET /api/v1/ops/riders and /ops/vendors) took 4.2 to 6.5 s with it on, and the
+      # journeys that read a roster failed on a 503 at the 5 s statement time-out (the API's own request log).
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
+
       - name: Browser, API and database journey
         run: pnpm run test:e2e
 
@@ -344,6 +355,16 @@ jobs:
       # store. Nothing else is installed into any trust store of the runner.
       - name: Install the NSS tools
         run: sudo apt-get install --no-install-recommends --yes libnss3-tools
+
+      # JIT is off on this disposable server too, as in the database job (the evidence is in the comment of the step there): the rider
+      # and vendor list reads of these journeys took 4.2 to 6.5 s with it on, and three journeys failed on a 503 at the 5 s time-out.
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
 
       - name: Browser, API and database journey over the trusted HTTPS origin
         env:
