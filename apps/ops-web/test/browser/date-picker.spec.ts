@@ -460,18 +460,25 @@ test.describe('the date field in a browser: reflow, enlarged text, forced colour
   // popover does animate.
   test('animates the calendar only when motion is welcome', async ({ page }) => {
     await openShowcase(page);
+    // The most animations the popover has at the click and at each of the next two frames (-1 when it is not there at all). One look, at the
+    // second frame, found none on a loaded runner (WebKit, 8 November 2026). The animation lasts 180 ms (--motion-normal) and a finished
+    // animation is no longer listed, so a look that comes late, after frames that ran long, finds nothing: asking at the click as well takes
+    // the animation where it begins.
     const animations = (): Promise<number> =>
       page.evaluate(async () => {
-        const button = document.querySelector<HTMLElement>('.ui-date-picker__button');
-        button?.click();
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
+        const popoverAnimations = (): number =>
+          document.querySelector('.ui-date-picker__popover')?.getAnimations().length ?? -1;
+        document.querySelector<HTMLElement>('.ui-date-picker__button')?.click();
+        let most = popoverAnimations();
+        for (let frame = 0; frame < 2; frame += 1) {
+          await new Promise<void>((resolve) => {
             requestAnimationFrame(() => {
               resolve();
             });
           });
-        });
-        return document.querySelector('.ui-date-picker__popover')?.getAnimations().length ?? -1;
+          most = Math.max(most, popoverAnimations());
+        }
+        return most;
       });
 
     await page.emulateMedia({ reducedMotion: 'no-preference' });
