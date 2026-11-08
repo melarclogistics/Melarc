@@ -152,7 +152,7 @@ jobs:
       # The attested enrolment (S0.57) is tested against the real verifier service, which these tests build from source and start: the JDK comes
       # from .java-version (Temurin), as in the verifier job, and Gradle from the wrapper, whose distribution is held to a checksum.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
@@ -172,9 +172,10 @@ jobs:
             -c "select pg_reload_conf()"
 
       # Two test files at a time (MELARC_DB_WORKERS, default 3): the runner has four CPUs, which the server shares with the test processes. At three,
-      # a rare separate failure showed once in a test that waits on a lock (which has since been given longer deadlines of its own); two passed three
-      # runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin under
-      # its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
+      # a rare separate failure showed once in a test that waits on a lock; its cause was in that test, not in the number of workers (its poll read
+      # a pg_stat_activity snapshot, which PostgreSQL keeps for the whole transaction, and it now clears the snapshot before each read). Two passed
+      # three runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin
+      # under its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
       - name: Database tests
         env:
           MELARC_DB_WORKERS: '2'
@@ -533,7 +534,7 @@ jobs:
       # The JDK comes from .java-version (Temurin); do not pin a version here. Gradle comes from the wrapper, whose distribution is
       # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
