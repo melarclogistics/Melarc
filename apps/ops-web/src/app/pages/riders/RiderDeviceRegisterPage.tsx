@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 
 import { FormPage } from '../../../components/FormPage';
@@ -13,7 +14,7 @@ import { useRider } from '../../../platform/rider/use-rider-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { UUID } from '../staff/WithProfile';
 import { CodeRecovery } from './CodeRecovery';
-import { EnrolmentCode, LapsedCode } from './EnrolmentCode';
+import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNotFound } from './RiderDetailPage';
 import { mayBindDevice } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
@@ -38,6 +39,25 @@ function Registering({ id }: { readonly id: string }) {
     onReload: () => rider.refetch(),
   });
   const { command } = code;
+  const actions = useRef<HTMLDivElement>(null);
+
+  // The control the officer pressed can go while the request is under way or when its answer comes: the button of the lapsed screen with the
+  // request, and the button that asked or the retry once the way out of an outcome nobody knows takes its place. The focus then falls to the
+  // document, where a screen reader says nothing. It goes to the control for what comes next: the way out, the reload of a conflict, or the
+  // button that asks. Only a focus that has fallen is put back: on the document, or on a region that merely holds the controls (an engine that
+  // does not focus a button when it is clicked leaves the focus on the page's main region, and the frame itself treats that focus as waiting).
+  // One the officer holds, or the notice of an earlier code (which takes it as the code goes), is left alone, and the code takes it when it arrives.
+  useEffect(() => {
+    if (command.phase === 'idle' || command.phase === 'done') return;
+    const buttons = actions.current;
+    if (buttons === null) return;
+    const held = document.activeElement;
+    if (held !== null && held !== document.body && !held.contains(buttons)) return;
+    const next =
+      buttons.querySelector<HTMLElement>('[data-recovery]') ??
+      buttons.querySelector<HTMLElement>('button');
+    next?.focus();
+  }, [command.phase]);
 
   const known = rider.status === 'success' ? rider.data : undefined;
   const name = known?.rider.full_name;
@@ -72,14 +92,12 @@ function Registering({ id }: { readonly id: string }) {
           onNew={() => {
             void command.submit(NOTHING);
           }}
-          renewing={command.phase === 'sending'}
         />
       ) : code.status === 'expired' ? (
         <LapsedCode
           onNew={() => {
             void command.submit(NOTHING);
           }}
-          renewing={command.phase === 'sending'}
         />
       ) : held > 0 ? (
         <FormPage>
@@ -103,6 +121,7 @@ function Registering({ id }: { readonly id: string }) {
         </FormPage>
       ) : (
         <FormPage>
+          {code.withdrawn ? <WithdrawnCode /> : null}
           <p>
             Do this in person, with the rider and the handset they will use. A code appears here;
             the rider scans it with the Melarc Rider app, which makes the key on their handset and
@@ -117,7 +136,7 @@ function Registering({ id }: { readonly id: string }) {
             command={command}
             unknownText={copyFor({ operation: 'registerRiderDevice', context: 'unknown-outcome' })}
           />
-          <div className="staff-action__buttons">
+          <div className="staff-action__buttons" ref={actions}>
             {command.phase === 'unknown' ? (
               <CodeRecovery command={command} />
             ) : command.phase === 'conflict' ? (

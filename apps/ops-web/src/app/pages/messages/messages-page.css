@@ -1,0 +1,77 @@
+/*
+ * The message log (S1.12e). Layout only: every colour, size and space comes from tokens.css; the components do the rest.
+ */
+
+/* The record the log is narrowed to, with the way to leave it: set apart by a border and its words, never by colour alone. */
+.messages-subject {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  max-width: 100%;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.messages-subject__text {
+  margin: 0;
+  font-weight: var(--text-label-md-weight);
+}
+
+/*
+ * Labels wrap at their spaces and never in the middle of a word. The frame lets any text break anywhere (`overflow-wrap: anywhere`), which is
+ * right for text that can be long and wrong here: the labels of this table cannot be, and a table that scrolls sideways would otherwise be
+ * squeezed to a letter a line ("Vendor / 's feed", "confirme / d") at a narrow width instead of keeping its columns readable and scrolling.
+ */
+.messages-words {
+  overflow-wrap: normal;
+}
+
+/* Two facts in one cell (a message over the version of its wording, an outcome over the provider's word), each on its own line. */
+.messages-lines {
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: normal;
+}
+
+/* The provider's closed word is the one thing here that can be long (up to 48 characters, with no space in it), so it may break anywhere. */
+.messages-support {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+/* A time, a number's hint: a short line in a table that scrolls sideways rather than breaks in the middle. */
+.messages-nowrap {
+  white-space: nowrap;
+}
+
+/*
+ * The dash and its hidden words: the words are positioned against the dash and not against the page, so that a table scrolled sideways inside its
+ * region takes them with it (positioned against the page, they would sit off to the right and make the page itself scroll to reach them).
+ */
+.messages-dash {
+  position: relative;
+}
+
+/* Out of sight and still read: where the eye sees a dash, assistive technology is told what it stands for. */
+.messages-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .messages-subject {
+    border-color: CanvasText;
+  }
+}

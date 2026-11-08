@@ -2,8 +2,9 @@ import {
   ATTESTATION_INTEGRITY_CAUSES,
   ATTESTATION_UNAVAILABLE_CAUSES,
 } from '../auth/ports/attestation-verifier.port.js';
-import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
+import { OUTBOX_OUTCOMES, SUPPRESSION_REASONS } from '../notifications/notification-vocabulary.js';
 
 /*
  * The closed catalogue of metrics (S0.15; OBSERVABILITY_AND_RECOVERY.md §3). A metric exists only if it is defined here, with a
@@ -60,7 +61,7 @@ export const METRIC_DEFINITIONS = Object.freeze({
   rate_limited_total: define({
     kind: 'counter',
     labels: {
-      bucket: RATE_LIMIT_BUCKETS,
+      bucket: RATE_LIMIT_COUNTERS,
       cause: ['BUCKET_CEILING', 'STORE_CAPACITY', 'KEY_TOO_LONG', 'HASH_ADMISSION_FULL'],
     },
     description: 'RATE_LIMITED refusals, by bucket and cause.',
@@ -196,6 +197,58 @@ export const METRIC_DEFINITIONS = Object.freeze({
     labels: {},
     description:
       'Seconds since the oldest due credential message was queued; zero when none is due.',
+  }),
+  /**
+   * How the notification lane ended or gave back each outbox envelope (S1.12; BACKGROUND_JOBS_AND_EVENTS.md §3.7), by outcome. A
+   * `SCOPE_MISMATCH` is the security signal of SECURITY_DESIGN.md §14.7 step 8; an `UNKNOWN_EVENT` is an event no message answers; both wait
+   * in the dead letter for a person. The labels carry no identifier: which envelope is in the worker's log and the outbox, never a metric.
+   */
+  notification_relay_total: define({
+    kind: 'counter',
+    labels: { outcome: OUTBOX_OUTCOMES },
+    description:
+      'Outbox envelopes the notification lane relayed, retried or dead-lettered, by outcome.',
+  }),
+  /** The result of each attempt to send a business text: the provider took it, will be asked again, refused it, or the schedule ended. */
+  notification_sends_total: define({
+    kind: 'counter',
+    labels: { result: ['SENT', 'RETRY', 'REJECTED', 'SCHEDULE_EXHAUSTED'] },
+    description: 'Attempts to send a business text message, by result.',
+  }),
+  /** A text held back and never sent, by the reason the message log shows: a switch, a limit, the window's guards, an overtaken message. */
+  notification_suppressed_total: define({
+    kind: 'counter',
+    labels: { reason: SUPPRESSION_REASONS },
+    description: 'Business text messages held back and never sent, by reason.',
+  }),
+  /** The network's word on a text the provider took: delivered, or failed in delivery. A message that never answers counts nowhere. */
+  notification_receipts_total: define({
+    kind: 'counter',
+    labels: { result: ['DELIVERED', 'FAILED'] },
+    description: 'The network’s word on business texts the provider accepted, by result.',
+  }),
+  /**
+   * The age of the oldest notification work that is due and not done: an outbox envelope not yet relayed or a text not yet sent. Read by the
+   * worker's metrics endpoint at each read (S1.12). Zero when nothing is due. A lane that has stopped, or a provider that is down, shows as
+   * this growing while the queue depth looks the same; no label, because which message is in the log and never a metric.
+   */
+  notification_oldest_due_age_seconds: define({
+    kind: 'gauge',
+    labels: {},
+    description:
+      'Seconds since the oldest due notification work (an envelope or a text) became due; zero when none is due.',
+  }),
+  /**
+   * How many outbox envelopes are in the dead letter, waiting for a person (BACKGROUND_JOBS_AND_EVENTS.md §3.3): an act whose messages were
+   * never made, because the aggregate no longer had the scope the envelope names (a security signal), because no message answers its
+   * event, or because the relay gave up. A dead envelope writes no notification, so the message log cannot show it; the counter of
+   * `notification_relay_total` shows it only until the process restarts, and this shows it for as long as it waits. Read at each read of the
+   * worker's metrics endpoint; no label, because which envelope is in the worker's log and the outbox, never a metric.
+   */
+  notification_dead_envelopes: define({
+    kind: 'gauge',
+    labels: {},
+    description: 'Outbox envelopes in the dead letter, waiting for a person.',
   }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 

@@ -53,8 +53,21 @@ export interface SecurityContext {
   readonly vendorOrganizationId?: string;
   /** Required for a RIDER principal. */
   readonly riderId?: string;
+  /**
+   * `SYSTEM` under the `notification` capability only, and required there when the lane works for one envelope: the stored outbox
+   * envelope it leased (SECURITY_DESIGN.md §14.7 step 5), which the policies on the aggregate tables compare the rows against. The
+   * values are the stored row's: a lane that has not read an envelope has none and opens its context without.
+   */
+  readonly outbox?: OutboxScope;
   /** The request or idempotency identifier. */
   readonly correlationId: string;
+}
+
+/** What a worker context carries of the envelope it works for: the envelope, the hub it is responsible to and the aggregate it names. */
+export interface OutboxScope {
+  readonly id: string;
+  readonly hubId: string;
+  readonly aggregateId: string;
 }
 
 /**
@@ -67,6 +80,7 @@ export function frozenContextCopy(context: SecurityContext): SecurityContext {
   if (context.authorizedHubIds !== undefined) {
     copy.authorizedHubIds = Object.freeze([...context.authorizedHubIds]);
   }
+  if (context.outbox !== undefined) copy.outbox = Object.freeze({ ...context.outbox });
   return Object.freeze(copy);
 }
 
@@ -169,6 +183,26 @@ export function toContextSettings(context: unknown): ContextSetting[] {
   if (given.riderId !== undefined || principalType === 'RIDER') {
     if (isUuid(given.riderId)) add('rider_id', given.riderId.toLowerCase());
     else invalid.push('riderId');
+  }
+
+  // The leased envelope of a notification lane (S1.12a): all three identifiers or none, and only for a SYSTEM context under the
+  // capability that works for envelopes, so that no business principal and no other capability carries one.
+  if (given.outbox !== undefined) {
+    const outbox = given.outbox as Record<string, unknown> | null;
+    const wellFormed =
+      typeof outbox === 'object' &&
+      outbox !== null &&
+      !Array.isArray(outbox) &&
+      isUuid(outbox.id) &&
+      isUuid(outbox.hubId) &&
+      isUuid(outbox.aggregateId);
+    if (!wellFormed || principalType !== 'SYSTEM' || given.taskCapability !== 'notification') {
+      invalid.push('outbox');
+    } else {
+      add('outbox_id', (outbox.id as string).toLowerCase());
+      add('outbox_hub_id', (outbox.hubId as string).toLowerCase());
+      add('outbox_aggregate_id', (outbox.aggregateId as string).toLowerCase());
+    }
   }
 
   if (typeof given.correlationId === 'string' && CORRELATION_ID.test(given.correlationId)) {

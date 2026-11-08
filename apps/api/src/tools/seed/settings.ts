@@ -265,4 +265,65 @@ export const SETTINGS: readonly SettingSeed[] = [
     'hours',
     'How long an idempotency record is kept before it may be reclaimed.',
   ),
+
+  // 7.8 Platform — business text messages (S1.12e; migration 0056 gives the same rows to a database seeded before them)
+  platform(
+    'sms_enabled',
+    'boolean',
+    true,
+    'on/off',
+    'The global switch of the business text messages the notification lane sends: off holds every text back, and feed entries and credential messages are not affected.',
+  ),
+  platform(
+    'sms_per_number_daily_limit',
+    'integer',
+    10,
+    'messages per day',
+    'The most business texts one number is sent in a day (the UTC day); the next is held back. Pilot figure decided by the Product Owner on 29 October 2026.',
+  ),
+  platform(
+    'sms_daily_limit',
+    'integer',
+    500,
+    'messages per day',
+    'The most business texts all numbers together are sent in a day (the UTC day); the next is held back. Pilot figure decided by the Product Owner on 29 October 2026.',
+  ),
+
+  // 7.4 Platform — the collection handshake (S1.27; migration 0070 gives the same rows to a database seeded before them). One value for the whole platform,
+  // changed by a Platform Admin (the Product Owner, 30 October 2026): they are security and abuse parameters that must not differ from one hub to another.
+  platform(
+    'handshake_code_length',
+    'integer',
+    4,
+    'digits',
+    'The number of digits of a collection handshake code. Confirmed by MSC-DEC-256; the direction of the handshake may not change.',
+  ),
+  platform(
+    'handshake_code_ttl_minutes',
+    'integer',
+    15,
+    'minutes',
+    'How long a collection handshake code stays valid after it is made; past it the handshake is expired and routes to Ops.',
+  ),
+  platform(
+    'handshake_max_wrong_attempts',
+    'integer',
+    5,
+    'attempts',
+    'How many wrong codes one collection handshake takes before it is exhausted and routes to Ops.',
+  ),
+  platform(
+    'sms_fallback_max_per_pickup',
+    'integer',
+    3,
+    'sends',
+    "The most codes the SMS fallback sends to a vendor's registered number for one stop.",
+  ),
+  platform(
+    'sms_fallback_cooldown_seconds',
+    'integer',
+    60,
+    'seconds',
+    'The least time between two SMS fallback sends for the same stop.',
+  ),
 ];

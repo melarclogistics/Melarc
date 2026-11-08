@@ -37,12 +37,20 @@ export const ADVISORY_CLASSES = Object.freeze({
    * every delete under one lock, which makes an election redundant. The number is never reused.)
    */
   RATE_LIMIT_CAPACITY: 1296847411,
+  /**
+   * The notification lane's day count (S1.12e; 0x4D4E4C31, "MNL1"): one lock, key zero, that the lane takes in the short transaction in which
+   * it counts what the day has carried and, if there is room, keeps the destination of the message it holds. Under it two lanes in two
+   * processes cannot both count the last free place. It is taken alone in its transaction and nothing is taken after it, so it takes
+   * part in no cycle, and it is a class of its own so that a count never queues behind a bundle change or an admission.
+   */
+  NOTIFICATION_LIMITS: 1296976945,
 });
 
 export const AUTH_POLICY_BUNDLE = ADVISORY_CLASSES.AUTH_POLICY_BUNDLE;
 export const AUTH_POLICY_FIXED = ADVISORY_CLASSES.AUTH_POLICY_FIXED;
 export const RATE_LIMIT_KEY = ADVISORY_CLASSES.RATE_LIMIT_KEY;
 export const RATE_LIMIT_CAPACITY = ADVISORY_CLASSES.RATE_LIMIT_CAPACITY;
+export const NOTIFICATION_LIMITS = ADVISORY_CLASSES.NOTIFICATION_LIMITS;
 
 /** The principal types that have a fixed policy, and the key of each: its ordinal, written down so that it never moves. */
 export const FIXED_POLICY_ORDINAL = Object.freeze({ VENDOR: 1, RIDER: 2 });

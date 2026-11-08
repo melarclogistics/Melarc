@@ -19,7 +19,7 @@ This is the moment custody transfers. A rider at a sender's door records **how m
 | Section| What it governs here|
 |---|---|
 | §21.3| Pickup completion: collected count, vendor note, mandatory variance reason, the zero-count bar|
-| §21.4| Collection confirmation: the overlay, code direction, TTL, attempts, dispute|
+| §21.4| Collection confirmation: code direction, TTL, attempts, dispute; the stop closes when the handshake is verified or overridden (§21.4 as amended on 29 October 2026)|
 | §35.3.6–9| Actual counts, two-party handshake, zero and partial consistency, offline obligations|
 | §36.4| Stop states and the zero-count rule|
 | §36.5| The four handshake lifecycle concepts that must not be collapsed|
@@ -39,7 +39,7 @@ This is the moment custody transfers. A rider at a sender's door records **how m
 ## 4. Preconditions
 
 - The manifest is `IN_PROGRESS` and the stop belongs to the acting rider.
-- The stop has reached `ARRIVED` — which also closes the vendor cancellation window.
+- The stop has reached `ARRIVED`. (The vendor's cancellation window closed earlier, at the assignment: state-machines.md §5, `AC-SLICE-001-12`; arrival writes nothing to the request.)
 
 ---
 
@@ -50,25 +50,31 @@ This is the moment custody transfers. A rider at a sender's door records **how m
 1. **The rider arrives.** The stop becomes `ARRIVED`.
 2. **The rider counts and records.** `collected_count` is the **actual** count, never the declared one (§35.3.6). A vendor note is optional.
 3. **If the counts differ, a variance reason is mandatory** (§21.3). `variance` records `MATCH` or `SHORT` on **every** collection — a clean count is a recorded outcome, not an absence.
-4. **The handshake runs.** A code is generated and delivered by the direction fixed for that sender type. Verification within TTL confirms.
-5. **The stop closes** as `COLLECTED` or `PARTIALLY_COLLECTED`.
-6. **A provisional ad-hoc sender is promoted to reusable** on physical completion — **without waiting for the handshake response** (§21.3).
+4. **The handshake runs.** Once the count is recorded the system generates a code and delivers it by the direction fixed for that sender type. Verification within TTL confirms; an expired or exhausted code routes to Ops, who may authorise an override.
+5. **The stop closes** as `COLLECTED` or `PARTIALLY_COLLECTED` when the handshake is verified or overridden. Until then it stays `ARRIVED`.
+6. **A provisional ad-hoc sender is promoted to reusable** when the count is recorded — **without waiting for the handshake response** (§21.3).
 7. Custody passes to the hub at handover, where the **blind count runs independently**.
+
+**As built (S1.26, `recordCollection`).** Steps 2 and 3 and 6 are built: the rider's count makes the `CollectionRecord` (the actual count, `variance` `MATCH` or `SHORT` on every collection, the reason of a short one from the `PICKUP_SHORT_COUNT` catalogue with the note it asks for), a shortfall raises the office flag in the same transaction (`office_notified_at`; **no office message is defined and none is queued**, OB-S1-51), and a provisional individual sender becomes reusable. **The stop stays `ARRIVED`** and the handshake (steps 4 and 5) is the next task's. **The count has an audit event of its own, `pickup.collection.recorded`** (OB-S1-54, decided on 4 November 2026): it says that a count was recorded and that the stop is still `ARRIVED`, the same for a clean count and a short one, and `pickup.stop.collected` and `pickup.stop.partially_collected` are written only when the handshake closes the stop, so a count whose handshake never finishes is never read as a completed collection. **The facts of the record that are the catalogue's and the clock's are the database's** (OB-S1-60, decided on 4 November 2026): the reason of a short count is an active reason of the catalogue as the catalogue holds it (its code, its label and its attribution, with the rider's note where the reason asks for one), and the recording and the office flag are the database's own instants, taken once the stop is locked, apart from the device's moment (`captured_at`). A short count whose reason asks for a photo is `REASON_REQUIRED` until evidence can be stored (OB-S1-52); **a count above the declared one is refused** (OB-S1-50). **A stop with a record is never skipped, failed or cancelled away** (approved on 4 November 2026, [§5.4](#54-a-stop-that-has-been-counted)): it waits for the handshake.
+
+**As built (S1.27, the collection handshake; migration `0070`).** Steps 4 and 5 are built, as five operations of the database that no other statement can imitate. The rider that recorded the count asks for the code (`initiateHandshake`); the database keeps a **keyed digest** of the live code and never the code, which is derived from the stop and the generation under a key of the `credential_delivery` purpose, shown once to the rider (a vendor's pickup: `display_code`) or texted by the notification lane (an individual sender's pickup, to the sender's number alone, with no link), and which appears in no log, metric, event or stored answer. The vendor enters the code its rider shows (`verifyHandshake`, channel `PORTAL`); the rider enters the code a sender received. **Each wrong code is counted by the database whatever the application does** and the last one ends the code (`ATTEMPTS_EXHAUSTED`); a code past `handshake_code_ttl_minutes` on the database's clock is `CODE_EXPIRED`, is kept expired and routes to Ops, and the right code after either is refused (late self-confirmation, `AC-SLICE-001-26`). The SMS fallback (`requestSmsHandshakeFallback`) makes a **new** code the rider has not seen and texts it to the vendor's registered number only; the cap and the cooldown are the database's, for every process (`SMS_FALLBACK_LIMIT_REACHED`, `AC-SLICE-001-73`), the code the rider displayed no longer verifies, the wrong attempts already counted stay counted, and the rider then enters what the vendor read out (channel `SMS_FALLBACK`). **The registered number is the phone of the vendor's credential** (F-23, resolved in the review closeout of 5 November 2026, migration `0073`; the Product Owner's confirmation is open, plan `OB-S1-62`): `VendorCredential.recovery_phone` where the credential's `delivery_channel` is `PHONE`, which is the number the vendor's own setup and recovery messages go to. It is entered at registration, chosen as the delivery channel by the approver, and proven by possession (the vendor set its secret from the grant that was texted to it: a credential whose secret was never set has no registered number); the organisation's business contact number is not an authentication channel (domain-model.md) and the fallback never goes to it. The lane reads no table for it: the database gives it to the one lane that sends the text, for the request its envelope names and only while a fallback code is live, and the message log keeps no hint of it. No operation changes the number in `SLICE-001`; a change is a later slice's act and must be an authorised, verified one (a grant to the new number, as at approval). **The length of a code is kept with it** (`code_length`, migration `0073`): the setting `handshake_code_length` is read when a code is made, and a setting changed after a code was made, sent or queued applies to the next code and cannot change the length of one that is out, so the text carries the length the vendor or the rider will be asked to type; the handshakes that existed when the column was added took the setting then in force. Ops overrides (`authoriseHandshakeOverride`, `pickup.handshake.override`: from a stop that is counted and arrived at, whatever the handshake stood at, with a note) and Senior Ops resolve (`resolveHandshake`, `pickup.handshake.resolve`: an expired or exhausted handshake, or a live one whose life has passed, with a note); each writes an enhanced event with the note. **The stop closes in the same change as the handshake ends**, as the count says (`COLLECTED` for `MATCH`, `PARTIALLY_COLLECTED` for `SHORT`), and the close writes `pickup.stop.collected` or `pickup.stop.partially_collected`; an abandoned handshake writes neither. Every rung writes its channel; the record's `handshake_channel`, `handshake_confirmed_at` and `handshake_override_by` are set once, by the close. Evidence on a manual resolution is `EVIDENCE_NOT_STORED` until the evidence store (S1.28) exists.
+
+**As built (S1.29, the collection dispute; migration `0071`).** The vendor whose pickup it is disputes a collection that has closed (`disputeCollection`, `pickup.collection.confirm` on the Vendor surface): the database raises the **reconciliation item** (`collection_dispute`: the stop, the organisation, the vendor principal, the vendor's note, `OPEN`), sets the stop's handshake `DISPUTED` and writes `pickup.handshake.disputed` (the actor and the note), in one change, under the stop's lock. **It never reverses physical completion**: the stop stays `COLLECTED` or `PARTIALLY_COLLECTED` (the operation does not touch it) and the manifest does not wait for the item; a run whose other stops are settled completes as it would have. A stop that has not closed through its handshake, a skipped stop and a failed one have no collection to dispute (`STATE_CONFLICT`, `details.rule` `stop_not_closed`; a failed stop has no dispute form by design, `AC-SLICE-001-35`); a second dispute of the same collection is `dispute_open`; another vendor's stop and an id that matches nothing are `NOT_FOUND`, the same. The item is readable by Ops in the stop's hub and by the vendor that raised it (the policies of the table say so; **no operation of the API lists or reads an item yet**: the Ops side of a dispute is S1.30's and the vendor's own view is a later screen's, and both need operations added to the contract first, plan `OB-S1-70`); its resolution is the detailed Ops reconciliation workflow that the specification leaves to downstream design, and **no operation resolves it in `SLICE-001`**.
 
 ### 5.2 Exception paths
 
 | Path| Behaviour| Error code|
 |---|---|---|
 | **Zero packages**| **Never a completed stop.** Zero collection routes to the failure flow with an approved category. The system must not create an empty completed stop, sender set or hub handover (§21.3, `MSC-DEC-120`)| `ZERO_COLLECTION_IS_FAILURE`|
-| **Short count**| Permitted. Stop closes `PARTIALLY_COLLECTED` with a mandatory variance reason, and **office is flagged in-system at the time of the shortfall** — supplementing the rider's phone call, never replacing it| `REASON_REQUIRED`|
+| **Short count**| Permitted. The stop closes `PARTIALLY_COLLECTED`, once the handshake is verified or overridden, with a mandatory variance reason recorded at the count, and **office is flagged in-system when the shortfall is recorded** — supplementing the rider's phone call, never replacing it| `REASON_REQUIRED`|
 | Handshake code wrong| Returns remaining attempts (§21.4)| `CODE_INVALID`|
 | Attempts exhausted| Code invalidated, routed to Ops (§21.4)| `ATTEMPTS_EXHAUSTED`|
 | TTL expired| Routed to Ops; **late self-confirmation is blocked** (§21.4)| `CODE_EXPIRED`|
 | **Portal unusable — no data, portal down**| **Fallback 1:** rider triggers SMS to the vendor's **registered number only**. Logged as `SMS_FALLBACK`. **Server-enforced per stop** (CRIT-08 audit remediation): capped at `sms_fallback_max_per_pickup` (3) sends, no closer together than `sms_fallback_cooldown_seconds` (60) apart| `NO_REGISTERED_NUMBER`|
 | **SMS fallback exhausted or attempted too fast**| **Refused, not silently retried.** The rider needs Fallback 2, not another SMS — this is the ladder working as designed, not a dead end (CRIT-08 audit remediation)| `SMS_FALLBACK_LIMIT_REACHED`|
 | **SMS also fails**| **Fallback 2:** rider contacts Ops, who verifies the vendor by another means and authorises as a recorded exception. Logged as `OPS_OVERRIDE`| `INSUFFICIENT_AUTHORITY`, `REASON_REQUIRED`|
-| **Vendor simply busy**| **Not a fallback trigger.** The ladder addresses technical failure, not inattention. The rider waits `rider_door_wait_minutes` (10) and may then fail the stop| —|
-| Vendor disputes| Raises reconciliation **without reversing physical completion** (§21.4)| —|
+| **Vendor simply busy**| **Not a fallback trigger.** The ladder addresses technical failure, not inattention. The rider waits `rider_door_wait_minutes` (10) and may then fail the stop. The server holds it: an earlier report of a vendor-unavailable failure is `PICKUP_DOOR_WAIT_NOT_ELAPSED` (migration `0073`)| —|
+| Vendor disputes| Raises reconciliation **without reversing physical completion** (§21.4): a dispute raised after the stop closed does not reopen it, and the parcels were collected| —|
 | Poor connectivity| The command is replay-safe under retry. **Collection requires a connection in Version 1** — hub-handover queuing is Version 1's whole offline scope.| `IDEMPOTENCY_KEY_CONFLICT`|
 | Duplicate submission| Idempotent replay returns the original result| `IDEMPOTENCY_KEY_CONFLICT`|
 
@@ -81,7 +87,15 @@ This is the moment custody transfers. A rider at a sender's door records **how m
 - **Never send the fallback SMS anywhere but the registered number.**
 - **Never treat "busy" as a technical failure.** The ladder exists for no-data and portal-down.
 - **Never let a dispute undo physical completion.** It raises reconciliation; the parcels were collected.
-- **Never block manifest completion on handshake confirmation.** §21.4: "manifest completion does not wait for confirmation."
+- **Never hold manifest completion for a dispute.** §21.4 as amended: a dispute raised after a stop closed does not hold up the run.
+
+### 5.4 A stop that has been counted
+
+*Approved by the Product Owner on 4 November 2026. The first rule is built (S1.26) and the second is built with the handshake (S1.27).*
+
+- **A counted stop is kept.** Once a `CollectionRecord` stands for a stop (a count above zero), the ordinary acts that discard a stop cannot discard its counted work: Ops's skip, the failure of the stop and the cancellation of its request are refused (`STATE_CONFLICT`, `details.rule` `collection_recorded`), and the database refuses them for every writer. The parcels have been counted and need a traceable resolution; the stop leaves `ARRIVED` through the handshake and its exits (verification, the Ops override, the manual resolution), never by being discarded.
+- **Who finishes the rider-side handshake of a counted stop (S1.27).** After a custody transfer ([state-machines.md §4.1](../../contracts/state-machines.md#41-runcustodyhandover--custody-moves-and-completion-follows-it)), the rider who recorded the count may finish that stop's rider-side handshake, **only while that rider's assignment and authorization are still valid**. Custody alone grants the receiving rider no handshake authority and no run-execution authority. If the recording rider is no longer eligible, the specified recovery or the Ops override applies, with its existing prerequisites and its audit. The vendor's confirmation and the individual sender's code stay as they are. **Built (S1.27):** asking for the code, the SMS fallback and the rider's entry of a code are refused to every rider but the one that recorded the count, and only while it is the run's assigned rider (`NOT_ASSIGNED_RIDER`); a rider that holds the run by custody alone has none of them, and an officer's override or resolution is the recovery. **This grants no authority to collect at additional stops**: what a rider who has handed custody away may still do at the stops yet to be worked is OB-S1-43 and OB-S1-55, which stay open.
+- **A run that completes as empty over a custody count** (OB-S1-59) stays an operational-release blocker: the custody count and the pickup counts are independent records, both are kept, and no figure of one seeds the other. The reconciliation that would hold such a completion is not specified here.
 
 ---
 
@@ -116,8 +130,8 @@ Non-obvious: `variance` is present on **every** collection, not only shortfalls;
 | Key| Why this feature reads it| Home|
 |---|---|---|
 | `rider_door_wait_minutes`| 10. How long before a busy vendor becomes a failed stop| [settings.md](../../contracts/settings.md) §7.3|
-| `handshake_code_length`, `handshake_code_ttl_minutes`, `handshake_max_wrong_attempts`| **`PROVISIONAL`** — carry values (4, 15, 5) but await security review under `OQ-048`. Not authoritative| [settings.md](../../contracts/settings.md) §7.4|
-| `sms_fallback_max_per_pickup`, `sms_fallback_cooldown_seconds`| **`CONFIRMED`** (3, 60). The SMS fallback's own cap and cooldown, independent of the generic authenticated-API rate-limit bucket (CRIT-08 audit remediation)| [settings.md](../../contracts/settings.md) §7.4|
+| `handshake_code_length`, `handshake_code_ttl_minutes`, `handshake_max_wrong_attempts`| **`CONFIRMED`** (4, 15, 5) — reviewed and confirmed by `MSC-DEC-256` (settings.md owns the status). **Seeded as platform settings and read by S1.27** (migration `0070`; the seed writes the same rows): the database reads the life and the limit inside its operations, the API reads the length once, when it makes a code, and the database keeps it with the code (`code_length`, migration `0073`: the notification lane reads the stored length and not the setting)| [settings.md](../../contracts/settings.md) §7.4|
+| `sms_fallback_max_per_pickup`, `sms_fallback_cooldown_seconds`| **`CONFIRMED`** (3, 60). The SMS fallback's own cap and cooldown, independent of the generic authenticated-API rate-limit bucket (CRIT-08 audit remediation). **Held by the database per stop (S1.27)**, in the handshake's own counters| [settings.md](../../contracts/settings.md) §7.4|
 
 ## 10. Errors — *pointer*
 
@@ -125,7 +139,7 @@ Non-obvious: `variance` is present on **every** collection, not only shortfalls;
 
 ## 11. Audit events — *pointer*
 
-`pickup.stop.collected`, `pickup.stop.partially_collected`, `pickup.handshake.generated`, `pickup.handshake.delivered`, `pickup.handshake.verified`, `pickup.handshake.disputed`, `pickup.handshake.manually_resolved`, `pickup.handshake.fallback_sms`, `pickup.handshake.fallback_override` *(enhanced)* — [audit.md](../../contracts/audit.md) §5.1.
+`pickup.collection.recorded` *(the count; the stop stays `ARRIVED`)*, `pickup.stop.collected`, `pickup.stop.partially_collected` *(the close of the stop, by the handshake)*, `pickup.handshake.generated`, `pickup.handshake.delivered`, `pickup.handshake.verified`, `pickup.handshake.disputed`, `pickup.handshake.manually_resolved`, `pickup.handshake.fallback_sms`, `pickup.handshake.fallback_override` *(enhanced)* — [audit.md](../../contracts/audit.md) §5.1.
 
 **Every identifier is spelled in full.** The suffix form — `` `.dispatched` `` after `` `pickup.manifest.created` `` — is not a resolvable identifier: no check can verify it, and it still reads correctly after the code it points at is renamed.
 
@@ -133,7 +147,7 @@ Non-obvious: `variance` is present on **every** collection, not only shortfalls;
 
 ## 12. API operations — *pointer*
 
-`arriveAtPickupStop`, `recordCollection` — [openapi.yaml](../../contracts/openapi.yaml). **`arriveAtPickupStop` added 16 September 2026** (`MSC-DEC-392`, resolving `CONFLICT-038`): §5.1 step 1 has read *the rider arrives; the stop becomes `ARRIVED`* throughout, §4 makes `ARRIVED` a precondition of collection, and **no operation reached it** — `recordCollection` closed an `ARRIVED` stop that nothing could open. Handshake verification and the two fallback escalations are **not yet in the contract**; they are added when this feature reaches `READY`.
+`arriveAtPickupStop`, `recordCollection` — [openapi.yaml](../../contracts/openapi.yaml). **`arriveAtPickupStop` added 16 September 2026** (`MSC-DEC-392`, resolving `CONFLICT-038`): §5.1 step 1 has read *the rider arrives; the stop becomes `ARRIVED`* throughout, §4 makes `ARRIVED` a precondition of collection, and **no operation reached it** — `recordCollection` closed an `ARRIVED` stop that nothing could open. The handshake operations (`initiateHandshake`, `verifyHandshake`, `requestSmsHandshakeFallback`, `authoriseHandshakeOverride`) are in the contract, added on 20 August, and `resolveHandshake` was added with the Slice 001 reconciliation; **all five are built (S1.27)**. `disputeCollection` is built too (S1.29).
 
 ---
 
@@ -157,9 +171,10 @@ And the rider is routed to the failure flow.
 Given a stop with a declared count of 5,
 When the rider records 3 collected without a variance reason,
 Then the backend rejects with REASON_REQUIRED,
-And when a reason is supplied the stop becomes PARTIALLY_COLLECTED,
+And when a reason is supplied the count is recorded and the stop stays ARRIVED until the handshake closes it,
 And an office notification is raised at that moment,
-And office_notified_at is recorded.
+And office_notified_at is recorded,
+And once the handshake is verified or overridden the stop becomes PARTIALLY_COLLECTED.
 ```
 
 **Governs:** §21.3, `MSC-DEC-194` · **Surface:** Melarc Rider · **Test level:** API · **Code:** `REASON_REQUIRED`
@@ -199,18 +214,18 @@ And when SMS also fails and Ops authorises an override, the channel records OPS_
 And a successful portal handshake records PORTAL rather than leaving the channel unset.
 ```
 
-**Governs:** `MSC-DEC-198` · **Surface:** Melarc Rider, Melarc Ops · **Test level:** integration · **Code:** `NO_REGISTERED_NUMBER`
+**Governs:** §21.4, `MSC-DEC-198` · **Surface:** Melarc Rider, Melarc Ops · **Test level:** integration · **Code:** `NO_REGISTERED_NUMBER`
 
 ### `AC-SLICE-001-25` — Busy is not a fallback trigger
 
 ```text
 Given a vendor who is present but too busy to enter the code,
-When the rider attempts to escalate to the SMS fallback on that basis,
-Then no technical-failure fallback is available,
+When the rider attempts to escalate to the SMS fallback with the trigger VENDOR_BUSY (the fallback request names its trigger, and only NO_DATA and PORTAL_DOWN are technical failures),
+Then the backend refuses with VALIDATION_FAILED and no SMS is sent, and the Rider app offers no such trigger,
 And after rider_door_wait_minutes the rider may fail the stop through the ordinary failure flow.
 ```
 
-**Governs:** `MSC-DEC-198`, `MSC-DEC-201` · **Surface:** Melarc Rider · **Test level:** e2e
+**Governs:** §21.4, `MSC-DEC-198`, `MSC-DEC-201` · **Surface:** Melarc Rider · **Test level:** API, e2e · **Code:** `VALIDATION_FAILED`
 
 ### `AC-SLICE-001-26` — TTL expiry blocks late self-confirmation
 
@@ -227,11 +242,11 @@ And the physical collection state is unchanged.
 ### `AC-SLICE-001-27` — A dispute does not reverse physical completion
 
 ```text
-Given a stop closed COLLECTED,
+Given a stop closed COLLECTED (its handshake verified or overridden),
 When the vendor disputes the collection,
 Then a reconciliation item is raised,
 And the stop remains COLLECTED,
-And the manifest may still complete without waiting for confirmation.
+And the manifest may still complete without waiting for the dispute to be resolved.
 ```
 
 **Governs:** §21.4 · **Surface:** Melarc Vendor · **Test level:** service
@@ -240,7 +255,7 @@ And the manifest may still complete without waiting for confirmation.
 
 ```text
 Given a PROVISIONAL ad-hoc sender,
-When a physical pickup for that sender completes successfully,
+When a collection with a count above zero is recorded for that sender,
 Then the sender becomes REUSABLE and searchable,
 And promotion does not wait for the handshake response.
 ```
@@ -275,7 +290,7 @@ Then the request is refused with SMS_FALLBACK_LIMIT_REACHED,
 And no SMS is sent.
 ```
 
-**Governs:** `MSC-DEC-198` · **Surface:** Melarc Rider · **Test level:** API · **Code:** `SMS_FALLBACK_LIMIT_REACHED`
+**Governs:** §21.4, `MSC-DEC-198` · **Surface:** Melarc Rider · **Test level:** API · **Code:** `SMS_FALLBACK_LIMIT_REACHED`
 
 *CRIT-08 audit remediation. Before this criterion, only the generic 120/minute authenticated-API bucket bounded this operation — a cost- and harassment-bearing SMS send with no cap of its own.*
 
@@ -285,7 +300,7 @@ And no SMS is sent.
 
 | ID| What it blocks here| Type|
 |---|---|---|
-| `OQ-048`| Handshake TTL, code length and attempt limits are `PROVISIONAL` pending security review. Behaviour is specified; the parameters are not authoritative| `EXTERNAL_INPUT` — blocks **launch**|
+| `OQ-048`| The SMS provider and the code message templates. The handshake parameters themselves were confirmed by `MSC-DEC-256`| `EXTERNAL_INPUT` — blocks **launch**|
 | ~~`OQ-027`~~| **No longer bears on this feature — `MSC-DEC-415`, 26 September 2026.** Collection is online-only in Version 1, and `AC-SLICE-001-29` tests replay safety, which the command's idempotency already carries. `OQ-027` narrows to the design of the queued hub handover, which is not this feature's.| —|
 
 No `DECISION_NEEDED` question blocks this feature.
@@ -295,9 +310,9 @@ No `DECISION_NEEDED` question blocks this feature.
 | Owed| Blocks which DoR area| Owner|
 |---|---|---|
 | ~~Offline action set — this feature leans on it heavily~~ — **discharged by `MSC-DEC-415`**: collection is online-only in Version 1, so nothing here waits on an offline design| —| ~~`OQ-027`~~|
-| Handshake security parameters| E — launch| `OQ-048`|
+| SMS provider and templates for the handshake code| E — launch| `OQ-048`|
 
-**The handshake operations exist**: `initiateHandshake`, `verifyHandshake`, `requestSmsHandshakeFallback` and `authoriseHandshakeOverride` were added on 20 August. This section called all four missing.
+**The handshake operations exist**: `initiateHandshake`, `verifyHandshake`, `requestSmsHandshakeFallback` and `authoriseHandshakeOverride` were added on 20 August. §12 said otherwise until the Slice 001 reconciliation.
 
 **Readiness is not assessed here.** [definition-of-ready.md](../../standards/definition-of-ready.md) assesses it **for the complete vertical slice** and records the verdict in the slice document; a feature cannot answer §44.3 or §44.4 alone. This section feeds that assessment instead of duplicating it (`MSC-DEC-239`, closing `CONFLICT-029`).
 
@@ -305,6 +320,7 @@ No `DECISION_NEEDED` question blocks this feature.
 
 | Surface| Status| Gap|
 |---|---|---|
+| API (`apps/api`)| 🟢 built (S1.27)| The five handshake operations, the texts of the sender's code and of the SMS fallback (words unapproved: OB-S1-06), the database rules; the dispute (S1.29) is built beside them; the sub-ceiling for operations that cause a text is built (review closeout of 5 November 2026, `OB-S1-65`): `initiateHandshake` and `requestSmsHandshakeFallback` declare it, with `confirmPickupRequest`, `dispatchManifest` and `skipPickupStop`|
 | Melarc Rider| ⚪ not built| Everything|
 | Melarc Vendor| ⚪ not built| Everything|
 | Melarc Ops| ⚪ not built| Override path and shortfall flag|

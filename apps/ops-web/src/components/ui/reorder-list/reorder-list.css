@@ -1,0 +1,78 @@
+/*
+ * ReorderList (design/COMPONENT_PATTERNS.md section 22g): an ordered list whose items carry a button to move each up and down. The place is
+ * written as a number before the item, so the order is told by more than the list's position. Everything is in rem and wraps, so enlarged text
+ * grows it and nothing pushes the page sideways at 320 px; the moves sit at the end of the item where there is room and under it where there
+ * is not. The buttons are IconButtons (their own size and focus ring); a fixed item has none and is told apart by words, not by colour alone.
+ */
+.ui-reorder__list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  list-style: none;
+}
+
+.ui-reorder__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ui-reorder__item:last-child {
+  border-bottom: 0;
+}
+
+.ui-reorder__place {
+  flex: none;
+  min-width: 1.5rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-reorder__content {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.ui-reorder__content > p {
+  margin: 0;
+}
+
+.ui-reorder__note {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-reorder__moves {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+}
+
+.ui-reorder__item--fixed {
+  background: var(--color-surface-subtle);
+}
+
+.ui-reorder__moves button:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.ui-reorder__status {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-reorder__status:empty {
+  display: none;
+}

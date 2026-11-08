@@ -1,0 +1,170 @@
+/*
+ * The manifest screens (S1.25). Layout only: every colour, size and space comes from tokens.css; the components do the rest. The record's facts,
+ * acts and sections are the pickup screens' (`pickup-pages.css`); what is here is what a manifest adds.
+ */
+.manifest-note {
+  margin: 0 0 var(--space-4);
+  max-width: 40rem;
+  color: var(--color-text-secondary);
+}
+
+.manifest-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.manifest-freshness__text {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.manifest-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.manifest-support {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.manifest-nowrap {
+  white-space: nowrap;
+}
+
+.manifest-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.manifest-card__title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.manifest-card__facts {
+  margin: var(--space-3) 0 0;
+}
+
+.manifest-card__fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.manifest-card__fact + .manifest-card__fact {
+  margin-top: var(--space-2);
+}
+
+.manifest-card__fact dt {
+  color: var(--color-text-secondary);
+}
+
+.manifest-card__fact dd {
+  margin: 0;
+}
+
+/* The stops of a run, in a table that scrolls inside its own region; the actions of a stop sit in its last column. */
+.manifest-stops .ui-table__table tbody th,
+.manifest-stops .ui-table__table tbody td {
+  padding-block: var(--space-3);
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.manifest-stop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.manifest-stop-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.manifest-marked {
+  border-inline-start: 0.25rem solid var(--color-status-danger-border);
+  padding-inline-start: var(--space-3);
+}
+
+/* The builder: the choices of a pool with the chosen ones summarised beside the date, and the reasons of the carried-over requests. */
+.manifest-builder__summary {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+}
+
+.manifest-builder__summary h2 {
+  margin: 0 0 var(--space-2);
+}
+
+.manifest-builder__chosen {
+  margin: var(--space-3) 0 0;
+  padding-inline-start: var(--space-5);
+}
+
+.manifest-builder__chosen li + li {
+  margin-top: var(--space-2);
+}
+
+.manifest-carryover {
+  margin-top: var(--space-4);
+}
+
+.manifest-carryover__entry {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+}
+
+.manifest-carryover__entry + .manifest-carryover__entry {
+  margin-top: var(--space-3);
+}
+
+.manifest-carryover__entry h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.manifest-carryover__error {
+  margin: 0 0 var(--space-2);
+  color: var(--color-status-danger-foreground);
+}
+
+.manifest-builder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.manifest-handover {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+}
+
+.manifest-handover p {
+  margin: 0 0 var(--space-2);
+}
+
+@media (forced-colors: active) {
+  .manifest-marked {
+    border-inline-start-color: CanvasText;
+  }
+}

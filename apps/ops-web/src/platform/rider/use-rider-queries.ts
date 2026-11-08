@@ -24,6 +24,8 @@ const NOT_KEPT = {
 
 export interface RiderListParams {
   readonly status?: RiderStatus;
+  /** Only the riders of this hub (the manifest's, for an assignment: what the grant reaches is not who is eligible). */
+  readonly hubId?: string;
   /** Matches the rider's name or phone. Blank is no search. */
   readonly q?: string;
   readonly pageToken?: string;
@@ -33,10 +35,10 @@ export interface RiderListParams {
 /** `listRiders`: a page of the riders the session's grant reaches (`dispatch.read`), scoped by the server through each rider's primary hub. */
 export function useRiders(params: RiderListParams): UseQueryResult<RiderPageView> {
   const client = useApiClient();
-  const { status, q, pageToken, enabled = true } = params;
+  const { status, hubId, q, pageToken, enabled = true } = params;
   const search = q?.trim() ?? '';
   return useQuery({
-    queryKey: ['riders', 'list', status ?? null, search, pageToken ?? null],
+    queryKey: ['riders', 'list', status ?? null, hubId ?? null, search, pageToken ?? null],
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -45,6 +47,7 @@ export function useRiders(params: RiderListParams): UseQueryResult<RiderPageView
           params: {
             query: {
               ...(status === undefined ? {} : { status }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(search === '' ? {} : { q: search }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },

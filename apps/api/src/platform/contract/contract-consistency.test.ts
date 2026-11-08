@@ -993,6 +993,10 @@ describe('(e) references: each way to break it is found', () => {
 });
 
 describe('(f) the number of operations: each way to break it is found', () => {
+  // The expectations below are derived from what the catalogue itself states, so adding an operation to the
+  // contract and to the catalogue does not mean editing a literal here: each break is "one more" or "one less".
+  const { stated } = performanceCatalogue(PERFORMANCE);
+
   it('finds an operation removed from, or added to, the contract', () => {
     const removed = changed((copy) => {
       copy.remove(['paths', '/pickup-requests', 'get']);
@@ -1002,11 +1006,11 @@ describe('(f) the number of operations: each way to break it is found', () => {
     });
 
     expect(operationCountProblems(removed, PERFORMANCE, [])).toEqual([
-      'The contract has 175 operations and the catalogue states 176',
+      `The contract has ${String(stated.total - 1)} operations and the catalogue states ${String(stated.total)}`,
       'listPickupRequests is classified in the catalogue and the contract has no such operation',
     ]);
     expect(operationCountProblems(added, PERFORMANCE, [])).toEqual([
-      'The contract has 177 operations and the catalogue states 176',
+      `The contract has ${String(stated.total + 1)} operations and the catalogue states ${String(stated.total)}`,
       'listGhosts is in the contract and in no class of the catalogue',
     ]);
   });
@@ -1034,25 +1038,28 @@ describe('(f) the number of operations: each way to break it is found', () => {
     expect(dropped).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, dropped, [])).toEqual([
       'listPickupRequests is in the contract and in no class of the catalogue',
-      'The catalogue states 65 NORMAL operations and lists 64',
+      `The catalogue states ${String(stated.NORMAL)} NORMAL operations and lists ${String(stated.NORMAL - 1)}`,
     ]);
     expect(operationCountProblems(CONTRACT, twice, [])).toEqual([
       'listPickupRequests is classified 2 times in the catalogue',
-      'The catalogue states 65 NORMAL operations and lists 66',
+      `The catalogue states ${String(stated.NORMAL)} NORMAL operations and lists ${String(stated.NORMAL + 1)}`,
     ]);
     expect(moved).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, moved, [])).toEqual([
-      'The catalogue states 111 CRITICAL_WRITE operations and lists 112',
-      'The catalogue states 65 NORMAL operations and lists 64',
+      `The catalogue states ${String(stated.CRITICAL_WRITE)} CRITICAL_WRITE operations and lists ${String(stated.CRITICAL_WRITE + 1)}`,
+      `The catalogue states ${String(stated.NORMAL)} NORMAL operations and lists ${String(stated.NORMAL - 1)}`,
     ]);
   });
 
   it('finds the stated figure changed', () => {
-    const edited = PERFORMANCE.replace('**176 operations:', '**177 operations:');
+    const edited = PERFORMANCE.replace(
+      `**${String(stated.total)} operations:`,
+      `**${String(stated.total + 1)} operations:`,
+    );
 
     expect(edited).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, edited, [])).toEqual([
-      'The contract has 176 operations and the catalogue states 177',
+      `The contract has ${String(stated.total)} operations and the catalogue states ${String(stated.total + 1)}`,
     ]);
   });
 

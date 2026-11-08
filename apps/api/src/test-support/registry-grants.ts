@@ -61,6 +61,10 @@ export const SEED_ONLY_TABLES: ReadonlySet<string> = new Set([
   'RoleBundle',
   'RoleBundleGrant',
   'FixedPermissionPolicy',
+  // The hub's configuration (S1.4, migration 0042): rows enter only through melarc.seed_hub_configuration, and the API reads.
+  'ServiceZone',
+  'ServiceZoneAlias',
+  'HubSetting',
 ]);
 
 /**

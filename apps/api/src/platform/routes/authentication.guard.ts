@@ -24,7 +24,7 @@ import { ErrorCode } from '../http/error-codes.js';
 import { credentialModesOf } from '../openapi/operation-statements.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
 import { currentRequestContext } from '../logging/request-context.js';
-import { accessKindOf } from './access-kind.js';
+import { accessDetailOf, accessKindOf } from './access-kind.js';
 
 /**
  * Step 2 of the refusal order: authentication (permission-enforcement.md §5.1; S0.24). A route that needs a principal (`self`,
@@ -91,6 +91,17 @@ export class AuthenticationGuard implements CanActivate {
       outcome.authenticated.session.id,
     );
     if (!decision.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
+    // The sub-ceiling inside the bucket (settings.md §7.7; R76), for an operation that states it can cause an outbound text: the same session key, a counter of its
+    // own, decided here with no transaction of this request's open because the limiter's admission is its own. A request is counted when it is admitted and stays
+    // counted whatever the operation then answers; one the ceiling refuses is counted nowhere in it and never reaches the operation, though it has already taken
+    // its place in the bucket above. Nothing is undone by a rollback, because nothing of the operation has run.
+    if (accessDetailOf(this.reflector, context)?.authenticated?.providerInitiating === true) {
+      const ceiling = await this.limiter.admit(
+        'provider_initiating_operation_ceiling_per_minute',
+        outcome.authenticated.session.id,
+      );
+      if (!ceiling.allowed) throw ApiException.of(ErrorCode.RateLimited, 'Too many requests');
+    }
 
     holdAuthenticatedSession(request, outcome.authenticated);
     return true;

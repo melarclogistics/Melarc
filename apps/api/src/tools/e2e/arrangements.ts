@@ -242,7 +242,66 @@ export const ARRANGEMENTS: Readonly<Record<string, Arrangement>> = {
       return result.rowCount ?? 0;
     },
   },
+
+  /** Lets the fifteen minutes of a rider's lock pass, as `lapse-lock` does for a staff member: the lock has ended, the count of failures is as it was. */
+  'lapse-rider-lock': {
+    arguments: ['phone'],
+    sample: ['+99900000001'],
+    async run(client, args) {
+      const result = await client.query(
+        `update rider_identity set locked_until = clock_timestamp() - interval '1 second'
+          where phone = $1 and locked_until is not null`,
+        [phone(args[0])],
+      );
+      return result.rowCount ?? 0;
+    },
+  },
+
+  /**
+   * The pool of a day's confirmed pickups, as a run of real bookings would have left it (S1.25's journey): `count` requests of the demonstration
+   * vendor, `CONFIRMED` and on no manifest, for the hub the vendor belongs to and for the service date given, each of three packages, with codes
+   * and names that say they are fixtures. The booking itself is not walked, because it depends on what the seed does not hold (no zone alias, no
+   * saved pickup location: OB-S1-02) and on the hour of the day (the booking cut-off); everything after the pool is the product's own. At most
+   * eight, because a code is made from its place in the run (`ACC-PR-HXA2MN`, `ACC-PR-HXB3MN`, ...), which is how a journey names a request
+   * without reading it. It fails when the vendor is not there, and a second call for the same codes is refused by the table.
+   */
+  'add-confirmed-pickups': {
+    arguments: ['account identifier', 'service date', 'count'],
+    sample: ['ABCDEFGH', '2026-11-03', '8'],
+    async run(client, args) {
+      const identifier = accountIdentifier(args[0]);
+      const day = args[1] ?? '';
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(day))
+        throw new Error('the service date is YYYY-MM-DD');
+      const count = Number(args[2] ?? '');
+      if (!Number.isInteger(count) || count < 1 || count > 8) {
+        throw new Error('count is a whole number from 1 to 8');
+      }
+      const codes = Array.from({ length: count }, (_, at) => fixturePickupCode(at));
+      const result = await client.query(
+        `insert into pickup_request (id, code, vendor_organization_id, sender_name, responsible_hub_id, pickup_intent, state,
+                                     declared_package_count, resolved_pickup_location, primary_phone, scheduled_service_date,
+                                     default_payer_intent, created_by, confirmed_at, confirmed_by)
+         select gen_random_uuid(), c.code, o.id, 'Demonstration Sender (fixture)', o.responsible_hub_id, 'OWN_PACKAGES', 'CONFIRMED',
+                3, '{"address":"Demonstration shop (fixture)"}'::jsonb, '+99900000011', $2::date, 'RECIPIENT_PAYS', $3,
+                clock_timestamp(), $3
+           from unnest($4::text[]) as c(code)
+           join vendor_account a on a.account_identifier = $1
+           join vendor_organization o on o.id = a.vendor_organization_id`,
+        [identifier, day, ARRANGED_ACTOR, codes],
+      );
+      return result.rowCount ?? 0;
+    },
+  },
 };
+
+/** The actor of arranged rows, as the database kit's is: nobody a journey signs in as. */
+const ARRANGED_ACTOR = '5eed0000-0000-4000-8000-0000000000e1';
+
+/** The code of the nth arranged pickup request (from 0), in the alphabet of an operational code (no 0, O, 1, I or L). */
+export function fixturePickupCode(at: number): string {
+  return `ACC-PR-HX${'ABCDEFGH'.charAt(at)}${String(at + 2)}MN`;
+}
 
 /** Runs a named arrangement and returns how many rows it reached. Refuses a name that is not in the list, and a change that reached none. */
 export async function arrange(

@@ -139,3 +139,114 @@ export function parseIdentityReasons(markdown: string): ReasonRow[] {
   }
   return rows;
 }
+
+export interface StopSkipReasonRow {
+  readonly code: string;
+  readonly attribution: string;
+  readonly requiresNote: boolean;
+}
+
+/**
+ * The four `PICKUP_STOP_SKIP` rows of domain-model.md section 3.9: code, attribution and whether a note is required. Read between the
+ * sentence that says the contents are seeded and the next domain's, because the `HANDOFF_FAILURE` table has the same shape.
+ */
+export function parseStopSkipReasons(markdown: string): StopSkipReasonRow[] {
+  const start = markdown.indexOf('**The `PICKUP_STOP_SKIP` contents are seeded**');
+  const end = markdown.indexOf('**The `HANDOFF_FAILURE` contents are seeded**');
+  if (start < 0 || end < start) return [];
+  const rows: StopSkipReasonRow[] = [];
+  for (const line of markdown.slice(start, end).split('\n')) {
+    const match =
+      /^\| `([A-Z][A-Z0-9_]*)`\| [^|]+\| `(CUSTOMER|MELARC|EXTERNAL)`\| (\*\*yes\*\*|yes|no)\|$/.exec(
+        line,
+      );
+    if (match === null) continue;
+    rows.push({
+      code: match[1] ?? '',
+      attribution: match[2] ?? '',
+      requiresNote: (match[3] ?? '').includes('yes'),
+    });
+  }
+  return rows;
+}
+
+export interface PickupCatalogueReasonRow {
+  readonly code: string;
+  readonly domain: 'PICKUP_CANCELLATION' | 'PICKUP_FAILURE' | 'PICKUP_SHORT_COUNT';
+  readonly attribution: string;
+  readonly requiresNote: boolean;
+  readonly requiresContactAttempt: boolean;
+  readonly requiresPhoto: boolean;
+}
+
+export interface CarryoverReasonRow {
+  readonly code: string;
+  readonly attribution: string;
+  readonly requiresNote: boolean;
+  readonly label: string;
+}
+
+/**
+ * The rows of the `PICKUP_CARRYOVER` table of domain-model.md section 3.9 (the decision of 2 November 2026): code, attribution, whether a note
+ * is required and the label, which this table gives because five of its codes carry a prefix their words do not. Read from the sentence that
+ * says the contents are seeded up to the next such sentence.
+ */
+export function parseCarryoverReasons(markdown: string): CarryoverReasonRow[] {
+  const start = markdown.indexOf('**The `PICKUP_CARRYOVER` contents are seeded**');
+  if (start < 0) return [];
+  const rest = markdown.slice(start + 1);
+  const next = rest.search(/\*\*The `[A-Z_]+` contents are seeded\*\*/);
+  const region = next < 0 ? rest : rest.slice(0, next);
+  const rows: CarryoverReasonRow[] = [];
+  for (const line of region.split('\n')) {
+    const cells = line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    const code = /^`([A-Z][A-Z0-9_]*)`$/.exec(cells[0] ?? '')?.[1];
+    const attribution = /^`(CUSTOMER|MELARC|EXTERNAL)`$/.exec(cells[1] ?? '')?.[1];
+    const label = cells[3];
+    if (code === undefined || attribution === undefined || label === undefined || label === '')
+      continue;
+    rows.push({ code, attribution, requiresNote: (cells[2] ?? '').includes('yes'), label });
+  }
+  return rows;
+}
+
+/** The requirement columns each pickup catalogue's table has after its code and attribution, in order. */
+const CATALOGUE_COLUMNS = {
+  PICKUP_CANCELLATION: ['requiresNote'],
+  PICKUP_FAILURE: ['requiresNote', 'requiresContactAttempt', 'requiresPhoto'],
+  PICKUP_SHORT_COUNT: ['requiresNote', 'requiresPhoto'],
+} as const;
+
+/**
+ * The rows of the three pickup catalogues of domain-model.md section 3.9, approved by the Product Owner on 29 October 2026 (SLICE-001,
+ * D-05): code, attribution and the requirements each table gives. Each table follows its own sentence ("The `PICKUP_FAILURE` contents are
+ * seeded"), read up to the next such sentence, so the tables of the other domains are never mixed in.
+ */
+export function parsePickupCatalogueReasons(markdown: string): PickupCatalogueReasonRow[] {
+  const rows: PickupCatalogueReasonRow[] = [];
+  for (const domain of Object.keys(CATALOGUE_COLUMNS) as (keyof typeof CATALOGUE_COLUMNS)[]) {
+    const start = markdown.indexOf(`**The \`${domain}\` contents are seeded**`);
+    if (start < 0) continue;
+    const rest = markdown.slice(start + 1);
+    const next = rest.search(/\*\*The `[A-Z_]+` contents are seeded\*\*/);
+    const region = next < 0 ? rest : rest.slice(0, next);
+    for (const line of region.split('\n')) {
+      const cells = line
+        .split('|')
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      const code = /^`([A-Z][A-Z0-9_]*)`$/.exec(cells[0] ?? '')?.[1];
+      const attribution = /^`(CUSTOMER|MELARC|EXTERNAL)`$/.exec(cells[1] ?? '')?.[1];
+      if (code === undefined || attribution === undefined) continue;
+      const flags = { requiresNote: false, requiresContactAttempt: false, requiresPhoto: false };
+      CATALOGUE_COLUMNS[domain].forEach((name, index) => {
+        flags[name] = (cells[2 + index] ?? '').includes('yes');
+      });
+      rows.push({ code, domain, attribution, ...flags });
+    }
+  }
+  return rows;
+}

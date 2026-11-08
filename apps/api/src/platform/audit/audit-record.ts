@@ -153,6 +153,21 @@ export function noteRefusal(note: string): NoteRefusal | undefined {
   }
 }
 
+/**
+ * The note as the writer would keep it: screened, a secret that travels inside the text removed, or `undefined` where the writer would refuse it. For an operation whose
+ * event is written by the database itself (so that it does not pass the writer) and which must keep nothing the writer would not: it asks what the writer would keep and
+ * refuses a note the screening would change, rather than altering a person's words without saying so.
+ */
+export function screenedNote(note: string): string | undefined {
+  if (note.length > AUDIT_LIMITS.maxNoteLength) return undefined;
+  try {
+    return screenText(note, 'note', AUDIT_LIMITS.maxNoteLength);
+  } catch (error) {
+    if (error instanceof AuditRefusedError) return undefined;
+    throw error;
+  }
+}
+
 function screenValue(value: unknown, field: string, depth: number): AuditJson {
   if (typeof value === 'string') return screenText(value, field, AUDIT_LIMITS.maxStringLength);
   if (typeof value === 'boolean' || value === null) return value;

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { sql } from 'drizzle-orm';
 
-import { RATE_LIMIT_BUCKETS } from '../../src/platform/auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS } from '../../src/platform/auth/ports/rate-limiter.port.js';
 import { serverErrorIn } from '../../src/platform/database/database-failures.js';
 import {
   IDENTITY_OPERATION_DOMAINS,
@@ -133,11 +133,12 @@ describe('the settings reader', () => {
     ).toBe(10);
   });
 
-  // Break caught (section 11.B of the Gate 2 brief; OB-102): the limiter's capability reading more than its six settings (a policy on
+  // The limit of the sub-ceiling inside the authenticated-API bucket is read too (migration 0073).
+  // Break caught (section 11.B of the Gate 2 brief; OB-102): the limiter's capability reading more than its settings (a policy on
   // the table as a whole), or writing any. It reads each bucket's limit, sees no other row, and cannot insert, update or delete.
-  it('lets the rate_limit capability read the six bucket settings and no other row, and write none', async () => {
+  it('lets the rate_limit capability read the six bucket settings, the sub-ceiling and no other row, and write none', async () => {
     const limiterContext = systemContext('rate_limit');
-    for (const bucket of RATE_LIMIT_BUCKETS) {
+    for (const bucket of RATE_LIMIT_COUNTERS) {
       expect(
         await withHandle(built.service, limiterContext, (handle) =>
           settings.integer(handle, bucket),
@@ -150,11 +151,14 @@ describe('the settings reader', () => {
         (row) => (row as { key: string }).key,
       ),
     );
-    expect(visible).toEqual([...RATE_LIMIT_BUCKETS].toSorted());
+    expect(visible).toEqual([...RATE_LIMIT_COUNTERS].toSorted());
     // The names in the policy are the buckets' (a seventh bucket, or a renamed one, is a change to both).
-    const policy = /"setting_rate_limit_read"[\s\S]*?key IN \(([^)]*)\)/.exec(
+    const policy = /ALTER POLICY "setting_rate_limit_read"[\s\S]*?key IN \(([^)]*)\)/.exec(
       readFileSync(
-        resolve(import.meta.dirname, '../../migrations/0012_rate_limit_hardening.sql'),
+        resolve(
+          import.meta.dirname,
+          '../../migrations/0073_review_closeout_handshake_ceiling_extension.sql',
+        ),
         'utf8',
       ),
     );
@@ -163,7 +167,7 @@ describe('the settings reader', () => {
         .split(',')
         .map((name) => name.trim().replaceAll("'", ''))
         .toSorted(),
-    ).toEqual([...RATE_LIMIT_BUCKETS].toSorted());
+    ).toEqual([...RATE_LIMIT_COUNTERS].toSorted());
     // A setting the capability has no business with reads as missing, as for a vendor.
     for (const other of [
       'signin_max_attempts',

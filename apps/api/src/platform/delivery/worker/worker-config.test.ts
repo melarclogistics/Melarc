@@ -11,6 +11,8 @@ import {
   WORKER_DEFAULTS,
   WORKER_ONLY_KEYS,
   WORKER_SHARED_KEYS,
+  WorkerConfigRefusedError,
+  assertWorkerConfigAccepted,
   loadWorkerConfig,
   type WorkerConfig,
 } from './worker-config.js';
@@ -94,11 +96,12 @@ describe('the delivery worker’s configuration (S0.18)', () => {
     });
 
     // Break caught: a pool that is not sized for the lanes (a lane would wait for a connection another holds, or the pool would be
-    // far larger than the worker can use): one connection for each lane, one for the poll and one for the cleanup.
-    it('sizes the database pool from the lanes: one connection for each, one to poll and one to clean up', () => {
-      expect(loaded(workerEnv()).database.poolMax).toBe(4 + 2);
-      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '1' })).database.poolMax).toBe(3);
-      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '32' })).database.poolMax).toBe(34);
+    // far larger than the worker can use): one connection for each lane, one for the poll, one for the cleanup and one for the
+    // notification lane (S1.12).
+    it('sizes the database pool from the lanes: one connection for each, one to poll, one to clean up and one for the notification lane', () => {
+      expect(loaded(workerEnv()).database.poolMax).toBe(4 + 3);
+      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '1' })).database.poolMax).toBe(4);
+      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '32' })).database.poolMax).toBe(35);
     });
 
     // Break caught: the worker taking the keys of purposes it has no use for, because the file it shares with the API carries them.
@@ -494,6 +497,14 @@ describe('the delivery worker’s configuration (S0.18)', () => {
         'DELIVERY_CAPTURE_DIRECTORY',
         'DELIVERY_PROVIDER_APPROVAL_REF',
         'DELIVERY_PROVIDER_ALLOWLIST',
+        'DELIVERY_PROVIDER_MESSAGE_CAP',
+        'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
+        'NOTIFICATION_SMS_ADAPTER',
+        'NOTIFICATION_SMS_ENDPOINT',
+        'NOTIFICATION_SMS_TIMEOUT_MS',
+        'HUBTEL_SMS_CLIENT_ID',
+        'HUBTEL_SMS_CLIENT_SECRET',
+        'HUBTEL_SMS_SENDER_ID',
         'DELIVERY_WORKER_METRICS_HOST',
         'DELIVERY_WORKER_METRICS_PORT',
         'DELIVERY_WORKER_METRICS_SECRET',
@@ -556,5 +567,305 @@ describe('the worker’s private metrics endpoint (S0.68)', () => {
     ).metrics;
     expect(metrics?.secret?.reveal()).toBe(secret);
     expect(inspect(metrics)).not.toContain(secret);
+  });
+});
+
+// S1.12d. The notification lane sends text messages through Hubtel. A real provider belongs to Staging and production, and to a local
+// run only inside a controlled window (the Product Owner's decision of 29 October 2026, which amends the decision of 11 October 2026
+// that a local run uses the capture adapter only): an approval reference, an allow-list of numbers the owner controls, the most messages
+// the window may send and the moment it ends. The credential channels keep the rule of 11 October: capture only in a local run.
+describe('the notification SMS channel and its controlled window (S1.12d)', () => {
+  const NOW = new Date('2026-10-29T12:00:00.000Z');
+  const CLIENT_ID = 'SENTINEL_CLIENT_ID_91c4';
+  const CLIENT_SECRET = 'SENTINEL_CLIENT_SECRET_77ab';
+  const GUARDS = [
+    'DELIVERY_PROVIDER_APPROVAL_REF',
+    'DELIVERY_PROVIDER_ALLOWLIST',
+    'DELIVERY_PROVIDER_MESSAGE_CAP',
+    'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
+  ] as const;
+  const HUBTEL = [
+    'NOTIFICATION_SMS_ENDPOINT',
+    'NOTIFICATION_SMS_TIMEOUT_MS',
+    'HUBTEL_SMS_CLIENT_ID',
+    'HUBTEL_SMS_CLIENT_SECRET',
+    'HUBTEL_SMS_SENDER_ID',
+  ] as const;
+
+  /** A local environment whose notification SMS goes through Hubtel, inside a complete window, unless a test says otherwise. */
+  const inWindow = (
+    overrides: Readonly<Record<string, string | undefined>> = {},
+  ): Record<string, string> =>
+    workerEnv({
+      NOTIFICATION_SMS_ADAPTER: 'provider',
+      NOTIFICATION_SMS_ENDPOINT: 'https://smsc.hubtel.com/v1/messages',
+      NOTIFICATION_SMS_TIMEOUT_MS: '8000',
+      HUBTEL_SMS_CLIENT_ID: CLIENT_ID,
+      HUBTEL_SMS_CLIENT_SECRET: CLIENT_SECRET,
+      HUBTEL_SMS_SENDER_ID: 'Melarc',
+      DELIVERY_PROVIDER_APPROVAL_REF: 'OWNER-2026-10-29-SMS',
+      DELIVERY_PROVIDER_ALLOWLIST: '+233201234567',
+      DELIVERY_PROVIDER_MESSAGE_CAP: '20',
+      DELIVERY_PROVIDER_WINDOW_ENDS_AT: '2026-11-05T23:59:59Z',
+      ...overrides,
+    });
+  const load = (env: Readonly<Record<string, string | undefined>>) =>
+    loadWorkerConfig(env, { now: NOW });
+  const acceptedAt = (env: Readonly<Record<string, string | undefined>>): WorkerConfig => {
+    const result = load(env);
+    if (!result.ok) throw new Error(`refused: ${result.problems.map((p) => p.key).join(', ')}`);
+    return result.config;
+  };
+  const refusedKeys = (env: Readonly<Record<string, string | undefined>>): string[] => {
+    const result = load(env);
+    return result.ok ? [] : result.problems.map((problem) => problem.key).toSorted();
+  };
+  const problemKinds = (env: Readonly<Record<string, string | undefined>>): string[] => {
+    const result = load(env);
+    return result.ok ? [] : result.problems.map((problem) => problem.problem);
+  };
+
+  // Break caught: the lane selecting a provider by default, or holding provider detail when nothing was selected.
+  it('selects capture when nothing is set, and holds no provider detail and no window', () => {
+    const config = acceptedAt(workerEnv());
+    expect(config.delivery.notificationSms).toEqual({ kind: 'capture' });
+    expect(config.delivery.providerWindow).toBeUndefined();
+  });
+
+  // Break caught: the local window refused although it is complete, or accepted with the detail left out of what the lane is built from.
+  it('accepts a real provider in a local run inside a complete window, and holds what the lane is built from', () => {
+    const config = acceptedAt(inWindow());
+    const { notificationSms } = config.delivery;
+    expect(notificationSms.kind).toBe('provider');
+    if (notificationSms.kind !== 'provider') throw new Error('unreachable');
+    expect(notificationSms).toMatchObject({
+      endpoint: 'https://smsc.hubtel.com/v1/messages',
+      timeoutMs: 8000,
+      hubtel: { senderId: 'Melarc' },
+    });
+    expect(notificationSms.hubtel.clientId.reveal()).toBe(CLIENT_ID);
+    expect(notificationSms.hubtel.clientSecret.reveal()).toBe(CLIENT_SECRET);
+    expect(config.delivery.providerWindow).toEqual({
+      approvalRef: 'OWNER-2026-10-29-SMS',
+      allowList: ['+233201234567'],
+      messageCap: 20,
+      endsAt: new Date('2026-11-05T23:59:59Z'),
+    });
+    expect(Object.isFrozen(config.delivery.providerWindow)).toBe(true);
+    expect(Object.isFrozen(notificationSms)).toBe(true);
+  });
+
+  // Break caught: a local run that sends for real with a guard missing, which is the whole of what the window is for.
+  it.each(GUARDS)('refuses a real provider in a local run without %s', (key) => {
+    expect(refusedKeys(inWindow({ [key]: undefined }))).toEqual([key]);
+    expect(problemKinds(inWindow({ [key]: undefined }))).toEqual(['missing']);
+  });
+
+  // Break caught: a provider selected without the detail it is built from, which would fail at the first send and not at the start.
+  it.each(HUBTEL)('refuses a real provider without %s', (key) => {
+    expect(refusedKeys(inWindow({ [key]: undefined }))).toEqual([key]);
+    expect(problemKinds(inWindow({ [key]: undefined }))).toEqual(['missing']);
+  });
+
+  // Break caught: a window with no end, one that has ended, one that is open for longer than the controlled fortnight, or one whose end
+  // is a local time (an instant that moves with the machine's zone).
+  it.each([
+    ['in the past', '2026-10-29T11:59:59Z'],
+    ['now', '2026-10-29T12:00:00Z'],
+    ['more than fourteen days away', '2026-11-12T12:00:01Z'],
+    ['without the Z of UTC', '2026-11-05T23:59:59'],
+    ['with an offset', '2026-11-05T23:59:59+01:00'],
+    ['a date only', '2026-11-05'],
+    ['not an instant', 'soon'],
+  ])('refuses a window end that is %s', (_label, endsAt) => {
+    expect(refusedKeys(inWindow({ DELIVERY_PROVIDER_WINDOW_ENDS_AT: endsAt }))).toEqual([
+      'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
+    ]);
+  });
+
+  it('accepts a window that ends within fourteen days, to the second', () => {
+    expect(
+      acceptedAt(inWindow({ DELIVERY_PROVIDER_WINDOW_ENDS_AT: '2026-11-12T12:00:00Z' })).delivery
+        .providerWindow?.endsAt,
+    ).toEqual(new Date('2026-11-12T12:00:00Z'));
+    expect(
+      acceptedAt(inWindow({ DELIVERY_PROVIDER_WINDOW_ENDS_AT: '2026-10-29T12:00:01Z' })).delivery
+        .providerWindow?.endsAt,
+    ).toEqual(new Date('2026-10-29T12:00:01Z'));
+  });
+
+  // Break caught: a cap that is not a whole number of messages from one to a thousand, or that reads text as a number.
+  it.each([['0'], ['1001'], ['-1'], ['2.5'], ['many'], ['1e2'], [' 20']])(
+    'refuses a message cap of %s',
+    (cap) => {
+      expect(refusedKeys(inWindow({ DELIVERY_PROVIDER_MESSAGE_CAP: cap }))).toEqual([
+        'DELIVERY_PROVIDER_MESSAGE_CAP',
+      ]);
+    },
+  );
+
+  it.each([['1'], ['20'], ['1000']])('accepts a message cap of %s', (cap) => {
+    expect(
+      acceptedAt(inWindow({ DELIVERY_PROVIDER_MESSAGE_CAP: cap })).delivery.providerWindow
+        ?.messageCap,
+    ).toBe(Number(cap));
+  });
+
+  // Break caught: a sender ID Hubtel cannot show (3 to 11 letters or digits), found at the first send and not at the start.
+  it.each([['Me'], ['Melarc Logistics'], ['Mel arc'], ['Melarc!'], ['Mélarc']])(
+    'refuses the sender ID %j',
+    (senderId) => {
+      expect(refusedKeys(inWindow({ HUBTEL_SMS_SENDER_ID: senderId }))).toEqual([
+        'HUBTEL_SMS_SENDER_ID',
+      ]);
+    },
+  );
+
+  it.each([['Melarc'], ['MELARC01'], ['A1B2C3'], ['Mel']])(
+    'accepts the sender ID %j',
+    (senderId) => {
+      expect(acceptedAt(inWindow({ HUBTEL_SMS_SENDER_ID: senderId }))).toBeDefined();
+    },
+  );
+
+  // Break caught: the provider's settings read with capture, where there is no provider to take them; and the window's guards read
+  // where there is no real provider to guard.
+  it.each([...HUBTEL, ...GUARDS])('refuses %s with capture', (key) => {
+    // Only the key under test stays: every other setting of the provider and the window is taken away.
+    const others: readonly string[] = [...HUBTEL, ...GUARDS].filter((other) => other !== key);
+    const env = Object.fromEntries(
+      Object.entries(inWindow({ NOTIFICATION_SMS_ADAPTER: 'capture' })).filter(
+        ([name]) => !others.includes(name),
+      ),
+    );
+    expect(refusedKeys(env)).toEqual([key]);
+  });
+
+  // Break caught: plain http reaching a host that is not this machine, which would put the credentials on a network.
+  it('takes plain http to a loopback host in a local run only, and https anywhere', () => {
+    expect(
+      acceptedAt(inWindow({ NOTIFICATION_SMS_ENDPOINT: 'http://127.0.0.1:4010/v1/messages' })),
+    ).toBeDefined();
+    expect(
+      refusedKeys(inWindow({ NOTIFICATION_SMS_ENDPOINT: 'http://smsc.hubtel.com/v1/messages' })),
+    ).toEqual(['NOTIFICATION_SMS_ENDPOINT']);
+    expect(refusedKeys(inWindow({ NOTIFICATION_SMS_ENDPOINT: 'not a url' }))).toEqual([
+      'NOTIFICATION_SMS_ENDPOINT',
+    ]);
+  });
+
+  // Break caught: Staging not held to the same window as a local run, or production asked for a window it must not have.
+  it('holds Staging to the same window, and production to a real provider without one', () => {
+    const staging = (over: Record<string, string | undefined> = {}) =>
+      inWindow({ NODE_ENV: 'production', APP_ENV: 'staging', ...over });
+    expect(acceptedAt(staging())).toBeDefined();
+    for (const key of GUARDS) {
+      expect(refusedKeys(staging({ [key]: undefined }))).toEqual([key]);
+    }
+
+    const production = (over: Record<string, string | undefined> = {}) =>
+      workerEnv({
+        NODE_ENV: 'production',
+        APP_ENV: 'production',
+        DELIVERY_CAPTURE_DIRECTORY: undefined,
+        DELIVERY_EMAIL_ADAPTER: 'provider',
+        DELIVERY_EMAIL_ENDPOINT: 'https://email.example.test/v1',
+        DELIVERY_EMAIL_TIMEOUT_MS: '5000',
+        DELIVERY_SMS_ADAPTER: 'provider',
+        DELIVERY_SMS_ENDPOINT: 'https://sms.example.test/v1',
+        DELIVERY_SMS_TIMEOUT_MS: '5000',
+        NOTIFICATION_SMS_ADAPTER: 'provider',
+        NOTIFICATION_SMS_ENDPOINT: 'https://smsc.hubtel.com/v1/messages',
+        NOTIFICATION_SMS_TIMEOUT_MS: '8000',
+        HUBTEL_SMS_CLIENT_ID: CLIENT_ID,
+        HUBTEL_SMS_CLIENT_SECRET: CLIENT_SECRET,
+        HUBTEL_SMS_SENDER_ID: 'Melarc',
+        ...over,
+      });
+    // The environment may still name what production refuses elsewhere (the local key custody): only the notification keys are asked about.
+    const notificationKeys = (env: Record<string, string>): string[] =>
+      refusedKeys(env).filter(
+        (key) =>
+          key.startsWith('NOTIFICATION_') ||
+          key.startsWith('HUBTEL_') ||
+          (GUARDS as readonly string[]).includes(key),
+      );
+    expect(notificationKeys(production())).toEqual([]);
+    for (const key of GUARDS) {
+      expect(notificationKeys(production({ [key]: inWindow()[key] }))).toContain(key);
+    }
+  });
+
+  // Break caught: production selecting capture for its text messages, which would drop them quietly.
+  it('refuses capture for the notification SMS in production', () => {
+    const production = workerEnv({
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      DELIVERY_CAPTURE_DIRECTORY: undefined,
+      DELIVERY_EMAIL_ADAPTER: 'provider',
+      DELIVERY_EMAIL_ENDPOINT: 'https://email.example.test/v1',
+      DELIVERY_EMAIL_TIMEOUT_MS: '5000',
+      DELIVERY_SMS_ADAPTER: 'provider',
+      DELIVERY_SMS_ENDPOINT: 'https://sms.example.test/v1',
+      DELIVERY_SMS_TIMEOUT_MS: '5000',
+    });
+    expect(refusedKeys(production)).toContain('NOTIFICATION_SMS_ADAPTER');
+  });
+
+  // Break caught: the owner's rule of 11 October for the credential channels dropped with the amendment: they stay capture-only locally.
+  it('leaves the credential channels as they were: a real provider for them is still refused in a local run', () => {
+    expect(
+      refusedKeys(
+        workerEnv({
+          DELIVERY_SMS_ADAPTER: 'provider',
+          DELIVERY_SMS_ENDPOINT: 'https://sms.example.test/v1',
+          DELIVERY_SMS_TIMEOUT_MS: '5000',
+          ...Object.fromEntries(GUARDS.map((key) => [key, inWindow()[key]])),
+        }),
+      ),
+    ).toContain('DELIVERY_SMS_ADAPTER');
+  });
+
+  // Break caught: a credential, or the sender's secret, printed by a problem, by the config's JSON or by its inspected form.
+  it('prints no credential: not in a problem, not in the configuration', () => {
+    const config = acceptedAt(inWindow());
+    for (const text of [
+      JSON.stringify(config),
+      inspect(config, { depth: 10, showHidden: true }),
+      JSON.stringify(config.delivery.notificationSms),
+    ]) {
+      expect(text).not.toContain(CLIENT_ID);
+      expect(text).not.toContain(CLIENT_SECRET);
+    }
+    const refused = load(
+      inWindow({ DELIVERY_PROVIDER_MESSAGE_CAP: 'many', HUBTEL_SMS_SENDER_ID: 'x' }),
+    );
+    expect(refused.ok).toBe(false);
+    expect(JSON.stringify(refused)).not.toContain(CLIENT_ID);
+    expect(JSON.stringify(refused)).not.toContain(CLIENT_SECRET);
+  });
+
+  // Break caught: a keys list that does not name the new settings, so that the example and the deployment document are not held to them.
+  it('names its settings among the keys only the worker reads', () => {
+    for (const key of [...HUBTEL, ...GUARDS, 'NOTIFICATION_SMS_ADAPTER']) {
+      expect(WORKER_ONLY_KEYS as readonly string[], key).toContain(key);
+      expect(WORKER_CONFIG_KEYS, key).toContain(key);
+    }
+  });
+
+  // Break caught: the composition trusting the loader alone: a configuration made by hand is judged by the same rule.
+  it('judges a configuration made by hand as it judges the environment', () => {
+    const config = acceptedAt(inWindow());
+    expect(() => {
+      assertWorkerConfigAccepted(config);
+    }).not.toThrow();
+    const { providerWindow: _window, ...delivery } = config.delivery;
+    expect(_window).toBeDefined();
+    expect(() => {
+      assertWorkerConfigAccepted({ ...config, delivery });
+    }).toThrow(WorkerConfigRefusedError);
+    expect(() => {
+      assertWorkerConfigAccepted({ ...config, appEnv: 'production' });
+    }).toThrow(WorkerConfigRefusedError);
   });
 });

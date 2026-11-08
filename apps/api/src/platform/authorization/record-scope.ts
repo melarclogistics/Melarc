@@ -78,6 +78,46 @@ export const RECORD_ENTITIES: RecordEntities = Object.freeze({
     hubScoped: true,
     hubColumn: 'primary_hub_id',
   },
+  // A pickup request (S1.13): hub-scoped by its responsible hub for staff, by its organisation for a vendor, with the probe policy beside
+  // its read policy (migration 0045). A staff member's miss on another hub's request is HUB_SCOPE_VIOLATION; a vendor's, and an id that
+  // matches nothing, are NOT_FOUND by one code path.
+  pickup_request: {
+    schema: 'public',
+    table: 'pickup_request',
+    hubScoped: true,
+  },
+  // A pickup manifest (S1.20): hub-scoped by its responsible hub for staff, by assignment after dispatch for a rider, with the probe policy
+  // beside its read policy (migration 0058). A staff member's miss on another hub's manifest is HUB_SCOPE_VIOLATION; a rider's (a run that
+  // is not assigned to it, or not yet dispatched), a vendor's and an id that matches nothing are NOT_FOUND by one code path.
+  pickup_manifest: {
+    schema: 'public',
+    table: 'pickup_manifest',
+    hubScoped: true,
+  },
+  // A pickup stop (S1.22, `getPickupStop`): hub-scoped by its responsible hub for staff, by the assignment of its manifest after dispatch for a
+  // rider, with the probe policy beside its read policy (migration 0065). A staff member's miss on another hub's stop is HUB_SCOPE_VIOLATION; a
+  // rider's (a run that is not assigned to it, or not yet dispatched), a vendor's and an id that matches nothing are NOT_FOUND by one code path.
+  pickup_stop: {
+    schema: 'public',
+    table: 'pickup_stop',
+    hubScoped: true,
+  },
+  // A run custody handover (S1.24, `getRunCustodyHandover`): hub-scoped by its responsible hub for staff, by the two parties for a rider, with the
+  // probe policy beside its read policy (migration 0067). A staff member's miss on another hub's handover is HUB_SCOPE_VIOLATION; a rider's (a
+  // handover it is not a party to), a vendor's and an id that matches nothing are NOT_FOUND by one code path.
+  run_custody_handover: {
+    schema: 'public',
+    table: 'run_custody_handover',
+    hubScoped: true,
+  },
+  // A vendor organisation (S1.14, `listVendorPickupLocations`): hub-scoped by its responsible hub, with the probe policy beside its read
+  // policy (migration 0049). A vendor sees its own and another's is answered as an id that matches nothing.
+  vendor_organization: {
+    schema: 'public',
+    table: 'vendor_organization',
+    hubScoped: true,
+    hubColumn: 'responsible_hub_id',
+  },
   // A vendor account (S0.47): a global master record whose staff reads are narrowed to the hubs of the grant through its organisation's
   // responsible hub (migration 0034), which the probe reads through the account's key; the probe policy is beside the read policy.
   vendor_account: {

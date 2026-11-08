@@ -4,7 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { IMPLEMENTED_OPERATIONS } from '../src/tools/contract/implemented-scope.js';
 import { CHECK_CONTRACT, killAll, requireBuild, run } from './support/api-process.js';
+import { firstOperationOutsideTheScope } from './support/contract-operations.js';
 
 beforeAll(requireBuild);
 
@@ -24,19 +26,25 @@ describe('the contract conformance command, run as CI runs it', () => {
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('no findings');
-    expect(result.stdout).toMatch(/42 operations? in the implemented scope/);
+    // The count of the scope, not a figure typed here: the scope is held to the router by the check itself, and to the contract by
+    // `real-contract.test.ts`; what this proves is that the process reports what it compared.
+    expect(result.stdout).toContain(
+      `${String(IMPLEMENTED_OPERATIONS.length)} operations in the implemented scope`,
+    );
   });
 
   // Break caught: a check that exits 0 whatever it finds, which would make it decoration. A scope that
   // claims an operation nothing serves must fail the process, name the operation and say where.
   it('fails, naming the operation, when the scope claims one that is not implemented', async () => {
-    const result = await run(CHECK_CONTRACT, {}, ['--scope', 'getPickupRequest']);
+    const notImplemented = firstOperationOutsideTheScope();
+
+    const result = await run(CHECK_CONTRACT, {}, ['--scope', notImplemented.id]);
 
     expect(result.code).toBe(1);
     expect(result.stdout).toContain('OPERATION_NOT_LIVE');
     expect(result.stdout).toContain('OPERATION_NOT_DESCRIBED');
-    expect(result.stdout).toContain('getPickupRequest');
-    expect(result.stdout).toContain('GET /pickup-requests/{id}');
+    expect(result.stdout).toContain(notImplemented.id);
+    expect(result.stdout).toContain(`${notImplemented.method} ${notImplemented.path}`);
   });
 
   it('fails for an operation id the contract does not have', async () => {

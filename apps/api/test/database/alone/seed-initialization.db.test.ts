@@ -2,6 +2,7 @@
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { BUILD_FIXED_POLICY } from '../../../src/platform/auth/sessions/build-fixed-policy.js';
 import { API_RUNTIME_ROLE } from '../../../src/platform/config/load-config.js';
 import { serverErrorIn } from '../../../src/platform/database/database-failures.js';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../../../src/platform/database/role-posture.js';
 import {
   PROVISIONING_ROLE,
+  WORKER_NOTIFICATION_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../../src/platform/database/technical-roles.js';
 import { catalogViolations } from '../../../src/tools/database/catalog-invariants.js';
@@ -112,18 +114,28 @@ interface Counters {
 const initializeAs = (db: TestDatabase, login: Parameters<TestDatabase['urlFor']>[0]) =>
   withClient(db.urlFor(login), (client) => client.query<Report>(INITIALIZE, [DOCUMENT]));
 
-/** Whether every bundle and every fixed policy is at revision 1 and floor 1. */
-async function startsAtOne(db: TestDatabase): Promise<boolean> {
+/**
+ * Whether nothing has been reduced: every bundle is at revision 1 and floor 1, and every fixed policy is at the revision `revisionOf`
+ * says (its audience's) and floor 1.
+ */
+async function startsUnreduced(
+  db: TestDatabase,
+  revisionOf: (principalType: string) => number,
+): Promise<boolean> {
   return withClient(db.urlFor('postgres'), async (client) => {
     const bundles = await client.query<Counters>(
       'select revision, reduction_floor from role_bundle',
     );
-    const fixed = await client.query<Counters>(
-      'select revision, minimum_revision from fixed_permission_policy',
+    const fixed = await client.query<Counters & { principal_type: string }>(
+      'select principal_type, revision, minimum_revision from fixed_permission_policy',
     );
     return (
+      bundles.rows.length > 0 &&
+      fixed.rows.length === 2 &&
       bundles.rows.every((row) => row.revision === 1 && row.reduction_floor === 1) &&
-      fixed.rows.every((row) => row.revision === 1 && row.minimum_revision === 1)
+      fixed.rows.every(
+        (row) => row.revision === revisionOf(row.principal_type) && row.minimum_revision === 1,
+      )
     );
   });
 }
@@ -153,13 +165,45 @@ describe('the first initialization', () => {
     expect(await countAll(database)).toEqual(PLANNED);
   });
 
-  // Break caught: a function that takes the revision or the floor from the document, or leaves them to chance. A bundle and a fixed
-  // policy start at revision 1 and floor 1, whatever the document says.
-  it('starts every bundle and fixed policy at revision 1 and floor 1', async () => {
-    expect(await startsAtOne(database)).toBe(true);
+  // Break caught: a function that takes a floor from the document, or leaves the revisions to chance. A bundle starts at revision 1 and
+  // floor 1 whatever the document says; a fixed policy starts at the revision of the build that seeds (migration 0046), with floor 1.
+  it('starts every bundle at revision 1 and floor 1, and every fixed policy at the build’s revision with floor 1', async () => {
+    expect(
+      await startsUnreduced(
+        database,
+        (type) => BUILD_FIXED_POLICY[type as keyof typeof BUILD_FIXED_POLICY] ?? 0,
+      ),
+    ).toBe(true);
   });
 
-  it('ignores a revision or a floor the document names, and a column it does not take', async () => {
+  // Break caught: the revision of a fixed policy ignored (a database seeded at the build's revision trailing it, which makes a reduction
+  // end no session), or a payload that names none refused (the seed of 27 October 2026 named none and started at 1).
+  it('takes the revision of a fixed policy from the document, and starts at 1 where it names none', async () => {
+    const named = await createTestDatabase();
+    const unnamed = await createTestDatabase();
+    try {
+      const payload = structuredClone(PLAN.payload) as Record<string, Record<string, unknown>[]>;
+      for (const row of payload.fixed_permission_policy ?? []) row.revision = 5;
+      await withClient(named.urlFor(PROVISIONING_ROLE), (client) =>
+        client.query(INITIALIZE, [JSON.stringify(payload)]),
+      );
+      expect(await startsUnreduced(named, () => 5)).toBe(true);
+
+      const old = structuredClone(PLAN.payload) as Record<string, Record<string, unknown>[]>;
+      old.fixed_permission_policy = (old.fixed_permission_policy ?? []).map((row) => ({
+        principal_type: row.principal_type,
+      }));
+      await withClient(unnamed.urlFor(PROVISIONING_ROLE), (client) =>
+        client.query(INITIALIZE, [JSON.stringify(old)]),
+      );
+      expect(await startsUnreduced(unnamed, () => 1)).toBe(true);
+    } finally {
+      await named.drop();
+      await unnamed.drop();
+    }
+  });
+
+  it('ignores a floor the document names and a revision of a bundle, and a column it does not take', async () => {
     const doctored = await createTestDatabase();
     try {
       const payload = structuredClone(PLAN.payload) as Record<string, Record<string, unknown>[]>;
@@ -174,7 +218,8 @@ describe('the first initialization', () => {
       await withClient(doctored.urlFor(PROVISIONING_ROLE), (client) =>
         client.query(INITIALIZE, [JSON.stringify(payload)]),
       );
-      expect(await startsAtOne(doctored)).toBe(true);
+      // The bundles stay at the first revision and floor; the fixed policies take the revision named and ignore the floor named.
+      expect(await startsUnreduced(doctored, () => 7)).toBe(true);
     } finally {
       await doctored.drop();
     }
@@ -621,6 +666,8 @@ describe('the functions, as the catalogue and the posture check see them', () =>
         'melarc.add_vendor_fixture',
         // S0.53 (migration 0040): the non-production rider fixture's one entry point.
         'melarc.add_rider_fixture',
+        // S1.4 (migration 0042): the launch hub's service zones and settings.
+        'melarc.seed_hub_configuration',
       ].toSorted(),
     );
     // And the runtime's: the read of a credential hash for the authentication capability (migration 0016), the facts of a second factor
@@ -646,9 +693,35 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.rider_pin_hash',
       'melarc.rider_active_device',
       'melarc.rider_locked_facts',
+      // S1.26 (migration 0068): the two narrow operations of the rider's count.
+      'melarc.collection_handshake_type',
+      'melarc.promote_collected_sender',
+      // S1.27 (migration 0070): the five operations of the collection handshake.
+      'melarc.handshake_issue',
+      'melarc.handshake_verify',
+      'melarc.handshake_sms_fallback',
+      'melarc.handshake_override',
+      'melarc.handshake_resolve',
+      // S1.29 (migration 0071): the vendor's dispute of a collection.
+      'melarc.dispute_collection',
+      // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
+      'melarc.rider_door_wait_minutes',
     ]);
+    // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
+    // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).
+    for (const role of [WORKER_NOTIFICATION_ROLE, WORKER_RUNTIME_ROLE]) {
+      expect(APPROVED_DEFINER_EXECUTE[role], role).toEqual([
+        'melarc.handshake_mark_delivered',
+        'melarc.notification_handshake_number',
+      ]);
+    }
     expect(Object.keys(APPROVED_DEFINER_EXECUTE).toSorted()).toEqual(
-      [API_RUNTIME_ROLE, PROVISIONING_ROLE].toSorted(),
+      [
+        API_RUNTIME_ROLE,
+        PROVISIONING_ROLE,
+        WORKER_NOTIFICATION_ROLE,
+        WORKER_RUNTIME_ROLE,
+      ].toSorted(),
     );
     const violations = await withClient(database.urlFor('postgres'), (client) =>
       catalogViolations(client),

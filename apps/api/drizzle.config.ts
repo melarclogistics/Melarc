@@ -24,6 +24,21 @@ export default defineConfig({
     './src/vendor/vendor-organization.schema.ts',
     './src/vendor/vendor-account.schema.ts',
     './src/vendor/registered-device.schema.ts',
+    // SLICE-001 (S1.10, S1.13): a vendor's saved pickup locations and financial standing, the ad-hoc sender and the pickup request.
+    './src/vendor/vendor-pickup-location.schema.ts',
+    './src/vendor/vendor-financial-standing.schema.ts',
+    './src/pickup/ad-hoc-sender.schema.ts',
+    './src/pickup/pickup-request.schema.ts',
+    // SLICE-001 (S1.20): the manifest (a run) and its stops, each the claim on one request.
+    './src/pickup/pickup-manifest.schema.ts',
+    './src/pickup/pickup-stop.schema.ts',
+    // SLICE-001 (S1.24): the custody of a run's parcels moving from the rider who holds them to another rider or to the hub.
+    './src/fleet/run-custody-handover.schema.ts',
+    // SLICE-001 (S1.26): what the rider counted at the door, made at the count (D-04 option 1).
+    './src/pickup/collection-record.schema.ts',
+    // SLICE-001 (S1.27): the two-party handshake of a counted stop, which closes the stop when it ends well.
+    './src/pickup/collection-handshake.schema.ts',
+    './src/pickup/collection-dispute.schema.ts',
   ],
   out: './migrations',
   strict: true,

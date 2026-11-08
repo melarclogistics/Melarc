@@ -1,6 +1,7 @@
 import type { RouteObject } from 'react-router';
 
 import { LoadingIndicator } from '../components/ui/loading/LoadingIndicator';
+import { QueueContinuityScope } from '../platform/pickup/QueueContinuityScope';
 import { RequireSession } from '../platform/session/RequireSession';
 import { AppFrame } from './AppFrame';
 import { AuthenticatedOpsShell } from './AuthenticatedOpsShell';
@@ -44,7 +45,8 @@ function PageLoading() {
 
 /**
  * The route tree. The signed-in routes are the registry's (`route-registry.tsx`): they are the children of the authenticated
- * Ops shell, which is the child of `RequireSession`, so none of them is shown until the API has said who is signed in, and each is
+ * Ops shell, which is the child of the pickup queue's scope of memory (`QueueContinuityScope`, a layout with no address of its own),
+ * which is the child of `RequireSession`, so none of them is shown until the API has said who is signed in, and each is
  * behind the permission key the registry gives it. A slice adds its screens to the registry and to nothing else here. The
  * pre-sign-in screens are siblings of the guard, outside it, because they must render with no session and must not ask for one.
  * `extra` lets a test add a route of its own, outside the guard, inside the same frame and error handling, and `signedIn` lets a
@@ -70,8 +72,14 @@ export function createAppRoutes(
               element: <RequireSession />,
               children: [
                 {
-                  element: <AuthenticatedOpsShell routes={signedIn} />,
-                  children: signedInRouteObjects(signedIn),
+                  // Where the pickup queue's one remembered place lives: inside the guard, so that it is gone with the session.
+                  element: <QueueContinuityScope />,
+                  children: [
+                    {
+                      element: <AuthenticatedOpsShell routes={signedIn} />,
+                      children: signedInRouteObjects(signedIn),
+                    },
+                  ],
                 },
               ],
             },

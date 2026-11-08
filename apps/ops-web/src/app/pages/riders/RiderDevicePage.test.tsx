@@ -40,6 +40,8 @@ const DIAGNOSTIC = /Diagnostic text that must never reach a screen\./;
 const QR_NAME = 'QR code for the rider’s handset';
 const NOTE_NAME = 'How you verified the rider in person (required)';
 const LIFETIME_MS = 5 * 60 * 1000;
+/** What a code that has left the screen is told in: what the page did, and nothing about what the server holds. */
+const LAPSED = /The QR code is no longer displayed\./;
 
 const captured: { client: QueryClient | undefined; store: SessionStore | undefined } = {
   client: undefined,
@@ -566,7 +568,14 @@ describe('the device page: replacing the handset', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LIFETIME_MS);
     });
-    expect(await screen.findByText(/The code has expired and is no longer shown/)).toBeVisible();
+    const news = await screen.findByText(LAPSED);
+    expect(news).toBeVisible();
+    // The page drops the code at its own limit, which is shorter than the grant's life: it may still stand at the server, so the words claim
+    // nothing of the kind.
+    expect(news).toHaveTextContent(
+      'The QR code is no longer displayed. Make a new code when the rider is ready.',
+    );
+    expect(news.textContent).not.toMatch(/expired|can no longer be used|invalid|cancel/i);
     expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
     expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
 
@@ -765,6 +774,303 @@ describe('the device page: when the replacement is refused or in doubt', () => {
 
     expect(await screen.findByRole('img', { name: QR_NAME })).toBeVisible();
   });
+});
+
+describe('the device page: a new replacement code asked for while a code is on the screen', () => {
+  const SECOND_URI = `melarc-rider://enrol/v1#token=${'SecondEnrolmentToken'.padEnd(43, 'x')}&challenge=${'SecondEnrolmentChallenge'.padEnd(43, 'y')}`;
+  const SECOND_FORMS = [SECOND_URI, encodeURIComponent(SECOND_URI)];
+  const NOTE = 'Checked the rider’s Ghana card in person.';
+  const lost = () => Promise.reject(new TypeError('Failed to fetch'));
+  const second = () => json(200, enrolmentGrantFixture({ enrolment_uri: SECOND_URI }, LIFETIME_MS));
+
+  /** The first ask is answered with the first code; each ask after it with the next of `then`, in order. */
+  function firstThen(...then: readonly Handler[]): Handler {
+    let asked = 0;
+    return (request) => {
+      asked += 1;
+      if (asked === 1) return json(200, enrolmentGrantFixture({}, LIFETIME_MS));
+      const next = then[asked - 2];
+      if (next === undefined) throw new Error('The test did not expect another request');
+      return next(request);
+    };
+  }
+
+  /** A request that is on its way until the test lets the answer go or loses it. */
+  function waiting() {
+    let release: (response: Response) => void = () => undefined;
+    let lose: () => void = () => undefined;
+    const answer = new Promise<Response>((resolve, reject) => {
+      release = resolve;
+      lose = () => {
+        reject(new TypeError('Failed to fetch'));
+      };
+    });
+    return { answer: () => answer, release, lose };
+  }
+
+  /** The record, whose version is the number of times it has been read. */
+  const versioned = () => {
+    let read = 0;
+    return () => {
+      read += 1;
+      return json(200, riderDetailFixture(), etag(`v${String(read)}`));
+    };
+  };
+
+  /** The form filled and sent, and its code drawn: where the officer can ask for another. */
+  async function replaced(handlers: Record<string, Handler>) {
+    const view = await open(REPLACER, handlers);
+    await fillReplacement(view, NOTE);
+    await view.user.click(screen.getByRole('button', { name: 'Show the QR code' }));
+    await screen.findByRole('img', { name: QR_NAME });
+    return view;
+  }
+
+  const oneCodeDrawn = (uri: string) => {
+    expect(screen.getAllByRole('img', { name: QR_NAME })).toHaveLength(1);
+    expect(
+      decodeRenderedSvg(screen.getByRole('img', { name: QR_NAME }) as unknown as SVGSVGElement),
+    ).toBe(uri);
+  };
+
+  // Break caught: the earlier code left on the screen, with no news and no way out, when the answer to a new code is lost. The new code may have
+  // been made and the earlier one ended, and the same request sent again (it takes no key) could make a second.
+  it('takes the earlier code off the screen and offers only a look at the rider, with what was written kept and locked, when the answer is lost', async () => {
+    const view = await replaced({ [REREGISTER]: firstThen(lost) });
+
+    await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'We could not confirm whether the code was made. Check the rider, then show a new code if you need one: a new code ends any earlier one, so only the latest can be scanned.',
+    );
+    const check = screen.getByRole('button', { name: 'Check the rider' });
+    expect(check).toBeVisible();
+    expect(check).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make a new code' })).toBeNull();
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(screen.getByText(/The earlier code is no longer shown\./)).toBeVisible();
+    const note = screen.getByRole('textbox', { name: NOTE_NAME });
+    expect(note).toHaveAttribute('readonly');
+    expect(note).toHaveValue(NOTE);
+    expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
+    // Nothing is sent again by itself.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(posts()).toHaveLength(2);
+  });
+
+  // Break caught: the earlier code coming back when the officer looks at the rider (it may have been ended by the new one), or the next code
+  // asked for with the version of the first read.
+  it('does not bring the earlier code back when the officer checks the rider, and the next code is asked for with the version then read', async () => {
+    const view = await replaced({ [REREGISTER]: firstThen(lost, second), [RECORD]: versioned() });
+    await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+
+    await view.user.click(await screen.findByRole('button', { name: 'Check the rider' }));
+
+    await waitFor(() => {
+      expect(reads()).toHaveLength(2);
+    });
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
+    expect(screen.getByRole('textbox', { name: NOTE_NAME })).not.toHaveAttribute('readonly');
+    await view.user.click(await screen.findByRole('button', { name: 'Show the QR code' }));
+    await screen.findByRole('img', { name: QR_NAME });
+    oneCodeDrawn(SECOND_URI);
+    expect(posts()).toHaveLength(3);
+    expect(posts()[1]?.headers.get('If-Match')).toBe('"v1"');
+    expect(posts()[2]?.headers.get('If-Match')).toBe('"v2"');
+    expect(await posts()[2]?.json()).toEqual({
+      reason_code: 'HANDSET_REPLACED',
+      verification_note: NOTE,
+    });
+  });
+
+  // Break caught: a refusal of the new code that leaves the earlier one on the screen with nothing said, or the officer with no way on.
+  it('says why a new code was refused, shows no code, and lets the officer ask again with the same reason and note', async () => {
+    const view = await replaced({
+      [REREGISTER]: firstThen(() => refusal(403, 'CSRF_VALIDATION_FAILED'), second),
+    });
+
+    await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+
+    expect(
+      await screen.findByText('The code could not be made. Nothing was changed.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(screen.getByText(/The earlier code is no longer shown\./)).toBeVisible();
+    expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
+
+    await view.user.click(screen.getByRole('button', { name: 'Show the QR code' }));
+
+    await screen.findByRole('img', { name: QR_NAME });
+    oneCodeDrawn(SECOND_URI);
+    expect(await posts()[2]?.json()).toEqual(await posts()[1]?.json());
+  });
+
+  // Break caught: a conflict on the new code shown without the way on, or the next code asked for with the version that has just been refused.
+  it('says the rider changed, and the next code is asked for with the version read after reloading', async () => {
+    const view = await replaced({
+      [REREGISTER]: firstThen(() => refusal(409, 'STATE_CONFLICT'), second),
+      [RECORD]: versioned(),
+    });
+
+    await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+
+    expect(
+      await screen.findByText(/A replacement cannot be registered for this rider as it stands/),
+    ).toBeVisible();
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: 'Reload the rider' }));
+    await waitFor(() => {
+      expect(reads()).toHaveLength(2);
+    });
+    await view.user.click(await screen.findByRole('button', { name: 'Show the QR code' }));
+
+    await screen.findByRole('img', { name: QR_NAME });
+    oneCodeDrawn(SECOND_URI);
+    expect(posts()[1]?.headers.get('If-Match')).toBe('"v1"');
+    expect(posts()[2]?.headers.get('If-Match')).toBe('"v2"');
+  });
+
+  // Break caught: the news of a failed new code lost behind the screen of a lapsed one, which has a button and no place for it.
+  it.each([
+    ['lost', lost, /We could not confirm whether the code was made/, 'Check the rider'],
+    [
+      'refused',
+      () => refusal(403, 'CSRF_VALIDATION_FAILED'),
+      /The code could not be made\. Nothing was changed\./,
+      'Show the QR code',
+    ],
+  ])(
+    'shows the news when the answer to a new code, asked for after the earlier one lapsed, is %s',
+    async (_how, answer, news, wayOn) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const view = await replaced({ [REREGISTER]: firstThen(answer) });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LIFETIME_MS);
+      });
+      await screen.findByText(LAPSED);
+
+      await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(news);
+      expect(screen.getByRole('button', { name: wayOn })).toBeVisible();
+      expect(screen.queryByText(LAPSED)).toBeNull();
+      expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+      // The lapsed screen has said the code is no longer displayed: it is not said again.
+      expect(screen.queryByText(/The earlier code is no longer shown/)).toBeNull();
+    },
+  );
+
+  // Break caught: the earlier code lapsing while the new one is asked for, which sent the page to the screen of a lapsed code (a button, no news, and
+  // no way out of an outcome nobody knows), or the earlier code coming back once the officer has looked.
+  it('neither hides the way out nor draws the earlier code again when its time ends while a new one is being made', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const pending = waiting();
+    const view = await replaced({ [REREGISTER]: firstThen(pending.answer) });
+    await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+    await waitFor(() => {
+      expect(posts()).toHaveLength(2);
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIFETIME_MS);
+    });
+
+    expect(screen.queryByText(LAPSED)).toBeNull();
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+
+    pending.lose();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /We could not confirm whether the code was made/,
+    );
+    await view.user.click(screen.getByRole('button', { name: 'Check the rider' }));
+    await screen.findByRole('button', { name: 'Show the QR code' });
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(screen.queryByText(LAPSED)).toBeNull();
+    expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
+  });
+
+  // Break caught: two clicks making two requests for a new code, of which the second could end the first's; and the earlier code staying on the
+  // screen until the request is sent, when it is the click that asks for the new one.
+  it('sends one request for two clicks on Make a new code, and the earlier code is off the screen at once', async () => {
+    const pending = waiting();
+    await replaced({ [REREGISTER]: firstThen(pending.answer) });
+    const renew = screen.getByRole('button', { name: 'Make a new code' });
+
+    act(() => {
+      renew.click();
+      renew.click();
+    });
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    await waitFor(() => {
+      expect(posts()).toHaveLength(2);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(posts()).toHaveLength(2);
+    pending.release(second());
+    await screen.findByRole('img', { name: QR_NAME });
+    oneCodeDrawn(SECOND_URI);
+  });
+
+  // Break caught: the answer to a new code, which arrives late, drawing a code (or leaving one in a cache) on a screen the officer has left, a
+  // session that has ended or a page that was hidden.
+  it.each([
+    [
+      'the officer has gone to another page',
+      async (view: Awaited<ReturnType<typeof replaced>>) => {
+        await view.router.navigate('/elsewhere');
+      },
+    ],
+    [
+      'the address has changed under the same screen',
+      async (view: Awaited<ReturnType<typeof replaced>>) => {
+        await view.router.navigate(`/admin/riders/${RIDER_ID}/device?again=1`);
+      },
+    ],
+    [
+      'the session has ended',
+      () => {
+        captured.store?.end();
+      },
+    ],
+    [
+      'the page has been hidden',
+      () => {
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      },
+    ],
+  ])(
+    'shows and keeps no code when the answer to a new one arrives after %s',
+    async (_what, happen) => {
+      const pending = waiting();
+      const view = await replaced({ [REREGISTER]: firstThen(pending.answer) });
+      await view.user.click(screen.getByRole('button', { name: 'Make a new code' }));
+      await waitFor(() => {
+        expect(posts()).toHaveLength(2);
+      });
+      await act(async () => {
+        await happen(view);
+      });
+
+      pending.release(second());
+      await act(async () => {
+        await pending.answer();
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+      expect(whereIs(...ENROLMENT_FORMS, ...SECOND_FORMS)).toEqual([]);
+    },
+  );
 });
 
 describeInterfaceStates('The device page', {

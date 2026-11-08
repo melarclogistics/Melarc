@@ -1,0 +1,108 @@
+/*
+ * RadioGroup (the Field's rules applied to a group of choices): the native controls, drawn by the browser so that forced colours, zoom and
+ * assistive technology behave as everywhere, sized in rem so enlarged text grows them, tinted with the primary action colour. Each choice's
+ * target is its whole row, at least the height of a medium control. The focus ring is the frame's own (base.css, `:focus-visible`). An error is
+ * an icon and words under the group, and a danger rule beside it: the colour is never alone.
+ */
+.ui-radio-group {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.ui-radio-group--invalid {
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--color-status-danger-foreground);
+}
+
+.ui-radio-group__legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-radio-group__required {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-radio-group__help,
+.ui-radio__help {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-radio-group__help {
+  margin-bottom: var(--space-2);
+}
+
+.ui-radio-group__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ui-radio {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  align-items: start;
+  min-height: var(--control-height-sm);
+}
+
+.ui-radio__input {
+  grid-column: 1;
+  grid-row: 1;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--color-action-primary);
+}
+
+.ui-radio__label {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+  overflow-wrap: anywhere;
+}
+
+.ui-radio__help {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.ui-radio__input:disabled {
+  cursor: not-allowed;
+}
+
+.ui-radio__input:disabled + .ui-radio__label {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.ui-radio-group__error {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--color-status-danger-foreground);
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-radio-group__error-icon {
+  margin-top: 0.125rem;
+}
+
+@media (forced-colors: active) {
+  .ui-radio-group--invalid {
+    border-inline-start-color: CanvasText;
+  }
+}

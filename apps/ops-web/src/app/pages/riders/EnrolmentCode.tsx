@@ -12,9 +12,8 @@ export interface EnrolmentCodeProps {
   readonly grant: EnrolmentGrantView;
   /** The rider scanned it, or the officer is done: the code goes and the page leaves. */
   readonly onFinish: () => void;
-  /** Another code is wanted: this one stops working when the new one is made. */
+  /** Another code is wanted: this one leaves the screen as it is asked for, and stops working once the new one is made. */
   readonly onNew: () => void;
-  readonly renewing: boolean;
 }
 
 /**
@@ -24,7 +23,7 @@ export interface EnrolmentCodeProps {
  * the officer's browser must hold to draw it, so a camera or a screenshot can capture it; the officer never receives the rider's PIN or private
  * key, and the code is useless without the handset's hardware attestation.
  */
-export function EnrolmentCode({ grant, onFinish, onNew, renewing }: EnrolmentCodeProps) {
+export function EnrolmentCode({ grant, onFinish, onNew }: EnrolmentCodeProps) {
   const until = formatInstant(grant.expiresAt);
   const region = useRef<HTMLElement>(null);
   // The button that asked for the code is gone from the page, so focus would fall to the document: it goes to the code's own region, which
@@ -50,7 +49,7 @@ export function EnrolmentCode({ grant, onFinish, onNew, renewing }: EnrolmentCod
         <Button type="button" onClick={onFinish}>
           The rider has scanned it
         </Button>
-        <Button type="button" variant="secondary" loading={renewing} onClick={onNew}>
+        <Button type="button" variant="secondary" onClick={onNew}>
           Make a new code
         </Button>
       </div>
@@ -58,14 +57,13 @@ export function EnrolmentCode({ grant, onFinish, onNew, renewing }: EnrolmentCod
   );
 }
 
-/** What the page says once a code has lapsed: it is never left on screen, and a new one is offered. */
-export function LapsedCode({
-  onNew,
-  renewing,
-}: {
-  readonly onNew: () => void;
-  readonly renewing: boolean;
-}) {
+/**
+ * What the page says once a code has lapsed: it is never left on screen, and a new one is offered. **The words say what the page did and claim
+ * nothing of the server.** The page stops showing a code at the lesser of its lifetime and its own limit for holding a secret
+ * (`MAX_HOLD_MS`), and the grant can outlive that limit, so "expired" or "can no longer be used" would be a statement about the server that the
+ * page cannot make.
+ */
+export function LapsedCode({ onNew }: { readonly onNew: () => void }) {
   const notice = useRef<HTMLDivElement>(null);
   // What was on the page (the code, and the button the officer was on) is gone: focus goes to the news, which the alert also announces.
   useEffect(() => {
@@ -74,16 +72,34 @@ export function LapsedCode({
   return (
     <div ref={notice} tabIndex={-1} className="rider-code">
       <Alert variant="danger" announce>
-        <p>
-          The code has expired and is no longer shown. It can no longer be used. Make a new one when
-          the rider is ready.
-        </p>
+        <p>The QR code is no longer displayed. Make a new code when the rider is ready.</p>
       </Alert>
       <div className="staff-action__buttons">
-        <Button type="button" loading={renewing} onClick={onNew}>
+        <Button type="button" onClick={onNew}>
           Make a new code
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the page says while a new code is asked for and the one that was on the screen is not: it was taken off the screen when the officer asked.
+ * **That ends nothing.** The server ends the earlier code when it makes the new one, and when the answer is lost the new one may already have been
+ * made, so the words say what the page did and what ends a code, and no more. The code and the button the officer pressed are gone from the page,
+ * so focus goes to these words, where a screen reader reads them and the officer is not dropped at the top of the document.
+ */
+export function WithdrawnCode() {
+  const notice = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    notice.current?.focus();
+  }, []);
+  return (
+    <div ref={notice} tabIndex={-1} className="staff-notice">
+      <p className="staff-action__text">
+        The earlier code is no longer shown. Taking it off the screen does not end it; making a new
+        code does.
+      </p>
     </div>
   );
 }

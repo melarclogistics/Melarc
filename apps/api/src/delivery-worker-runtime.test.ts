@@ -285,10 +285,12 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     }
 
     expect(refused).toBeInstanceOf(WorkerConfigRefusedError);
+    // Production refuses the capture adapter on every channel, the notification lane's included (S1.12: its texts would be dropped quietly).
     expect((refused as WorkerConfigRefusedError).keys).toEqual([
       'KEY_CUSTODY',
       'DELIVERY_EMAIL_ADAPTER',
       'DELIVERY_SMS_ADAPTER',
+      'NOTIFICATION_SMS_ADAPTER',
     ]);
     expect((refused as Error).message).not.toContain('SENTINEL-DB-PASSWORD');
   });
@@ -319,11 +321,15 @@ describe('the delivery worker’s runtime (S0.18)', () => {
       'DELIVERY_PROVIDER_APPROVAL_REF',
       'DELIVERY_PROVIDER_ALLOWLIST',
     ]);
-    // Production also refuses the local key substitute, which is why that is on the list with the two settings of the window.
+    // Production also refuses the local key substitute and the notification lane's capture adapter, which is why those are on the list with
+    // the four settings of the window (the two of the credential channels, and the lane's cap and end).
     expect(refusedBy(withWindow)).toEqual([
       'KEY_CUSTODY',
+      'NOTIFICATION_SMS_ADAPTER',
       'DELIVERY_PROVIDER_APPROVAL_REF',
       'DELIVERY_PROVIDER_ALLOWLIST',
+      'DELIVERY_PROVIDER_MESSAGE_CAP',
+      'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
     ]);
   });
 

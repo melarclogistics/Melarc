@@ -1,4 +1,9 @@
-import { API_RUNTIME_ROLE, PROVISIONING_ROLE } from './technical-roles.js';
+import {
+  API_RUNTIME_ROLE,
+  PROVISIONING_ROLE,
+  WORKER_NOTIFICATION_ROLE,
+  WORKER_RUNTIME_ROLE,
+} from './technical-roles.js';
 
 /**
  * What a runtime login may not be or hold (SECURITY_DESIGN.md §14.6, "What the API's posture check inspects"), asked of
@@ -64,8 +69,8 @@ export type PostureFlag = (typeof POSTURE_FLAGS)[number];
  * change functions of the same migration are on no line: only the migration login, which is not a runtime identity, may execute them.
  * And the API runtime and two functions: the one of migration 0016 that reads a credential hash for the authentication capability, and
  * the one of migration 0027 that gives a staff read the second-factor facts of the identities its scope shows (and nothing else of the
- * factor, grant and delivery tables). The workers are on no line, so EXECUTE on any definer is a finding for them, and for the API
- * runtime on any other.
+ * factor, grant and delivery tables). The workers are on no line but one (the notification capability's, for the one operation that
+ * records a delivered code), so EXECUTE on any other definer is a finding for them, and for the API runtime on any other.
  */
 export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {
   [PROVISIONING_ROLE]: [
@@ -84,6 +89,9 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // The non-production rider fixture (migration 0040, S0.53; MIGRATION_AND_SEEDING.md section 4a): the only way that login reaches the
     // rider tables. Two or more ACTIVE riders of the reserved +999 range with no PIN and no device, refused while one exists.
     'melarc.add_rider_fixture',
+    // The launch hub's service zones and settings (migration 0042, S1.4; MIGRATION_AND_SEEDING.md section 4): once, refused while any
+    // of the three tables holds a row. The only way that login reaches them.
+    'melarc.seed_hub_configuration',
   ],
   // The one way to read the credential hash of a staff identity (migration 0016): the runtime has no SELECT on the column, and the
   // function refuses any context but a SYSTEM one under the authentication capability.
@@ -125,6 +133,46 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.rider_pin_hash',
     'melarc.rider_active_device',
     'melarc.rider_locked_facts',
+    // And the two narrow operations of the rider's count (migration 0068, S1.26; OB-S1-53): the direction of a handshake for a stop the rider has
+    // arrived at (`melarc.collection_handshake_type`: one word, never a row of the request) and the promotion of an individual sender by a count the
+    // rider recorded (`melarc.promote_collected_sender`: the one change, its event in the same change, and the sender's identifier). Each answers the
+    // key `pickup.collection.confirm` of a rider alone; the policies of the request, the sender and the promotion's event admit that key only to a
+    // statement that runs as the owner, which is a statement inside these two, so the rider's context reads no request and no sender, the login holds
+    // no right to update a sender, and no statement of the login writes the promotion's event.
+    'melarc.collection_handshake_type',
+    'melarc.promote_collected_sender',
+    // And the five operations of the collection handshake (migration 0070, S1.27): the code asked for by the rider that counted the stop
+    // (`melarc.handshake_issue`), a code entered by the vendor or by the rider (`melarc.handshake_verify`), the SMS fallback
+    // (`melarc.handshake_sms_fallback`), and the officer's override and manual resolution (`melarc.handshake_override`,
+    // `melarc.handshake_resolve`). Each answers the key of its own act and the kind of principal that holds it, takes the lock of the stop first, and
+    // writes the handshake, the close of the stop, the envelope for the notification lane and the events in one change; the policies of those tables
+    // admit the keys only to a statement that runs as the owner, which is a statement inside these functions, so the login can write none of them.
+    'melarc.handshake_issue',
+    'melarc.handshake_verify',
+    'melarc.handshake_sms_fallback',
+    'melarc.handshake_override',
+    'melarc.handshake_resolve',
+    // And the one operation of a vendor's dispute of a collection (migration 0071, S1.29): it raises the reconciliation item, sets the handshake `DISPUTED` and
+    // writes the event in one change, for the vendor whose pickup it is. The policies of the item, the handshake and the ledger admit the vendor's key only to a
+    // statement that runs as the owner, which is a statement inside this function.
+    'melarc.dispute_collection',
+    // And the one read of a hub's door wait for the rider's failure key (migration 0073): the stop's guard asks it when a vendor-unavailable failure is reported, and the
+    // application asks it to say when the report is allowed. It answers that key alone and reads the one setting; a hub that has none is a refusal, and no wait is invented.
+    'melarc.rider_door_wait_minutes',
+  ],
+  // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
+  // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification
+  // capability alone. The worker's login holds it only through this role, and the check asks both the role and the login that inherits it,
+  // so the line is on both.
+  // And the one that gives it the number a fallback code is texted to (migration 0073, F-23): the vendor credential's registered phone, for the request its envelope names
+  // and only while a fallback code is live for it. The lane reads neither the organisation nor the credential.
+  [WORKER_NOTIFICATION_ROLE]: [
+    'melarc.handshake_mark_delivered',
+    'melarc.notification_handshake_number',
+  ],
+  [WORKER_RUNTIME_ROLE]: [
+    'melarc.handshake_mark_delivered',
+    'melarc.notification_handshake_number',
   ],
 };
 
