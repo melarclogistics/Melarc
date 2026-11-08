@@ -588,10 +588,13 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     await user.click(within(dialog).getByRole('button', { name: 'Assign the rider' }));
 
     expect(await within(dialog).findAllByText(/cannot be given the manifest/)).not.toHaveLength(0);
-    expect(within(dialog).queryByText('Choose another rider')).toBeNull();
+    // The choice is set aside in a render of its own, after the refusal is told. The list coming back is what says it is gone, so that is
+    // waited for before the change button is looked for: a loaded runner read the dialog between the two renders, with the refusal shown and
+    // "Choose another rider" still there.
     expect(
       await within(dialog).findByRole('button', { name: 'Choose: Kwame Mensah' }),
     ).toBeVisible();
+    expect(within(dialog).queryByText('Choose another rider')).toBeNull();
   });
 
   it('dispatches on the version read, with no key and no body, and says the rider starts the run', async () => {
