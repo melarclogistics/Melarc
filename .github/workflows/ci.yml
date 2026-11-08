@@ -172,9 +172,10 @@ jobs:
             -c "select pg_reload_conf()"
 
       # Two test files at a time (MELARC_DB_WORKERS, default 3): the runner has four CPUs, which the server shares with the test processes. At three,
-      # a rare separate failure showed once in a test that waits on a lock (which has since been given longer deadlines of its own); two passed three
-      # runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin under
-      # its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
+      # a rare separate failure showed once in a test that waits on a lock; its cause was in that test, not in the number of workers (its poll read
+      # a pg_stat_activity snapshot, which PostgreSQL keeps for the whole transaction, and it now clears the snapshot before each read). Two passed
+      # three runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin
+      # under its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
       - name: Database tests
         env:
           MELARC_DB_WORKERS: '2'
