@@ -4,7 +4,7 @@ import { parseEnv } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
-import { apiEnvironment, PROTECTED_KEYS } from './api-environment.ts';
+import { apiEnvironment, PROTECTED_KEYS, runKeys } from './api-environment.ts';
 
 const RUNTIME_URL =
   'postgres://melarc_api_runtime:runtime-secret@127.0.0.1:5432/melarc_test_0a1b2c3d';
@@ -70,6 +70,34 @@ describe('apiEnvironment', () => {
     expect(keys(environment)).toHaveLength(5);
     for (const value of keys(environment)) expect(value).toMatch(/^1:[A-Za-z0-9_-]{43}$/);
     expect(new Set([...keys(environment), ...keys(again)]).size).toBe(10);
+  });
+
+  // Break caught (S0.45): the API judging a real browser's `Origin` against a placeholder, so that every sign-in of a journey is refused
+  // `CSRF_VALIDATION_FAILED`. The Ops origin of the run is the one the API is given.
+  it('is given the origin the browser really sends', () => {
+    const served = apiEnvironment({
+      port: 1,
+      runtimeUrl: RUNTIME_URL,
+      captureFile: '/tmp/capture.jsonl',
+      opsOrigin: 'http://127.0.0.1:5199',
+    });
+
+    expect(served.OPS_ORIGIN).toBe('http://127.0.0.1:5199');
+  });
+
+  // Break caught (S0.45): the API and the delivery worker holding different keys for the same purpose, so that the worker could not
+  // open the message the API sealed for it and no link would ever be captured.
+  it('uses the key material it is given, so that the worker can hold the same delivery key', () => {
+    const keys = runKeys();
+    const first = apiEnvironment({
+      port: 1,
+      runtimeUrl: RUNTIME_URL,
+      captureFile: '/tmp/capture.jsonl',
+      keys,
+    });
+
+    for (const [name, value] of Object.entries(keys)) expect(first[name], name).toBe(value);
+    expect(keys.KEY_CREDENTIAL_DELIVERY_MATERIAL).toMatch(/^1:[A-Za-z0-9_-]{43}$/);
   });
 
   // Break caught: the migration credentials reaching the API. It refuses to start with the variable present,

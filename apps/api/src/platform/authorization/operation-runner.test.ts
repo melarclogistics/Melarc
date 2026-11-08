@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { StoredSession } from '../auth/ports/session-store.port.js';
 import type { TransactionHandle, UnitOfWork } from '../auth/ports/unit-of-work.port.js';
 import type { PolicyCoordinator } from '../database/policy-lock/coordinate.js';
+import { bundleLock, fixedLock } from '../database/policy-lock/plan.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import type { AuthorizedRequest } from './authorized-request.js';
 import type { OperationContexts } from './operation-contexts.js';
@@ -110,6 +111,75 @@ describe('OperationRunner.read', () => {
     expect(failure).toBeInstanceOf(TypeError);
     expect((failure as Error).message).toMatch(/runs through OperationRunner\.mutate/);
     expect(events).toEqual([]);
+  });
+});
+
+describe('OperationRunner.actAsAuthentication (S0.49)', () => {
+  const AUTHENTICATION = {
+    principalType: 'SYSTEM',
+    principalId: '61757468-0000-4000-8000-000000000001',
+    surface: 'SYSTEM',
+    taskCapability: 'authentication',
+    correlationId: 'correlation',
+  } as SecurityContext;
+  const vendor = (): AuthorizedRequest => ({
+    ...authorized(true),
+    session: {
+      ...SESSION,
+      principalType: 'VENDOR',
+      authority: { bundleId: '44444444-4444-4444-8444-444444444444' },
+    } as unknown as StoredSession,
+  });
+
+  function recording() {
+    const seen: { context?: SecurityContext; plan?: unknown } = {};
+    const coordinator = {
+      run: (context: SecurityContext, steps: { plan: () => unknown }) => {
+        seen.context = context;
+        seen.plan = steps.plan();
+        return Promise.resolve('acted');
+      },
+    } as unknown as Pick<PolicyCoordinator, 'run'>;
+    const contexts = {
+      of: () => Promise.reject(new Error('no session context is built')),
+    } as unknown as OperationContexts;
+    const unitOfWork: Pick<UnitOfWork, 'run'> = {
+      run: () => Promise.reject(new Error('not used')),
+    };
+    return { seen, subject: new OperationRunner({ coordinator, unitOfWork, contexts }) };
+  }
+
+  // Break caught: a vendor's own credential act run with none of its session's policy locks, or in the session's own context, where row-level
+  // security gives a vendor no write on the grant, the message or the browser (data-scope-registry.md: Vendor DENY).
+  it('takes the session’s shared policy locks and runs the work under the authentication capability it is given', async () => {
+    const { seen, subject } = recording();
+
+    expect(
+      await subject.actAsAuthentication(vendor(), AUTHENTICATION, () => Promise.resolve('x')),
+    ).toBe('acted');
+
+    expect(seen.context).toBe(AUTHENTICATION);
+    expect(seen.plan).toEqual([
+      bundleLock('44444444-4444-4444-8444-444444444444', 'shared'),
+      fixedLock('VENDOR', 'shared'),
+    ]);
+  });
+
+  // Break caught: the path used to widen any context: another capability, a principal's own context, or a staff session.
+  it('refuses a context that is not the authentication capability, and a session that is not a vendor’s', async () => {
+    const { seen, subject } = recording();
+    for (const context of [
+      { ...AUTHENTICATION, taskCapability: 'credential_delivery' },
+      { ...AUTHENTICATION, principalType: 'VENDOR' },
+    ] as SecurityContext[]) {
+      await expect(
+        subject.actAsAuthentication(vendor(), context, () => Promise.resolve('x')),
+      ).rejects.toBeInstanceOf(TypeError);
+    }
+    await expect(
+      subject.actAsAuthentication(authorized(true), AUTHENTICATION, () => Promise.resolve('x')),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(seen).toEqual({});
   });
 });
 

@@ -45,6 +45,9 @@ GoogleService-Info.plist
 # PostgreSQL password files
 .pgpass
 pgpass.conf
+# The custody bundle of the bootstrap seed (apps/api/src/tools/bootstrap): a setup secret in clear. The commands write it outside the
+# checkout; a copy that lands in the tree is never committed (scripts/package-source.ts refuses it by name as well).
+melarc-bootstrap-*.bundle
 
 # Local databases and runtime data
 *.sqlite
@@ -76,3 +79,7 @@ graphify-out/
 *.tar
 *.tar.gz
 *.7z
+
+# Gradle, the attestation verifier (apps/attestation-verifier): the daemon's and the Kotlin compiler's local state. Its build output is build/ above.
+.gradle/
+.kotlin/

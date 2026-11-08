@@ -7,12 +7,13 @@ The specifications and engineering foundation of the Melarc logistics platform: 
 1. [Development Execution Plan](delivery/DEVELOPMENT_EXECUTION_PLAN.md): how work is done, the technical direction and the bootstrap roadmap. Read all of it before any task.
 2. [Bootstrap B0 Runbook](delivery/planning/BOOTSTRAP_B0_RUNBOOK.md): the selected bootstrap task. Its "Carried forward" notes say what each finished task did not do.
 3. Product work starts only once bootstrap is accepted ([runbook §5](delivery/planning/BOOTSTRAP_B0_RUNBOOK.md#5-product-development-handoff)): [Implementation Plan](delivery/IMPLEMENTATION_PLAN.md), then the slice it names ([delivery/slices/](delivery/slices/SLICE-000.md); the first is `SLICE-000`, whose owner decisions of 8 October 2026 are in [SLICE-000-FINAL-DECISIONS.md](delivery/planning/SLICE-000-FINAL-DECISIONS.md) and whose ordered tasks are in [SLICE-000-IMPLEMENTATION-PLAN.md](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md)).
-4. Resuming SLICE-000 work: read the plan's [current position](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#12-current-position) first. It says what is done, what evidence is still owed and which task awaits authorization; the plan's [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps) is how to test.
+4. Resuming SLICE-000 work: read the plan's [current position](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#12-current-position) first. It says what is done, what evidence is still owed and which task awaits authorization. How to test is [the development loop](DEVELOPMENT.md#the-development-loop-and-the-gate), with the plan's [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps).
 5. Running the code: [Developer setup](DEVELOPMENT.md).
 
 ## Working rules
 
 - Execute only the bounded task requested. State the affected files and the smallest meaningful validation; report actual commands, results and blockers. Fix failures before dependent work continues.
+- Run checks in the loop of [DEVELOPMENT.md](DEVELOPMENT.md#the-development-loop-and-the-gate): `pnpm run test:affected` (the tests a change can reach) while editing; `pnpm run precheck` (the cheap checks of CI, in parallel, cached) after any contract, schema, migration or document change; derived files such as the API client regenerated last; before handing a task over, `pnpm run precheck` and then `pnpm run test:affected` once on the final state, reported with what it chose, what passed and what it left owed. `pnpm run gate` is the owner's full run: start it only when the owner asks for it in the task, with `--asked`, then once, in the background, on a tree nobody edits (a change to the tree voids it), read with `pnpm run gate:status` and reported as it ended. CI is the parallel full run: push for it only when the owner authorizes.
 - Read only the relevant master sections, owning contracts, feature criteria, surfaces and architecture (map below). Each fact has one owning document: link to it, do not restate it.
 - Current retained specifications define the requirements. Historical identifiers (`MSC-DEC-…`, `OQ-…`) are provenance only; the current rule or unresolved input is stated locally. Do not rebuild old governance machinery.
 - If sources conflict or a necessary product value is unset, surface the specific issue before implementing the affected behavior. Continue independent work; never invent defaults or product approval.
@@ -45,6 +46,7 @@ The specifications and engineering foundation of the Melarc logistics platform: 
 | Ops Portal code | [apps/ops-web/](apps/ops-web/CLAUDE.md) |
 | Generated API client | [packages/api-client/](packages/api-client/CLAUDE.md) |
 | Browser, API and database tests | [e2e/](e2e/CLAUDE.md) |
+| Rider device attestation verifier (JVM service) | [apps/attestation-verifier/](apps/attestation-verifier/CLAUDE.md) |
 | Root tooling, CI scripts, documentation checks | [scripts/](scripts/CLAUDE.md); CI is [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 
 The master specification names files that are not in this repository (`00_SPECIFICATION_CHARTER.md`, `DRAFT_PERMISSIONS_CATALOG_V0.1.md`); do not look for or recreate them. `DOMAIN_MODEL.md` is now [contracts/domain-model.md](contracts/domain-model.md).
@@ -63,10 +65,11 @@ pnpm --filter @melarc/api run db:check
 pnpm run test:db
 pnpm run test:browser
 pnpm run test:e2e
+pnpm run verifier:test
 pnpm audit --audit-level high
 ```
 
-These are the checks of CI ([ci.yml](.github/workflows/ci.yml)). `test:db` and `test:e2e` need the local database; `test:browser` and `test:e2e` need Chromium; `contract:check` needs a build. Setup, ports and reset are in [DEVELOPMENT.md](DEVELOPMENT.md).
+These are the checks of CI ([ci.yml](.github/workflows/ci.yml)). `test:db` and `test:e2e` need the local database; `test:browser` and `test:e2e` need Chromium; `verifier:test` and two tests of `test:db` (the attested rider enrolment and the alert rehearsal) need a JDK 21 (`JAVA_HOME`); `contract:check` needs a build. `pnpm run precheck` runs the cheap ones and the dependency audit in parallel, `pnpm run test:affected` the tests a change can reach, and `pnpm run gate` all of them once, in the order of the loop in Working rules. Setup, ports and reset are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Never
 
@@ -77,3 +80,6 @@ These are the checks of CI ([ci.yml](.github/workflows/ci.yml)). `test:db` and `
 - Add a success stub for an unimplemented operation, or fabricate data or sign-in to make a screen look finished.
 - Replace opaque sessions with JWTs, merge browser and Rider authentication, or add a broker, Redis, worker or provider that no retained requirement needs ([plan §6 and §12](delivery/DEVELOPMENT_EXECUTION_PLAN.md#6-security-and-behavior-rules)).
 - Depend on the git-ignored `tmp/` folder or any other machine-local state.
+- Wrap a gate or another long run in `timeout`, edit the tree or start another heavy command while a gate runs, or call a gate green from reruns of its failed parts (stop one with `pnpm run gate:stop`).
+- Start `pnpm run gate` or a whole suite unasked, or report an affected run as a gate: the gate is the owner's run (27 October 2026).
+- Set `VITEST_MAX_WORKERS`: Vitest applies it to every project, so the API's one-at-a-time tests would run side by side. `MELARC_TEST_WORKERS` bounds the workers.

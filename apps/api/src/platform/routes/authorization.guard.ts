@@ -16,7 +16,7 @@ import { OPERATION_CONTEXTS } from '../authorization/authorization-providers.js'
 import type { OperationContexts } from '../authorization/operation-contexts.js';
 import { RECORD_SCOPE_RESOLVER } from '../authorization/authorization-providers.js';
 import type { RecordScopeResolver } from '../authorization/record-scope.js';
-import { requireTier } from '../authorization/tier-policy.js';
+import { queryTierRequirement, requireTier } from '../authorization/tier-policy.js';
 import { SURFACE_OF_PRINCIPAL } from '../database/transaction-context.js';
 import { authenticatedSessionOf } from '../auth/sessions/request-session.js';
 import { ApiException } from '../http/api-exception.js';
@@ -39,7 +39,9 @@ const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
  *    bundle (a reduction ends the session; an addition applies to later ones). `403 PERMISSION_DENIED`, the same answer as the
  *    surface gate: passing either never implies the other, and neither says which failed.
  * 6. **The tier** (`tier-policy.ts`), which the route declares (`tier`) and this guard decides, so that it comes before the scope and the
- *    validation: the least tier the grant must carry whatever the target is, before anything is looked up; and a requirement derived
+ *    validation: the least tier the grant must carry whatever the target is, before anything is looked up; the tier a discriminator
+ *    in the query asks (`byQuery`: `listSessions` by the type of principal), read as it arrived and never granting anything when it
+ *    is missing, repeated or not one of the declared values; and a requirement derived
  *    from the target's authoritative record, asked of the route's rule once the record is found visible (never from the request, and
  *    never for a record the caller may not see, who is answered by step 7 and learns nothing of what the record needs). The
  *    operation's transaction judges the rule again on the record it holds (`OperationRunner.requireTargetTier`).
@@ -97,6 +99,10 @@ export class AuthorizationGuard implements CanActivate {
     // 6. The least tier the operation needs of the grant, whatever the target: before anything is looked up.
     const tier = options.tier;
     if (grant !== undefined && tier?.minimum !== undefined) requireTier(grant.tier, tier.minimum);
+    // ... and the one a discriminator in the query asks, read as it arrived, before the request is validated (F03 of 23 October 2026).
+    if (grant !== undefined && tier?.byQuery !== undefined) {
+      requireTier(grant.tier, queryTierRequirement(tier.byQuery, request.query));
+    }
 
     // 7. The scope of this grant, and the record the route names if it names one (and, once it is found, the tier it needs).
     const scope = effectiveScope(grant, session.authority.authorizedHubIds);

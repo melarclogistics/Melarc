@@ -180,11 +180,39 @@ describe('what it runs', () => {
     expect(plans).toEqual([['reason_code (fixtures)']]);
   });
 
+  // Break caught (S0.47): the demonstration vendor written in production. MIGRATION_AND_SEEDING.md section 4b: Local and Staging only.
+  it('refuses --vendor-fixture in production before it connects', async () => {
+    const { run, opened, plans } = build();
+    await expect(
+      run(['--vendor-fixture'], { DATABASE_SEED_URL: URL, APP_ENV: 'production' }),
+    ).rejects.toBeInstanceOf(FixturesRefusedError);
+    expect(opened).toEqual([]);
+    expect(plans).toEqual([]);
+  });
+
+  it.each(['local', 'staging'])(
+    'runs only the vendor fixture with --vendor-fixture in %s',
+    async (appEnv) => {
+      const { run, plans, lines } = build();
+      await run(['--vendor-fixture'], { DATABASE_SEED_URL: URL, APP_ENV: appEnv });
+      expect(plans).toEqual([
+        [
+          'vendor_organization (fixture)',
+          'vendor_account (fixture)',
+          'vendor_credential (fixture)',
+        ],
+      ]);
+      expect(lines).toContain('seeded vendor_account (fixture): 1 row');
+    },
+  );
+
   it('refuses an argument it does not know, before it connects', async () => {
     for (const argv of [
       ['--fixture'],
       ['fixtures'],
       ['--fixtures', '--reference'],
+      ['--fixtures', '--vendor-fixture'],
+      ['--vendor-fixtures'],
       ['melarc_dev'],
     ]) {
       const { run, opened } = build();

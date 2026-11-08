@@ -1,12 +1,14 @@
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
 import type { DeliveryProvider } from './platform/auth/ports/delivery-provider.port.js';
 import { CAPTURE_CALL_TIMEOUT_MS } from './platform/delivery/delivery-parameters.js';
+import { UNBUILT_REDEMPTION_READER } from './platform/delivery/worker/redemption-record-reader.js';
 import {
   CaptureDirectoryInsideCheckoutError,
   CaptureDirectoryNotPrivateError,
@@ -397,13 +399,23 @@ describe('the delivery worker’s runtime (S0.18)', () => {
       retentionIntervalMs: 100,
     });
 
+    const periodicFailures = (): Record<string, unknown>[] =>
+      lines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((line) => line.msg === 'delivery periodic task failed');
+
     runtime.start();
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    // Wait for the second failure to be logged and not for a time to pass: a run is a refused connection, whose duration is the
+    // machine's (in the full run of 21 October 2026 that took 339 seconds, one failure had been logged after the 450 ms this test
+    // used to sleep, and two were expected). The bound is only for a worker that does not run it again, and it separates the interval
+    // that was given (100 ms) from the default (60 s): a worker that ignored it would log no second failure within the bound.
+    const deadline = Date.now() + 10_000;
+    while (periodicFailures().length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     const outcome = await runtime.shutdown();
 
-    const failed = lines
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter((line) => line.msg === 'delivery periodic task failed');
+    const failed = periodicFailures();
     expect(failed.length).toBeGreaterThanOrEqual(2);
     expect(failed[0]).toMatchObject({ task: 'retention', level: 'error' });
     expect(Object.keys(failed[0] ?? {})).not.toContain('err');
@@ -413,13 +425,15 @@ describe('the delivery worker’s runtime (S0.18)', () => {
 
   // Break caught: a worker that starts without saying that it cannot yet confirm any record (it claims nothing, and an operator who
   // sees messages queue up must be able to find out why), or whose log names a password; or (G2-03) one that claims anyway: every
-  // claim it made would be given back, and each would be an attempt counted against a message it could not send.
+  // claim it made would be given back, and each would be an attempt counted against a message it could not send. Since S0.29 this is
+  // the worker given the reader that confirms nothing; as composed it reads setup grants (the test after the next).
   it('says at start that no record can be confirmed yet, claims nothing, and logs no credential', async () => {
     const lines: string[] = [];
     const runtime = createDeliveryWorkerRuntime(
       configFor({ DELIVERY_WORKER_POLL_INTERVAL_MS: '100' }),
       {
         destination: { write: (line: string) => void lines.push(line) },
+        redemptionReader: UNBUILT_REDEMPTION_READER,
       },
     );
 
@@ -437,6 +451,29 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     expect(text).toContain('delivery worker stopped');
     expect(text).not.toContain('SENTINEL-DB-PASSWORD');
     expect(text).toContain('melarc-delivery-worker');
+  });
+
+  // Break caught (S0.29, OB-119; S0.69): the worker as composed still unable to confirm a setup grant, so that no message is ever sent;
+  // or telling an operator that a kind of record it does read (a recovery request's, since S0.50) is not built, which sends them looking
+  // for a fault in mail that is going out. The database in this test is not reachable, so a worker that claims says so ("delivery claim
+  // failed").
+  it('as composed reads setup grants and recovery requests, claims, and says no reader is missing', async () => {
+    const lines: string[] = [];
+    const runtime = createDeliveryWorkerRuntime(
+      configFor({ DELIVERY_WORKER_POLL_INTERVAL_MS: '100' }),
+      { destination: { write: (line: string) => void lines.push(line) } },
+    );
+
+    runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const outcome = await runtime.shutdown();
+
+    const text = lines.join('');
+    expect(outcome).toBe('clean');
+    expect(text).toContain('delivery claim failed');
+    expect(text).not.toContain('redemption record readers are not built');
+    expect(text).not.toContain('not built yet');
+    expect(text).not.toContain('SENTINEL-DB-PASSWORD');
   });
 
   // Break caught (G2-03): the other half of the one above, so that the first cannot pass because nothing ever claims: with a reader
@@ -475,5 +512,65 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     expect(first).toBe('clean');
     expect(second).toBe('clean');
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+/** A port that nothing listens on now: one is asked for and given back. */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address() as { port: number };
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+const scrape = (port: number): Promise<Response> =>
+  fetch(`http://127.0.0.1:${String(port)}/metrics`, { signal: AbortSignal.timeout(5_000) });
+
+describe('the delivery worker’s private metrics endpoint (S0.68)', () => {
+  // Break caught: an endpoint composed with no gauge, which would serve a backlog of nothing as healthy: with the database away the age of
+  // the oldest due message cannot be read, so a scrape must say so (503) and not answer 200 with the counters alone.
+  it('serves the port it was given, reads the backlog gauge at each scrape, and is closed by the shutdown', async () => {
+    const port = await freePort();
+    const runtime = createDeliveryWorkerRuntime(
+      configFor({ DELIVERY_WORKER_METRICS_PORT: String(port) }),
+      { destination: { write: () => undefined } },
+    );
+    await runtime.startMetrics();
+
+    expect((await scrape(port)).status).toBe(503);
+    expect(await runtime.shutdown()).toBe('clean');
+    await expect(scrape(port)).rejects.toThrow();
+  });
+
+  it('opens no port when none is configured', async () => {
+    const runtime = createDeliveryWorkerRuntime(configFor(), {
+      destination: { write: () => undefined },
+    });
+
+    await runtime.startMetrics();
+
+    expect(await runtime.shutdown()).toBe('clean');
+  });
+
+  // Break caught: a shutdown that began while the endpoint was opening, after which the endpoint registers on a registry that has already
+  // been emptied and is never closed (a process that does not end after a clean shutdown), and a worker that begins its lanes after it
+  // was told to stop.
+  it('closes an endpoint that opened while the worker was being told to stop, and begins no lane after it', async () => {
+    const port = await freePort();
+    const runtime = createDeliveryWorkerRuntime(
+      configFor({ DELIVERY_WORKER_METRICS_PORT: String(port) }),
+      { destination: { write: () => undefined } },
+    );
+    const lanes = vi.spyOn(runtime.worker, 'start');
+
+    const opening = runtime.startMetrics();
+    const stopping = runtime.shutdown();
+    await opening;
+    runtime.start();
+    await stopping;
+
+    expect(lanes).not.toHaveBeenCalled();
+    await expect(scrape(port)).rejects.toThrow();
   });
 });

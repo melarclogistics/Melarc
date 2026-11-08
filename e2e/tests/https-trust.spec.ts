@@ -36,7 +36,12 @@ test.describe('the trusted HTTPS origin, in each engine', () => {
     const response = await page.goto('/');
 
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    // The shell is up: its banner shows the logo. (The page itself is the guarded landing, which asks the API who is signed
+    // in and, with nobody, goes to the sign-in screen (S0.43); only that it loaded over TLS is this test's subject.)
+    await expect(
+      page.getByRole('banner').getByRole('img', { name: 'Melarc Logistics' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     expect(
       await page.evaluate(() => ({ secure: window.isSecureContext, protocol: location.protocol })),
     ).toEqual({ secure: true, protocol: 'https:' });

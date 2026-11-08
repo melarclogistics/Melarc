@@ -1,6 +1,10 @@
 import { sql } from 'drizzle-orm';
 
-import type { TransactionHandle, UnitOfWork } from '../auth/ports/unit-of-work.port.js';
+import type {
+  TransactionHandle,
+  UnitOfWork,
+  UnitOfWorkOptions,
+} from '../auth/ports/unit-of-work.port.js';
 import type { DatabaseService } from './database.service.js';
 import { timestampOf } from './timestamps.js';
 import type { SecurityContext } from './transaction-context.js';
@@ -31,8 +35,13 @@ export class PostgresUnitOfWork implements UnitOfWork {
   run<T>(
     context: SecurityContext,
     work: (transaction: TransactionHandle) => Promise<T>,
+    options: UnitOfWorkOptions = {},
   ): Promise<T> {
-    return this.#database.transactionWithContext(context, (tx) => work(bindTransactionHandle(tx)));
+    return this.#database.transactionWithContext(
+      context,
+      (tx) => work(bindTransactionHandle(tx)),
+      options,
+    );
   }
 
   async databaseNow(transaction: TransactionHandle): Promise<Date> {

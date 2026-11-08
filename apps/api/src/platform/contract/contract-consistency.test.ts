@@ -1002,11 +1002,11 @@ describe('(f) the number of operations: each way to break it is found', () => {
     });
 
     expect(operationCountProblems(removed, PERFORMANCE, [])).toEqual([
-      'The contract has 171 operations and the catalogue states 172',
+      'The contract has 175 operations and the catalogue states 176',
       'listPickupRequests is classified in the catalogue and the contract has no such operation',
     ]);
     expect(operationCountProblems(added, PERFORMANCE, [])).toEqual([
-      'The contract has 173 operations and the catalogue states 172',
+      'The contract has 177 operations and the catalogue states 176',
       'listGhosts is in the contract and in no class of the catalogue',
     ]);
   });
@@ -1034,25 +1034,25 @@ describe('(f) the number of operations: each way to break it is found', () => {
     expect(dropped).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, dropped, [])).toEqual([
       'listPickupRequests is in the contract and in no class of the catalogue',
-      'The catalogue states 63 NORMAL operations and lists 62',
+      'The catalogue states 65 NORMAL operations and lists 64',
     ]);
     expect(operationCountProblems(CONTRACT, twice, [])).toEqual([
       'listPickupRequests is classified 2 times in the catalogue',
-      'The catalogue states 63 NORMAL operations and lists 64',
+      'The catalogue states 65 NORMAL operations and lists 66',
     ]);
     expect(moved).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, moved, [])).toEqual([
-      'The catalogue states 109 CRITICAL_WRITE operations and lists 110',
-      'The catalogue states 63 NORMAL operations and lists 62',
+      'The catalogue states 111 CRITICAL_WRITE operations and lists 112',
+      'The catalogue states 65 NORMAL operations and lists 64',
     ]);
   });
 
   it('finds the stated figure changed', () => {
-    const edited = PERFORMANCE.replace('**172 operations:', '**173 operations:');
+    const edited = PERFORMANCE.replace('**176 operations:', '**177 operations:');
 
     expect(edited).not.toBe(PERFORMANCE);
     expect(operationCountProblems(CONTRACT, edited, [])).toEqual([
-      'The contract has 172 operations and the catalogue states 173',
+      'The contract has 176 operations and the catalogue states 177',
     ]);
   });
 

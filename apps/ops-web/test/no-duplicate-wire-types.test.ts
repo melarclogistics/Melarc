@@ -117,11 +117,20 @@ describe('Ops and the contract', () => {
       .filter((source) => moduleSpecifiers(source.text, source.path).includes(`${PACKAGE}/browser`))
       .map((source) => source.path);
 
-    // The provider makes the client; the query client reads the errors it raises (ApiError, BrowserTransportError)
-    // to decide what to retry and when a session has ended. A third user is a decision, so it is named here.
+    // The provider makes the client; the query client reads the errors it raises (BrowserTransportError) to decide what
+    // to retry. The response reader (S0.38) keeps what `unwrap` drops (the status, the ETag, the declared details), the
+    // key slot tells an unknown outcome from a decided one by the same errors, and the session read is the first call
+    // that uses the client. The session boundary (U03) scopes the client and reads the response of every call to tell the
+    // end of a session from any other failure. The problem copy (S0.40) reads an `ApiError` to word a failure: it is the one place that
+    // turns a code into a sentence. Another user is a decision, so each is named here.
     expect(users).toEqual([
       'src/platform/api/api-client.tsx',
+      'src/platform/api/api-response.ts',
+      'src/platform/api/idempotency.ts',
+      'src/platform/problem/problem-copy.ts',
       'src/platform/query/query-client.ts',
+      'src/platform/session/read-session.ts',
+      'src/platform/session/session-boundary.ts',
     ]);
   });
 });

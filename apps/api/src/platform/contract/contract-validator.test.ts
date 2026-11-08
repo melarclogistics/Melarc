@@ -1314,6 +1314,136 @@ describe('the lifetime of the cookies a response sets', () => {
   });
 });
 
+/**
+ * The cookies a response may also set (`x-set-cookies-optional`; the trusted browser of staff-authentication.md section 5.8): one that
+ * is set must carry what `x-cookies` promises and none is owed. A cookie defined with `expirable: true` may also be sent with an expiry
+ * (`Max-Age=0`) in place of its lifetime, to remove it.
+ */
+describe('the cookies a response may also set', () => {
+  const SESSION = 'melarc_session=S; Path=/; HttpOnly; Secure; SameSite=Lax';
+  const TRUSTED =
+    'melarc_trusted_browser=T; Max-Age=604800; Path=/api/v1/auth/staff; HttpOnly; Secure; SameSite=Lax';
+  const REMOVED =
+    'melarc_trusted_browser=; Max-Age=0; Path=/api/v1/auth/staff; HttpOnly; Secure; SameSite=Lax';
+  const json = (schema: JsonObject): JsonObject => ({ 'application/json': { schema } });
+  const xCookies = (expirable: boolean): JsonObject => ({
+    melarc_session: {
+      attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/',
+      browser_session: true,
+      host_only: true,
+      read_by_javascript: false,
+    },
+    melarc_trusted_browser: {
+      attributes: 'HttpOnly; Secure; SameSite=Lax; Path=/api/v1/auth/staff; Max-Age=604800',
+      host_only: true,
+      read_by_javascript: false,
+      ...(expirable ? { expirable: true } : {}),
+    },
+  });
+  const validatorOf = (
+    expirable: boolean,
+    response: JsonObject = {
+      'x-set-cookies': ['melarc_session'],
+      'x-set-cookies-optional': ['melarc_trusted_browser'],
+    },
+  ) =>
+    new ContractValidator({
+      openapi: '3.1.0',
+      'x-cookies': xCookies(expirable),
+      paths: {
+        '/sign-in': {
+          post: {
+            operationId: 'signIn',
+            responses: {
+              '200': {
+                description: 'Signed in',
+                headers: { 'Set-Cookie': { schema: { type: 'string' } } },
+                content: json({ type: 'object' }),
+                ...response,
+              },
+            },
+          },
+        },
+      },
+    });
+  const cookiesOf = (validator: ContractValidator, setCookie: string[]) =>
+    validator
+      .validateResponse(
+        'signIn',
+        response({ status: 200, body: {}, headers: { 'set-cookie': setCookie } }),
+      )
+      .filter((violation) => violation.in === 'response-cookie');
+
+  // Break caught: an optional cookie being required, so that a sign-in that was not asked to remember the browser fails, or being
+  // forbidden, so that one that was asked is refused as an undeclared cookie.
+  it('owes the optional cookie to nobody, and accepts it when it is set as declared', () => {
+    const validator = validatorOf(true);
+
+    expect(cookiesOf(validator, [SESSION])).toEqual([]);
+    expect(cookiesOf(validator, [SESSION, TRUSTED])).toEqual([]);
+  });
+
+  // Break caught: an optional cookie set with weaker attributes than `x-cookies` states, which "optional" must not excuse.
+  it.each([
+    ['without HttpOnly', TRUSTED.replace('HttpOnly; ', ''), 'httponly'],
+    ['without Secure', TRUSTED.replace('Secure; ', ''), 'secure'],
+    ['on another path', TRUSTED.replace('/api/v1/auth/staff', '/'), 'path'],
+    ['with another lifetime', TRUSTED.replace('604800', '86400'), 'max-age'],
+    ['without a lifetime', TRUSTED.replace('Max-Age=604800; ', ''), 'max-age'],
+    ['shared with subdomains', `${TRUSTED}; Domain=melarc.example`, 'domain'],
+  ])('reports the optional cookie %s', (_label, line, rule) => {
+    expect(cookiesOf(validatorOf(true), [SESSION, line])).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_trusted_browser', rule },
+    ]);
+  });
+
+  // Break caught: the optional list excusing a cookie it does not name.
+  it('still reports a cookie that is neither declared nor optional', () => {
+    expect(cookiesOf(validatorOf(true), [SESSION, 'tracker=1; Path=/'])).toEqual([
+      { in: 'response-cookie', pointer: '*', rule: 'undeclared' },
+    ]);
+    const without = validatorOf(true, { 'x-set-cookies': ['melarc_session'] });
+    expect(cookiesOf(without, [SESSION, TRUSTED])).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_trusted_browser', rule: 'undeclared' },
+    ]);
+  });
+
+  // Break caught: a persistent cookie that cannot be removed, so that removing the browser asking leaves its credential in the browser;
+  // and a cookie that was not defined as removable being removed, or removed with a lifetime that is neither.
+  it('accepts an expiry for a cookie defined as expirable and for no other', () => {
+    expect(cookiesOf(validatorOf(true), [SESSION, REMOVED])).toEqual([]);
+    expect(cookiesOf(validatorOf(false), [SESSION, REMOVED])).toEqual([
+      { in: 'response-cookie', pointer: 'melarc_trusted_browser', rule: 'max-age' },
+    ]);
+    expect(
+      cookiesOf(validatorOf(true), [SESSION, REMOVED.replace('Max-Age=0', 'Max-Age=3600')]),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_trusted_browser', rule: 'max-age' }]);
+  });
+
+  // Break caught: an expiry that excuses the other attributes, so that a removal on the wrong path would leave the credential where it was.
+  it('holds an expiry to the other attributes of the cookie', () => {
+    expect(
+      cookiesOf(validatorOf(true), [SESSION, REMOVED.replace('/api/v1/auth/staff', '/')]),
+    ).toEqual([{ in: 'response-cookie', pointer: 'melarc_trusted_browser', rule: 'path' }]);
+  });
+
+  // Break caught: a contract that contradicts itself being read as it was meant.
+  it('refuses a contract that lists a cookie as both owed and optional, or optional and undefined', () => {
+    expect(() => {
+      validatorOf(true, {
+        'x-set-cookies': ['melarc_trusted_browser'],
+        'x-set-cookies-optional': ['melarc_trusted_browser'],
+      }).prepare('signIn');
+    }).toThrow(/both/);
+    expect(() => {
+      validatorOf(true, { 'x-set-cookies-optional': ['ghost'] }).prepare('signIn');
+    }).toThrow(/ghost/);
+    expect(() => {
+      validatorOf(true, { 'x-set-cookies-optional': 'melarc_trusted_browser' }).prepare('signIn');
+    }).toThrow(/x-set-cookies-optional/);
+  });
+});
+
 describe('a cookie a request must carry', () => {
   const validator = new ContractValidator({
     openapi: '3.1.0',

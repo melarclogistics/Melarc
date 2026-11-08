@@ -65,7 +65,7 @@ This is a feature rather than a contract section because **enforcement has behav
 9. **Idempotency.** A replay of a command that already succeeded returns its original answer; the same key with a different payload is `IDEMPOTENCY_KEY_CONFLICT`. **One exception, time-limited:** the sealed replay of `registerRiderDevice` ends with its grant, after which a replay is `STATE_CONFLICT` and discloses no secret ([SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.16).
 10. **Version check.** `If-Match` against the record's current version: `STATE_CONFLICT`.
 11. **State precondition.** Does the §36 machine permit this transition from the record's current state?
-12. **Maker-checker.** For maker-checker actions, is the actor distinct from the maker (§37.4): `SELF_APPROVAL_FORBIDDEN`.
+12. **Maker-checker.** For maker-checker actions, is the actor distinct from the maker (§37.4), unless the acting grant is at tier P, a Platform Admin ([permissions.md](../../contracts/permissions.md) §6): `SELF_APPROVAL_FORBIDDEN`.
 
 **Why this order.** A caller who may not use an operation learns nothing about its schema, because validation (8) follows permission, tier and scope (5 to 7). And a replay of a command that already succeeded returns its original answer and not a state conflict (with the one time-limited exception of step 9), because idempotency (9) is decided before the version (10) and the state (11) that the first success changed. **For a Vendor's own records scope still comes before version** (`AC-SLICE-000-101`): step 7 precedes step 10.
 
@@ -89,7 +89,7 @@ This is a feature rather than a contract section because **enforcement has behav
 | No such record| `NOT_FOUND`| Nothing beyond that|
 | A **Vendor** asks for another vendor's record, or a **Rider** looks up a record that is not theirs| `NOT_FOUND`, **identical**| Nothing: the same status, code, body shape and timing class as for a record that does not exist (§43.2, §19.2)|
 | Held, in scope, but state forbids it| The transition's own code| The state reason. This is operational information, not a secret|
-| Maker equals checker| `SELF_APPROVAL_FORBIDDEN`| That a different approver is required|
+| Maker equals checker, and the acting grant is below tier P| `SELF_APPROVAL_FORBIDDEN`| That a different approver is required|
 
 **`MFA_REQUIRED` never appears here.** Since `MSC-DEC-228` made the second factor a sign-in gate, a session that exists is already privileged to whatever its bundle allows — there is no unelevated privileged session to refuse. An authorization layer returning `MFA_REQUIRED` has confused authentication with authorization.
 

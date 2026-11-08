@@ -1,0 +1,84 @@
+/*
+ * IconButton (design/COMPONENT_PATTERNS.md section 22): a native button drawn with one icon. At least the small control height square, so
+ * the target is above the 24px of WCAG 2.2 and grows with enlarged text. `bare` sits on a light surface, `inverse` on Ink (the
+ * authenticated shell), where it uses the inverse focus recipe because the default ring is only 2.64:1 on Ink.
+ */
+.ui-icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-height-sm);
+  min-height: var(--control-height-sm);
+  padding: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label-md-size);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.ui-icon-button--bare {
+  color: var(--color-text-secondary);
+}
+
+.ui-icon-button--bare:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+}
+
+.ui-icon-button--bare:active {
+  background: var(--button-pressed-background);
+}
+
+.ui-icon-button--inverse {
+  color: var(--shell-text-muted);
+}
+
+.ui-icon-button--inverse:hover {
+  background: var(--shell-surface-hover);
+  color: var(--shell-text);
+}
+
+.ui-icon-button--inverse:active {
+  background: var(--shell-surface-pressed);
+}
+
+.ui-icon-button--inverse:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring-inverse);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset-inverse);
+}
+
+.ui-icon-button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.ui-icon-button:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-button {
+    transition: none;
+  }
+}
+
+/* Forced colours: the system draws a control by its border, so every state keeps one. */
+@media (forced-colors: active) {
+  .ui-icon-button {
+    border-color: ButtonText;
+    color: ButtonText;
+  }
+
+  .ui-icon-button:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+}

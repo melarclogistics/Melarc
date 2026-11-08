@@ -75,7 +75,7 @@ Applicable to any operation. Each derives from an approved rule rather than from
 | Version| The `If-Match` version is not the record's current one| `409` `STATE_CONFLICT`|
 | Second factor not enrolled| A Senior Ops or Platform Admin identity with the correct password and no `ACTIVE` MFA factor completes the second step of sign-in| `403` `MFA_ENROLMENT_REQUIRED`|
 | State| The record is in scope and its state forbids the act| The transition's own code: `409` `STATE_CONFLICT`, or `422` and a domain code|
-| Maker-checker| The approver is the creator| `422` `SELF_APPROVAL_FORBIDDEN`|
+| Maker-checker| The approver is the creator and is not a Platform Admin| `422` `SELF_APPROVAL_FORBIDDEN`|
 
 **The rows follow one order for every operation** (Product decision, 6 October 2026): the first refusal wins, so a caller who may not use an operation learns nothing about its schema, and a replay of a command that already succeeded returns its original answer and not a state conflict. The order is owned by [permission-enforcement.md](../features/identity/permission-enforcement.md) §5.1 and is not restated here.
 
@@ -178,7 +178,7 @@ Harvested from every transition table in [state-machines.md](state-machines.md) 
 | `MARGIN_NOT_CONFIGURED`| Outside-Accra pricing attempted while the hub's `outside_accra_margin` is unset. **The order is refused, not priced at cost** (§33.4). Accra is set at GH₵30; **this code stays live because §33.4 forbids inheritance**, so every new hub reaches it until its own margin is entered|
 | `VALUE_DECLARATION_REQUIRED`| Declared value exceeds `value_declaration_threshold` and no declaration was captured at booking|
 | `NOTIFICATION_FAILED`| Repricing could not notify affected parties — the notification is part of the rule|
-| `SELF_APPROVAL_FORBIDDEN`| The approver is the record's creator (§37.4, `MSC-DEC-135`)|
+| `SELF_APPROVAL_FORBIDDEN`| The approver is the record's creator and the acting grant is below tier P (§37.4, §11.6, `MSC-DEC-135`). A Platform Admin, whose grant is at tier P, is excepted and may decide a record they made (permissions.md §6; Product decision, 25 October 2026)|
 | `INSUFFICIENT_AUTHORITY`| **The actor holds the operation's key, but this target or state needs a higher tier than the actor's bundle holds** — a privileged bundle submitted to a Senior Ops approver, or a Senior Ops session asking for a staff or vendor session it may not revoke. **A missing key is `PERMISSION_DENIED`, never this**, so an Ops Staff member calling a Senior Ops operation is `PERMISSION_DENIED`|
 | `REASON_REQUIRED`| A mandatory reason, or a field the reason's metadata makes mandatory, is absent (§35.9.2)|
 
@@ -240,7 +240,7 @@ Added 24 August by `MSC-DEC-247`. **Two codes only** — the rest of the identit
 
 | Refusal| Code| Why not a new one|
 |---|---|---|
-| The creator tried to approve their own profile| `SELF_APPROVAL_FORBIDDEN`| The same-actor exclusion is **one uniform rule** — §11.6, `MSC-DEC-135`. `approveOnePackageException` already returns this code. A second name would put two vocabularies on one constraint|
+| A creator below the Platform Admin tier tried to approve their own profile| `SELF_APPROVAL_FORBIDDEN`| The same-actor exclusion is **one uniform rule** — §11.6, `MSC-DEC-135` — **from which a Platform Admin is excepted** (the acting grant at tier P; permissions.md §6). `approveOnePackageException` already returns this code. A second name would put two vocabularies on one constraint|
 | A Senior Ops tried to approve or reject a profile carrying a privileged bundle| `INSUFFICIENT_AUTHORITY`| The actor holds the key and not the standing. Exactly what this code means everywhere else|
 | A rejection or suspension arrived without grounds| `REASON_REQUIRED`| §30.9's four grounds categories are reason metadata (§35.9.2), not a new mechanism|
 | The record was not in the expected state| `STATE_CONFLICT`| §36.1, unchanged|
@@ -374,6 +374,7 @@ Canonical homes only. **Nothing here is redefined**; follow the link.
 | `Session.principal_type`| `STAFF`, `RIDER`, `VENDOR`| `domain-model.md` §6.8|
 | `Session.state`| `ACTIVE`, `TERMINATED`| `state-machines.md` §13 — **two states**; `ELEVATED` withdrawn by `MSC-DEC-228`|
 | `Session.termination_reason`| `SIGNED_OUT`, `SUPERSEDED_BY_NEW_LOGIN`, **`REPLACED_BY_NEW_SESSION`**, `EXPIRED`, `CREDENTIAL_CHANGED`, `SUSPENDED`, `OFFBOARDED`, `ADMIN_REVOKED`, `AUTHORITY_CHANGED`, `HUB_SCOPE_CHANGED`, `DEVICE_REVOKED`, **`DEVICE_REPLACED`**, `MFA_RESET` — **thirteen**| `domain-model.md` §6.8, `state-machines.md` §13|
+| `TrustedBrowser.revocation_cause`| `SELF`, `ADMINISTRATOR`, `FACTOR_RESET`, `FACTOR_REPLACED`, `CREDENTIAL_CHANGED`, `REPLACED`; null while the trusted browser stands (staff-authentication.md §5.8; state-machines.md §23). Closed by a check of the table. `SELF` and `ADMINISTRATOR` name the person who removed it; `REPLACED` names nobody|
 | `StaffIdentity.status`| `PENDING_APPROVAL`, `ACTIVE`, `REJECTED`, `SUSPENDED`, `OFFBOARDED` — **five**| `domain-model.md` §6.8, `state-machines.md` §13.3|
 | `RiderIdentity.status`| `ACTIVE`, `INACTIVE`, `TEMPORARILY_UNAVAILABLE`, `SUSPENDED`, `OFFBOARDED`| `domain-model.md` §6.8|
 | `MfaFactor.status`| `PENDING`, `ACTIVE`, `REVOKED`| `domain-model.md` §6.8, `state-machines.md` §18|

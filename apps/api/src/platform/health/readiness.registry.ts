@@ -3,10 +3,12 @@ import { Injectable } from '@nestjs/common';
 /**
  * Why an instance is not ready, as a probe says it (a coarse reason, never a name or an error). `dependency_unavailable` is a
  * dependency that does not answer; `policy_superseded` is an instance that answered and found that it is older than the policy the
- * deployment now runs (SECURITY_DESIGN.md section 13.10: its compiled fixed-policy revision is below the stored floor). They are
- * different facts with different remedies (wait, or drain this instance and start a current one), so a check says which.
+ * deployment now runs (SECURITY_DESIGN.md section 13.10: its compiled fixed-policy revision is below the stored floor);
+ * `reference_data_missing` is a database that answered and holds no reference data, because the seed has not run on it. They are
+ * different facts with different remedies (wait; drain this instance and start a current one; run the seed), so a check says which.
  */
-export type NotReadyReason = 'dependency_unavailable' | 'policy_superseded';
+export type NotReadyReason =
+  'dependency_unavailable' | 'policy_superseded' | 'reference_data_missing';
 
 /**
  * A check that found the instance not fit to serve for a reason other than a dependency being unreachable throws this, with the

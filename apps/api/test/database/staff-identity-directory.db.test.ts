@@ -12,6 +12,7 @@ import {
   IdentityDirectoryNotBuiltError,
   PostgresStaffIdentityDirectory,
 } from '../../src/staff/postgres.staff-identity-directory.adapter.js';
+import { RESERVED_SYSTEM_ACTOR_ID } from '../../src/staff/reserved-system-actor.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { openAdmin, type Admin } from './support/admin.js';
 import { insertStaff, staffRow, type StaffRow } from './support/identities.js';
@@ -77,6 +78,34 @@ describe('findStaffByCanonicalEmail', () => {
       credentialEstablishedAt: row.credentialEstablishedAt,
       bundleId: BUNDLE_IDS.seniorOps,
       authorizedHubIds: [hub],
+      origin: 'MAKER_CHECKER',
+    });
+  });
+
+  // Break caught (S0.31): the origin inferred from the reserved actor or the absence of an approval instead of read from the immutable
+  // column, which is the one thing a rule that treats a bootstrap identity differently may read (domain-model.md §6.8).
+  it('reports the origin of the identity as the column holds it, whoever its maker and checker are', async () => {
+    const seeded = await staff({
+      origin: 'BOOTSTRAP',
+      roleBundleId: BUNDLE_IDS.platformAdmin,
+      createdBy: RESERVED_SYSTEM_ACTOR_ID,
+      approvedBy: RESERVED_SYSTEM_ACTOR_ID,
+      credentialHash: null,
+      credentialEstablishedAt: null,
+    });
+    // A maker-checker identity whose maker is the reserved actor: it is not a bootstrap identity for that.
+    const lookalike = await staff({ createdBy: RESERVED_SYSTEM_ACTOR_ID });
+
+    expect(
+      await inside((handle) =>
+        directory.findStaffByCanonicalEmail(handle, seeded.workEmailCanonical),
+      ),
+    ).toMatchObject({ origin: 'BOOTSTRAP' });
+    expect(await inside((handle) => directory.readIdentity(handle, ref(seeded)))).toMatchObject({
+      origin: 'BOOTSTRAP',
+    });
+    expect(await inside((handle) => directory.lockIdentity(handle, ref(lookalike)))).toMatchObject({
+      origin: 'MAKER_CHECKER',
     });
   });
 
@@ -215,6 +244,109 @@ describe('readIdentity and lockIdentity', () => {
   });
 });
 
+const HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$bmV3IGNyZWRlbnRpYWw';
+
+describe('establishCredential (S0.31)', () => {
+  const noCredential = (overrides: Partial<StaffRow> = {}): Promise<StaffRow> =>
+    staff({ credentialHash: null, credentialEstablishedAt: null, ...overrides });
+  const stored = async (row: StaffRow) =>
+    (
+      await admin.query<{ hash: string | null; at: Date | null; generation: string }>(
+        'select credential_hash as hash, credential_established_at as at, credential_generation as generation from staff_identity where id = $1',
+        [row.id],
+      )
+    ).rows[0];
+
+  // Break caught: a credential written without the generation rising by one, at a moment that is not the database's, or not written
+  // at all. The identity lock is the caller's: the write is one conditional update of the three credential columns.
+  it('writes the first credential: the hash, the database time and generation one', async () => {
+    const row = await noCredential();
+
+    const written = await inside(async (handle) => {
+      await directory.lockIdentity(handle, ref(row));
+      return directory.establishCredential(handle, ref(row), HASH);
+    });
+
+    expect(written).toEqual({ generation: 1 });
+    const found = await stored(row);
+    expect(found?.hash).toBe(HASH);
+    expect(found?.generation).toBe('1');
+    const now = (await admin.query<{ now: Date }>('select now() as now')).rows[0]?.now;
+    expect(Math.abs((found?.at?.getTime() ?? 0) - (now?.getTime() ?? 0))).toBeLessThan(10_000);
+  });
+
+  // Break caught: the one credential an identity holds being replaced by a setup: a second establishment (a grant that raced the
+  // first, a replayed request) must write nothing, because replacing a credential is a recovery's act and not a setup's.
+  it('writes nothing when the identity already holds a credential', async () => {
+    const row = await staff();
+    const before = await stored(row);
+
+    const written = await inside(async (handle) => {
+      await directory.lockIdentity(handle, ref(row));
+      return directory.establishCredential(handle, ref(row), HASH);
+    });
+
+    expect(written).toBeNull();
+    expect(await stored(row)).toEqual(before);
+  });
+
+  it('answers null for an identity that does not exist, and writes a credential to no other', async () => {
+    const other = await noCredential();
+    const written = await inside((handle) =>
+      directory.establishCredential(handle, { type: 'STAFF', id: randomUUID() }, HASH),
+    );
+    expect(written).toBeNull();
+    expect((await stored(other))?.hash).toBeNull();
+  });
+
+  // Break caught: an empty or unbounded hash reaching the table's own checks as a database error, or a non-text hash written.
+  it.each(['', 'x'.repeat(1025), 42, null, undefined])(
+    'refuses the hash %j before any statement',
+    async (bad) => {
+      const row = await noCredential();
+      await expect(
+        inside((handle) =>
+          directory.establishCredential(handle, ref(row), bad as unknown as string),
+        ),
+      ).rejects.toThrow(/encoded hash/);
+      expect((await stored(row))?.hash).toBeNull();
+    },
+  );
+
+  it('writes under the lock the transaction holds and is undone with it', async () => {
+    const row = await noCredential();
+    await expect(
+      inside(async (handle) => {
+        await directory.lockIdentity(handle, ref(row));
+        await directory.establishCredential(handle, ref(row), HASH);
+        throw new Error('the act failed after the credential was written');
+      }),
+    ).rejects.toThrow(/the act failed/);
+    expect((await stored(row))?.hash).toBeNull();
+    expect((await stored(row))?.generation).toBe('0');
+  });
+});
+
+describe('accountLabel (S0.31)', () => {
+  // Break caught: the label read from the canonical column, which is lower-cased and normalised: an authenticator app would show an
+  // address the employee did not type.
+  it('is the work email as entered', async () => {
+    const row = await staff({
+      workEmail: 'Label.Case@Example.Test',
+      workEmailCanonical: 'label.case@example.test',
+    });
+    expect(await inside((handle) => directory.accountLabel(handle, ref(row)))).toBe(
+      'Label.Case@Example.Test',
+    );
+  });
+
+  it('is null for an identity that does not exist', async () => {
+    expect(
+      await inside((handle) => directory.accountLabel(handle, { type: 'STAFF', id: randomUUID() })),
+    ).toBeNull();
+  });
+});
+
 describe('what is not built', () => {
   // Break caught: a vendor or a rider found as nobody (a success stub): a lookup the adapter cannot answer fails and says so.
   it('refuses a vendor account, a rider and a reference that is not staff, and says why', async () => {
@@ -230,6 +362,12 @@ describe('what is not built', () => {
       ).rejects.toBeInstanceOf(IdentityDirectoryNotBuiltError);
       await expect(
         inside((h) => directory.lockIdentity(h, { type, id: randomUUID() })),
+      ).rejects.toBeInstanceOf(IdentityDirectoryNotBuiltError);
+      await expect(
+        inside((h) => directory.establishCredential(h, { type, id: randomUUID() }, HASH)),
+      ).rejects.toBeInstanceOf(IdentityDirectoryNotBuiltError);
+      await expect(
+        inside((h) => directory.accountLabel(h, { type, id: randomUUID() })),
       ).rejects.toBeInstanceOf(IdentityDirectoryNotBuiltError);
     }
   });

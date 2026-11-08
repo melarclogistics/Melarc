@@ -3,12 +3,20 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  ATTESTATION_INTEGRITY_CAUSES,
+  ATTESTATION_UNAVAILABLE_CAUSES,
+} from '../auth/ports/attestation-verifier.port.js';
 import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
 import { METRIC_DEFINITIONS, labelPolicyFor, metricNames } from './metric-catalogue.js';
 
 const OBSERVABILITY = readFileSync(
   resolve(import.meta.dirname, '../../../../../architecture/OBSERVABILITY_AND_RECOVERY.md'),
+  'utf8',
+).replaceAll('\r', '');
+const SECURITY_DESIGN = readFileSync(
+  resolve(import.meta.dirname, '../../../../../architecture/SECURITY_DESIGN.md'),
   'utf8',
 ).replaceAll('\r', '');
 
@@ -84,6 +92,42 @@ describe('the metric catalogue', () => {
     }
   });
 
+  // Break caught (S0.56): the attestation counters missing, a cause the port does not know on one of them, or the unavailable causes drifting
+  // from the six the security design and the runbook name.
+  it('counts the attestation verifier by the closed sets of its port, and the unavailable causes are the six of the design', () => {
+    const calls = METRIC_DEFINITIONS.attestation_verifier_calls_total;
+    const unavailable = METRIC_DEFINITIONS.attestation_verifier_unavailable_total;
+    const refused = METRIC_DEFINITIONS.attestation_integrity_failures_total;
+
+    expect(calls.kind).toBe('counter');
+    expect(calls.labels).toEqual({
+      outcome: [
+        'VERIFIED',
+        'DEVICE_INTEGRITY_FAILED',
+        'DEVICE_SECURITY_UNSUPPORTED',
+        'TRUST_DATA_UNAVAILABLE',
+        'INTERFACE_BROKEN',
+      ],
+    });
+    expect(unavailable.kind).toBe('counter');
+    expect(unavailable.labels).toEqual({ cause: [...ATTESTATION_UNAVAILABLE_CAUSES] });
+    expect(refused.kind).toBe('counter');
+    expect(refused.labels).toEqual({ cause: [...ATTESTATION_INTEGRITY_CAUSES] });
+
+    const sentence =
+      /one of six closed diagnostic causes with it — ([^.]*?) — which go to the structured log/.exec(
+        SECURITY_DESIGN,
+      );
+    const named = [...(sentence?.[1] ?? '').matchAll(/`([A-Z_]+)`/g)].map((match) => match[1]);
+    expect(named).toEqual([...ATTESTATION_UNAVAILABLE_CAUSES]);
+    expect(SECURITY_DESIGN).toContain('`attestation_verifier_unavailable_total`');
+    expect(OBSERVABILITY).toContain('`attestation_verifier_unavailable_total{cause}`');
+    // Neither a verdict nor a refusal carries a key, a chain, a package or a digest as a label.
+    for (const definition of [calls, unavailable, refused]) {
+      expect(Object.keys(definition.labels)).toHaveLength(1);
+    }
+  });
+
   // Break caught: a label whose values are not a fixed small set (an identifier, an address, a token) entering the catalogue.
   it('has only labels with a closed, small set of upper-case values, and no label named for an identifier', () => {
     for (const [name, definition] of Object.entries(METRIC_DEFINITIONS)) {
@@ -94,7 +138,8 @@ describe('the metric catalogue', () => {
           /id|email|phone|address|token|session|key|destination/,
         );
         expect(values.length, `${name}.${label}`).toBeGreaterThan(0);
-        expect(values.length, `${name}.${label}`).toBeLessThanOrEqual(10);
+        // The eleven closed integrity causes of the attestation policy are the largest set (SECURITY_DESIGN.md §15.2.1).
+        expect(values.length, `${name}.${label}`).toBeLessThanOrEqual(12);
         for (const value of values)
           expect(value, `${name}.${label}`).toMatch(/^[a-z][a-z0-9_]*$|^[A-Z][A-Z0-9_]*$/);
       }

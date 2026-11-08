@@ -27,6 +27,15 @@ afterEach(async () => {
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
+/** A project of the API's test configuration, as vitest.config.ts declares it. */
+interface DeclaredProject {
+  readonly test: {
+    readonly name: string;
+    readonly testTimeout?: number;
+    readonly hookTimeout?: number;
+  };
+}
+
 /** A script that stays alive until it is killed. */
 function script(source: string): string {
   const directory = mkdtempSync(join(tmpdir(), 'melarc-harness-'));
@@ -50,13 +59,32 @@ const FOREVER = 'setInterval(() => {}, 1000); console.log("started"); console.er
 
 describe('the process helpers', () => {
   // Break caught: a helper deadline that is longer than the test's own, so Vitest ends the test first
-  // with "timed out", which says nothing about what was being waited for, and leaves the process behind.
-  it('finish inside Vitest’s test timeout even when the longest test uses them all', () => {
-    const testTimeout = vitestConfig.test?.testTimeout;
-    expect(testTimeout).toBeTypeOf('number');
+  // with "timed out", which says nothing about what was being waited for, and leaves the process behind;
+  // and (27 October 2026) a project whose tests start processes left at a limit the waits do not fit.
+  it('finish inside Vitest’s limits, test and hook, of every project that starts processes, even when the longest test uses them all', () => {
+    const declared = (vitestConfig.test?.projects ?? []) as unknown as readonly DeclaredProject[];
     const longestTest = DEADLINES.ready + DEADLINES.request + DEADLINES.stop;
-    expect(longestTest).toBeLessThan((testTimeout ?? 0) - 2_000);
-    expect(DEADLINES.finish).toBeLessThan((testTimeout ?? 0) - 2_000);
+    for (const name of ['process', 'database', 'database-alone']) {
+      const own = declared.find((entry) => entry.test.name === name)?.test;
+      for (const limit of [own?.testTimeout, own?.hookTimeout]) {
+        expect(limit, name).toBeTypeOf('number');
+        expect(longestTest, name).toBeLessThan((limit ?? 0) - 2_000);
+        expect(DEADLINES.finish, name).toBeLessThan((limit ?? 0) - 2_000);
+      }
+    }
+  });
+
+  // The owner's decision of 27 October 2026 (SLICE-000 plan, 7.48): a process may take 20 seconds to start or to finish before a helper
+  // gives up, about four times the slowest seen on an idle workstation, because a busy one missed 8. These are guards against a hang and
+  // not a measure of speed. Break caught: a wait raised again to get a test green, which is the owner's decision and not a fix.
+  it('wait as long as the owner decided, and no longer', () => {
+    expect(DEADLINES).toEqual({
+      finish: 20_000,
+      ready: 20_000,
+      request: 1_000,
+      stop: 8_000,
+      kill: 3_000,
+    });
   });
 
   // Break caught: a script that never finishes being reported by its exit status after it was killed

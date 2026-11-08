@@ -122,6 +122,10 @@ export const isLiveState = (state: JobState): boolean =>
 
 /**
  * The envelope the sealed payload is stored in has a fixed layout, and so has the text inside it (`delivery-payload.ts`). A
- * reader selects the layout from the record and never by trial.
+ * reader selects the layout from the record and never by trial. Two layouts are written: `1`, the destination and the link, and `2`
+ * (S0.47), which adds a vendor message's account identifier. This is the newest one this release reads; a newer one is kept for a reader
+ * that can open it.
  */
-export const DELIVERY_PAYLOAD_VERSION = 1;
+export const DELIVERY_PAYLOAD_VERSION = 2;
+/** The layout of a message that carries no account identifier, which every message did before S0.47. */
+export const PLAIN_PAYLOAD_VERSION = 1;

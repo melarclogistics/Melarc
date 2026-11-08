@@ -16,13 +16,38 @@ pnpm --filter @melarc/e2e test   # the harness's own tests; no database or brows
   recorded (`sandbox.externalBrowserRequests()`). Service workers are blocked.
 - The API runs under an outbound guard: any connection to something other than this machine is refused and
   recorded, so a test can assert on an external effect the code tried to have (`sandbox.outboundAttempts()`).
-- Data comes from `fixtures` (seeded by the test's title) and the browser clock from `freezeBrowserClock`.
+- Data comes from `fixtures` (seeded by the test's title) and the browser clock from `freezeBrowserClock`. The people of the staff journeys are
+  made by the journeys themselves, from the two bootstrap administrators (below).
 - When a test fails, the logs of every process, the sandbox capture, a database summary and a description of
   the stack (passwords hidden) are attached to the report.
 - A run removes only the database it made, and ends only the processes it started; a stop that cannot confirm a
   process ended fails and names it. Harnesses can share a PostgreSQL server: nothing removes another run's
   database. A run that was killed leaves its database behind; list them with
   `pnpm --filter @melarc/api db:orphans` and remove one by name with `db:orphans --drop <name>`.
+
+## The staff journeys (S0.45, S0.46)
+
+The shared stack is the **stack of the journeys**: a disposable database with the reference data, the two bootstrap Platform Admins that the
+real `bootstrap:seed` makes (each with a one-time secret in a custody bundle), the API, the **delivery worker** as a process of its own, and
+the Ops build. The worker writes every message into a capture folder, and the stack removes the folders (the bundles and the captured links hold
+secrets in clear) when it stops; a stack made for the harness's own tests is the bare one (`startStack({})`). A journey is what a person does on the
+real screens, in order, with what a person is given:
+
+| A journey needs                                                            | It comes from                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the one-time secret of a bootstrap administrator                           | `harness/custody.ts`: the custody bundle is read once and removed, as a custodian is handed theirs                                                                                                                       |
+| the link a message carried                                                 | `harness/messages.ts`: the capture sink the worker writes, read as an inbox that hands each message over once                                                                                                            |
+| a code from an authenticator                                               | `harness/totp.ts`: RFC 6238 for the setup key the page showed; it offers only a step the server still takes and has not taken                                                                                            |
+| time to pass (a grant, a challenge, a session or a lock)                   | `arrange` in `harness/database.ts`: a closed list in `apps/api/src/tools/e2e/arrangements.ts`, run by `e2e-database` as the cluster administrator, the way the database tests age a row; it fails when it changed no row |
+| a fact no operation shows (an authenticator's status, why a session ended) | `observe`, the same module: a closed list that reads no column that holds a secret                                                                                                                                       |
+| the provisioning command of AC-SLICE-000-93                                | `resumeAdministrator`: the real `bootstrap:resume`, started as an operator starts it                                                                                                                                     |
+
+`harness/journeys/staff-journeys.ts` holds the journeys of demonstration rows 1 to 6, 12, 13 (staff) and 14 and AC-SLICE-000-115, 35, 83, 84 and 127 (the
+Ops half), registered by two thin specs: `tests/staff-journeys.secret.test.ts` runs them in Chromium over plain HTTP (`pnpm run test:e2e`: **a
+diagnostic**, the session cookies are `Secure`) and `tests/https-staff-journeys.secret.test.ts` runs the same list over the trusted HTTPS origin in
+Chromium, Firefox and WebKit (`pnpm run test:e2e:https`: **the evidence**, CI). Both are `*.secret.test.ts`: passwords, setup keys, codes and links are
+typed into and read from real pages, so the recorders are off and a journey compares facts and never a secret (`SecretText` prints as nothing). The
+journeys are one story told in order, so they run serially and a failure stops the rest. Nothing in them edits a row by hand.
 
 ## The trusted HTTPS origin (S0.23)
 
@@ -93,15 +118,23 @@ passes in full.**
   the harness's technical routes (`/api/v1/e2e/cookies/*`, `/api/v1/e2e/echo`), which exist only in the test entry point, so they
   are **fixture/platform evidence** and say nothing of a real sign-in.
 - **The command is `pnpm run test:e2e:https`** (`harness/https-run.ts`): it makes a private directory outside the checkout, makes the
-  CA in it, and runs the HTTPS projects with `MELARC_E2E_TLS_DIR` naming it in **two runs**: first Chromium, Firefox and WebKit's
-  refusal, then, with the CA put in the system store of a GitHub-hosted runner, WebKit's other proofs. It takes the CA out of the
-  system store and removes the directory in a `finally` whatever happened, runs both whatever the first did, and exits with the first
-  failure. Each run says its exit status when it ends, and the command ends with a summary of every run and of the one the overall
+  CA in it, and runs the HTTPS projects with `MELARC_E2E_TLS_DIR` naming it in **three runs, each with a stack of its own**: first Chromium and
+  WebKit's refusal, then Firefox, then, with the CA put in the system store of a GitHub-hosted runner, WebKit's other proofs. A run is
+  one Playwright invocation and so one global setup, one database, one set of the one-time bootstrap bundles and one worker; the
+  journeys of an engine begin by consuming those bundles, so no two engines share a run (audit G01 of 26 October 2026). It takes the CA out of the
+  system store and removes the directory in a `finally` whatever happened, runs every run whatever the one before it did, and exits with
+  the first failure. Each run says its exit status when it ends, and the command ends with a summary of every run and of the one the overall
   status comes from. Each run writes to an output directory of its own below `test-results` (`--output`), because Playwright clears the
   output directory of the projects it runs at the start of a run, and the failure artifact of CI keeps `e2e/test-results`; the recorders
-  of the secret projects are unchanged. Where the system store may not be changed (anywhere but a GitHub-hosted runner) the second run
-  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
-  installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
+  of the secret projects are unchanged. Where the system store may not be changed (anywhere but a GitHub-hosted runner) WebKit's run
+  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (the `https` job, a matrix of two jobs beside the `integrated`
+  job that runs `pnpm run test:e2e`, with `libnss3-tools` installed for `certutil`), and CI makes it **as two shards**, a shard of the
+  runs in each job (`MELARC_HTTPS_SHARD=current/total`, `harness/https-shards.ts`; the Product Owner's decision of 7 November 2026): shard 1
+  is Chromium's run, with WebKit's refusal, and WebKit's other proofs, in that order and in **one job**, because the refusal is a control only
+  while the CA is not in the system store and the proofs need it there (the decision of 12 October 2026 holds: refused before, trusted
+  after, on one machine); shard 2 is Firefox's run and touches no system store. A run is never cut. A value that is not a shard of the
+  harness is refused before anything is made; without the variable the command makes all three runs, as it did. Each job makes its own CA.
+  **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.
 - **A smoke check in branded Chrome and Edge** is a person's, on a machine cleared for key material (a clean Linux machine or
@@ -127,6 +160,7 @@ cleared machine passes (`pnpm run test:e2e:https` is the first real evidence tha
 `certutil` seeds the stores, and that each engine trusts the CA by its mechanism: the first hosted run showed WebKit's first candidate
 does not work, and its replacement, the system store of a GitHub-hosted runner, is shown by the next); the
 branded Chrome and Edge smoke check; any HTTPS run on Windows or macOS; and the sign-in, MFA, revocation and rotation proofs of
-`AC-SLICE-000-127` and `GBT-W13` over a real sign-in, which need operations that are not built. The generator's name-constraint proof
+`AC-SLICE-000-127` and `GBT-W13` over a real sign-in, which `https-staff-journeys.secret.test.ts` (S0.46) now makes and which are unrun until that same first
+run. The generator's name-constraint proof
 and the leaf's validation by each engine are claims about software this repository does not control: they are shown by the run, not by
 the policy.

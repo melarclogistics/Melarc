@@ -4,9 +4,11 @@ import type { IdempotencyScope } from '../auth/ports/idempotency-store.port.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import {
   IdempotencyRefusedError,
+  ON_BEHALF_OPERATIONS,
   SEALED_REPLAY_OPERATIONS,
   checkFingerprint,
   checkScope,
+  isIdempotencyKey,
   scopeKey,
 } from './idempotency-scope.js';
 
@@ -69,6 +71,42 @@ describe('the scope of an idempotency key', () => {
     ).toBe('IDEMPOTENCY_SCOPE_REFUSED');
   });
 
+  // Break caught (S0.49): the exception widened beyond its one operation. `requestAdditionalDeviceGrant` writes a grant and a message only
+  // the authentication capability may write (data-scope-registry.md: Vendor `DENY`), in one transaction with the vendor's own record, which
+  // that capability therefore keeps on the vendor's behalf; any other operation, principal type or capability is refused as before.
+  it('lets the authentication capability key the vendor’s additional-browser grant on the vendor’s behalf, and nothing else', () => {
+    const authentication: SecurityContext = {
+      principalType: 'SYSTEM',
+      principalId: '61757468-0000-4000-8000-000000000001',
+      surface: 'SYSTEM',
+      taskCapability: 'authentication',
+      correlationId: 'request-1',
+    };
+    const vendor: IdempotencyScope = {
+      principalType: 'VENDOR',
+      principalId: PRINCIPAL,
+      operationId: 'requestAdditionalDeviceGrant',
+      key: 'retry-1',
+    };
+
+    expect(checkScope(vendor, authentication)).toEqual(vendor);
+    expect(ON_BEHALF_OPERATIONS).toEqual({ requestAdditionalDeviceGrant: 'VENDOR' });
+    for (const scope of [
+      { ...vendor, operationId: 'registerRiderDevice' },
+      { ...vendor, principalType: 'STAFF' as const },
+      { ...vendor, principalType: 'RIDER' as const },
+    ]) {
+      expect(refusal(() => checkScope(scope, authentication)).code).toBe(
+        'IDEMPOTENCY_SCOPE_REFUSED',
+      );
+    }
+    expect(
+      refusal(() =>
+        checkScope(vendor, { ...authentication, taskCapability: 'credential_delivery' }),
+      ).code,
+    ).toBe('IDEMPOTENCY_SCOPE_REFUSED');
+  });
+
   // Break caught: an operation name or a key outside the bounds the table and the contract hold.
   it('bounds the operation and the key', () => {
     const bad: Partial<IdempotencyScope>[] = [
@@ -125,6 +163,21 @@ describe('the fingerprint given to the store', () => {
     expect(checkFingerprint('a'.repeat(64))).toBe('a'.repeat(64));
     for (const bad of ['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64), 7]) {
       expect(refusal(() => checkFingerprint(bad as never)).code).toBe('IDEMPOTENCY_SCOPE_REFUSED');
+    }
+  });
+});
+
+describe('isIdempotencyKey', () => {
+  // Break caught (the adversarial review): a key the store refuses reaching it inside a transaction, which a request would then answer as a
+  // server error. The predicate is the store's own rule, so a service can refuse the same keys first.
+  it('accepts one to 128 characters without a control character, and nothing else', () => {
+    for (const key of ['retry-1', 'a', 'x'.repeat(128), 'clé-du-jour-😀', ' padded ']) {
+      expect(isIdempotencyKey(key), key).toBe(true);
+    }
+    const tab = String.fromCharCode(9);
+    const c1 = String.fromCharCode(0x85);
+    for (const key of ['', 'x'.repeat(129), `a${tab}b`, `a${c1}b`, undefined, null, 5, {}]) {
+      expect(isIdempotencyKey(key)).toBe(false);
     }
   });
 });

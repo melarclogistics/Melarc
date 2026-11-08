@@ -1,0 +1,4 @@
+/* ReadState (design/COMPONENT_PATTERNS.md section 33.3): the retry is a control beside the error, under it and not against it. */
+.ui-read-state__retry {
+  margin: var(--space-3) 0 0;
+}

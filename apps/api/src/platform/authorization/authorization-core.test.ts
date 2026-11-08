@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { ApiException } from '../http/api-exception.js';
 import { effectiveScope } from './effective-scope.js';
 import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
-import { meetsTier, requireTargetTier, requireTier, type TierRule } from './tier-policy.js';
+import {
+  meetsTier,
+  queryTierRequirement,
+  requireTargetTier,
+  requireTier,
+  SESSION_PRINCIPAL_TIERS,
+  tierForSessionPrincipal,
+  type TierRule,
+} from './tier-policy.js';
 
 describe('tier (permissions.md section 5; AC-SLICE-000-114)', () => {
   // Break caught: a lower tier meeting a higher requirement (a Senior Ops approving a privileged bundle), or a higher tier not
@@ -181,5 +189,62 @@ describe('the hub scope an operation runs under (SECURITY_DESIGN.md sections 14.
     expect(scope.authorizedHubIds).toEqual([HUB_A]);
     expect(Object.isFrozen(scope)).toBe(true);
     expect(Object.isFrozen(scope.authorizedHubIds)).toBe(true);
+  });
+});
+
+describe('a tier decided from a discriminator in the query, before the request is validated (F03 of 23 October 2026)', () => {
+  const declaration = {
+    param: 'principal_type',
+    tiers: { STAFF: 'P', VENDOR: 'P', RIDER: 'S' },
+  } as const;
+
+  // Break caught: a requirement read from the wrong value: Senior Ops asking for a staff member's sessions served because the rider
+  // value was read, or a rider's sessions refused at the staff tier.
+  it.each([
+    ['STAFF', 'P'],
+    ['VENDOR', 'P'],
+    ['RIDER', 'S'],
+  ] as const)('needs %s for the discriminator %s', (value, expected) => {
+    expect(queryTierRequirement(declaration, { principal_type: value })).toBe(expected);
+  });
+
+  // Break caught: a discriminator the guard cannot read granting authority, or being read as "no requirement". It asks the least
+  // tier any supported value asks, so that a caller who could never be served by any value is refused before the body is looked at,
+  // and a caller who could be served by one gets the validation answer for their own input.
+  it.each([
+    ['missing', {}],
+    ['empty', { principal_type: '' }],
+    ['unknown', { principal_type: 'ADMIN' }],
+    ['in lower case', { principal_type: 'staff' }],
+    ['padded', { principal_type: ' STAFF' }],
+    ['repeated', { principal_type: ['RIDER', 'STAFF'] }],
+    ['an object', { principal_type: { a: 'STAFF' } }],
+    ['a number', { principal_type: 1 }],
+    ['an inherited name', { principal_type: '__proto__' }],
+    ['a name of Object.prototype', { principal_type: 'constructor' }],
+    ['a name of Object.prototype (toString)', { principal_type: 'toString' }],
+  ])(
+    'needs the least tier of the supported values when the discriminator is %s',
+    (_label, query) => {
+      expect(queryTierRequirement(declaration, query)).toBe('S');
+    },
+  );
+
+  // Break caught: the least tier computed as the first listed, or as the highest.
+  it('takes the least tier whatever the order the values are declared in', () => {
+    expect(queryTierRequirement({ param: 'k', tiers: { A: 'P', B: 'A', C: 'S' } }, {})).toBe('A');
+    expect(queryTierRequirement({ param: 'k', tiers: { C: 'S', B: 'A', A: 'P' } }, {})).toBe('A');
+  });
+
+  it('does not look at any other parameter', () => {
+    expect(queryTierRequirement(declaration, { type: 'RIDER', principal_id: 'x' })).toBe('S');
+  });
+
+  // Break caught: the table the service and the guard read being two tables, so the guard and the service disagree.
+  it('is the table the service asks as well', () => {
+    expect(SESSION_PRINCIPAL_TIERS).toEqual({ STAFF: 'P', VENDOR: 'P', RIDER: 'S' });
+    for (const kind of ['STAFF', 'VENDOR', 'RIDER'] as const) {
+      expect(tierForSessionPrincipal(kind)).toBe(SESSION_PRINCIPAL_TIERS[kind]);
+    }
   });
 });

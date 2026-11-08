@@ -394,8 +394,9 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     });
 
     // Break caught: a limit described as applied that nothing reads, or an applied one still described as validation only.
-    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), and the HTTP limits and the request budget (S0.20), and no other', () => {
+    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), the HTTP limits and the request budget (S0.20) and the verifier call (S0.56), and no other', () => {
       const applied = (setting: string): boolean =>
+        setting.includes('ATTESTATION_VERIFIER_TIMEOUT_MS') ||
         setting.includes('SHUTDOWN_TIMEOUT_MS') ||
         setting.includes('DATABASE_') ||
         setting.includes('HTTP_') ||
@@ -789,7 +790,12 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
     expect(applied).toMatch(/Indicative figures, not a benchmark/);
     const limits = section.slice(section.indexOf(limitsHeading));
     expect(limits).toMatch(/no real provider/);
-    expect(limits).toMatch(/S0\.29 and S0\.50/);
+    // The redemption readers (S0.29 built the setup grant's, S0.50 the recovery request's): the paragraph must say which kinds the worker
+    // reads, and that a record of a kind it cannot read is not sent (S0.69 corrected it, which said the second was still to come).
+    expect(limits).toMatch(/since S0\.29 it reads a setup grant's state and expiry/);
+    expect(limits).toMatch(/since S0\.50 a recovery request's/);
+    expect(limits).not.toMatch(/arrives with S0\.50/);
+    expect(limits).toMatch(/is not confirmed and is not sent/);
     expect(limits).toMatch(/Windows/);
     expect(limits).toMatch(/required before Gate 2 passes/);
     expect(limits).toMatch(/OB-24/);

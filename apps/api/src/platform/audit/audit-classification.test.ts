@@ -39,7 +39,9 @@ const AUTHENTICATION: SecurityContext = {
   taskCapability: 'authentication',
   correlationId: 'request-2',
 };
-const SEED: SecurityContext = { ...AUTHENTICATION, taskCapability: 'seed' };
+// The bootstrap seed writes the two administrators under the `bootstrap` capability; the reference seed (`seed`) writes no identity.
+const BOOTSTRAP: SecurityContext = { ...AUTHENTICATION, taskCapability: 'bootstrap' };
+const REFERENCE_SEED: SecurityContext = { ...AUTHENTICATION, taskCapability: 'seed' };
 
 const build = (input: AuditEventInput, context: SecurityContext = STAFF) =>
   buildAuditRecord(input, context, NOW, ID);
@@ -91,12 +93,12 @@ describe('the tier of each event is the catalogue’s, read from the document (G
 
   // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
   // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 76 enhanced, 5 that depend on the act, 109 ordinary, of 190', () => {
-    expect(ENHANCED_CODES).toHaveLength(76);
+  it('counts the tiers: 78 enhanced, 5 that depend on the act, 111 ordinary, of 194', () => {
+    expect(ENHANCED_CODES).toHaveLength(78);
     expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(190);
+    expect(AUDIT_EVENT_CODES).toHaveLength(194);
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
-    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(109);
+    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(111);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
     for (const code of Object.keys(CONDITIONAL_CODES)) {
       expect(ENHANCED_CODES as readonly string[]).not.toContain(code);
@@ -263,12 +265,19 @@ describe('the writer holds an event to its tier (G2-06)', () => {
   it.each([
     ['auth.recovery.requested', 'ADMINISTRATOR_INITIATED', true, STAFF],
     ['auth.recovery.requested', 'SELF_SERVICE', false, AUTHENTICATION],
-    ['staff.identity.created', 'BOOTSTRAP_SEED', true, SEED],
+    ['staff.identity.created', 'BOOTSTRAP_SEED', true, BOOTSTRAP],
     ['staff.identity.created', 'OPERATION', false, STAFF],
   ] as const)('holds %s to its basis %s: the tier is %s', (code, basis, enhanced, context) => {
     const extras =
       code === 'auth.recovery.requested'
-        ? { resultingState: 'ISSUED', relatedIds: { initiated_by: OTHER_ID } }
+        ? {
+            resultingState: 'ISSUED',
+            relatedIds: {
+              principal_type: 'STAFF',
+              principal_id: OTHER_ID,
+              ...(enhanced ? { initiated_by: STAFF_ID } : {}),
+            },
+          }
         : {};
     const beforeAfter = enhanced ? { created: 'NONE_TO_PENDING_APPROVAL' } : undefined;
     const event: AuditEventInput = {
@@ -309,6 +318,9 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     };
     expect(refusalOf(() => build(seed, STAFF)).field).toBe('enhancedBasis');
     expect(refusalOf(() => build(seed, AUTHENTICATION)).field).toBe('enhancedBasis');
+    // The reference seed is not the bootstrap: a transaction under the seed capability cannot claim the bootstrap basis (S0.30).
+    expect(refusalOf(() => build(seed, REFERENCE_SEED)).field).toBe('enhancedBasis');
+    expect(build(seed, BOOTSTRAP).enhanced).toBe(true);
     const recovery: AuditEventInput = {
       code: 'auth.recovery.requested',
       enhanced: true,
@@ -316,7 +328,7 @@ describe('the writer holds an event to its tier (G2-06)', () => {
       outcome: 'SUCCEEDED',
       object: { type: 'RecoveryRequest', id: OBJECT_ID },
       resultingState: 'ISSUED',
-      relatedIds: { initiated_by: OTHER_ID },
+      relatedIds: { principal_type: 'STAFF', principal_id: OTHER_ID, initiated_by: STAFF_ID },
       beforeAfter: { recovery: 'NONE_TO_ISSUED' },
     };
     expect(refusalOf(() => build(recovery, AUTHENTICATION)).field).toBe('enhancedBasis');
@@ -328,6 +340,55 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     expect(refusalOf(() => build({ ...plain, enhancedBasis: 'SELF_SERVICE' })).field).toBe(
       'enhancedBasis',
     );
+  });
+
+  // Break caught (S0.50): a self-service recovery request refused for want of an initiator it cannot have, an administrator's recorded
+  // without the administrator who initiated it (or naming someone else), or either recorded without the principal it is for.
+  it('holds a recovery request to its principal, and to an initiator exactly when an administrator initiated it', () => {
+    const selfService: AuditEventInput = {
+      code: 'auth.recovery.requested',
+      enhanced: false,
+      enhancedBasis: 'SELF_SERVICE',
+      outcome: 'SUCCEEDED',
+      actor: { type: 'SYSTEM', id: null },
+      object: { type: 'RecoveryRequest', id: OBJECT_ID },
+      resultingState: 'ISSUED',
+      relatedIds: { principal_type: 'STAFF', principal_id: OTHER_ID },
+    };
+    expect(build(selfService, AUTHENTICATION).relatedIds).toEqual({
+      principal_type: 'STAFF',
+      principal_id: OTHER_ID,
+    });
+    expect(
+      refusalOf(() =>
+        build(
+          { ...selfService, relatedIds: { ...selfService.relatedIds, initiated_by: STAFF_ID } },
+          AUTHENTICATION,
+        ),
+      ).field,
+    ).toBe('relatedIds');
+    expect(
+      refusalOf(() =>
+        build({ ...selfService, relatedIds: { principal_type: 'STAFF' } }, AUTHENTICATION),
+      ).field,
+    ).toBe('relatedIds');
+
+    const administrator: AuditEventInput = {
+      ...selfService,
+      enhanced: true,
+      enhancedBasis: 'ADMINISTRATOR_INITIATED',
+      actor: undefined,
+      relatedIds: { principal_type: 'VENDOR', principal_id: OTHER_ID, initiated_by: STAFF_ID },
+      beforeAfter: { recovery_request: { before: 'NONE', after: 'ISSUED' } },
+    };
+    expect(build(administrator).relatedIds).toMatchObject({ initiated_by: STAFF_ID });
+    for (const relatedIds of [
+      { principal_type: 'VENDOR', principal_id: OTHER_ID } as Record<string, string>,
+      { principal_type: 'VENDOR', principal_id: OTHER_ID, initiated_by: OTHER_ID },
+      { principal_id: OTHER_ID, initiated_by: STAFF_ID },
+    ]) {
+      expect(refusalOf(() => build({ ...administrator, relatedIds })).field).toBe('relatedIds');
+    }
   });
 
   // Break caught: the null object accepted everywhere. The contract's own table says the object is not null; the two events for

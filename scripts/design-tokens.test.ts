@@ -103,6 +103,20 @@ describe('the token file against DESIGN_SYSTEM', () => {
       '--font-family-sans', // the fallback stack of section 5.1, written once for components
       '--button-pressed-background', // the bare #EAECF0 of the Secondary pressed recipe, section 4.6
       '--layout-content-width', // the width the frame has always given the main landmark
+      // The side menu on Ink (the authenticated shell, 25 October 2026; section 4.6, the shell recipe): aliases of palette colours, and
+      // the two widths of the menu, which are layout and not a design-system token (section 13.2).
+      '--shell-surface-hover', // gray.900
+      '--shell-surface-pressed', // gray.800
+      '--shell-border', // gray.800, a divider and not a boundary of a control
+      '--shell-text', // text.inverse
+      '--shell-text-muted', // gray.300
+      '--shell-text-subtle', // gray.400
+      '--sidebar-width',
+      '--sidebar-width-collapsed',
+      // The three sizes of an icon (section 24), in rem so that enlarged text enlarges them.
+      '--icon-size-sm',
+      '--icon-size-md',
+      '--icon-size-lg',
     ];
     assert.deepEqual(undocumentedTokenProblems(document, tokenCss, recorded), []);
   });
@@ -191,6 +205,14 @@ const PAIRINGS: Pairing[] = [
     background: fill,
     threshold: 4.5,
   })),
+  // The Danger button (§4.6, the outline recipe): the danger text on its fill, hovered and pressed. On white it is the `danger text` pairing above,
+  // and on its soft fill the `danger alert` pairing below.
+  {
+    use: 'Danger button pressed',
+    foreground: property('color.status.danger.foreground'),
+    background: '--button-pressed-background',
+    threshold: 4.5,
+  },
   {
     use: 'inverse text',
     foreground: property('color.text.inverse'),
@@ -242,6 +264,45 @@ const PAIRINGS: Pairing[] = [
     foreground: property('focus.ringInverse'),
     background: surface('inverse'),
     threshold: 3,
+  },
+  // The side menu (the shell recipe of §4.6): the item text on Ink, hovered and pressed, and the focus ring on each of them.
+  ...(['--shell-text-muted', '--shell-text-subtle'] as const).map((foreground) => ({
+    use: `shell ${foreground.slice(2)}`,
+    foreground,
+    background: surface('inverse'),
+    threshold: 4.5,
+  })),
+  ...(['--shell-surface-hover', '--shell-surface-pressed'] as const).flatMap((background) => [
+    {
+      use: `shell text on ${background.slice(2)}`,
+      foreground: '--shell-text',
+      background,
+      threshold: 4.5,
+    },
+    {
+      use: `shell muted text on ${background.slice(2)}`,
+      foreground: '--shell-text-muted',
+      background,
+      threshold: 4.5,
+    },
+    {
+      use: `inverse focus ring on ${background.slice(2)}`,
+      foreground: property('focus.ringInverse'),
+      background,
+      threshold: 3,
+    },
+  ]),
+  {
+    use: 'shell subtle text on hover',
+    foreground: '--shell-text-subtle',
+    background: '--shell-surface-hover',
+    threshold: 4.5,
+  },
+  {
+    use: 'shell current item',
+    foreground: property('color.action.primaryText'),
+    background: property('color.action.primary'),
+    threshold: 4.5,
   },
   {
     use: 'selected row bar',

@@ -465,6 +465,9 @@ export class DeliveryWorker {
       channel: claimed.channel,
       destination: claimed.request.destination,
       link: claimed.request.link,
+      ...(claimed.request.accountIdentifier === undefined
+        ? {}
+        : { accountIdentifier: claimed.request.accountIdentifier }),
     };
     const sent = await this.#call(budget, 'provider-send', timeoutMs, context, () =>
       provider.send(message),

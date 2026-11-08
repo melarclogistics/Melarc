@@ -64,6 +64,21 @@ export const SEED_ONLY_TABLES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The tables the `bootstrap` capability reaches (S0.30; data-scope-registry.md §5.2) **only inside the four definer functions of
+ * migration 0019**, which run as the table owner: the provisioning login holds nothing on them, as it holds nothing on the seven of
+ * `SEED_ONLY_TABLES`, so that asserting the label reaches no row. The registry and the capability matrix list the statements the
+ * capability runs on each (that is what the functions do and what the policy branches admit), and this set is what holds the
+ * provisioning login's own grants to none. The API and the workers are held by the other ceilings below.
+ */
+export const PROVISIONING_FUNCTION_ONLY_TABLES: ReadonlySet<string> = new Set([
+  'StaffIdentity',
+  'SetupGrant',
+  'MfaFactor',
+  'AuditEvent',
+  'Session',
+]);
+
+/**
  * Tables whose grants are held below what the registry's "Write identity" reads as, and the most any login may hold on them.
  * The audit ledger is written once and never changed or removed; other tables are held to the statements their task has built.
  * The registry's write cell for `AuditEvent` reads `api` `worker` *(INSERT)*, and the check above reads a write identity as INSERT,
@@ -89,6 +104,16 @@ export const GRANT_CEILINGS: ReadonlyMap<string, readonly Privilege[]> = new Map
   // UPDATE of named columns only, and no INSERT on the identity until the task that inserts one).
   ['Session', ['SELECT', 'INSERT', 'UPDATE']],
   ['StaffIdentity', ['SELECT', 'INSERT', 'UPDATE']],
+  // A setup grant ends (consumed, expired, superseded) and an MFA factor is revoked; neither is removed, so that the history of every
+  // grant and every factor stays readable (domain-model.md §6.8, state-machines.md §18 and §19). No registry row gives any identity
+  // DELETE on either, although the write cell reads `api`, which the check reads as DELETE too (migration 0018).
+  ['SetupGrant', ['SELECT', 'INSERT', 'UPDATE']],
+  ['MfaFactor', ['SELECT', 'INSERT', 'UPDATE']],
+  // An MFA challenge ends in a terminal state and stays as the history of a sign-in; no registry row gives any identity DELETE on it,
+  // although the write cell reads `api`, which the check reads as DELETE too (migration 0020).
+  ['MfaChallenge', ['SELECT', 'INSERT', 'UPDATE']],
+  // A rider's sign-in challenge is the same: it ends in a terminal state and stays as the history of a sign-in (migration 0041).
+  ['RiderSignInChallenge', ['SELECT', 'INSERT', 'UPDATE']],
 ]);
 
 /** The privileges `login` may hold on `row`'s table. */
@@ -111,6 +136,9 @@ export function allowedPrivileges(login: Login, row: RegistryRow): Set<Privilege
   if (SEED_ONLY_TABLES.has(row.table)) {
     const ceiling: readonly Privilege[] = login.identity === 'provisioning' ? [] : ['SELECT'];
     for (const privilege of allowed) if (!ceiling.includes(privilege)) allowed.delete(privilege);
+  }
+  if (login.identity === 'provisioning' && PROVISIONING_FUNCTION_ONLY_TABLES.has(row.table)) {
+    allowed.clear();
   }
   const appendOnly = GRANT_CEILINGS.get(row.table);
   if (appendOnly !== undefined) {

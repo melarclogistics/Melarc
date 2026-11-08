@@ -2,6 +2,19 @@ import type { RateLimitDecision } from '../auth/ports/rate-limiter.port.js';
 import { MAX_BUCKET_LIMIT, WINDOW_SECONDS } from './limiter-parameters.js';
 
 /**
+ * How far past the window a row may read as leaving (S0.32): a row is stamped by the database's clock when it is admitted and judged by
+ * the clock of the statement that reads it, and the clock of a server can read some tenths of a second **behind** a stamp it has
+ * already written (a virtual machine whose clock is corrected; a server stepped by its time service; measured here on the development
+ * machine at up to about 120 ms, in two reads of a hundred). A row stamped a little ahead of the reader is **reported** as leaving at
+ * the end of the window, which is the longest a caller is ever told to wait. It is not true of the row: a row stamped ahead by some
+ * seconds stays counted that many seconds longer than the window, so a caller told to wait a whole window can be refused once more
+ * (by at most this tolerance). The value is a provisional engineering one (`delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md`,
+ * decision 8 of S0.32), calibrated with the other limits at S0.65. A row further ahead than this is not skew but a clock that cannot
+ * be trusted, and the limiter still fails closed on it.
+ */
+export const CLOCK_SKEW_TOLERANCE_SECONDS = 5;
+
+/**
  * The whole seconds a refused caller is told to wait: the time until the place frees, rounded **up** (a client sent back early is
  * refused again and counts a retry), and never below one second or above the window.
  */
@@ -35,17 +48,19 @@ export function decideAgainstLimit(
       typeof seconds !== 'number' ||
       !Number.isFinite(seconds) ||
       seconds <= 0 ||
-      seconds > WINDOW_SECONDS ||
+      seconds > WINDOW_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS ||
       seconds < previous
     ) {
       throw new TypeError('The live rows leave the window ascending, within it');
     }
     previous = seconds;
   }
-  const count = secondsUntilLeaving.length;
+  // What is read as ahead of the window leaves at the end of it: the skew is not a longer window.
+  const leaving = secondsUntilLeaving.map((seconds) => Math.min(seconds, WINDOW_SECONDS));
+  const count = leaving.length;
   if (count < limit) return { allowed: true };
   return {
     allowed: false,
-    retryAfterSeconds: retryAfterSeconds(secondsUntilLeaving[count - limit] ?? WINDOW_SECONDS),
+    retryAfterSeconds: retryAfterSeconds(leaving[count - limit] ?? WINDOW_SECONDS),
   };
 }

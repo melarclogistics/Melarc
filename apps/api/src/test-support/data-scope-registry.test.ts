@@ -30,7 +30,7 @@ describe('the data scope registry as the tests read it (GBT-S1, S2)', () => {
       RIDER_ASSIGNMENT: count('RIDER_ASSIGNMENT'),
       AUDIT: count('AUDIT'),
       SYSTEM: count('SYSTEM'),
-    }).toEqual({ PLATFORM: 18, HUB: 47, VENDOR: 10, RIDER_ASSIGNMENT: 2, AUDIT: 2, SYSTEM: 4 });
+    }).toEqual({ PLATFORM: 19, HUB: 47, VENDOR: 10, RIDER_ASSIGNMENT: 2, AUDIT: 2, SYSTEM: 4 });
   });
 
   it('lists a table once', () => {

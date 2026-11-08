@@ -129,12 +129,16 @@ class StatusController {
 @Module({ controllers: [StatusController] })
 class StatusModule {}
 
-/** The real contract's `getPickupRequest`, bound to a route, to show the default wiring reads the real file. */
-@Controller('pickup-requests')
+/**
+ * The real contract's `registerRiderDevice`, bound to a route, to show the default wiring reads the real file. (It was a later slice's
+ * `getPickupRequest` until S0.67: that operation lists no `VALIDATION_FAILED`, so its refusal of a malformed id is one its contract does
+ * not admit, and the filter answers it as the defect it is.)
+ */
+@Controller('ops/riders')
 @TechnicalEndpoint()
 class PickupController {
-  @Get(':id')
-  @ContractOperation('getPickupRequest')
+  @Post(':riderId/device/register')
+  @ContractOperation('registerRiderDevice')
   read(): unknown {
     behaviour.calls += 1;
     return {};
@@ -1132,12 +1136,12 @@ describe('headers and cookies, over real HTTP (audit F04)', () => {
 });
 
 describe('the contract is read only when something is bound to it', () => {
-  // Break caught: every start paying for a 700 KB parse of a document nothing uses. With no bound operation,
-  // which is today's application, the contract is never read.
+  // Break caught: every start paying for a 700 KB parse of a document nothing uses. With no bound operation (the application with
+  // none of the product's routes, which the first routes of S0.31 are now part of), the contract is never read.
   it('is not loaded at all when no operation is bound', async () => {
     const source = fixtureSource();
 
-    await start({ contractSource: source });
+    await start({ rootModule: appWith(), contractSource: source });
 
     expect(source.loads).toBe(0);
   });
@@ -1185,11 +1189,14 @@ describe('the real contract, with the default wiring', () => {
   it('validates a bound real operation against contracts/openapi.yaml', async () => {
     const app = await start({ rootModule: appWith(PickupModule) });
 
-    const refused = await fetch(`${app.baseUrl}/api/v1/pickup-requests/not-a-uuid`);
+    const refused = await fetch(`${app.baseUrl}/api/v1/ops/riders/not-a-uuid/device/register`, {
+      method: 'POST',
+      headers: { 'idempotency-key': 'a-key-of-the-caller' },
+    });
 
     expect(refused.status).toBe(400);
     expect(((await refused.json()) as { details: unknown }).details).toEqual({
-      violations: [{ in: 'path', pointer: 'id', rule: 'format' }],
+      violations: [{ in: 'path', pointer: 'riderId', rule: 'format' }],
     });
     expect(behaviour.calls).toBe(0);
   });

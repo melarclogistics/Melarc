@@ -39,6 +39,9 @@ export class CaptureDeliveryProvider implements DeliveryProvider {
         channel: message.channel,
         destination: message.destination,
         link: message.link,
+        ...(message.accountIdentifier === undefined
+          ? {}
+          : { accountIdentifier: message.accountIdentifier }),
       });
     } catch {
       return { outcome: 'UNKNOWN' };

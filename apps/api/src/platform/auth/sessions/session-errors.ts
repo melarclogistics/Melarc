@@ -23,6 +23,19 @@ export class AuthenticationUnavailableError extends Error {
   }
 }
 
+/**
+ * The current-session read or the sign-out was asked for in an application composed without a part it needs: the runner of an
+ * operation (a database), the session store, the audit writer or the directory that gives a principal's name. Nothing was read or
+ * ended, and nothing answers as though a session had been signed out: the platform answers its fixed, code-less `503`
+ * (`operational-failure.ts`).
+ */
+export class SessionOperationsUnavailableError extends Error {
+  constructor() {
+    super('A session operation was asked for and the application is not composed to carry it out');
+    this.name = 'SessionOperationsUnavailableError';
+  }
+}
+
 /** Why a session was not issued, from the closed list the sign-in operations map to their own outward answers. */
 export type SessionIssueRefusal =
   | 'PRINCIPAL_NOT_FOUND'

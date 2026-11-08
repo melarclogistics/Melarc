@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
 import { randomUUIDv7 } from '../auth/crypto/uuid-v7.js';
+import { mayQueueGrantMessage } from '../auth/setup-grants/issuing-authority.js';
 import type { Clock } from '../auth/ports/clock.port.js';
 import type {
   ClaimedDelivery,
@@ -17,6 +18,7 @@ import type {
 } from '../auth/ports/delivery-queue.port.js';
 import type { SecretCipher } from '../auth/ports/secret-cipher.port.js';
 import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
+import { canonicalAccountIdentifier } from '../auth/vendor/vendor-vocabulary.js';
 import { serverErrorIn } from '../database/database-failures.js';
 import type { DatabaseService } from '../database/database.service.js';
 import { credentialDeliveryJob } from '../database/schema/credential-delivery.js';
@@ -63,15 +65,14 @@ export interface PostgresDeliveryQueueOptions {
 }
 
 /**
- * Queueing and cancelling are the issuing capability's: a `SYSTEM` context under `authentication`. Under any other, a queued message
- * is refused by the table with a bare privilege error, and a cancellation finds no row to change and returns nought, which the caller
- * cannot tell from "nothing was live". Refusing here, before anything is written, keeps both where the caller can see them.
+ * Queueing and cancelling are the issuing capability's: a `SYSTEM` context under `authentication`, and, for the message of a grant that
+ * an administrator issues to another person, a staff member's own context under the key of that operation (`issuing-authority.ts`;
+ * S0.36, migration 0029). Under any other, a queued message is refused by the table with a bare privilege error, and a cancellation
+ * finds no row to change and returns nought, which the caller cannot tell from "nothing was live". Refusing here, before anything is
+ * written, keeps both where the caller can see them.
  */
 function assertIssuing(transaction: TransactionHandle): void {
-  const context = securityContextOf(transaction);
-  if (context.principalType !== 'SYSTEM' || context.taskCapability !== 'authentication') {
-    throw new DeliveryContextError();
-  }
+  if (!mayQueueGrantMessage(securityContextOf(transaction))) throw new DeliveryContextError();
 }
 
 const isOneOf = <T extends string>(values: readonly T[], value: unknown): value is T =>
@@ -128,7 +129,13 @@ export class PostgresDeliveryQueue implements DeliveryQueue {
 
     const sealed = await this.#cipher.seal(
       'DELIVERY_PAYLOAD',
-      encodeDeliveryPayload({ destination: checked.destination, link: checked.link }),
+      encodeDeliveryPayload({
+        destination: checked.destination,
+        link: checked.link,
+        ...(checked.accountIdentifier === undefined
+          ? {}
+          : { accountIdentifier: checked.accountIdentifier }),
+      }),
       deliveryPayloadContext({
         jobId: id,
         kind: checked.kind,
@@ -207,6 +214,7 @@ interface CheckedRequest {
   readonly redemption: { readonly type: RedemptionRecordType; readonly id: string };
   readonly destination: string;
   readonly link: string;
+  readonly accountIdentifier?: string;
   readonly expiresAt: Date;
 }
 
@@ -252,6 +260,16 @@ function checkRequest(request: DeliveryRequest): CheckedRequest {
   if (typeof given.link !== 'string' || linkProblem(given.link) !== undefined) {
     return invalid('link');
   }
+  // A vendor's message carries the identifier it signs in with, in its canonical form, and no other message carries one.
+  const accountIdentifier = given.accountIdentifier;
+  if (
+    principal.type === 'VENDOR'
+      ? typeof accountIdentifier !== 'string' ||
+        canonicalAccountIdentifier(accountIdentifier) !== accountIdentifier
+      : accountIdentifier !== undefined
+  ) {
+    return invalid('accountIdentifier');
+  }
   if (!(given.expiresAt instanceof Date) || !Number.isFinite(given.expiresAt.getTime())) {
     return invalid('expiresAt');
   }
@@ -262,6 +280,7 @@ function checkRequest(request: DeliveryRequest): CheckedRequest {
     redemption: { type: redemption.type, id: redemption.id.toLowerCase() },
     destination: given.destination,
     link: given.link,
+    ...(typeof accountIdentifier === 'string' ? { accountIdentifier } : {}),
     expiresAt: given.expiresAt,
   };
 }

@@ -75,7 +75,7 @@ const isSignInStep = (value: unknown): value is SignInStep => {
   return typeof name === 'string' && name !== '' && typeof run === 'function';
 };
 
-export interface IssueSessionRequest {
+export interface IssueSessionRequest<View = undefined> {
   readonly principal: PrincipalRef;
   /** The id of the request or command this issues for: the audit and the logs correlate on it. */
   readonly correlationId: string;
@@ -91,11 +91,26 @@ export interface IssueSessionRequest {
   readonly registeredDeviceId?: string;
   /** A Rider's own root-detection result, recorded as a risk signal; never for staff or a Vendor. */
   readonly clientRootSignal?: ClientRootSignal;
+  /**
+   * How a staff sign-in met the second step, recorded as the fact `second_factor` of `auth.session.issued` (audit.md §5.4): `NONE` for
+   * a role that needs none, `TOTP` for a code that was accepted, `TRUSTED_BROWSER` for a trusted browser that stood in for it. Staff only.
+   */
+  readonly secondFactor?: 'NONE' | 'TOTP' | 'TRUSTED_BROWSER';
   /** The writes of the sign-in that commit with the session (see `SignInStep`), in the order they run. */
   readonly steps?: readonly SignInStep[];
+  /**
+   * Builds what the sign-in answers with from the session just created, **in the issuing transaction**, after everything else it wrote
+   * (the audit of 21 October 2026, A04). A view read in a transaction of its own after the commit can fail with the session already
+   * committed, the proofs spent and the audit written, for a caller who is answered with a failure and never receives the credential.
+   * Built here, a failure rolls back the session, the proofs the steps spent, the success event and the displacement of an earlier
+   * session, together: the sign-in did not happen, and can be repeated. It reads the database and nothing else: it makes no HTTP call
+   * and no call to another system (a rollback does not undo one, and a restart of the transaction would repeat it), and it takes no
+   * lock (the issue holds the policy and identity locks, in their order, and a lock taken here would come after the session rows).
+   */
+  readonly project?: (handle: TransactionHandle, session: StoredSession) => Promise<View>;
 }
 
-export interface IssuedSession {
+export interface IssuedSession<View = undefined> {
   readonly session: StoredSession;
   /** The opaque session secret, shown once: 32 random bytes as 43 base64url characters. Only its hash is stored. */
   readonly token: string;
@@ -103,6 +118,8 @@ export interface IssuedSession {
   readonly csrfToken: string | null;
   /** The ids of the earlier sessions of a Vendor or a Rider that this sign-in ended, in the same transaction; empty for staff. */
   readonly displacedSessionIds: readonly string[];
+  /** What `project` built in the issuing transaction; `undefined` when the request asked for none. */
+  readonly view: View;
 }
 
 /**
@@ -132,7 +149,7 @@ const unchanged = (before: PrincipalSummary | null, after: PrincipalSummary | nu
   before.bundleId === after.bundleId &&
   sameHubs(before.authorizedHubIds, after.authorizedHubIds);
 
-function checked(request: IssueSessionRequest): void {
+function checked(request: IssueSessionRequest<unknown>): void {
   const { principal } = request;
   if (
     !(SESSION_PRINCIPAL_TYPES as readonly string[]).includes(principal.type) ||
@@ -169,6 +186,22 @@ function checked(request: IssueSessionRequest): void {
       throw new TypeError('Only a rider session records a client root signal, one of the three');
     }
   }
+  if (request.secondFactor !== undefined) {
+    if (
+      principal.type !== 'STAFF' ||
+      !(['NONE', 'TOTP', 'TRUSTED_BROWSER'] as readonly string[]).includes(request.secondFactor)
+    ) {
+      throw new TypeError(
+        'Only a staff session records how it met the second step, one of the three',
+      );
+    }
+  }
+  const project: unknown = request.project;
+  if (project !== undefined && typeof project !== 'function') {
+    throw new TypeError(
+      'The view of a session is built by a function that runs in the transaction',
+    );
+  }
 }
 
 /**
@@ -202,7 +235,7 @@ export class SessionIssuer {
     this.#options = options;
   }
 
-  async issue(request: IssueSessionRequest): Promise<IssuedSession> {
+  async issue<View = undefined>(request: IssueSessionRequest<View>): Promise<IssuedSession<View>> {
     checked(request);
     const { principal } = request;
     const {
@@ -224,7 +257,7 @@ export class SessionIssuer {
     };
     const type: SessionPrincipalType = principal.type;
 
-    return coordinator.run<PrincipalSummary | null, IssuedSession>(context, {
+    return coordinator.run<PrincipalSummary | null, IssuedSession<View>>(context, {
       discover: async (_tx, handle) => {
         const found = await identities.readIdentity(handle, principal);
         if (found === null) throw new SessionIssueRefusedError('PRINCIPAL_NOT_FOUND');
@@ -334,9 +367,18 @@ export class SessionIssuer {
           ...(request.registeredDeviceId === undefined
             ? {}
             : { deviceContext: { registered_device_id: request.registeredDeviceId } }),
-          ...(request.clientRootSignal === undefined
+          ...(request.clientRootSignal === undefined && request.secondFactor === undefined
             ? {}
-            : { detail: { client_root_signal: request.clientRootSignal } }),
+            : {
+                detail: {
+                  ...(request.clientRootSignal === undefined
+                    ? {}
+                    : { client_root_signal: request.clientRootSignal }),
+                  ...(request.secondFactor === undefined
+                    ? {}
+                    : { second_factor: request.secondFactor }),
+                },
+              }),
         });
 
         // What ended the earlier session, named by the catalogue (audit.md section 5.4): the vendor's displacement is
@@ -370,11 +412,16 @@ export class SessionIssuer {
           }
         }
 
+        // Last, so that a view that cannot be built takes the whole issue back with it.
+        const view =
+          request.project === undefined ? undefined : await request.project(handle, stored);
+
         return {
           session: stored,
           token: session.token,
           csrfToken: csrf?.token ?? null,
           displacedSessionIds: displaced,
+          view: view as View,
         };
       },
     });

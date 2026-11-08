@@ -1,7 +1,11 @@
+import {
+  ATTESTATION_INTEGRITY_CAUSES,
+  ATTESTATION_UNAVAILABLE_CAUSES,
+} from '../auth/ports/attestation-verifier.port.js';
 import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
 
-/**
+/*
  * The closed catalogue of metrics (S0.15; OBSERVABILITY_AND_RECOVERY.md §3). A metric exists only if it is defined here, with a
  * kind and, for each label, **the closed set of values the label can take**. That is what keeps a label bounded: a label value is
  * an outcome class, a bucket, a cause, never an identifier, an address, a destination or a token, and the registry refuses a
@@ -9,9 +13,14 @@ import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/deliver
  * is added here in the same change as the code that records it, and `metric-catalogue.test.ts` holds the figures the documents
  * state to the documents.
  *
- * Nothing here is served: the private endpoint that serves them, the thresholds and the alerts are S0.68's.
+ * What serves them is the private metrics endpoint of each process (`metrics-listener.ts`, S0.68; off unless its port is configured),
+ * and the thresholds and alerts that read them are `alert-rules.ts` (the alerting tool is release gate G3).
  */
-export type MetricKind = 'counter' | 'observation';
+/**
+ * A counter and an observation are recorded by the code as things happen (`Metrics`); a **gauge** is read when the metrics are served
+ * (S0.68), from the state it describes (the age of the oldest due delivery job), and the registry refuses to record one.
+ */
+export type MetricKind = 'counter' | 'observation' | 'gauge';
 
 export interface MetricDefinition {
   readonly kind: MetricKind;
@@ -122,6 +131,43 @@ export const METRIC_DEFINITIONS = Object.freeze({
     description: 'Delivery leases taken over after their holder left no outcome.',
   }),
   /**
+   * Each answer of the private attestation verifier to the API (S0.56; SECURITY_DESIGN.md §15.2.3), by the outcome class of the port
+   * (`INTERFACE_BROKEN` is an answer that is not in the interface and is thrown as a defect). The verdicts count what was decided, not who:
+   * no key, chain, package or digest is a label.
+   */
+  attestation_verifier_calls_total: define({
+    kind: 'counter',
+    labels: {
+      outcome: [
+        'VERIFIED',
+        'DEVICE_INTEGRITY_FAILED',
+        'DEVICE_SECURITY_UNSUPPORTED',
+        'TRUST_DATA_UNAVAILABLE',
+        'INTERFACE_BROKEN',
+      ],
+    },
+    description: 'Answers of the attestation verifier service, by outcome class.',
+  }),
+  /**
+   * `TRUST_DATA_UNAVAILABLE` by its closed cause (SECURITY_DESIGN.md §15.2.3; OBSERVABILITY_AND_RECOVERY.md §4.3a): stale or missing data and
+   * unloadable roots as the verifier says them, and an unreachable, late or overloaded verifier as the API sees them. The cause is in the
+   * log and here, and never in a response.
+   */
+  attestation_verifier_unavailable_total: define({
+    kind: 'counter',
+    labels: { cause: ATTESTATION_UNAVAILABLE_CAUSES },
+    description: 'Enrolments the attestation verifier could not evaluate, by closed cause.',
+  }),
+  /**
+   * `DEVICE_INTEGRITY_FAILED` by the step of the policy that refused (SECURITY_DESIGN.md §15.2.1): a chain ending at an unknown root is visible
+   * as a rate, and so is a rotation the configuration missed. The cause is also on the audit event, and never in a response.
+   */
+  attestation_integrity_failures_total: define({
+    kind: 'counter',
+    labels: { cause: ATTESTATION_INTEGRITY_CAUSES },
+    description: 'Attestations the verifier refused, by the closed cause of the step that did.',
+  }),
+  /**
    * The registry's own account of the samples it dropped in production (OB-35), by the reason. The reason is a closed set; the
    * dropped sample's name and values are never kept.
    */
@@ -137,6 +183,19 @@ export const METRIC_DEFINITIONS = Object.freeze({
       ],
     },
     description: 'Metric samples dropped for having an unbounded name, label or value.',
+  }),
+  /**
+   * How long ago the oldest credential message that is due was queued, in seconds (retries included: the time the person it is for has
+   * waited for the link): of the jobs whose next attempt is due, or whose lease ended with no outcome, and whose credential has not
+   * expired, which are what the worker would claim next. Zero when none is due. Read by
+   * the worker's metrics endpoint from the queue at each read (S0.68); the delivery-backlog alert of OBSERVABILITY_AND_RECOVERY.md
+   * section 3 is on it. No label: the job's id is the worker log's, never a metric's.
+   */
+  credential_delivery_oldest_due_age_seconds: define({
+    kind: 'gauge',
+    labels: {},
+    description:
+      'Seconds since the oldest due credential message was queued; zero when none is due.',
   }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 

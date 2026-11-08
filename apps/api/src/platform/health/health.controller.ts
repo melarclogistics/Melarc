@@ -56,10 +56,14 @@ export class HealthController {
     const failing = await this.readiness.failingChecks();
     if (failing.length === 0) return undefined;
     this.logger.warn({ checks: failing.map((each) => each.name) }, 'readiness check failing');
-    // A dependency that does not answer outranks a policy that is superseded: the instance cannot yet tell which policy it is
-    // older than, and the remedy of the first (wait) is the one to try first.
-    return failing.some((each) => each.reason === 'dependency_unavailable')
-      ? 'dependency_unavailable'
+    // A dependency that does not answer outranks everything: the instance cannot yet tell whether it is seeded or which policy it is
+    // older than, and the remedy of the first (wait) is the one to try first. A database without its reference data outranks a
+    // policy that is superseded, because the policy cannot be read until the seed has run.
+    if (failing.some((each) => each.reason === 'dependency_unavailable')) {
+      return 'dependency_unavailable';
+    }
+    return failing.some((each) => each.reason === 'reference_data_missing')
+      ? 'reference_data_missing'
       : 'policy_superseded';
   }
 }

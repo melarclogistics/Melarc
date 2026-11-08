@@ -7,6 +7,7 @@ import {
   OPTIONAL_KEYS,
   envShape,
   integerBetween,
+  isLoopbackAddress,
   type ConfigKey,
 } from '../../config/config-settings.js';
 import { deliveryAdapterProblems } from '../../config/delivery-adapter-problems.js';
@@ -21,6 +22,7 @@ import type {
   ConfigProblem,
   DatabaseDeadlines,
   DeliveryAdapterConfig,
+  MetricsEndpointConfig,
 } from '../../config/load-config.js';
 import { Secret } from '../../config/secret.js';
 import { parsePostgresUrl } from '../../database/postgres-url.js';
@@ -81,6 +83,9 @@ export const WORKER_ONLY_KEYS = [
   'DELIVERY_CAPTURE_DIRECTORY',
   'DELIVERY_PROVIDER_APPROVAL_REF',
   'DELIVERY_PROVIDER_ALLOWLIST',
+  'DELIVERY_WORKER_METRICS_HOST',
+  'DELIVERY_WORKER_METRICS_PORT',
+  'DELIVERY_WORKER_METRICS_SECRET',
 ] as const;
 
 type WorkerOnlyKey = (typeof WORKER_ONLY_KEYS)[number];
@@ -112,6 +117,12 @@ export const WORKER_EXPECTED: Readonly<Record<WorkerOnlyKey, string>> = {
     'a reference of 4 to 64 letters, digits and . _ : - to the written approval of the controlled window; required in Staging with a real provider, absent with capture and in production',
   DELIVERY_PROVIDER_ALLOWLIST:
     'one to 50 comma-separated email addresses or numbers in the form of E.164, none repeated; required in Staging with a real provider, absent with capture and in production',
+  DELIVERY_WORKER_METRICS_HOST:
+    'a host name or IP address without spaces; a loopback address unless DELIVERY_WORKER_METRICS_SECRET is set',
+  DELIVERY_WORKER_METRICS_PORT:
+    "an integer from 1 to 65535; absent: the worker's private metrics endpoint is off",
+  DELIVERY_WORKER_METRICS_SECRET:
+    'a 32-byte key as 43 unpadded base64url characters; required when DELIVERY_WORKER_METRICS_HOST is not a loopback address, absent without DELIVERY_WORKER_METRICS_PORT',
 };
 
 const FORBIDDEN_EVERYWHERE = {
@@ -130,6 +141,8 @@ const FORBIDDEN_WHEN_DEPLOYED: readonly string[] = [
     keyEnvName(purpose, 'MATERIAL'),
   ),
   'ATTESTATION_VERIFIER_CALLER_SECRET',
+  // The API's private metrics endpoint has a key of its own, and the worker has `DELIVERY_WORKER_METRICS_SECRET`: it holds nothing of the API's.
+  'METRICS_SECRET',
 ];
 
 const expectedText = (key: string): string =>
@@ -139,6 +152,8 @@ const OPTIONAL_WORKER_KEYS: readonly string[] = [
   'DELIVERY_CAPTURE_DIRECTORY',
   'DELIVERY_PROVIDER_APPROVAL_REF',
   'DELIVERY_PROVIDER_ALLOWLIST',
+  'DELIVERY_WORKER_METRICS_PORT',
+  'DELIVERY_WORKER_METRICS_SECRET',
   ...OPTIONAL_KEYS.filter((key) => (WORKER_SHARED_KEYS as readonly string[]).includes(key)),
 ];
 
@@ -173,6 +188,10 @@ const workerSchema = z.object({
     .string()
     .refine((text) => parseAllowList(text) !== undefined)
     .optional(),
+  // The worker's own private metrics endpoint (S0.68), by the rules of the API's (`METRICS_*`) and on a port of its own.
+  DELIVERY_WORKER_METRICS_HOST: envShape.METRICS_HOST,
+  DELIVERY_WORKER_METRICS_PORT: envShape.METRICS_PORT,
+  DELIVERY_WORKER_METRICS_SECRET: envShape.METRICS_SECRET,
 });
 
 type ParsedEnv = z.infer<typeof workerSchema>;
@@ -208,6 +227,8 @@ export interface WorkerConfig {
   /** The key material the worker holds: the `credential_delivery` purpose and no other. */
   readonly keys: KeyHolding;
   readonly delivery: WorkerDeliveryConfig;
+  /** The worker's private metrics endpoint; absent when it is off. */
+  readonly metrics?: MetricsEndpointConfig;
 }
 
 export type LoadWorkerConfigResult =
@@ -277,6 +298,15 @@ function relationProblems(env: ParsedEnv): ConfigProblem[] {
     windowKeys.forEach((key, index) => {
       if (window[index] !== undefined) invalid(key);
     });
+  }
+
+  if (env.DELIVERY_WORKER_METRICS_PORT === undefined) {
+    if (env.DELIVERY_WORKER_METRICS_SECRET !== undefined) invalid('DELIVERY_WORKER_METRICS_SECRET');
+  } else if (
+    env.DELIVERY_WORKER_METRICS_SECRET === undefined &&
+    !isLoopbackAddress(env.DELIVERY_WORKER_METRICS_HOST)
+  ) {
+    missing('DELIVERY_WORKER_METRICS_SECRET');
   }
   return problems;
 }
@@ -399,6 +429,8 @@ export function loadWorkerConfig(
           allowList: Object.freeze(allowListEntries(values.DELIVERY_PROVIDER_ALLOWLIST)),
         })
       : undefined;
+  const metricsPort = values.DELIVERY_WORKER_METRICS_PORT;
+  const metricsSecret = values.DELIVERY_WORKER_METRICS_SECRET;
   const config: WorkerConfig = {
     nodeEnv: values.NODE_ENV,
     appEnv: values.APP_ENV,
@@ -406,8 +438,9 @@ export function loadWorkerConfig(
     shutdown: Object.freeze({ timeoutMs: values.SHUTDOWN_TIMEOUT_MS }),
     database: Object.freeze({
       url: values.DATABASE_WORKER_URL,
-      // One connection for each lane, one to poll and one for the cleanup: nothing is held across a send.
-      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 2,
+      // One connection for each lane, one to poll and one for the cleanup, and one for the metrics endpoint's read of the queue when it
+      // is on: nothing is held across a send.
+      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 2 + (metricsPort === undefined ? 0 : 1),
       deadlines: Object.freeze({
         acquireTimeoutMs: values.DATABASE_ACQUIRE_TIMEOUT_MS,
         lockTimeoutMs: values.DATABASE_LOCK_TIMEOUT_MS,
@@ -436,6 +469,15 @@ export function loadWorkerConfig(
         : { captureDirectory: values.DELIVERY_CAPTURE_DIRECTORY }),
       ...(window === undefined ? {} : { providerWindow: window }),
     }),
+    ...(metricsPort === undefined
+      ? {}
+      : {
+          metrics: Object.freeze({
+            host: values.DELIVERY_WORKER_METRICS_HOST,
+            port: metricsPort,
+            ...(metricsSecret === undefined ? {} : { secret: new Secret(metricsSecret) }),
+          }),
+        }),
   };
 
   const refused = refusals(config);

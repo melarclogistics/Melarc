@@ -13,10 +13,15 @@
       "outputs": ["dist/**"]
     },
     "typecheck": {},
-    "test": {},
+    "test": {
+      "passThroughEnv": ["MELARC_TEST_WORKERS"]
+    },
     "test:db": {
       "cache": false,
       "passThroughEnv": [
+        "MELARC_TEST_WORKERS",
+        "MELARC_DB_WORKERS",
+        "JAVA_HOME",
         "MELARC_PG_HOST",
         "MELARC_PG_PORT",
         "MELARC_PG_ADMIN_PASSWORD",
@@ -50,13 +55,14 @@
         "GITHUB_ACTIONS",
         "RUNNER_ENVIRONMENT",
         "MELARC_E2E_KEYS_CLEARED",
+        "MELARC_HTTPS_SHARD",
         "OPENSSL",
         "CERTUTIL"
       ]
     },
     "test:browser": {
       "cache": false,
-      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS"]
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS", "MELARC_BROWSER_SHARD"]
     }
   }
 }

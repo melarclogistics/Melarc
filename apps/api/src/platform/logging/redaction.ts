@@ -39,7 +39,16 @@ const SENSITIVE_SUBSTRINGS = [
 ];
 
 /** Short words that count only as a whole key: they sit inside ordinary ones ("shipping", "footprint"). */
-const SENSITIVE_WHOLE_KEYS = new Set(['pin', 'otp', 'seed', 'sig', 'melarcvendordevice']);
+const SENSITIVE_WHOLE_KEYS = new Set([
+  'pin',
+  'otp',
+  'seed',
+  'sig',
+  'melarcvendordevice',
+  // The trusted-browser credential is the `melarc_trusted_browser` cookie (staff-authentication.md section 5.8): a credential that stands in
+  // for a code, so as good as a session for the second step. It holds no other sensitive word.
+  'melarctrustedbrowser',
+]);
 
 function isSensitiveKey(key: string): boolean {
   const normalised = key.toLowerCase().replace(/[^a-z0-9]/g, '');

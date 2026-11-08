@@ -1,13 +1,17 @@
 import { sql } from 'drizzle-orm';
 
 import type { StoredSession } from '../auth/ports/session-store.port.js';
-import type { TransactionHandle, UnitOfWork } from '../auth/ports/unit-of-work.port.js';
+import type {
+  TransactionHandle,
+  UnitOfWork,
+  UnitOfWorkOptions,
+} from '../auth/ports/unit-of-work.port.js';
 import { judgeSession } from '../auth/sessions/session-judgement.js';
 import { PolicyCoordinator } from '../database/policy-lock/coordinate.js';
 import { bundleLock, fixedLock, type PolicyLockRequest } from '../database/policy-lock/plan.js';
 import { timestampOf } from '../database/timestamps.js';
 import { transactionOf } from '../database/transaction-handle.js';
-import { isUuid } from '../database/transaction-context.js';
+import { isUuid, type SecurityContext } from '../database/transaction-context.js';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import type { AuthorizedRequest } from './authorized-request.js';
@@ -72,8 +76,9 @@ export type OperationWork<T> = (
  * `OB-131`). The use case does not open its own: it asks this, so that the lock order and the revalidation are built once.
  *
  * - **`read`**: no policy lock ("a read-only request: none"). One transaction under the operation's context, at the database's
- *   default isolation. The authority check of such a request is the one authentication made; a read racing a reduction is simply
- *   ordered before it.
+ *   default isolation unless the use case asks for `REPEATABLE READ` (a read that answers from several statements and must answer one
+ *   coherent state: the staff reads of S0.35). The authority check of such a request is the one authentication made; a read racing a
+ *   reduction is simply ordered before it.
  * - **`mutate`**: the five steps of the specification on the toolkit of S0.7. **(1)** A non-authoritative read, before the
  *   transaction, of the acting session's own row. **(2)** The plan: the shared lock on the acting session's **bundle** and, for a
  *   Vendor or a Rider, on the **fixed policy** of the audience, in canonical order. **(3)** The locks are taken before any other
@@ -124,6 +129,7 @@ export class OperationRunner {
     authorized: AuthorizedRequest,
     correlationId: string,
     work: OperationWork<T>,
+    options: UnitOfWorkOptions = {},
   ): Promise<T> {
     // The lock-free path is for a request that changes nothing. A state-changing request that came here would act on authority that
     // a reduction could end while it ran: it is a defect of the use case, found at the first call, and nothing is opened for it.
@@ -133,7 +139,11 @@ export class OperationRunner {
       );
     }
     const context = await this.#options.contexts.of(authorized, correlationId);
-    return this.#options.unitOfWork.run(context, (transaction) => work(transaction, authorized));
+    return this.#options.unitOfWork.run(
+      context,
+      (transaction) => work(transaction, authorized),
+      options,
+    );
   }
 
   async mutate<T>(
@@ -142,6 +152,40 @@ export class OperationRunner {
     work: OperationWork<T>,
   ): Promise<T> {
     const context = await this.#options.contexts.of(authorized, correlationId);
+    return this.#locked(authorized, context, work);
+  }
+
+  /**
+   * A vendor's own credential act (S0.49: `requestAdditionalDeviceGrant`, `revokeVendorDevice`): the locked path of `mutate`, the session's
+   * shared policy locks and its standing judged under them, **with the work under the `authentication` capability** the caller gives. The
+   * registry gives a Vendor no write on the grant, the message or the browser it changes (data-scope-registry.md: Vendor `DENY`), which only
+   * that capability writes, by key; the session and its locks are what make it the vendor's act, and the caller records the vendor's
+   * account as the actor. The context is built where the capability may be opened (`platform/auth`) and handed in; anything else, and a
+   * session that is not a vendor's, is refused before a lock is taken.
+   */
+  async actAsAuthentication<T>(
+    authorized: AuthorizedRequest,
+    context: SecurityContext,
+    work: OperationWork<T>,
+  ): Promise<T> {
+    if (context.principalType !== 'SYSTEM' || context.taskCapability !== 'authentication') {
+      throw new TypeError(
+        'A vendor’s own credential act runs under the authentication capability and no other context',
+      );
+    }
+    if (authorized.session.principalType !== 'VENDOR') {
+      throw new TypeError(
+        'Only a vendor’s own credential act runs under the authentication capability',
+      );
+    }
+    return this.#locked(authorized, context, work);
+  }
+
+  async #locked<T>(
+    authorized: AuthorizedRequest,
+    context: SecurityContext,
+    work: OperationWork<T>,
+  ): Promise<T> {
     const { session } = authorized;
     return this.#options.coordinator.run<Standing | null, T>(context, {
       discover: (_transaction, handle) => readStanding(handle, session.id),

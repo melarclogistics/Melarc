@@ -62,18 +62,70 @@ export type PostureFlag = (typeof POSTURE_FLAGS)[number];
  * And the one function of migration 0017 that the seed takes its policy locks with (`melarc.lock_policy_keys`, S0.27): it takes the
  * exclusive advisory locks of the bundles and the fixed policies named, in the canonical order, and reads and writes no table. The
  * change functions of the same migration are on no line: only the migration login, which is not a runtime identity, may execute them.
- * And the API runtime and the one function of migration 0016 that reads a credential hash for the authentication capability. The
- * workers are on no line, so EXECUTE on any definer is a finding for them, and for the API runtime on any other.
+ * And the API runtime and two functions: the one of migration 0016 that reads a credential hash for the authentication capability, and
+ * the one of migration 0027 that gives a staff read the second-factor facts of the identities its scope shows (and nothing else of the
+ * factor, grant and delivery tables). The workers are on no line, so EXECUTE on any definer is a finding for them, and for the API
+ * runtime on any other.
  */
 export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]>> = {
   [PROVISIONING_ROLE]: [
     'melarc.initialize_reference_data',
     'melarc.add_reason_fixtures',
     'melarc.lock_policy_keys',
+    // The bootstrap seed and the resume command (migration 0019, S0.30): the only way the provisioning login reaches the identity,
+    // grant, factor and audit tables, which it holds no privilege on.
+    'melarc.bootstrap_status',
+    'melarc.seed_bootstrap_administrators',
+    'melarc.bootstrap_identity_state',
+    'melarc.resume_bootstrap_identity',
+    // The non-production vendor fixture (migration 0034, S0.47; MIGRATION_AND_SEEDING.md section 4b): the only way that login reaches the
+    // vendor tables, which it holds no privilege on. One organisation, account and credential with no secret, refused while one exists.
+    'melarc.add_vendor_fixture',
+    // The non-production rider fixture (migration 0040, S0.53; MIGRATION_AND_SEEDING.md section 4a): the only way that login reaches the
+    // rider tables. Two or more ACTIVE riders of the reserved +999 range with no PIN and no device, refused while one exists.
+    'melarc.add_rider_fixture',
   ],
   // The one way to read the credential hash of a staff identity (migration 0016): the runtime has no SELECT on the column, and the
   // function refuses any context but a SYSTEM one under the authentication capability.
-  [API_RUNTIME_ROLE]: ['melarc.staff_credential_hash'],
+  // And the facts of a staff identity's second factor (migration 0027, F02 of the audit of 22 October 2026): for a staff read of
+  // `staff.read` in one snapshot, or the authentication capability; it returns facts and no secret, hash, token or record identifier.
+  // And the facts of one identity a mutation reads under the identity's lock (migration 0029, S0.36; extended in 0030, S0.37): for a STAFF
+  // context under `staff.identity.approve` or `staff.mfa.reset` at READ COMMITTED, in the caller's scope; the same closed list of facts.
+  // And the two authentication-only readers of a secret column (migration 0031, F01 of the audit of 23 October 2026): the session row
+  // of a token hash (`melarc.session_by_token_hash`) and the sealed seed of one factor (`melarc.mfa_factor_sealed_seed`). The runtime
+  // login holds no SELECT on `session.token_hash`, `session.bundle_snapshot` or `mfa_factor.secret_*`; each function answers only a
+  // SYSTEM context under the authentication capability, and the seed reader only the factor's own identity.
+  // And the two readers of the hash of a trusted browser (migration 0033, the Product Owner's instruction of 25 October 2026): the runtime
+  // login cannot select `trusted_browser.token_hash`, so the sign-in uses a credential through `melarc.use_trusted_browser` (the
+  // authentication capability alone: valid means not removed, unexpired, the identity active and the factor and generation as bound) and
+  // a list recognises the browser asking through `melarc.trusted_browser_id_for` (that capability, or a staff context for its own
+  // identity). `melarc.staff_locked_facts` admits `staff.session.revoke` from the same migration.
+  // And the four readers of the vendor tables (migration 0034, S0.47): the hash of a vendor's shared secret and the browser a credential
+  // belongs to (`melarc.vendor_secret_hash`, `melarc.vendor_device_by_credential`: the authentication capability alone; the runtime cannot
+  // select either hash), the credential facts a staff read of `vendor.read` is given in one snapshot (`melarc.vendor_credential_facts`:
+  // booleans, the channel's name and the generation, never an address or a hash), and the facts and the one destination an administrative
+  // act reads under the credential's lock (`melarc.vendor_locked_facts`: `vendor.organization.approve` or `vendor.credential.recover` at
+  // READ COMMITTED, in the caller's scope).
+  [API_RUNTIME_ROLE]: [
+    'melarc.staff_credential_hash',
+    'melarc.staff_reset_facts',
+    'melarc.staff_locked_facts',
+    'melarc.session_by_token_hash',
+    'melarc.mfa_factor_sealed_seed',
+    'melarc.use_trusted_browser',
+    'melarc.trusted_browser_id_for',
+    'melarc.vendor_secret_hash',
+    'melarc.vendor_device_by_credential',
+    'melarc.vendor_credential_facts',
+    'melarc.vendor_locked_facts',
+    // And the three readers of the rider tables (migration 0040, S0.53): the hash of a rider's PIN and the key of a rider's active device
+    // (`melarc.rider_pin_hash`, `melarc.rider_active_device`: the authentication capability alone; the runtime cannot select either), and
+    // the facts an act reads under a rider's lock (`melarc.rider_locked_facts`: `staff.device.register`, `staff.device.reregister` and
+    // `staff.device.revoke` at READ COMMITTED, in the caller's scope).
+    'melarc.rider_pin_hash',
+    'melarc.rider_active_device',
+    'melarc.rider_locked_facts',
+  ],
 };
 
 /** Schemas that are the server's own and not ours to inspect. */

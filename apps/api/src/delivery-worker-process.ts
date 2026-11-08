@@ -76,6 +76,20 @@ export function startDeliveryWorker(
     },
     shutdown: () => runtime.shutdown(),
   });
-  runtime.start();
+  if (loaded.config.metrics === undefined) {
+    runtime.start();
+  } else {
+    // The private metrics endpoint first (S0.68), so that a port it cannot take stops the worker before it claims anything.
+    runtime.startMetrics().then(
+      () => {
+        runtime.start();
+      },
+      (error: unknown) => {
+        runtime.logger.fatal({ err: error }, 'the metrics endpoint could not start');
+        process.exitCode = 1;
+        void runtime.shutdown();
+      },
+    );
+  }
   return runtime;
 }

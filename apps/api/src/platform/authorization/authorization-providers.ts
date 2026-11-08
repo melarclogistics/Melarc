@@ -1,6 +1,11 @@
 import type { Provider } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
+import { vendorOrganizationFromDirectory } from '../auth/directory/vendor-organization-resolver.js';
+import {
+  IDENTITY_DIRECTORY,
+  type IdentityDirectory,
+} from '../auth/ports/identity-directory.port.js';
 import { UNIT_OF_WORK, type UnitOfWork } from '../auth/ports/unit-of-work.port.js';
 import { POLICY_COORDINATOR } from '../auth/sessions/session-providers.js';
 import type { PolicyCoordinator } from '../database/policy-lock/coordinate.js';
@@ -42,11 +47,26 @@ export const authorizationProviders: readonly Provider[] = [
         : new RecordScopeResolver({ unitOfWork, entities, tierRules }),
     inject: [optional(UNIT_OF_WORK), RECORD_ENTITIES_TOKEN, TIER_RULES_TOKEN],
   },
+  // A vendor session's organisation: the resolver the composition gives (a test supplies one), or else the vendor domain's answer through
+  // the directory the composition root bound (S0.47). Without a database there is neither, and a vendor's operation is not served.
   {
     provide: OPERATION_CONTEXTS,
-    useFactory: (vendorOrganization: VendorOrganizationResolver | undefined): OperationContexts =>
-      new OperationContexts(vendorOrganization),
-    inject: [optional(VENDOR_ORGANIZATION_RESOLVER)],
+    useFactory: (
+      vendorOrganization: VendorOrganizationResolver | undefined,
+      unitOfWork: UnitOfWork | undefined,
+      directory: IdentityDirectory | undefined,
+    ): OperationContexts =>
+      new OperationContexts(
+        vendorOrganization ??
+          (unitOfWork === undefined || directory === undefined
+            ? undefined
+            : vendorOrganizationFromDirectory(unitOfWork, directory)),
+      ),
+    inject: [
+      optional(VENDOR_ORGANIZATION_RESOLVER),
+      optional(UNIT_OF_WORK),
+      optional(IDENTITY_DIRECTORY),
+    ],
   },
   {
     provide: OPERATION_RUNNER,

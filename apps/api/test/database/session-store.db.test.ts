@@ -663,3 +663,216 @@ describe('terminate', () => {
     await expect(attempt({ by: 'everyone' })).rejects.toThrow(TypeError);
   });
 });
+
+describe('expire', () => {
+  const expire = (id: string, idleMinutes: number | null = 30): Promise<boolean> =>
+    unitOfWork.run(systemContext('authentication'), (handle) =>
+      store.expire(handle, id, idleMinutes),
+    );
+  // The three tests that make the expiry wait for a row wait for about two seconds on purpose, which is the default lock time of a
+  // request (`DATABASE_LOCK_TIMEOUT_MS`): an expiry that waits longer is ended by the database, which is right in production and is not
+  // what is being asked here (the first run of the gate of S0.34 showed the boundary and the lock time two seconds apart, and the lock
+  // time winning). So they use a service of their own, whose lock and statement times are longer than the wait.
+  let patient: BuiltService;
+  let patientUnitOfWork: PostgresUnitOfWork;
+  beforeAll(() => {
+    patient = buildService(database, {
+      poolMax: 2,
+      deadlines: { ...INERT_DEADLINES, lockTimeoutMs: 15_000, statementTimeoutMs: 30_000 },
+    });
+    patientUnitOfWork = new PostgresUnitOfWork(patient.service);
+  });
+  afterAll(async () => {
+    await patient.close();
+  });
+  const expireHere = (id: string, idleMinutes: number | null): Promise<boolean> =>
+    patientUnitOfWork.run(systemContext('authentication'), (handle) =>
+      store.expire(handle, id, idleMinutes),
+    );
+  /** A session issued a moment ago, with eight hours to run: live on every count until it is aged. */
+  const live = async (overrides: Partial<NewSession> = {}): Promise<StoredSession> => {
+    const issuedAt = new Date(Date.now() - 1_000);
+    return create(
+      newSession({
+        issuedAt,
+        expiresAt: new Date(issuedAt.getTime() + 8 * 3_600_000),
+        ...overrides,
+      }),
+    );
+  };
+  /** Lets `minutes` pass for a session by changing the data, as the tests of the recording of activity do. */
+  const age = async (id: string, minutes: number) => {
+    await admin.query('alter table session disable trigger session_guard');
+    try {
+      await admin.query(
+        `update session set issued_at = issued_at - make_interval(mins => $2),
+                            last_activity_at = last_activity_at - make_interval(mins => $2),
+                            expires_at = expires_at - make_interval(mins => $2) where id = $1`,
+        [id, minutes],
+      );
+    } finally {
+      await admin.query('alter table session enable trigger session_guard');
+    }
+  };
+
+  // Break caught (AC-SLICE-000-35): an idle browser session left live in the table, so that the record says ACTIVE for a session that
+  // every request has refused for an hour.
+  it('ends a browser session that is idle with EXPIRED, and says it did', async () => {
+    const stored = await live();
+    await age(stored.id, 31);
+
+    expect(await expire(stored.id)).toBe(true);
+
+    expect(await rowOf(stored.id)).toMatchObject({ termination_reason: 'EXPIRED' });
+    expect((await rowOf(stored.id))?.terminated_at).toBeInstanceOf(Date);
+  });
+
+  // Break caught: the absolute end not ending a session, or a rider's absence from the idle rule not being kept.
+  it('ends a session past its absolute end, and a rider only for that and never for idleness', async () => {
+    const pastEnd = await create(
+      newSession({
+        issuedAt: new Date(Date.now() - 600 * 60_000),
+        expiresAt: new Date(Date.now() - 60_000),
+      }),
+    );
+    const rider = await live({
+      principalType: 'RIDER',
+      registeredDeviceId: randomUUID(),
+      authority: { ...newSession().authority, policyRevision: 1 },
+    });
+    // Idle for a hundred minutes, and with seven hours still to run: only the idle rule could end it, and a rider has none.
+    await age(rider.id, 100);
+
+    expect(await expire(pastEnd.id, null)).toBe(true);
+    expect((await rowOf(pastEnd.id))?.termination_reason).toBe('EXPIRED');
+    expect(await expire(rider.id, null)).toBe(false);
+    expect((await rowOf(rider.id))?.terminated_at).toBeNull();
+  });
+
+  // Break caught: the judgement made on what the caller read earlier and not on the row as it is: a live session ended because a
+  // request, a moment before, saw it idle. The statement judges, so a session that is live is left alone.
+  it('leaves a live session alone, whatever its caller believes', async () => {
+    const stored = await live();
+
+    expect(await expire(stored.id)).toBe(false);
+
+    expect((await rowOf(stored.id))?.terminated_at).toBeNull();
+  });
+
+  // Break caught: an ended session ended again, with the time and the reason of the expiry: the first record is the record.
+  it('keeps the reason a session ended with, and does not end it again', async () => {
+    const stored = await live();
+    await age(stored.id, 31);
+    await terminate({ by: 'session', sessionId: stored.id }, 'SIGNED_OUT');
+    const before = await rowOf(stored.id);
+
+    expect(await expire(stored.id)).toBe(false);
+
+    expect(await rowOf(stored.id)).toEqual(before);
+  });
+
+  // Break caught: a session that does not exist answering as though it had been ended.
+  it('answers false for a session that does not exist', async () => {
+    expect(await expire(randomUUID())).toBe(false);
+  });
+
+  it('refuses an id that is not a session id and an idle limit that is not whole minutes', async () => {
+    await expect(expire('not-a-uuid')).rejects.toBeInstanceOf(TypeError);
+    await expect(expire(randomUUID(), 0)).rejects.toBeInstanceOf(RangeError);
+    await expect(expire(randomUUID(), 1.5)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  /** Locks the row of a session from a connection of its own and changes nothing. */
+  async function lockOnly(id: string): Promise<pg.Client> {
+    const client = clientFor(database.urlFor('postgres'));
+    client.on('error', () => undefined);
+    await client.connect();
+    await client.query('begin');
+    await client.query('select 1 from session where id = $1 for update', [id]);
+    return client;
+  }
+
+  async function untilWaiting(): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const waiting = await observer.rows(
+        `select 1 from pg_stat_activity
+          where wait_event_type = 'Lock' and datname = current_database() and query ~* 'from session where id|update session'`,
+      );
+      if (waiting.length > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('the expiry never waited on the row lock');
+  }
+
+  async function untilClockPasses(boundary: Date): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const now = await observer.one<{ past: boolean }>(
+        `select clock_timestamp() > $1::timestamptz as past`,
+        [boundary],
+      );
+      if (now?.past === true) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('the database clock did not pass the boundary in time');
+  }
+
+  // Break caught: the expiry judged on the clock read before the wait for the row and not after it (a holder that only locks the row
+  // leaves a waiting UPDATE with the qualification it had), so that a session whose end comes while the expiry waits is left live
+  // by the statement that was written to end it.
+  it('ends a session whose absolute end comes while the expiry waits for its row', async () => {
+    const issuedAt = new Date(Date.now() - 2 * 3_600_000);
+    const expiresAt = new Date(Date.now() + 2_000);
+    const stored = await create(newSession({ issuedAt, expiresAt }));
+    const holder = await lockOnly(stored.id);
+    try {
+      const pending = expireHere(stored.id, null);
+      await untilWaiting();
+      await untilClockPasses(expiresAt);
+      await holder.query('rollback');
+
+      expect(await pending).toBe(true);
+    } finally {
+      await holder.end();
+    }
+    expect((await rowOf(stored.id))?.termination_reason).toBe('EXPIRED');
+  });
+
+  // Control: the same expiry with the lock released before the boundary ends nothing. A test that cannot show this proves nothing
+  // about the one above.
+  it('ends nothing when the lock is released before the boundary', async () => {
+    const issuedAt = new Date(Date.now() - 2 * 3_600_000);
+    const stored = await create(newSession({ issuedAt, expiresAt: new Date(Date.now() + 60_000) }));
+    const holder = await lockOnly(stored.id);
+    try {
+      const pending = expireHere(stored.id, null);
+      await untilWaiting();
+      await holder.query('rollback');
+
+      expect(await pending).toBe(false);
+    } finally {
+      await holder.end();
+    }
+    expect((await rowOf(stored.id))?.terminated_at).toBeNull();
+  });
+
+  // Break caught: an expiry that wins against a request which, while it waited, was recorded as activity: the person acted and the
+  // session is live at the clock the statement reads.
+  it('leaves a session alone whose activity is recorded while the expiry waits for its row', async () => {
+    const stored = await live();
+    await age(stored.id, 31);
+    const holder = await lockOnly(stored.id);
+    try {
+      const pending = expireHere(stored.id, 30);
+      await untilWaiting();
+      await holder.query('update session set last_activity_at = clock_timestamp() where id = $1', [
+        stored.id,
+      ]);
+      await holder.query('commit');
+
+      expect(await pending).toBe(false);
+    } finally {
+      await holder.end();
+    }
+    expect((await rowOf(stored.id))?.terminated_at).toBeNull();
+  });
+});

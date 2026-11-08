@@ -101,6 +101,8 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
           'Hub',
           'Setting',
           'ReasonCode',
+          // The status of a vendor account's organisation, which a vendor's recovery is judged on (S0.50, credential-recovery.md 5.7).
+          'VendorOrganization',
         ],
         ['SELECT'],
       ),
@@ -111,8 +113,8 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
       ),
       ...on(
         ['IdempotencyRecord'],
-        ['UPDATE'],
-        'UPDATE that erases the sealed columns only, for the grant just consumed, superseded or invalidated',
+        ['SELECT', 'INSERT', 'UPDATE'],
+        'UPDATE that erases the sealed columns only, for the grant just consumed, superseded or invalidated; and a vendor’s own unsealed record of requestAdditionalDeviceGrant, kept on its behalf (migration 0036, S0.49)',
       ),
       ...on(['AuditEvent'], ['INSERT']),
     ],
@@ -187,19 +189,36 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     identity: 'provisioning',
     opener: 'The bootstrap seed and the bootstrap-resume command',
     openedUnder: ['tools/bootstrap/'],
+    // Only inside the four functions of migration 0019 (melarc.bootstrap_status, seed_bootstrap_administrators, bootstrap_identity_state
+    // and resume_bootstrap_identity): the provisioning identity holds no privilege on any of these tables, as it holds none on the
+    // seven of the seed, and the functions run as the owner and set the capability for their own statements.
     tables: [
-      ...on(['StaffIdentity'], ['INSERT'], 'the pair, in one transaction'),
+      ...on(
+        ['StaffIdentity'],
+        ['SELECT', 'INSERT'],
+        'the pair, in one transaction, only inside melarc.seed_bootstrap_administrators: the insert policy admits the bootstrap shape (origin BOOTSTRAP, ACTIVE, Platform Admin, no hub, no credential, the reserved system actor as maker and checker) and nothing else; SELECT counts the table, and a row lock (no change) is admitted for a bootstrap identity',
+      ),
       ...on(
         ['SetupGrant'],
-        ['INSERT'],
-        'BOOTSTRAP_SETUP, and the resume command’s MFA_REENROLMENT',
+        ['SELECT', 'INSERT', 'UPDATE'],
+        'BOOTSTRAP_SETUP, and the resume command’s MFA_REENROLMENT, PENDING and with no issuer; UPDATE ends a PENDING grant as SUPERSEDED or EXPIRED and nothing else',
       ),
-      ...on(['MfaFactor'], ['INSERT', 'UPDATE'], 'supersede a stale PENDING'),
-      ...on(['AuditEvent'], ['INSERT']),
+      ...on(
+        ['MfaFactor'],
+        ['SELECT', 'UPDATE'],
+        'revoke a stale PENDING factor, with no administrator, reason or episode, and nothing else; no insert',
+      ),
+      ...on(
+        ['AuditEvent'],
+        ['INSERT'],
+        'six events, by SYSTEM with a null actor, tiered as the catalogue says: staff.identity.created, staff.identity.approved, auth.mfa.revoked and the summary of a resume, auth.bootstrap.resumed (enhanced, about a StaffIdentity), auth.setup_grant.issued and auth.setup_grant.superseded (ordinary)',
+      ),
+      ...on(['Session'], ['SELECT'], 'that no session of the identity is live (condition 5)'),
+      ...on(['Setting'], ['SELECT'], 'recovery_link_ttl_minutes and no other row, no write'),
     ],
     lookups:
-      'The seeded bootstrap identities only, under the conditions of MIGRATION_AND_SEEDING.md §3.3a',
-    returns: 'The raw secret once, to the controlled channel, and never logged',
+      'The seeded bootstrap identities only, under the conditions of MIGRATION_AND_SEEDING.md §3.3a, which the resume function judges under the identity’s row lock; the seed counts the whole staff table, under a lock, and refuses unless it is empty',
+    returns: 'The raw secret once, to the controlled channel (a custody bundle), and never logged',
   },
   policy_change: {
     identity: 'migration',

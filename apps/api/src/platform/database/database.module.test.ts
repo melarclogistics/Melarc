@@ -76,7 +76,8 @@ describe('the database module', () => {
     });
     expect(
       running.logs.records().find((record) => record.msg === 'readiness check failing'),
-    ).toMatchObject({ level: 'warn', checks: ['database'] });
+      // Every check that reads the database fails with it: the fixed policy since the build declares a Vendor revision (S0.48).
+    ).toMatchObject({ level: 'warn', checks: ['database', 'fixed-policy', 'reference-data'] });
     const everything = `${running.logs.text()}${JSON.stringify(ready)}`;
     for (const secret of ['URL-PASSWORD-VALUE', 'melarc_unreachable']) {
       expect(everything).not.toContain(secret);

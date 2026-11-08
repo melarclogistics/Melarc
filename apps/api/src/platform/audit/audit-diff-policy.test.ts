@@ -178,7 +178,7 @@ describe('the branches of the events whose answer depends on what happened', () 
     outcome: 'SUCCEEDED',
     object: { type: 'RecoveryRequest', id: OBJECT_ID },
     resultingState: 'ISSUED',
-    relatedIds: { initiated_by: STAFF_ID },
+    relatedIds: { principal_type: 'STAFF', principal_id: OBJECT_ID, initiated_by: STAFF_ID },
     ...over,
   });
 
@@ -200,7 +200,13 @@ describe('the branches of the events whose answer depends on what happened', () 
   // Break caught: the self-service branch, which is not enhanced, held to a diff as if it were.
   it('leaves the diff of a self-service recovery optional, and still forbids one on COALESCED', () => {
     const selfService = (over: Partial<AuditEventInput> = {}): AuditEventInput =>
-      recovery({ enhanced: false, enhancedBasis: 'SELF_SERVICE', ...over });
+      recovery({
+        enhanced: false,
+        enhancedBasis: 'SELF_SERVICE',
+        actor: { type: 'SYSTEM', id: null },
+        relatedIds: { principal_type: 'STAFF', principal_id: OBJECT_ID },
+        ...over,
+      });
 
     expect(build(selfService(), AUTHENTICATION).beforeAfter).toBeNull();
     expect(build(selfService({ beforeAfter: DIFF }), AUTHENTICATION).beforeAfter).toEqual(DIFF);

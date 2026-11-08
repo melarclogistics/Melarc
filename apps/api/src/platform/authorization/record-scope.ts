@@ -1,7 +1,14 @@
 import { sql } from 'drizzle-orm';
 
 import type { UnitOfWork } from '../auth/ports/unit-of-work.port.js';
-import { createScopeProbe, type ExistingRecordHub } from '../database/scope-probe.js';
+import {
+  createHubSetProbe,
+  createScopeProbe,
+  type ExistingRecordHub,
+  type ExistingRecordHubs,
+  type HubScopedEntity,
+  type HubSetEntity,
+} from '../database/scope-probe.js';
 import { isUuid, type SecurityContext } from '../database/transaction-context.js';
 import { transactionOf } from '../database/transaction-handle.js';
 import { ApiException } from '../http/api-exception.js';
@@ -17,18 +24,73 @@ import { requireTargetTier, type Tier, type TierRule, type TierRules } from './t
 export interface RecordEntity {
   readonly schema: string;
   readonly table: string;
-  /** True where the table has the probe policy and a `responsible_hub_id`. */
+  /** True where the table has the probe policy and a column that carries its hub. */
   readonly hubScoped: boolean;
+  /** The column that carries the hub, where it is not `responsible_hub_id` (a staff identity's is `primary_hub_id`). */
+  readonly hubColumn?: string;
+  /** The record that carries the hub, where it is not on this one: a vendor account's hub is its organisation's (S0.47). */
+  readonly hubVia?: HubScopedEntity['hubVia'];
+  /**
+   * The array column that carries the hubs of a record that belongs to **several** (a session is issued for the hubs of its principal).
+   * Such a record is not `hubScoped` (the one-hub probe cannot compare it); it names this column instead, and the hub-set probe reads it
+   * (F06 of 23 October 2026). The record is *outside the caller's hubs* when it has hubs and none of them is one the operation reaches; a
+   * record with no hub is not outside anyone's hubs, and one the caller cannot see for any other reason is not told apart from absent.
+   */
+  readonly hubsColumn?: string;
 }
 
 export type RecordEntities = Readonly<Record<string, RecordEntity>>;
 
 /**
- * The entities the application's routes may name. **Empty until a slice adds a table that an operation addresses by id**: the slice
+ * The entities the application's routes may name. **A slice adds a table that an operation addresses by id**: the slice
  * adds its row here in the same change, as it adds a row to `HUB_SCOPED_ENTITIES` when the table is hub-scoped. A route that names an
  * entity that is not here stops the application at start (`assertRoutesAreSound`).
  */
-export const RECORD_ENTITIES: RecordEntities = Object.freeze({});
+export const RECORD_ENTITIES: RecordEntities = Object.freeze({
+  // A staff identity (S0.35): hub-scoped by its primary hub, with the probe policy beside its read policy (migration 0024).
+  staff_identity: {
+    schema: 'public',
+    table: 'staff_identity',
+    hubScoped: true,
+    hubColumn: 'primary_hub_id',
+  },
+  // A session (S0.37, `revokeSession`): named by its id. It carries the several hubs it was issued for, which the policy of the key reads
+  // (the caller reaches a session whose hubs it shares), so it is not hub-scoped as a record: a session the caller cannot see is told
+  // from an absent one by its hub **set** (F06 of 23 October 2026), with the probe policy of migration 0031.
+  session: {
+    schema: 'public',
+    table: 'session',
+    hubScoped: false,
+    hubsColumn: 'authorized_hub_ids',
+  },
+  // A registered browser (S0.49, `revokeVendorDevice`): named by its id; a vendor sees its own (migration 0034), and another's is answered
+  // `NOT_FOUND` at once, as a record that does not exist is. Not hub-scoped.
+  registered_device: {
+    schema: 'public',
+    table: 'registered_device',
+    hubScoped: false,
+  },
+  // A rider (S0.53): hub-scoped by its primary hub, with the probe policy beside its read policy (migration 0040). The roster's key and the
+  // three device keys name it by the path, and each is held to the hubs of its own grant; a Rider and a Vendor are answered `NOT_FOUND` at once.
+  rider_identity: {
+    schema: 'public',
+    table: 'rider_identity',
+    hubScoped: true,
+    hubColumn: 'primary_hub_id',
+  },
+  // A vendor account (S0.47): a global master record whose staff reads are narrowed to the hubs of the grant through its organisation's
+  // responsible hub (migration 0034), which the probe reads through the account's key; the probe policy is beside the read policy.
+  vendor_account: {
+    schema: 'public',
+    table: 'vendor_account',
+    hubScoped: true,
+    hubVia: {
+      table: 'vendor_organization',
+      key: 'vendor_organization_id',
+      hubColumn: 'responsible_hub_id',
+    },
+  },
+});
 
 export const RECORD_ENTITIES_TOKEN = Symbol('RECORD_ENTITIES');
 
@@ -45,11 +107,34 @@ function hubIsInScope(hub: string, context: SecurityContext): boolean {
 }
 
 /** The entities as the probe wants them: only the hub-scoped ones. */
-function hubScopedOf(entities: RecordEntities): Record<string, { schema: string; table: string }> {
+function hubScopedOf(entities: RecordEntities): Record<string, HubScopedEntity> {
   return Object.fromEntries(
     Object.entries(entities)
       .filter(([, entity]) => entity.hubScoped)
-      .map(([name, entity]) => [name, { schema: entity.schema, table: entity.table }]),
+      .map(([name, entity]) => [
+        name,
+        {
+          schema: entity.schema,
+          table: entity.table,
+          ...(entity.hubColumn === undefined ? {} : { hubColumn: entity.hubColumn }),
+          ...(entity.hubVia === undefined ? {} : { hubVia: entity.hubVia }),
+        },
+      ]),
+  );
+}
+
+/** The entities as the hub-set probe wants them: only the ones that keep their hubs in an array. */
+function hubSetsOf(entities: RecordEntities): Record<string, HubSetEntity> {
+  return Object.fromEntries(
+    Object.entries(entities)
+      .filter(
+        (entry): entry is [string, RecordEntity & { hubsColumn: string }] =>
+          entry[1].hubsColumn !== undefined,
+      )
+      .map(([name, entity]) => [
+        name,
+        { schema: entity.schema, table: entity.table, hubsColumn: entity.hubsColumn },
+      ]),
   );
 }
 
@@ -66,6 +151,8 @@ export interface RecordScopeResolverOptions {
   readonly tierRules?: TierRules;
   /** Defaults to a probe over the hub-scoped entities of `entities`. A test supplies a spy to show what it was asked. */
   readonly probe?: ExistingRecordHub;
+  /** Defaults to a probe over the entities of `entities` that keep several hubs. A test supplies a spy to show what it was asked. */
+  readonly hubSetProbe?: ExistingRecordHubs;
 }
 
 /**
@@ -94,6 +181,7 @@ export class RecordScopeResolver {
   readonly #entities: RecordEntities;
   readonly #tierRules: TierRules;
   readonly #probe: ExistingRecordHub;
+  readonly #hubSetProbe: ExistingRecordHubs;
 
   constructor(options: RecordScopeResolverOptions) {
     for (const [name, entity] of Object.entries(options.entities)) {
@@ -111,6 +199,7 @@ export class RecordScopeResolver {
     this.#entities = options.entities;
     this.#tierRules = options.tierRules ?? {};
     this.#probe = options.probe ?? createScopeProbe(hubScopedOf(options.entities));
+    this.#hubSetProbe = options.hubSetProbe ?? createHubSetProbe(hubSetsOf(options.entities));
   }
 
   has(entity: string): boolean {
@@ -155,6 +244,19 @@ export class RecordScopeResolver {
         // the policy reads) while its hub is one the operation reaches is not "outside your hubs", and an all-hub caller has no hub
         // outside their scope: both are answered as a record that is not there.
         if (hub !== undefined && !hubIsInScope(hub, context)) {
+          throw ApiException.of(ErrorCode.HubScopeViolation, 'The record is outside your hubs');
+        }
+      } else if (context.principalType === 'STAFF' && entity.hubsColumn !== undefined) {
+        // A record of several hubs is outside the caller's when it has hubs and the operation reaches none of them: the same overlap the
+        // policy of the key applies, so a record the caller cannot see because of its hubs is the one told as outside them. A record with
+        // no hub (a vendor's session has none) is not outside anyone's hubs, and an all-hub caller reaches every hub: both are answered as
+        // a record that is not there, like one hidden for another reason.
+        const hubs = await this.#hubSetProbe(transaction, scope.entity, id);
+        if (
+          hubs !== undefined &&
+          hubs.length > 0 &&
+          !hubs.some((hub) => hubIsInScope(hub, context))
+        ) {
           throw ApiException.of(ErrorCode.HubScopeViolation, 'The record is outside your hubs');
         }
       }

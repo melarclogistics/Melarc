@@ -12,7 +12,7 @@ export const REDACTED = '[REDACTED]';
 
 /** Words that make a key name a secret wherever they sit in it. */
 const SECRET_WORD =
-  /password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf/i;
+  /password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf|melarc[_-]vendor[_-]device|melarc[_-]trusted[_-]browser/i;
 
 /** Keys that are secrets only as a whole: they sit inside ordinary words. */
 const WHOLE_KEYS = new Set(['pin', 'otp', 'sig']);

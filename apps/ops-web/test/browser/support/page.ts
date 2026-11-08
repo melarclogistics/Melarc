@@ -22,19 +22,40 @@ export async function tabReachesLinks(page: Page): Promise<boolean> {
   return reached;
 }
 
-/** The accessible-ish name of every element a keyboard can reach, in document order, with or without the links. */
+/**
+ * The accessible-ish name of every element a keyboard can reach, in document order, with or without the links. An element that is not
+ * drawn (`display: none`, `visibility: hidden`, as a menu that has slid out of sight is) or that lies inside something inert is not a stop.
+ */
 export function reachableNames(page: Page, includeLinks: boolean): Promise<string[]> {
   return page.evaluate(
     (withLinks) =>
       [
         ...document.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
         ),
       ]
+        // Not a stop: the hidden date input that React Aria Components keeps beside a date field for autofill, which is out of the Tab order and
+        // out of the accessibility tree (tabindex="-1" inside an aria-hidden container). A real control that regressed to tabindex="-1" is
+        // still listed, so that the walks that compare this list with the Tab order fail on it.
+        .filter(
+          (element) =>
+            element.getAttribute('tabindex') !== '-1' ||
+            element.closest('[aria-hidden="true"]') === null,
+        )
         .filter((element) => withLinks || element.tagName !== 'A')
+        .filter(
+          (element) =>
+            element.getClientRects().length > 0 &&
+            getComputedStyle(element).visibility !== 'hidden' &&
+            element.closest('[inert]') === null,
+        )
         .map((element) => {
           const labelled =
-            element instanceof HTMLInputElement ? element.labels?.[0]?.textContent : null;
+            element instanceof HTMLInputElement ||
+            element instanceof HTMLSelectElement ||
+            element instanceof HTMLTextAreaElement
+              ? element.labels?.[0]?.textContent
+              : null;
           return (element.getAttribute('aria-label') ?? labelled ?? element.textContent).trim();
         }),
     includeLinks,
@@ -47,16 +68,15 @@ export function watchPage(page: Page) {
   const requests: string[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error' && message.type() !== 'warning') return;
-    // Browsers ask for /favicon.ico on their own. No brand assets exist yet, so it is a 404 and the
-    // browser logs it. Delete this allowance when an icon is added.
-    if (message.location().url.endsWith('/favicon.ico')) return;
     problems.push(`console ${message.type()}: ${message.text()} (${message.location().url})`);
   });
   page.on('pageerror', (error) => {
     problems.push(`uncaught: ${error.message}`);
   });
   page.on('requestfailed', (request) => {
-    problems.push(`request failed: ${request.url()}`);
+    problems.push(
+      `request failed: ${request.url()} (${request.failure()?.errorText ?? 'no reason given'})`,
+    );
   });
   page.on('response', (response) => {
     if (response.status() >= 400)
@@ -68,8 +88,31 @@ export function watchPage(page: Page) {
   return { problems, requests };
 }
 
-/** One line per violation: the rule, what it asks for and the first elements that break it. */
+/**
+ * Waits until no CSS transition or finite animation is still running. WCAG judges the colours a page settles on, but axe measures the
+ * ones it finds: a button that has just become enabled fades from its disabled grey to its own colour over `--motion-fast` (120 ms),
+ * and the white label of the primary button is under 4.5:1 for most of that fade (1.4:1 to 4.4:1 until about 90 ms in). A scan that
+ * starts inside the fade reports a failure that nobody sees and that comes and goes with timing. An animation that never ends, such
+ * as a spinner, is not waited for. It fails after 5 s, so a page that never settles is reported and not scanned.
+ */
+export async function untilSettled(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.playState !== 'running' ||
+            animation.effect?.getComputedTiming().iterations === Infinity,
+        ),
+    undefined,
+    { timeout: 5_000 },
+  );
+}
+
+/** One line per violation: the rule, what it asks for and the first elements that break it. The page is scanned once its transitions end. */
 export async function wcagViolations(page: Page): Promise<string[]> {
+  await untilSettled(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   return results.violations.map(
     (violation) =>

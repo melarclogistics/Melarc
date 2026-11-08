@@ -6,7 +6,9 @@
  *     alias, git URL, tarball URL, `file:` or `link:`, so what runs is what was reviewed and a lockfile refresh
  *     cannot move it;
  *   - nothing rewrites what the lockfile resolves or what the install does: no overrides, resolutions, patches,
- *     package extensions or pnpmfile, in package.json files, pnpm-workspace.yaml, the lockfile or on disk;
+ *     package extensions or pnpmfile, in package.json files, pnpm-workspace.yaml, the lockfile or on disk, with ONE recorded
+ *     exception (OVERRIDE_EXCEPTIONS): an exact selector and an exact version, in pnpm-workspace.yaml and the lockfile alone,
+ *     which is itself a finding once it is stale;
  *   - dependency build scripts run only when approved, and none is: `allowBuilds` may hold `false` values only;
  *   - the lockfile resolves every package from the registry, with an integrity hash: no git, tarball URL, `file:`
  *     or directory source, and a `link:` only to a package of this workspace.
@@ -25,6 +27,7 @@ import { workspaceDirectories } from './test-inventory.ts';
 export type PolicyProblemCode =
   | 'SPECIFIER_NOT_EXACT'
   | 'FORBIDDEN_SETTING'
+  | 'STALE_EXCEPTION'
   | 'BUILD_ALLOWED'
   | 'CUSTOMISATION_FILE'
   | 'LOCK_UNREADABLE'
@@ -46,6 +49,35 @@ export interface PolicyInputs {
   /** Which of the customisation files exist in the repository root. */
   customisationFiles: readonly string[];
 }
+
+/**
+ * The one override the policy allows, and why. An override rewrites what the lockfile resolves, so each is a reviewed exception: the exact
+ * selector and the exact version, nothing wider, in `pnpm-workspace.yaml` and the lockfile only, with the advisory it answers and the
+ * condition on which it goes. `findPolicyProblems` refuses any other override, and refuses this one when it has gone stale.
+ */
+export interface OverrideException {
+  /** The dependency the override sets. */
+  readonly dependency: string;
+  /** What it sets it to: an exact version. */
+  readonly version: string;
+  /** `name@version` of the parent the selector names; the lockfile must still resolve it, or the exception is stale. */
+  readonly parent: string;
+  readonly advisory: string;
+  readonly why: string;
+  readonly removeWhen: string;
+}
+
+export const OVERRIDE_EXCEPTIONS: Readonly<Record<string, OverrideException>> = {
+  '@nestjs/platform-express@12.1.2>multer': {
+    dependency: 'multer',
+    version: '2.5.0',
+    parent: '@nestjs/platform-express@12.1.2',
+    advisory: 'GHSA-q7qp-rjg7-q26m',
+    why: '@nestjs/platform-express pins multer to exactly 2.4.0 (12.1.2, 12.1.3 and 12.2.0), which the advisory (denial of service, fixed in 2.5.0) affects, and the audit stage fails on a high finding. The API has no upload route.',
+    removeWhen:
+      'a @nestjs/platform-express release supplies a patched compatible multer (2.5.0 or later): upgrade it, delete the override from pnpm-workspace.yaml and run pnpm install.',
+  },
+};
 
 /** pnpm's customisation files: code or patches that change what an install does. */
 export const CUSTOMISATION_FILES: readonly string[] = [
@@ -92,20 +124,112 @@ const exact = (specifier: unknown): boolean =>
  */
 const SETTING_MAPS = ['pnpm', 'config', 'settings'];
 
-function forbiddenSettings(where: string, document: unknown): PolicyProblem[] {
+/**
+ * Whether `value` is the recorded exception and nothing else: the same selectors and the same exact versions, no more and no fewer. A range,
+ * another selector, the same selector beside another override, or an empty map are not.
+ */
+function isRecordedException(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const recorded = Object.entries(OVERRIDE_EXCEPTIONS);
+  const given = Object.keys(value);
+  return (
+    given.length === recorded.length &&
+    recorded.every(([selector, exception]) => value[selector] === exception.version)
+  );
+}
+
+/**
+ * `allowException` is for the two files that hold pnpm's settings, `pnpm-workspace.yaml` and the lockfile, and for their top level only:
+ * a manifest, `pnpm.overrides`, `config.overrides` or the lockfile's `settings.overrides` may not hold even the recorded override.
+ */
+function forbiddenSettings(
+  where: string,
+  document: unknown,
+  allowException = false,
+): PolicyProblem[] {
   if (!isRecord(document)) return [];
   const maps: [prefix: string, map: unknown][] = [
     ['', document],
     ...SETTING_MAPS.map((name): [string, unknown] => [`${name}.`, document[name]]),
   ];
-  return maps.flatMap(([prefix, map]) =>
-    Object.keys(isRecord(map) ? map : {})
+  return maps.flatMap(([prefix, map]) => {
+    const settings = isRecord(map) ? map : {};
+    return Object.keys(settings)
       .filter((key) => FORBIDDEN_KEYS.has(key))
+      .filter(
+        (key) =>
+          !(
+            allowException &&
+            prefix === '' &&
+            key === 'overrides' &&
+            isRecordedException(settings[key])
+          ),
+      )
       .map((key) => ({
         code: 'FORBIDDEN_SETTING' as const,
-        message: `${where} sets ${prefix}${key}: nothing may rewrite what is resolved or what an install does.`,
-      })),
-  );
+        message:
+          `${where} sets ${prefix}${key}: nothing may rewrite what is resolved or what an install does.` +
+          (allowException && prefix === '' && key === 'overrides'
+            ? ` The one override allowed is the recorded exception (${Object.keys(OVERRIDE_EXCEPTIONS).join(', ')}), written exactly and alone.`
+            : ''),
+      }));
+  });
+}
+
+/**
+ * The recorded exception must still be doing its job. It is stale when only one of the two files records it, when the lockfile no longer
+ * resolves the parent it names (Nest was upgraded and the selector matches nothing), or when the snapshots of that parent do not hold the
+ * version it sets. A stale exception is a finding, so that it is removed or reviewed when the thing it answers moves, and does not stay as
+ * an override nobody remembers.
+ */
+function exceptionProblems(workspaceYaml: string, lockfileText: string): PolicyProblem[] {
+  const workspace: unknown = parse(workspaceYaml);
+  const lock: unknown = parse(lockfileText);
+  const inWorkspace = isRecord(workspace) && isRecordedException(workspace.overrides);
+  const inLock = isRecord(lock) && isRecordedException(lock.overrides);
+  if (!inWorkspace && !inLock) return [];
+
+  const problems: PolicyProblem[] = [];
+  const selectors = Object.keys(OVERRIDE_EXCEPTIONS).join(', ');
+  const advisories = Object.values(OVERRIDE_EXCEPTIONS)
+    .map((exception) => exception.advisory)
+    .join(', ');
+  if (inWorkspace !== inLock) {
+    problems.push({
+      code: 'STALE_EXCEPTION',
+      message: `${inWorkspace ? 'pnpm-workspace.yaml' : 'pnpm-lock.yaml'} records the exception ${selectors} (${advisories}) and ${inWorkspace ? 'pnpm-lock.yaml' : 'pnpm-workspace.yaml'} does not: run pnpm install so that they agree.`,
+    });
+  }
+
+  const packages = isRecord(lock) && isRecord(lock.packages) ? lock.packages : {};
+  const snapshots = isRecord(lock) && isRecord(lock.snapshots) ? lock.snapshots : {};
+  for (const [selector, exception] of Object.entries(OVERRIDE_EXCEPTIONS)) {
+    if (!(exception.parent in packages)) {
+      problems.push({
+        code: 'STALE_EXCEPTION',
+        message: `The exception ${selector} (${exception.advisory}) names ${exception.parent}, which pnpm-lock.yaml no longer resolves, so it applies to nothing. Remove it when ${exception.removeWhen}`,
+      });
+      continue;
+    }
+    const parents = Object.entries(snapshots).filter(
+      ([key]) => key === exception.parent || key.startsWith(`${exception.parent}(`),
+    );
+    const unchanged = parents.filter(
+      ([, snapshot]) =>
+        !(
+          isRecord(snapshot) &&
+          isRecord(snapshot.dependencies) &&
+          snapshot.dependencies[exception.dependency] === exception.version
+        ),
+    );
+    if (parents.length === 0 || unchanged.length > 0) {
+      problems.push({
+        code: 'STALE_EXCEPTION',
+        message: `The exception ${selector} (${exception.advisory}) does not change what ${exception.parent} resolves ${exception.dependency} to in pnpm-lock.yaml: run pnpm install. Remove it when ${exception.removeWhen}`,
+      });
+    }
+  }
+  return problems;
 }
 
 function specifierProblems(path: string, json: unknown): PolicyProblem[] {
@@ -127,7 +251,7 @@ function specifierProblems(path: string, json: unknown): PolicyProblem[] {
 
 function workspaceProblems(yaml: string): PolicyProblem[] {
   const workspace: unknown = parse(yaml);
-  const problems = forbiddenSettings('pnpm-workspace.yaml', workspace);
+  const problems = forbiddenSettings('pnpm-workspace.yaml', workspace, true);
   const settings = isRecord(workspace) ? workspace : {};
 
   const allowBuilds = settings.allowBuilds;
@@ -253,7 +377,7 @@ function lockProblems(text: string, directories: readonly string[]): PolicyProbl
     ];
   }
   return [
-    ...forbiddenSettings('pnpm-lock.yaml', lock),
+    ...forbiddenSettings('pnpm-lock.yaml', lock, true),
     ...importerProblems(lock, directories),
     ...packageProblems(lock),
   ];
@@ -268,6 +392,7 @@ export function findPolicyProblems(inputs: PolicyInputs): PolicyProblem[] {
     ]),
     ...workspaceProblems(inputs.workspaceYaml),
     ...lockProblems(inputs.lockfile, inputs.workspaceDirectories),
+    ...exceptionProblems(inputs.workspaceYaml, inputs.lockfile),
     ...inputs.customisationFiles.map((file) => ({
       code: 'CUSTOMISATION_FILE' as const,
       message: `${file} exists in the repository root: it changes what an install does.`,

@@ -1,6 +1,7 @@
 import type { Clock } from '../auth/ports/clock.port.js';
 import type { MetricLabels, Metrics } from '../auth/ports/metrics.port.js';
 import { METRIC_DEFINITIONS, type LabelPolicy, type MetricDefinition } from './metric-catalogue.js';
+import type { MetricsSnapshot } from './metrics-snapshot.js';
 
 /** A sample refused for an unbounded name, label or value: `LABEL_UNBOUNDED`. The message names the metric and the label, never a value. */
 export class MetricsLabelError extends Error {
@@ -65,17 +66,7 @@ interface ObservationEntry extends Series {
   max: number;
 }
 
-export interface MetricsSnapshot {
-  readonly counters: readonly { name: string; labels: Record<string, string>; value: number }[];
-  readonly observations: readonly {
-    name: string;
-    labels: Record<string, string>;
-    count: number;
-    sum: number;
-    min: number;
-    max: number;
-  }[];
-}
+export type { MetricsSnapshot };
 
 /**
  * The supported boundary of a labels argument (G2-08): **a record**, an object that is not `null` and not an array, whose own

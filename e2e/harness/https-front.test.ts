@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   request as httpRequest,
@@ -7,7 +7,7 @@ import {
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -288,5 +288,23 @@ describe('the origin it is opened at, and the TLS it is given', () => {
     fronts.splice(fronts.indexOf(started), 1);
 
     await expect(get(started, '/')).rejects.toThrow();
+  });
+});
+
+describe('the policy the front sends and the policy the shell is held to', () => {
+  // Break caught: two copies of one policy that drift: the shell and the date field are proved to work under STRICT_POLICY, and the HTTPS run
+  // sends CONTENT_SECURITY_POLICY. If they differ, "works under the strict policy" no longer says that it works under the one the edge sends.
+  it('are the same directives', () => {
+    const text = readFileSync(
+      resolve(import.meta.dirname, '../../apps/ops-web/test/browser/support/strict-policy.ts'),
+      'utf8',
+    );
+    const start = text.indexOf('export const STRICT_POLICY = [');
+    const end = text.indexOf('].join', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const baseline = [...text.slice(start, end).matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+
+    expect(baseline.length).toBeGreaterThan(5);
+    expect(CONTENT_SECURITY_POLICY.split('; ')).toEqual(baseline);
   });
 });

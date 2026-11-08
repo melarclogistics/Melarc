@@ -1,0 +1,44 @@
+/*
+ * StatusBadge (design/COMPONENT_PATTERNS.md section 18; DESIGN_SYSTEM section 4.4): the status text on its own soft background, as an Alert has
+ * it. The words carry the meaning; the border is decoration of 1.3 to 1.9:1.
+ */
+.ui-status-badge {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  white-space: nowrap;
+}
+
+.ui-status-badge--success {
+  border-color: var(--color-status-success-border);
+  background: var(--color-status-success-background);
+  color: var(--color-status-success-foreground);
+}
+
+.ui-status-badge--warning {
+  border-color: var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-status-badge--danger {
+  border-color: var(--color-status-danger-border);
+  background: var(--color-status-danger-background);
+  color: var(--color-status-danger-foreground);
+}
+
+.ui-status-badge--info {
+  border-color: var(--color-status-info-border);
+  background: var(--color-status-info-background);
+  color: var(--color-status-info-foreground);
+}
+
+.ui-status-badge--neutral {
+  border-color: var(--color-status-neutral-border);
+  background: var(--color-status-neutral-background);
+  color: var(--color-status-neutral-foreground);
+}

@@ -16,7 +16,7 @@
  * on the connection that makes the cancel. So the server ends a transaction by itself only when this process could not clean up
  * within this time, and a cancel that cannot connect is given up on at the same moment the clean-up is.
  *
- * Exercised by `test/database/execution-budget.db.test.ts` (a cancel and rollback on a local PostgreSQL complete in tens of
+ * Exercised by `test/database/alone/execution-budget.db.test.ts` (a cancel and rollback on a local PostgreSQL complete in tens of
  * milliseconds, so two seconds is generous there) and by `database-deadlines.test.ts` (the bound itself, with the cancel failing
  * and the rollback hanging). A deployment across a network is the case the margin is for: S0.65 proposes the release value.
  */

@@ -294,7 +294,7 @@ describe('I7 to I9: the refusals of the identity operations', () => {
     expect(codes('approveStaffIdentity')).toContain('INSUFFICIENT_AUTHORITY');
     expect(statuses('approveStaffIdentity')).toContain('403');
     expect(description('approveStaffIdentity')).toMatch(
-      /The same holds for rejection.*Platform Admin other than the maker.*`INSUFFICIENT_AUTHORITY` \(`403`\)/,
+      /The same holds for rejection.*needs a Platform Admin, the maker included, and a lower tier is `INSUFFICIENT_AUTHORITY` \(`403`\)/,
     );
     expect(description('approveStaffIdentity')).toMatch(/Its work email is released/);
   });

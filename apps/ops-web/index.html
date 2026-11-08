@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Melarc Ops Portal</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!--
+      React Aria Components inserts one style element of its own into the page unless an element with this id already exists, and a policy
+      without inline styles refuses it. The same rule is in src/styles/base.css instead; src/components/ui/aria-wiring.test.tsx holds the
+      two together. Keep the id.
+    -->
+    <meta
+      id="react-aria-pressable-style"
+      name="react-aria-pressable-style"
+      content="src/styles/base.css"
+    />
   </head>
   <body>
     <div id="root"></div>

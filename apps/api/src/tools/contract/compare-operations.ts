@@ -231,6 +231,20 @@ function compareResponse(
       actual: [...actual.setCookies],
     });
   }
+  const optional = setDifference(expected.setCookiesOptional, actual.setCookiesOptional);
+  if (optional.onlyContract.length > 0 || optional.onlyCode.length > 0) {
+    out.push({
+      code: 'COOKIE_DRIFT',
+      at,
+      message: describeSet(
+        'The cookies this response may also set differ.',
+        optional,
+        'the optional cookie',
+      ),
+      expected: [...expected.setCookiesOptional],
+      actual: [...actual.setCookiesOptional],
+    });
+  }
   if (expected.setCookiesFor !== actual.setCookiesFor) {
     const who = (scheme: string | undefined) =>
       scheme === undefined ? 'every caller' : `a request that presented ${scheme}`;
