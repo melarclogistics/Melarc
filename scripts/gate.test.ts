@@ -1399,6 +1399,15 @@ describe('what the command line starts', () => {
       assert.ok(!passed(task).includes('VITEST_MAX_WORKERS'), task);
   });
 
+  // Break caught: a `MELARC_BROWSER_SHARD` left in the owner's shell (from reproducing one job of CI) reaching the browser stage, which
+  // the Ops Portal's configuration would then run as one shard of its engine: a gate that is green for a part of the browser tests.
+  it('passes no MELARC_BROWSER_SHARD, which would make the browser stage run a part of its tests', () => {
+    const base = { PATH: '/bin', MELARC_BROWSER_SHARD: '2/7', MELARC_BROWSERS: 'chromium' };
+    const env = gateEnvironment(base);
+    assert.equal(env.MELARC_BROWSER_SHARD, undefined);
+    assert.equal(env.MELARC_BROWSERS, 'chromium', 'only the shard is taken out');
+  });
+
   // Break caught: an agent starting the hour-long gate the owner did not ask for; or the owner's own terminal, which Claude Code does
   // not mark, being asked for a flag.
   it('refuses an agent that does not say the owner asked, and asks nothing of the owner', () => {

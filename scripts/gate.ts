@@ -166,11 +166,13 @@ export function childEnvironment(base: NodeJS.ProcessEnv, uncached: boolean): No
  * The gate's environment: the uncached one, without `VITEST_MAX_WORKERS`. Every Vitest configuration bounds its own workers
  * (`MELARC_TEST_WORKERS`, 4 when unset: at Vitest's default this 16 GB workstation ran out of memory and lost tests that pass alone),
  * and Vitest applies `VITEST_MAX_WORKERS` to every project after its configuration, which would run the API's one-at-a-time projects
- * several at a time (the API's configuration refuses it).
+ * several at a time (the API's configuration refuses it). Nor does it pass `MELARC_BROWSER_SHARD`, with which the Ops Portal's
+ * configuration runs one shard of its browser tests (each job of CI runs one): a gate runs the whole of every stage.
  */
 export function gateEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = childEnvironment(base, true);
   delete env.VITEST_MAX_WORKERS;
+  delete env.MELARC_BROWSER_SHARD;
   return env;
 }
 

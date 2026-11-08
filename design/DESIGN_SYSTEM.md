@@ -886,8 +886,9 @@ Entry and 3.2.6 Consistent Help.
 ### Supported browsers
 
 The promise stays: the current and previous major release of Chrome, Edge, Firefox and Safari on desktop
-([surfaces/ops-portal.md](../surfaces/ops-portal.md) §11). The Playwright browser tests run Chromium, Firefox and WebKit
-in CI (`MELARC_BROWSERS`; Chromium alone runs locally unless more are installed). Edge is Chromium and WebKit is
+([surfaces/ops-portal.md](../surfaces/ops-portal.md) §11). The Playwright browser tests run Chromium on every pull request in CI, and
+Chromium, Firefox and WebKit on every push to main and every night (`MELARC_BROWSERS`;
+[what CI runs when](../DEVELOPMENT.md#what-ci-runs-when); Chromium alone runs locally unless more are installed). Edge is Chromium and WebKit is
 Safari's engine, not Safari itself, and only the engines' current releases are tested: Safari as a product and the
 previous major releases remain a manual check.
 

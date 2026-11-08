@@ -127,8 +127,14 @@ passes in full.**
   status comes from. Each run writes to an output directory of its own below `test-results` (`--output`), because Playwright clears the
   output directory of the projects it runs at the start of a run, and the failure artifact of CI keeps `e2e/test-results`; the recorders
   of the secret projects are unchanged. Where the system store may not be changed (anywhere but a GitHub-hosted runner) WebKit's run
-  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (`integrated`, after `pnpm run test:e2e`, with `libnss3-tools`
-  installed for `certutil`). **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
+  is made without it, says so, and WebKit's proofs fail to trust. It is a mandatory step of CI (the `https` job, a matrix of two jobs beside the `integrated`
+  job that runs `pnpm run test:e2e`, with `libnss3-tools` installed for `certutil`), and CI makes it **as two shards**, a shard of the
+  runs in each job (`MELARC_HTTPS_SHARD=current/total`, `harness/https-shards.ts`; the Product Owner's decision of 7 November 2026): shard 1
+  is Chromium's run, with WebKit's refusal, and WebKit's other proofs, in that order and in **one job**, because the refusal is a control only
+  while the CA is not in the system store and the proofs need it there (the decision of 12 October 2026 holds: refused before, trusted
+  after, on one machine); shard 2 is Firefox's run and touches no system store. A run is never cut. A value that is not a shard of the
+  harness is refused before anything is made; without the variable the command makes all three runs, as it did. Each job makes its own CA.
+  **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.
 - **A smoke check in branded Chrome and Edge** is a person's, on a machine cleared for key material (a clean Linux machine or
