@@ -190,6 +190,10 @@ test.describe('moving through the screens', () => {
     await expect(table.getByRole('row', { name: /Ama Boateng/ })).toBeVisible();
 
     await page.getByRole('combobox', { name: 'Status' }).selectOption('');
+    // The status is out of the address before the search is made. The search is built from the filters the page last drew, so two choices
+    // made before the page has taken the first are a race of the test's own (messages.spec.ts waits the same way): a loaded runner lost it,
+    // and the address kept `status=SUSPENDED` beside `q=esi`.
+    await expect(page).toHaveURL('/admin/riders');
     await page.getByRole('searchbox', { name: 'Search by name or phone' }).fill('  esi  ');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL('/admin/riders?q=esi');
