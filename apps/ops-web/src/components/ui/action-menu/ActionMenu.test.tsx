@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
-import { ActionMenu, type ActionMenuItem } from './ActionMenu';
+import { Dialog } from '../dialog/Dialog';
+import { ActionMenu, type ActionMenuItem, type ActionOutcome } from './ActionMenu';
 
 const CANCEL_CONFIRMATION = {
   title: 'Cancel request ACC-PR-7KQ2MZ?',
@@ -12,7 +13,11 @@ const CANCEL_CONFIRMATION = {
 } as const;
 
 function items(
-  overrides: { reassign?: () => void; cancel?: () => void; escalate?: () => void } = {},
+  overrides: {
+    reassign?: () => void;
+    cancel?: () => ActionOutcome | Promise<ActionOutcome>;
+    escalate?: () => void;
+  } = {},
 ) {
   return [
     {
@@ -90,7 +95,7 @@ describe('ActionMenu', () => {
 
   describe('a destructive act', () => {
     // Break caught: a destructive act that runs as it is chosen, with no question: the whole point of confirming it.
-    it('is not run when it is chosen: a question comes first, with Cancel focused', async () => {
+    it('is not run when it is chosen: a question comes first, with Go back focused', async () => {
       const user = userEvent.setup();
       const cancel = vi.fn();
       render(<ActionMenu label="More actions for ACC-PR-7KQ2MZ" items={items({ cancel })} />);
@@ -103,11 +108,13 @@ describe('ActionMenu', () => {
       });
       expect(cancel).not.toHaveBeenCalled();
       expect(question).toHaveAccessibleDescription(/A cancellation charge may apply\./);
-      expect(within(question).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+      // "Go back", and not "Cancel": the act is called "Cancel the request", and a button that says Cancel beside it is a button nobody can tell from it (task R5.2, M3).
+      expect(within(question).getByRole('button', { name: 'Go back' })).toHaveFocus();
+      expect(within(question).queryByRole('button', { name: 'Cancel' })).toBeNull();
     });
 
     // Break caught: a Cancel that runs the act anyway, or one that leaves the person somewhere that is not where they were.
-    it('is left alone by Cancel, and focus goes back to the button that opened the menu', async () => {
+    it('is left alone by Go back, and focus goes back to the button that opened the menu', async () => {
       const user = userEvent.setup();
       const cancel = vi.fn();
       render(<ActionMenu label="More actions for ACC-PR-7KQ2MZ" items={items({ cancel })} />);
@@ -115,7 +122,7 @@ describe('ActionMenu', () => {
       await user.click(screen.getByRole('menuitem', { name: 'Cancel request' }));
       const question = await screen.findByRole('alertdialog');
 
-      await user.click(within(question).getByRole('button', { name: 'Cancel' }));
+      await user.click(within(question).getByRole('button', { name: 'Go back' }));
 
       expect(cancel).not.toHaveBeenCalled();
       await waitFor(() => {
@@ -221,5 +228,235 @@ describe('ActionMenu', () => {
 
     await open(user);
     expect(await wcagViolations(document.body)).toEqual([]);
+  });
+});
+
+// Task R5.2, M3 and M8: the confirmation of an act is asked once, never sends a form that holds the menu, shows what is under way and what failed, and the menu is drawn
+// into the dialog that holds it.
+describe('ActionMenu: the confirmation (task R5.2, M3)', () => {
+  const MENU = 'More actions for ACC-PR-7KQ2MZ';
+
+  /** Chooses the destructive act and returns the question it opens. */
+  async function ask(user: ReturnType<typeof userEvent.setup>) {
+    await open(user);
+    await user.click(screen.getByRole('menuitem', { name: 'Cancel request' }));
+    return screen.findByRole('alertdialog', { name: 'Cancel request ACC-PR-7KQ2MZ?' });
+  }
+
+  // Break caught: the question's submit reaching a form that holds the menu (the form's own handler runs, and the page sends what it was filling).
+  it('never submits a form that holds the menu', async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn();
+    const submitted = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted();
+        }}
+      >
+        <ActionMenu label={MENU} items={items({ cancel })} />
+      </form>,
+    );
+
+    const question = await ask(user);
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
+  // Break caught: the question closing at once on an act that takes its time, so that nothing says it is under way and a second press can run it twice.
+  it('stays open and busy while the act is under way, and closes when it is done', async () => {
+    const user = userEvent.setup();
+    let finish: (outcome: ActionOutcome) => void = () => undefined;
+    const cancel = vi.fn(
+      () =>
+        new Promise<ActionOutcome>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<ActionMenu label={MENU} items={items({ cancel })} />);
+
+    const question = await ask(user);
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(within(question).getByRole('button', { name: 'Cancel the request' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(within(question).getByRole('button', { name: 'Go back' })).toBeDisabled();
+    // Escape does nothing while it is under way, and a second press runs nothing.
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish({ ok: true });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+  });
+
+  // Break caught: a failure that closes the question as though the act were done, or that shows the error's own text instead of the page's words.
+  it('tells a failure in the page’s words, stays open, and lets the person go back or try again', async () => {
+    const user = userEvent.setup();
+    const cancel = vi
+      .fn<() => Promise<ActionOutcome>>()
+      .mockResolvedValueOnce({ ok: false, message: 'The request is already in a pickup run.' })
+      .mockResolvedValueOnce({ ok: true });
+    render(<ActionMenu label={MENU} items={items({ cancel })} />);
+
+    const question = await ask(user);
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+
+    expect(await screen.findByText('The request is already in a pickup run.')).toBeVisible();
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(within(question).getByRole('button', { name: 'Go back' })).toBeEnabled();
+
+    // The next confirmation is a new act.
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    expect(cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('says that an act did not go through when its promise breaks, never with the error’s own text', async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn(() => Promise.reject(new Error('socket hang up: 10.0.0.7')));
+    render(<ActionMenu label={MENU} items={items({ cancel })} />);
+
+    const question = await ask(user);
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+
+    expect(
+      await screen.findByText('That did not go through. Try again, or go back.'),
+    ).toBeVisible();
+    expect(screen.queryByText(/socket hang up/)).toBeNull();
+  });
+
+  it('leaves the failure behind when the person goes back, and starts the next question clean', async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn().mockResolvedValue({ ok: false, message: 'Not now.' });
+    render(<ActionMenu label={MENU} items={items({ cancel })} />);
+
+    const question = await ask(user);
+    await user.click(within(question).getByRole('button', { name: 'Cancel the request' }));
+    expect(await screen.findByText('Not now.')).toBeVisible();
+    await user.click(within(question).getByRole('button', { name: 'Go back' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+    await ask(user);
+    expect(screen.queryByText('Not now.')).toBeNull();
+  });
+
+  // Break caught: an act that brings its own dialog asked about twice (the menu's question and then its own), or one that does not give focus back.
+  it('opens an act’s own dialog instead of its question, and gives focus back when it closes', async () => {
+    const user = userEvent.setup();
+    const items: ActionMenuItem[] = [
+      {
+        id: 'revoke',
+        label: 'Revoke access',
+        destructive: true,
+        dialog: ({ onClose }) => (
+          <Dialog open title="Why is access revoked?" role="alertdialog" onRequestClose={onClose}>
+            <label>
+              Reason <input type="text" />
+            </label>
+            <button type="button" onClick={onClose}>
+              Done
+            </button>
+          </Dialog>
+        ),
+      },
+      { id: 'note', label: 'Add a note', onSelect: vi.fn() },
+    ];
+    render(<ActionMenu label={MENU} items={items} />);
+
+    const { trigger } = await open(user);
+    await user.click(screen.getByRole('menuitem', { name: 'Revoke access' }));
+
+    const own = await screen.findByRole('alertdialog', { name: 'Why is access revoked?' });
+    expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
+    // It is last, in the vermilion of danger, as a destructive act is.
+    await user.click(within(own).getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('keeps an act with its own dialog last when it is destructive, set apart by the separator', async () => {
+    const user = userEvent.setup();
+    render(
+      <ActionMenu
+        label={MENU}
+        items={[
+          {
+            id: 'revoke',
+            label: 'Revoke access',
+            destructive: true,
+            dialog: () => null,
+          },
+          { id: 'note', label: 'Add a note', onSelect: vi.fn() },
+        ]}
+      />,
+    );
+
+    const { menu } = await open(user);
+
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Add a note', 'Revoke access']);
+    expect(within(menu).getByRole('separator')).toBeInTheDocument();
+  });
+});
+
+describe('ActionMenu: inside a modal dialog (task R5.2, M8)', () => {
+  // Break caught: the menu drawn into the page's body, under the dialog's top layer: unseen and out of reach. (The top layer and the inertness are proved in a browser,
+  // in `kit.spec.ts`; here, that the menu is inside the dialog's own element.)
+  it('is drawn into the dialog that holds it', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open title="Request ACC-PR-7KQ2MZ">
+        <ActionMenu label="More actions for ACC-PR-7KQ2MZ" items={items()} />
+      </Dialog>,
+    );
+
+    await open(user);
+
+    const menu = await screen.findByRole('menu');
+    expect(menu.closest('dialog')).toBe(document.querySelector('dialog'));
+    expect(menu.closest('[data-slot="dropdown-menu-content"]')).not.toBeNull();
+  });
+
+  it('draws its own question over the dialog, once', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open title="Request ACC-PR-7KQ2MZ">
+        <ActionMenu label="More actions for ACC-PR-7KQ2MZ" items={items()} />
+      </Dialog>,
+    );
+
+    await open(user);
+    await user.click(screen.getByRole('menuitem', { name: 'Cancel request' }));
+
+    expect(
+      await screen.findByRole('alertdialog', { name: 'Cancel request ACC-PR-7KQ2MZ?' }),
+    ).toBeVisible();
+    expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
   });
 });

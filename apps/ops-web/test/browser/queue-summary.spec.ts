@@ -105,8 +105,11 @@ test.describe('the counts of the queues in a browser', () => {
     await expect(
       menu(page).getByRole('link', { name: 'Staff 12 waiting for approval' }),
     ).toBeVisible();
-    // A queue with nothing in it that was read is drawn, quietly; an entry with no queue draws none.
-    await expect(menu(page).getByRole('link', { name: 'Pickup runs 0 in progress' })).toBeVisible();
+    // A queue with nothing in it that was read draws no pill (task R5.2, M16: a row of zeros is noise beside the entries that hold something; My work's "Also clear" line
+    // still names the queue), and its entry keeps its name; an entry with no queue draws none either.
+    const runs = menu(page).getByRole('link', { name: 'Pickup runs', exact: true });
+    await expect(runs).toBeVisible();
+    await expect(runs.locator('.ui-count-badge')).toHaveCount(0);
     await expect(menu(page).getByRole('link', { name: 'My work' })).toBeVisible();
     await expect(
       menu(page).getByRole('link', { name: 'My work' }).locator('.ui-count-badge'),
@@ -118,9 +121,9 @@ test.describe('the counts of the queues in a browser', () => {
     }
     // ...and a label is a whole word of the entry's name: the first letters of "Pickup runs" are not an entry.
     await expect(menuEntry(page, 'Pickup run')).toHaveCount(0);
-    // Four entries have a queue: the other two queues of the summary (the late bookings, the confirmed pickups not on a run) have no entry, and
-    // are drawn on My work only.
-    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
+    // Four entries have a queue, and three of them hold something: the other two queues of the summary (the late bookings, the confirmed pickups not on a run) have no
+    // entry, and are drawn on My work only.
+    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(3);
     expect(seen.problems).toEqual([]);
   });
 
@@ -223,7 +226,7 @@ test.describe('the counts of the queues in a browser', () => {
     await expect(
       page.getByRole('link', { name: 'Pickup requests waiting for confirmation' }),
     ).toBeVisible();
-    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
+    await expect(menu(page).locator('.ui-count-badge')).toHaveCount(3);
   });
 
   // Break caught: the counts of the moment the page opened shown beside every page the person goes to after it.
@@ -309,7 +312,7 @@ test.describe('accessibility of the counts', () => {
       await page.emulateMedia({ colorScheme: scheme });
       await open(page);
       await expect(page.getByRole('list', { name: 'Waiting for you' })).toBeVisible();
-      await expect(menu(page).locator('.ui-count-badge')).toHaveCount(4);
+      await expect(menu(page).locator('.ui-count-badge')).toHaveCount(3);
 
       expect(await wcagViolations(page), `${scheme}: My work`).toEqual([]);
     });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
 import { PageHeader } from '../components/PageHeader';
 import { Alert } from '../components/ui/alert/Alert';
 import { AlertDialog } from '../components/ui/dialog/AlertDialog';

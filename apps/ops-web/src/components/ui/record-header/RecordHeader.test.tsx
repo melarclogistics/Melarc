@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import { Button } from '../button/Button';
+import { SidePanel } from '../side-panel/SidePanel';
 import { RecordHeader } from './RecordHeader';
 import { StageTracker } from './StageTracker';
 
@@ -53,12 +54,38 @@ describe('StageTracker', () => {
     expect(states()).toEqual(['done', 'done', 'done', 'current']);
   });
 
-  // Break caught: a current stage that is not one of the stages, drawn as a record that has not started or has finished: a defect of the page.
-  it('throws for a current stage that is not one of its stages, and for two stages with one id', () => {
+  // Break caught (task R5.2, M12): a current stage that is not one of the stages (a state the page does not know yet) drawn as a record that has not started or has
+  // finished, or the whole record page falling over for it: it degrades as StatusBadge does, neutral, with no stage current and none called done or not reached.
+  it('says "Unknown stage" for a stage that is not one of its stages, and calls none done, current or not reached', () => {
+    render(<StageTracker label="Progress" stages={STAGES} currentId="on_hold" />);
+
+    const list = screen.getByRole('list', { name: 'Progress' });
+    for (const stage of within(list).getAllByRole('listitem')) {
+      expect(stage).toHaveAttribute('data-state', 'unknown');
+      expect(stage).not.toHaveAttribute('aria-current');
+    }
+    expect(list.textContent).not.toMatch(/Done:|Current stage:|Not reached:/);
+    expect(screen.getByText('Unknown stage')).toBeVisible();
+    // The server's raw value is never drawn.
+    expect(screen.queryByText(/on_hold|on hold/i)).toBeNull();
+  });
+
+  it('says the page’s own words for an unknown stage when it is given them', () => {
+    render(
+      <StageTracker
+        label="Progress"
+        stages={STAGES}
+        currentId="lost"
+        unknownLabel="Stage not recognised"
+      />,
+    );
+
+    expect(screen.getByText('Stage not recognised')).toBeVisible();
+  });
+
+  // Break caught: two stages with one id drawn as if nothing were wrong: a defect of the page.
+  it('throws for two stages with one id', () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(() =>
-      render(<StageTracker label="Progress" stages={STAGES} currentId="lost" />),
-    ).toThrow(/is not one of the stages/);
     expect(() =>
       render(
         <StageTracker
@@ -149,5 +176,25 @@ describe('RecordHeader', () => {
     );
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+describe('RecordHeader inside a SidePanel (task R5.2, M12)', () => {
+  // Break caught: the record's code drawn as a heading in the header and again as the panel's own heading: two headings with one name, read twice.
+  it('draws the code as text and leaves the heading to the panel', () => {
+    render(
+      <SidePanel open onClose={vi.fn()} code="ACC-PR-7KQ2MZ">
+        <RecordHeader code="ACC-PR-7KQ2MZ" level={2} sentence="Waiting for confirmation." />
+      </SidePanel>,
+    );
+
+    expect(screen.getAllByRole('heading', { name: 'ACC-PR-7KQ2MZ' })).toHaveLength(1);
+    expect(screen.getAllByText('ACC-PR-7KQ2MZ').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('is the record’s heading beside a list, outside a panel', () => {
+    render(<RecordHeader code="ACC-PR-7KQ2MZ" level={2} />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' })).toBeInTheDocument();
   });
 });

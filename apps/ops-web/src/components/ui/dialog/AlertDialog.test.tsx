@@ -167,3 +167,67 @@ describe('AlertDialog: accessibility', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('AlertDialog: inside a form (task R5.2, M3)', () => {
+  // Break caught: the question's submit bubbling to a form that holds the dialog (an action menu in a form): confirming the question sends the form too.
+  it('never submits a form that holds it', async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn();
+    const submitted = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted();
+        }}
+      >
+        <AlertDialog
+          open
+          title="End this demo session?"
+          confirmLabel="End the demo session"
+          onConfirm={onConfirm}
+          onCancel={vi.fn()}
+        >
+          <p>The demo person is signed out of every browser. This cannot be undone.</p>
+        </AlertDialog>
+      </form>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'End the demo session' }));
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
+  // Break caught: a failure told in words the page did not give, or one that is not announced when it appears.
+  it('says an error in the page’s words, announced when it appears, and keeps the buttons', async () => {
+    const view = render(
+      <AlertDialog
+        open
+        title="End this demo session?"
+        confirmLabel="End the demo session"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      >
+        <p>The demo person is signed out of every browser.</p>
+      </AlertDialog>,
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    view.rerender(
+      <AlertDialog
+        open
+        title="End this demo session?"
+        confirmLabel="End the demo session"
+        error="The session has already ended."
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      >
+        <p>The demo person is signed out of every browser.</p>
+      </AlertDialog>,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The session has already ended.');
+    expect(screen.getByRole('button', { name: 'End the demo session' })).toBeEnabled();
+  });
+});

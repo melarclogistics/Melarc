@@ -5,6 +5,7 @@ import { OperationalCode } from '../code/OperationalCode';
 import { IconButton } from '../icon-button/IconButton';
 import { Link } from '../link/Link';
 import { AnimatePresence, motion, useMotion } from '../motion/motion';
+import { InSidePanel } from './side-panel-context';
 import { useMediaQuery } from './use-media-query';
 import './side-panel.css';
 
@@ -80,6 +81,12 @@ export function SidePanel({
     }
     if (wasOpen.current) {
       wasOpen.current = false;
+      // Focus goes back to the row only if it was in the panel (Escape, the close button) or nowhere (the focused control went with the panel). A page that closes the
+      // panel while the person is on another control (a filter, a field) must not pull focus away from it (task R5.2, M7).
+      const active = document.activeElement;
+      const wasInside =
+        active === null || active === document.body || active.closest('.ui-side-panel') !== null;
+      if (!wasInside) return;
       const back = returnTo.current?.() ?? opener.current;
       if (back instanceof HTMLElement && back.isConnected) back.focus();
     }
@@ -120,7 +127,9 @@ export function SidePanel({
               </div>
             )}
           </SheetHeader>
-          <div className="ui-side-panel__body">{children}</div>
+          <div className="ui-side-panel__body">
+            <InSidePanel.Provider value>{children}</InSidePanel.Provider>
+          </div>
         </SheetContent>
       </Sheet>
     );
@@ -163,7 +172,7 @@ export function SidePanel({
             aria-label={`Details of ${code}`}
             tabIndex={0}
           >
-            {children}
+            <InSidePanel.Provider value>{children}</InSidePanel.Provider>
           </div>
         </motion.aside>
       ) : null}

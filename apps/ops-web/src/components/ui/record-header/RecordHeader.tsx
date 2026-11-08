@@ -1,12 +1,16 @@
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 
 import { PageHeading } from '../../PageHeading';
 import { OperationalCode } from '../code/OperationalCode';
+import { InSidePanel } from '../side-panel/side-panel-context';
 import './record-header.css';
 import { StageTracker, type StageTrackerProps } from './StageTracker';
 
 export interface RecordHeaderProps {
-  /** The record's code, exactly as the server gave it. It is the record's name: the page's one level-one heading, or a level-two heading in a panel. */
+  /**
+   * The record's code, exactly as the server gave it. It is the record's name: the page's one level-one heading, or a level-two heading beside a list. **Inside a `SidePanel`
+   * it is drawn as text**: the panel's own heading is the same code, and two headings with one name would be read twice (task R5.2, M12).
+   */
   readonly code: string;
   /** `1` for a record's own page (the heading takes focus after a navigation); `2` when the header is in a panel or beside a list. Default 1. */
   readonly level?: 1 | 2;
@@ -40,6 +44,7 @@ export function RecordHeader({
   secondaryActions,
   menu,
 }: RecordHeaderProps) {
+  const inPanel = useContext(InSidePanel);
   const hasActions =
     primaryAction !== undefined || secondaryActions !== undefined || menu !== undefined;
   return (
@@ -47,7 +52,11 @@ export function RecordHeader({
       <div className="ui-record-header__row">
         <div className="ui-record-header__identity">
           <div className="ui-record-header__titleline">
-            {level === 1 ? (
+            {inPanel ? (
+              <p className="ui-record-header__heading">
+                <OperationalCode>{code}</OperationalCode>
+              </p>
+            ) : level === 1 ? (
               <PageHeading>
                 <OperationalCode>{code}</OperationalCode>
               </PageHeading>

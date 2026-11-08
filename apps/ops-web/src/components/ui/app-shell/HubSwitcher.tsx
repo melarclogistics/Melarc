@@ -53,7 +53,7 @@ export function HubSwitcher({ hubs, activeHubId, hasChoice, onChoose }: HubSwitc
         <button type="button" className="ui-hub" aria-label={`Hub: ${name}`}>
           <span className="ui-hub__square" aria-hidden="true" />
           <span className="ui-hub__name">{name}</span>
-          <Icon name="choose" size="sm" />
+          <Icon name="opens-menu" size="sm" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={8} className="ui-menu ui-menu--hubs">

@@ -10,7 +10,6 @@ import {
   ChevronUp,
   ChevronsLeft,
   ChevronsRight,
-  ChevronsUpDown,
   CircleAlert,
   CircleCheck,
   ClipboardList,
@@ -83,7 +82,8 @@ export const ICONS = {
   'sign-out': LogOut,
   search: Search,
   plus: Plus,
-  choose: ChevronsUpDown,
+  // The chevron of a button that opens a menu below it (the hub switcher's): a single chevron down, named for what it says (task R5.2, M16).
+  'opens-menu': ChevronDown,
   'theme-light': Sun,
   'theme-dark': Moon,
   'theme-system': Monitor,

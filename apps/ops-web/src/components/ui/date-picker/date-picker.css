@@ -167,14 +167,6 @@
   visibility: hidden;
 }
 
-/*
- * Inside a modal dialog the calendar is drawn into the dialog (the page behind it is inert and its top layer is above the body), and the
- * dialog scrolls: a calendar longer than the dialog would be cut off at the dialog's edge. While one is open, the dialog lets it overhang.
- */
-.ui-dialog:has(.ui-date-picker__popover) {
-  overflow: visible;
-}
-
 /* Under reduced motion nothing moves, and nothing is animating at all: the popover primitive's animation is switched off, not only shortened to nothing. */
 @media (prefers-reduced-motion: reduce) {
   .ui-date-picker__popover {

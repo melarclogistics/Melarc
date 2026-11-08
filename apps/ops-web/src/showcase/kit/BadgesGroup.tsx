@@ -12,37 +12,39 @@ import {
 import { Avatar } from '../../components/ui/avatar/Avatar';
 import { CountBadge } from '../../components/ui/count-badge/CountBadge';
 import { StatusBadge } from '../../components/ui/status-badge/StatusBadge';
-import { KitSection, Specimen } from './Section';
+import { KitSection, ScrollRegion, Specimen } from './Section';
 
 /** Every state the portal shows, as the one table has it (`app/status/status-table.ts`), each drawn by the badge. */
 function StatusTable() {
   return (
-    <Table aria-label="Every state the portal shows, and how it is drawn">
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">Domain</TableHead>
-          <TableHead scope="col">State</TableHead>
-          <TableHead scope="col">Drawn as</TableHead>
-          <TableHead scope="col">Pair</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {STATUS_ROWS.map((row) => (
-          <TableRow key={`${row.domain}/${row.state}`}>
-            <TableCell>
-              <code className="showcase-kit-token">{row.domain}</code>
-            </TableCell>
-            <TableCell>
-              <code className="showcase-kit-token">{row.state}</code>
-            </TableCell>
-            <TableCell>
-              <StatusBadge<string> status={row.state} map={STATUS_TABLE[row.domain]} />
-            </TableCell>
-            <TableCell>{row.pair}</TableCell>
+    <ScrollRegion label="Every state the portal shows, and how it is drawn">
+      <Table aria-label="Every state the portal shows, and how it is drawn">
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Domain</TableHead>
+            <TableHead scope="col">State</TableHead>
+            <TableHead scope="col">Drawn as</TableHead>
+            <TableHead scope="col">Pair</TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {STATUS_ROWS.map((row) => (
+            <TableRow key={`${row.domain}/${row.state}`}>
+              <TableCell>
+                <code className="showcase-kit-token">{row.domain}</code>
+              </TableCell>
+              <TableCell>
+                <code className="showcase-kit-token">{row.state}</code>
+              </TableCell>
+              <TableCell>
+                <StatusBadge<string> status={row.state} map={STATUS_TABLE[row.domain]} />
+              </TableCell>
+              <TableCell>{row.pair}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </ScrollRegion>
   );
 }
 

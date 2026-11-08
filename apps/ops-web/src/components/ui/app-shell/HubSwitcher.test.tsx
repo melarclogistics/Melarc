@@ -120,3 +120,17 @@ describe('the hub switcher', () => {
     expect(await wcagViolations(document.body)).toEqual([]);
   });
 });
+
+describe('the hub switcher’s chevron (task R5.2, M16)', () => {
+  // Break caught: the pair of up-and-down chevrons that says "choose from a list" for a control that opens a menu below it: a dropdown's chevron is one, pointing down.
+  it('is a single chevron pointing down, that is drawn for the eye alone', () => {
+    renderSwitcher();
+
+    const trigger = screen.getByRole('button', { name: 'Hub: All hubs' });
+    const icon = trigger.querySelector('svg');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon?.getAttribute('class')).toContain('lucide-chevron-down');
+    expect(icon?.getAttribute('class')).not.toContain('chevrons-up-down');
+  });
+});

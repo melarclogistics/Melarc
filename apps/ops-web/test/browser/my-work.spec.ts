@@ -228,6 +228,31 @@ test.describe('what is waiting', () => {
     ).toBeVisible();
   });
 
+  // Break caught (task R5.2, M16): a card whose only target is the words of its title (a small target in a large card), underlined like a link in a sentence, or one with no
+  // chevron to say it goes somewhere: the card is the link, the chevron is its cue (so the underline may go), and a press on the empty part of the card follows it.
+  test('is one link over the whole card, with a chevron in place of the underline', async ({
+    page,
+  }) => {
+    await open(page, QUEUES);
+    const card = cards(page).getByRole('listitem').filter({ hasText: 'Staff profiles' });
+    const link = card.getByRole('link');
+
+    await expect(link).toHaveCount(1);
+    await expect(link.locator('svg')).toBeVisible();
+    expect(await link.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe(
+      'none',
+    );
+    const at = await card.boundingBox();
+    expect(at).not.toBeNull();
+    // The lower right corner of the card: no words and no control are there.
+    await page.mouse.click(
+      (at?.x ?? 0) + (at?.width ?? 0) - 8,
+      (at?.y ?? 0) + (at?.height ?? 0) - 8,
+    );
+
+    await expect(page).toHaveURL(/\/admin\/staff\?view=waiting/);
+  });
+
   // Break caught: "Nothing is waiting" said for a summary that was not read, that was cut short, or that has anything in it.
   test('says nothing is waiting only when the summary was read and every count of it is 0', async ({
     page,

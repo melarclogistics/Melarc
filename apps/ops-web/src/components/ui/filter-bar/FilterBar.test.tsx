@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
+import { Dialog } from '../dialog/Dialog';
 import { FilterBar, type FilterBarProps, type FilterChip } from './FilterBar';
 
 const CHIPS: readonly FilterChip[] = [
@@ -176,5 +177,76 @@ describe('FilterBar', () => {
     const { container } = render(<Host sortLabel="Sorted by oldest first" onClearAll={vi.fn()} />);
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+describe('FilterBar: the popover of the page’s fields (task R5.2, M8 and M12)', () => {
+  const FILTER = () => screen.getByRole('button', { name: 'Filter' });
+
+  // Break caught: a popover the page cannot close (a filter applied from inside it leaves it open over the rows), or one that ignores what the page says.
+  it('is opened and closed by the page when it is given both the state and the change', async () => {
+    const user = userEvent.setup();
+    const changes: boolean[] = [];
+    function Page() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Apply
+          </button>
+          <Host
+            filterOpen={open}
+            onFilterOpenChange={(next) => {
+              changes.push(next);
+              setOpen(next);
+            }}
+          />
+        </>
+      );
+    }
+    render(<Page />);
+
+    expect(screen.queryByRole('dialog', { name: 'Filter' })).toBeNull();
+    await user.click(FILTER());
+    expect(await screen.findByRole('dialog', { name: 'Filter' })).toBeVisible();
+    expect(changes).toEqual([true]);
+
+    // The page closes it: the Apply of the page, outside the popover, after the person chose something in it.
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Filter' })).toBeNull();
+    });
+    expect(changes).toEqual([true, false]);
+
+    await user.click(FILTER());
+    expect(await screen.findByRole('dialog', { name: 'Filter' })).toBeVisible();
+  });
+
+  it('draws the popover open when the page says it is open, and shut when the page says so', () => {
+    const view = render(<Host filterOpen onFilterOpenChange={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: 'Filter' })).toBeVisible();
+
+    view.rerender(<Host filterOpen={false} onFilterOpenChange={vi.fn()} />);
+    expect(screen.queryByRole('dialog', { name: 'Filter' })).toBeNull();
+  });
+
+  // Break caught: the popover drawn into the page's body when the bar is in a dialog, under the dialog's top layer: unseen and out of reach.
+  it('is drawn into the dialog that holds the bar', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open title="Choose the requests">
+        <Host />
+      </Dialog>,
+    );
+
+    await user.click(FILTER());
+
+    const popover = await screen.findByRole('dialog', { name: 'Filter' });
+    expect(document.querySelector('dialog')?.contains(popover)).toBe(true);
   });
 });

@@ -224,16 +224,18 @@
 
 /* ---- The menus that open from the bar ---- */
 
+/* The menus are never wider than the screen, whatever the size of the text (task R5.2, M9: a min-width in rem alone is 448px to 512px at 200%). */
 .ui-menu {
-  min-width: 14rem;
+  min-width: min(14rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
 }
 
 .ui-menu--hubs {
-  min-width: 15rem;
+  min-width: min(15rem, calc(100vw - 1rem));
 }
 
 .ui-menu--account {
-  min-width: 16rem;
+  min-width: min(16rem, calc(100vw - 1rem));
 }
 
 .ui-menu__who {

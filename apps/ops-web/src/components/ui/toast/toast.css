@@ -120,25 +120,13 @@
   color: var(--color-text-primary);
 }
 
-.ui-toast__close {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+/* The dismiss control is the kit's IconButton, made 24px square here: a toast's line is not the 36px that an IconButton keeps (the target is above the 24px of WCAG 2.5.8). */
+.ui-toast .ui-icon-button {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
   margin-top: -0.0625rem;
   padding: 0;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.ui-toast__close:hover {
-  background: var(--color-surface-subtle);
-  color: var(--color-text-primary);
 }
 
 @media (forced-colors: active) {

@@ -45,3 +45,21 @@ export function Specimen({
     </figure>
   );
 }
+
+/**
+ * A table of the primitive in a box that scrolls sideways and takes focus, named: a table wider than its room (a phone, text at 200%) must be reachable from the keyboard
+ * (WCAG 2.1.1; task R5.2, M9). The primitive's own box is made not to scroll (`showcase-kit-scroll` in kit.css), as the DataTable does, so that this is the one box.
+ */
+export function ScrollRegion({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="showcase-kit-scroll" role="region" aria-label={label} tabIndex={0}>
+      {children}
+    </div>
+  );
+}

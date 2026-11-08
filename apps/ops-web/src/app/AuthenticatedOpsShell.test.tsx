@@ -470,3 +470,33 @@ describe('the authenticated Ops shell: where it is not', () => {
     ]);
   });
 });
+
+describe('the authenticated Ops shell: its toasts across sessions (task R5.2, H2)', () => {
+  // Break caught: a toast with an action (which has no end of its own) shown again by the next shell: Sonner keeps its toasts in one store for the page, and shows every
+  // active one to a toaster that mounts later, so what one person was told appears to the next. The shell's toaster takes the toasts with it when it goes.
+  it('does not show to the next person a toast raised for the last one', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    act(() => {
+      showToast({
+        tone: 'success',
+        message: 'Request ACC-PR-7KQ2MZ confirmed.',
+        action: { label: 'Open', onClick: () => undefined },
+      });
+    });
+    expect(await screen.findByText('Request ACC-PR-7KQ2MZ confirmed.')).toBeVisible();
+
+    // The person leaves the shell (the session ends); the next signs in and the shell is drawn again, with a toaster of its own.
+    await act(async () => {
+      await router.navigate('/sign-in');
+    });
+    expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
+    await act(async () => {
+      await router.navigate('/');
+    });
+    await screen.findByRole('navigation', { name: 'Primary' });
+
+    expect(toasters()).toHaveLength(1);
+    expect(screen.queryByText('Request ACC-PR-7KQ2MZ confirmed.')).toBeNull();
+  });
+});

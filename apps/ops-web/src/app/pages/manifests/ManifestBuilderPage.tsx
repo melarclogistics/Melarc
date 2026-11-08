@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
 import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
@@ -75,6 +76,14 @@ interface RunHub {
 const NO_HUBS: readonly { readonly id: string; readonly display_name: string }[] = [];
 
 const NOT_RECORDED = 'Not recorded';
+/**
+ * A session that lists no hub has nothing to choose and nothing to build a run from (task R5.2, M15b: it was told "Choose the hub first" with nothing to choose). The
+ * words name no role and no permission, as the portal's refusals do; they are provisional copy for the Product Owner to approve.
+ */
+const NO_HUB_DESCRIPTION =
+  'A run is for one hub, and your session lists none, so there is nothing to build here.';
+const NO_HUB_NOTE =
+  'Your session lists no hub, so there is nothing to build a run from: a manifest is made for one hub.';
 
 /** What the page says of the limit of a manifest, beside the review once the choice is as large as a manifest holds. */
 const AT_MOST_STOPS = `A manifest holds at most ${String(MAX_STOPS)} requests; use another manifest for the rest.`;
@@ -438,7 +447,9 @@ export function ManifestBuilderPage() {
         title="Build a manifest"
         description={
           runHub === undefined
-            ? 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the manifest.'
+            ? hubs.length === 0
+              ? NO_HUB_DESCRIPTION
+              : 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the manifest.'
             : `Run for ${runHub.display_name}. Choose confirmed pickups for one run, on one day. Nothing is made until you create the manifest.`
         }
       />
@@ -483,7 +494,9 @@ export function ManifestBuilderPage() {
 
         {runHubId === undefined ? (
           <p className="manifest-note">
-            Choose the hub first: the pool, the review and the manifest are that hub’s.
+            {hubs.length === 0
+              ? NO_HUB_NOTE
+              : 'Choose the hub first: the pool, the review and the manifest are that hub’s.'}
           </p>
         ) : null}
 

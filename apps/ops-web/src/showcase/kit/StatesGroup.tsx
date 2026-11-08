@@ -15,7 +15,7 @@ import { SkeletonBar } from '../../components/ui/skeleton/SkeletonBar';
 import { SkeletonCard } from '../../components/ui/skeleton/SkeletonCard';
 import { requestColumns } from './DataGroup';
 import { sampleRequests, type SampleRequest } from './sample-data';
-import { KitSection, Specimen } from './Section';
+import { KitSection, ScrollRegion, Specimen } from './Section';
 
 const COLUMNS = ['Request', 'Sender', 'Hub', 'Service date', 'Status'] as const;
 
@@ -142,22 +142,24 @@ function LoadingRowSpecimens() {
       <Specimen label="Five loading rows under their headings">
         <div className="showcase-kit-stack">
           <LoadingIndicator label="Loading pickup requests" />
-          <Table aria-label="Pickup requests, loading">
-            <TableHeader>
-              <TableRow>
-                {COLUMNS.map((column) => (
-                  <TableHead key={column} scope="col">
-                    {column}
-                  </TableHead>
+          <ScrollRegion label="Pickup requests, loading">
+            <Table aria-label="Pickup requests, loading">
+              <TableHeader>
+                <TableRow>
+                  {COLUMNS.map((column) => (
+                    <TableHead key={column} scope="col">
+                      {column}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Array.from({ length: 5 }, (_row, index) => (
+                  <LoadingRow key={index} columns={COLUMNS.length} index={index} />
                 ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Array.from({ length: 5 }, (_row, index) => (
-                <LoadingRow key={index} columns={COLUMNS.length} index={index} />
-              ))}
-            </TableBody>
-          </Table>
+              </TableBody>
+            </Table>
+          </ScrollRegion>
         </div>
       </Specimen>
       <Specimen label="The queue's table while it loads, and when its rows have arrived (sample data)">

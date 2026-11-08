@@ -53,6 +53,12 @@ const DATES = [
   '2026-11-09',
 ] as const;
 
+/**
+ * The phone of a sample sender, as a **record's own page** shows it: whole, as the record's own read returned it. Masking (`+233******111`) is for the results of a lookup
+ * only (the search and the palette), never for a record's own page (task R5.2, M16; COMPONENT_PATTERNS section 12.6). It is made up, and says so by being all zeros.
+ */
+export const SAMPLE_SENDER_PHONE = '+233200000000';
+
 /** The first `count` sample requests, from 1 to 20: the same ones in the same order every time. */
 export function sampleRequests(count: number): SampleRequest[] {
   return CODES.slice(0, Math.min(count, CODES.length)).map((code, index) => ({

@@ -661,3 +661,25 @@ describe('My work follows the hub switcher (task C3)', () => {
     ).toBeVisible();
   });
 });
+
+describe('a card of My work is one link (task R5.2, M16)', () => {
+  // Break caught: a card whose only link is the words of its title (a small target in a large card), underlined by the kit's Link; or a link that is also named by its figure
+  // (the number read twice). The card is the link: its name is the queue's alone, it carries a chevron in place of the underline, and the figure stays outside it.
+  it('has one link in each card, named by its queue alone, with a chevron, and not the kit’s underlined link', async () => {
+    open(KEYS.approver, OFFICER);
+
+    const items = await cards();
+
+    expect(items.length).toBeGreaterThan(1);
+    for (const item of items) {
+      const links = within(item).getAllByRole('link');
+      expect(links).toHaveLength(1);
+      const link = links[0];
+      expect(link).toHaveClass('my-work-card__link');
+      expect(link).not.toHaveClass('ui-link');
+      expect(link?.querySelector('svg')).not.toBeNull();
+      expect(link).toHaveAccessibleName(titleOf(item));
+      expect(link?.textContent).not.toMatch(/\d/);
+    }
+  });
+});

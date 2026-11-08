@@ -1,10 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { useRef } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import { OperationalCode } from '../code/OperationalCode';
+import { Dialog } from '../dialog/Dialog';
 import { dismissToast, showToast, Toaster, type ToastOptions } from './Toast';
+import { TOAST_CLEARANCE_PROPERTY, useToastClearance } from './toast-clearance';
 
 // jsdom has no pointer capture. Sonner takes it when a pointer goes down on a toast (to follow a swipe), so pressing a button in a toast would throw in the
 // middle of the event, outside the test. A browser has the methods; this gives jsdom enough of them for a click to go through.
@@ -401,5 +406,194 @@ describe('Toast', () => {
     await screen.findByText('Request ACC-PR-7KQ2MZ booked.');
 
     expect(await wcagViolations(document.body)).toEqual([]);
+  });
+});
+
+describe('Toast: across sessions, while a dialog is open, and the rest of task R5.2', () => {
+  // Break caught (H2): a toast with an action (which has no end of its own) shown again, to the next person, by a toaster that mounts after the session ended: Sonner keeps
+  // its toasts in one store and replays the active ones to every new toaster.
+  it('is gone when the toaster goes, and is not shown again by the toaster that mounts next', async () => {
+    act(() => {
+      showToast({
+        tone: 'success',
+        message: 'Request ACC-PR-7KQ2MZ confirmed.',
+        action: { label: 'Open', onClick: () => undefined },
+      });
+    });
+    await screen.findByText('Request ACC-PR-7KQ2MZ confirmed.');
+
+    // The session ends: the shell, and the one toaster with it, is gone; the next person signs in and a new toaster mounts.
+    act(() => {
+      unmountFirstToaster();
+    });
+    render(<Toaster />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Request ACC-PR-7KQ2MZ confirmed.')).toBeNull();
+  });
+
+  it('stays while another toaster is mounted: only the last one going takes the toasts with it', async () => {
+    render(<Toaster />);
+    act(() => {
+      showToast({
+        tone: 'info',
+        message: 'The run is being built.',
+        action: { label: 'Open', onClick: () => undefined },
+      });
+    });
+    await screen.findByText('The run is being built.');
+
+    act(() => {
+      unmountFirstToaster();
+    });
+
+    expect(await screen.findByText('The run is being built.')).toBeVisible();
+  });
+
+  // Break caught (M11a): a toast raised while a modal dialog is open, drawn behind its scrim (everything outside a modal dialog is inert): never seen, and with an action it
+  // never goes by itself.
+  it('is held while a modal dialog is open, and shown when it has closed', async () => {
+    const view = render(
+      <Dialog open title="Add a note">
+        <p>Write the note.</p>
+      </Dialog>,
+    );
+
+    act(() => {
+      showToast({ tone: 'success', message: 'The note is saved.' });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('The note is saved.')).toBeNull();
+
+    view.rerender(
+      <Dialog open={false} title="Add a note">
+        <p>Write the note.</p>
+      </Dialog>,
+    );
+
+    expect(await screen.findByText('The note is saved.')).toBeVisible();
+  });
+
+  it('is shown when the dialog leaves the page without closing, and the held ones keep the order they were raised in', async () => {
+    const view = render(
+      <Dialog open title="Add a note">
+        <p>Write the note.</p>
+      </Dialog>,
+    );
+    act(() => {
+      showToast({ tone: 'success', message: 'First message.' });
+      showToast({ tone: 'info', message: 'Second message.' });
+    });
+    expect(screen.queryByText('First message.')).toBeNull();
+
+    view.unmount();
+
+    const first = await screen.findByText('First message.');
+    const second = await screen.findByText('Second message.');
+    // Sonner puts the newest on top: the one raised second stands above the one raised first, as it would had no dialog been open.
+    expect(second.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('is never shown when it was taken away while it was held', async () => {
+    const view = render(
+      <Dialog open title="Add a note">
+        <p>Write the note.</p>
+      </Dialog>,
+    );
+    let id: string | number = '';
+    act(() => {
+      id = showToast({ tone: 'success', message: 'The note is saved.' });
+    });
+
+    act(() => {
+      dismissToast(id);
+    });
+    view.rerender(
+      <Dialog open={false} title="Add a note">
+        <p>Write the note.</p>
+      </Dialog>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('The note is saved.')).toBeNull();
+  });
+
+  it('is shown at once when no dialog is open', async () => {
+    act(() => {
+      showToast({ tone: 'success', message: 'Shown at once.' });
+    });
+
+    expect(await screen.findByText('Shown at once.')).toBeVisible();
+  });
+
+  // Break caught (M11b): the same toast raised twice stacking two copies (a double press, a retry): an id names it, and the second replaces the first in place.
+  it('replaces a toast that has the same id instead of stacking a copy', async () => {
+    act(() => {
+      showToast({ tone: 'success', message: 'Request confirmed (1).', id: 'confirmed' });
+      showToast({ tone: 'success', message: 'Request confirmed (2).', id: 'confirmed' });
+    });
+
+    expect(await screen.findByText('Request confirmed (2).')).toBeVisible();
+    expect(screen.queryByText('Request confirmed (1).')).toBeNull();
+    expect(document.querySelectorAll('.ui-toast')).toHaveLength(1);
+  });
+
+  it('stacks toasts that have no id, each its own', async () => {
+    act(() => {
+      showToast({ tone: 'info', message: 'One.' });
+      showToast({ tone: 'info', message: 'Two.' });
+    });
+
+    await screen.findByText('Two.');
+    expect(document.querySelectorAll('.ui-toast')).toHaveLength(2);
+  });
+
+  // Break caught (M11d): a dismiss control that is its own button instead of the kit's IconButton (two controls to keep the same).
+  it('has the kit’s icon button to dismiss it', async () => {
+    act(() => {
+      showToast({
+        tone: 'info',
+        message: 'The run is being built.',
+        action: { label: 'Open', onClick: () => undefined },
+      });
+    });
+
+    await screen.findByText('The run is being built.');
+    const dismiss = within(toastOf('The run is being built.')).getByRole('button', {
+      name: 'Dismiss this message',
+    });
+    expect(dismiss).toHaveClass('ui-icon-button');
+  });
+});
+
+describe('useToastClearance (task R5.2, M11)', () => {
+  function Bar({ shown }: { readonly shown: boolean }) {
+    const bar = useRef<HTMLDivElement>(null);
+    useToastClearance(bar);
+    return shown ? <div ref={bar}>Bar</div> : <div ref={bar}>Bar</div>;
+  }
+
+  // Break caught: a sticky bar that cannot say where it is, so a toast at the bottom of a narrow window covers it; or one that leaves its clearance behind when it goes.
+  it('publishes how far up the toasts stand while the bar is there, and takes it back when it goes', () => {
+    const view = render(<Bar shown />);
+
+    expect(document.documentElement.style.getPropertyValue(TOAST_CLEARANCE_PROPERTY)).toMatch(
+      /^\d+(\.\d+)?px$/,
+    );
+
+    view.unmount();
+    expect(document.documentElement.style.getPropertyValue(TOAST_CLEARANCE_PROPERTY)).toBe('');
+  });
+
+  it('is what the toaster reads at the foot of a narrow window', () => {
+    const source = readFileSync(join(import.meta.dirname, 'Toast.tsx'), 'utf8');
+
+    expect(source).toContain(`var(${TOAST_CLEARANCE_PROPERTY}, 0px)`);
   });
 });

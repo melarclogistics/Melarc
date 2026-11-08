@@ -16,15 +16,18 @@ type Scheme = 'light' | 'dark';
 interface OpenOptions {
   readonly scheme?: Scheme;
   readonly reducedMotion?: boolean;
+  readonly forcedColors?: boolean;
   readonly width?: number;
+  readonly height?: number;
 }
 
 async function openKit(page: Page, group: string, options: OpenOptions = {}) {
   const seen = watchPage(page);
-  if (options.width !== undefined)
-    await page.setViewportSize({ width: options.width, height: 900 });
+  if (options.width !== undefined || options.height !== undefined)
+    await page.setViewportSize({ width: options.width ?? 1280, height: options.height ?? 900 });
   if (options.scheme !== undefined) await page.emulateMedia({ colorScheme: options.scheme });
   if (options.reducedMotion === true) await page.emulateMedia({ reducedMotion: 'reduce' });
+  if (options.forcedColors === true) await page.emulateMedia({ forcedColors: 'active' });
   await page.goto(`${KIT}/${group}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Kit showcase' })).toBeVisible();
   return seen;
@@ -290,6 +293,12 @@ test.describe('PageHeader, ViewTabs and FilterBar in a browser', () => {
     await views.getByRole('tab', { name: /^Needs decision/ }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(views.getByRole('tab', { name: /^Confirmed/ })).toBeFocused();
+    // The arrows only move (task R5.2, M12: manual activation): the view changes, and the page reads the server, on Enter or Space.
+    await expect(views.getByRole('tab', { name: /^Confirmed/ })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    await page.keyboard.press('Enter');
     await expect(views.getByRole('tab', { name: /^Confirmed/ })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -384,7 +393,8 @@ test.describe('DataTable in a browser', () => {
     await openKit(page, 'data');
     const specimenBox = specimen(page, 'Single line, 36px rows');
     const row = specimenBox.getByRole('table').locator('tbody tr').nth(2);
-    const target = await box(row.locator('td').last());
+    // The last cell that is drawn: the packages column goes first when the table's box is narrow (task R5.2, M12: priority 3), so it is not always there.
+    const target = await box(row.locator('td:visible').last());
     const button = row.getByRole('button', { name: /^Open ACC-PR-2MX8RC/ });
 
     // The button is stretched: its pseudo-element covers the row, so a press at the far end of the row is a press on it.
@@ -422,25 +432,33 @@ test.describe('DataTable in a browser', () => {
     ).toBeVisible();
   });
 
-  // Break caught: a bar that pushes the rows (they move under the hand), is not announced, or whose act does not reach the rows chosen.
-  test('slides the bar of acts in when rows are chosen, over the rows and not pushing them, and confirms what is chosen', async ({
+  // Break caught: a bar that is not announced, whose act does not reach the rows it can act on, that counts a row it cannot act on, or that moves the rows more than once. The
+  // bar is above the rows and sticks (task R5.2, M12: it used to float over the last rows and push none), so the rows move down by its height once, when it comes.
+  test('brings the bar of acts in above the rows, counts the rows it can act on, and confirms them', async ({
     page,
   }) => {
     await openKit(page, 'data');
     const two = specimen(page, 'Two lines (a code over a name)');
-    const table = two.getByRole('table');
-    const first = table.locator('tbody tr').first();
-    // Where the first row is from the top of its table: the page scrolls to the boxes that are checked, so a position in the window would change.
-    const fromTop = async (): Promise<number> => (await box(first)).y - (await box(table)).y;
+    const first = two.getByRole('table').locator('tbody tr').first();
+    // Where the first row is in the document: the page scrolls to the boxes that are checked, so a position in the window would change.
+    const fromTop = async (): Promise<number> =>
+      (await box(first)).y + (await page.evaluate(() => window.scrollY));
     const before = await fromTop();
 
+    // Two that are waiting, and one that is confirmed already: the bar counts three chosen, and the act is for the two it can be taken on.
+    await two.getByRole('checkbox', { name: 'Select ACC-PR-7KQ2MZ' }).check();
+    await two.getByRole('checkbox', { name: 'Select ACC-PR-9WXH4T' }).check();
     await two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' }).check();
-    await two.getByRole('checkbox', { name: 'Select ACC-PR-3NP6VB' }).check();
     const bar = two.getByRole('group', { name: 'Actions for the chosen rows' });
     await expect(bar).toBeVisible();
-    await expect(bar.getByText('2 selected')).toBeVisible();
-    expect(await fromTop()).toBe(before);
-    await expect(two.getByRole('status').filter({ hasText: '2 selected' })).toHaveCount(1);
+    await expect(bar.getByText('3 selected')).toBeVisible();
+    await expect(bar.getByText('1 is already confirmed or cancelled')).toBeVisible();
+    await expect(two.getByRole('status').filter({ hasText: '3 selected' })).toHaveCount(1);
+    const height = (await box(bar)).height;
+    await expect
+      .poll(async () => Math.round((await fromTop()) - before))
+      .toBeGreaterThanOrEqual(Math.round(height) - 1);
+    expect((await fromTop()) - before).toBeLessThanOrEqual(height + 24);
 
     await bar.getByRole('button', { name: 'Confirm 2' }).click();
     await expect(bar).toBeHidden();
@@ -450,7 +468,7 @@ test.describe('DataTable in a browser', () => {
   // Break caught: a bar that appears with no slide and no fade, or that slides for a person who asked the system for less motion. The bar is read the moment
   // it is drawn (before any frame has moved it), so the check does not depend on how fast the machine is.
   for (const reduced of [false, true]) {
-    test(`brings the bar of acts in 12px low and faded${reduced ? ' (it does not under reduced motion)' : ''}`, async ({
+    test(`brings the bar of acts in 12px high and faded${reduced ? ' (it does not under reduced motion)' : ''}`, async ({
       page,
     }) => {
       await openKit(page, 'data', { reducedMotion: reduced });
@@ -475,10 +493,10 @@ test.describe('DataTable in a browser', () => {
         expect(first?.opacity).toBe(1);
         expect(first?.y).toBe(0);
       } else {
-        // Not yet at its place: the 12px it comes in from, less what the first moment of the move has covered.
+        // Not yet at its place: the 12px it comes in from (above, since the bar is above the rows), less what the first moment of the move has covered.
         expect(first?.opacity).toBeLessThan(1);
-        expect(first?.y).toBeGreaterThan(6);
-        expect(first?.y).toBeLessThanOrEqual(12);
+        expect(first?.y).toBeLessThan(-6);
+        expect(first?.y).toBeGreaterThanOrEqual(-12);
       }
     });
   }
@@ -490,7 +508,7 @@ test.describe('DataTable in a browser', () => {
     }) => {
       await openKit(page, 'data', { reducedMotion: reduced });
       const two = specimen(page, 'Two lines (a code over a name)');
-      await two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' }).check();
+      await two.getByRole('checkbox', { name: 'Select ACC-PR-7KQ2MZ' }).check();
       await two.getByRole('button', { name: 'Confirm 1' }).click();
 
       const changed = two.locator('tr[data-changed="true"]').first();
@@ -859,7 +877,8 @@ test.describe('ActionMenu and Toast in a browser', () => {
     await page.getByRole('menuitem', { name: 'Cancel request' }).click();
     const question = page.getByRole('alertdialog', { name: 'Cancel request ACC-PR-7KQ2MZ?' });
     await expect(question).toBeVisible();
-    await expect(question.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+    // The dismiss never repeats the act's verb (task R5.2, M3: the question is about cancelling a request, so its safe button is "Go back", not "Cancel").
+    await expect(question.getByRole('button', { name: 'Go back', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(question).toBeHidden();
     await expect(trigger(page)).toBeFocused();
@@ -1410,7 +1429,8 @@ test.describe('the composed examples in a browser', () => {
   }) => {
     await openKit(page, 'example-queue', { width: 1440 });
     const card = page.locator('.showcase-kit-card [data-slot="card"]');
-    expect(await card.evaluate((element) => getComputedStyle(element).overflow)).toBe('hidden');
+    // `clip`, not `hidden`: a box that is `hidden` is a scroll container, which pins a sticky bar inside it to a box that never scrolls (task R5.2, M12).
+    expect(await card.evaluate((element) => getComputedStyle(element).overflow)).toBe('clip');
     // What the card cuts must not be the focus ring of the box that scrolls (it takes focus, so that the rows off to the side can be reached): the ring is drawn
     // inside the box, where nothing cuts it.
     const scroller = page.getByRole('region', { name: 'Pickup requests' });
@@ -1503,5 +1523,497 @@ test.describe('the composed examples in a browser', () => {
     await expect(send).toBeEnabled();
     await send.click();
     await expect(page.locator('.ui-toast', { hasText: 'Your count was sent.' })).toBeVisible();
+  });
+});
+
+/**
+ * The browser proof of task R5.2, M9: every page of the kit on the narrowest screen with the largest text, and under forced colours. The kit's pages have the scan of
+ * WCAG 2.2 in both themes above; these are the conditions that scan does not make.
+ */
+test.describe('the kit on a 320px screen with the text at 200%: WCAG 1.4.4 and 1.4.10', () => {
+  const enlarge = (page: Page) =>
+    page.evaluate(() => {
+      document.documentElement.style.fontSize = '200%';
+    });
+
+  // Break caught: a component that is wider than the narrowest screen, as it is or with the text twice as large (a code, a badge or a row that does not wrap, a width in
+  // pixels), which scrolls the whole page sideways: found in the record's title, a description value, a stop in a list and a long status.
+  for (const group of GROUPS) {
+    test(`the ${group} page does not scroll sideways, and has no violation, at 200%`, async ({
+      page,
+    }) => {
+      const seen = await openKit(page, group, { width: 320, height: 640 });
+      expect(await overflow(page), 'at 100%').toBeLessThanOrEqual(0);
+
+      await enlarge(page);
+      expect(await overflow(page), 'at 200%').toBeLessThanOrEqual(0);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(seen.problems).toEqual([]);
+    });
+  }
+
+  // Break caught: a size written in pixels, which leaves a row, a tab or a button as it was when the text is enlarged, so that the larger words are cut or crowd their box
+  // (WCAG 1.4.4).
+  test('grows a row, a tab, a chip and a button with the text', async ({ page }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const row = specimen(page, 'Single line, 36px rows').locator('tbody tr').first();
+    const rowBefore = (await box(row)).height;
+    await openKit(page, 'header', { width: 1440, height: 900 });
+    const tab = page.locator('.ui-view-tabs__tab').first();
+    const chip = page.locator('.ui-filter-bar__chip').first();
+    const tabBefore = (await box(tab)).height;
+    const chipBefore = (await box(chip)).height;
+
+    await enlarge(page);
+
+    expect((await box(tab)).height, 'a tab').toBeGreaterThanOrEqual(tabBefore * 1.6);
+    expect((await box(chip)).height, 'a chip').toBeGreaterThanOrEqual(chipBefore * 1.6);
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    await enlarge(page);
+    expect(
+      (await box(specimen(page, 'Single line, 36px rows').locator('tbody tr').first())).height,
+      'a row',
+    ).toBeGreaterThanOrEqual(rowBefore * 1.6);
+  });
+
+  // Break caught: an open menu, popover, panel or toast wider than the screen, or pushed off its edge, when the text is large: what opens is part of the reflow. Motion is
+  // reduced, so that each box is measured where it rests and not part-way through its entrance.
+  test('keeps the menu, the filter popover, the side panel as a sheet and a toast inside the screen', async ({
+    page,
+  }) => {
+    const inside = async (locator: Locator, what: string) => {
+      const found = await box(locator);
+      expect(found.x, `${what}: left edge`).toBeGreaterThanOrEqual(-0.5);
+      expect(found.x + found.width, `${what}: right edge`).toBeLessThanOrEqual(320.5);
+    };
+
+    await openKit(page, 'menus', { width: 320, height: 640, reducedMotion: true });
+    await enlarge(page);
+    await page
+      .getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' })
+      .first()
+      .scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' }).first().click();
+    await inside(page.getByRole('menu'), 'the menu');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Success', exact: true }).click();
+    await inside(page.locator('.ui-toast').first(), 'the toast');
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+
+    await openKit(page, 'header', { width: 320, height: 640, reducedMotion: true });
+    await enlarge(page);
+    const filter = specimen(page, 'Three filters, with Clear all').getByRole('button', {
+      name: 'Filter',
+      exact: true,
+    });
+    await filter.scrollIntoViewIfNeeded();
+    await filter.click();
+    await inside(page.getByRole('dialog', { name: 'Filter' }), 'the filter popover');
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+
+    await openKit(page, 'panels', { width: 320, height: 640, reducedMotion: true });
+    await enlarge(page);
+    const row = specimen(page, 'Beside a list of sample requests').getByRole('button', {
+      name: 'Open ACC-PR-7KQ2MZ',
+    });
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+    await inside(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' }), 'the sheet');
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe('the kit under forced colours: a fill is never the only thing that draws a surface or tells a state', () => {
+  test.skip(
+    ({ browserName }) => browserName === 'webkit',
+    'Playwright cannot emulate forced colours in WebKit; the rules are held by the stylesheets and the token guard.',
+  );
+
+  /** What a system colour resolves to in this page (as a background, which is what a fill is drawn in). */
+  const system = (page: Page, name: 'Highlight' | 'CanvasText' | 'Canvas'): Promise<string> =>
+    page.evaluate((value) => {
+      const probe = document.createElement('span');
+      probe.style.background = value;
+      probe.style.color = value;
+      document.body.append(probe);
+      const resolved = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return resolved;
+    }, name);
+
+  /** Whether an element draws an edge of its own: a border on a side, or an outline. A shadow is not one: forced colours drop it. */
+  const edged = (locator: Locator): Promise<boolean> =>
+    locator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const border = ['Top', 'Right', 'Bottom', 'Left'].some(
+        (side) =>
+          parseFloat(style.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0 &&
+          style.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none',
+      );
+      return border || (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0);
+    });
+
+  /**
+   * The classes of the kit on the page, each with whether its first element is a fill (a background that is not its parent's) and draws an edge. Read in the normal colours
+   * and again in forced colours on the same page, a surface that was drawn by its fill alone is the one that has lost its edge.
+   */
+  const surfaces = (page: Page) =>
+    page.evaluate(() => {
+      const found: Record<string, { filled: boolean; edged: boolean }> = {};
+      const transparent = (colour: string) =>
+        colour === 'transparent' || /^rgba\(.*,\s*0\)$/.test(colour) || /\/\s*0\)$/.test(colour);
+      for (const element of document.querySelectorAll('[class*="ui-"]')) {
+        const at = element.getBoundingClientRect();
+        if (at.width < 6 || at.height < 6) continue;
+        const style = getComputedStyle(element);
+        const parent = element.parentElement ? getComputedStyle(element.parentElement) : null;
+        const filled =
+          !transparent(style.backgroundColor) && style.backgroundColor !== parent?.backgroundColor;
+        const border = ['top', 'right', 'bottom', 'left'].some(
+          (side) =>
+            parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0 &&
+            style.getPropertyValue(`border-${side}-style`) !== 'none',
+        );
+        const outline = style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
+        for (const name of String(element.getAttribute('class')).split(/\s+/)) {
+          if (name.startsWith('ui-') && !(name in found))
+            found[name] = { filled, edged: border || outline };
+        }
+      }
+      return found;
+    });
+
+  /**
+   * Fills that are not surfaces of their own: the scroller sits inside the table's frame, which has the edge; the header of the table is a `thead`, whose cells carry the
+   * rule under it; the dot of a badge is a mark, which the test of the badge holds to a system colour.
+   */
+  const NOT_A_SURFACE = new Set([
+    'ui-data-table__scroller',
+    'ui-data-table__head',
+    'ui-status-badge__dot',
+  ]);
+
+  // Break caught: a component drawn by its fill alone (a tile on a tinted ground, a chip, a dot), which forced colours replace with the page's own ground, so that it has no
+  // boundary and no mark at all. Every filled class of every page is read in the normal colours and again in forced colours, so that a new component is held too.
+  for (const group of GROUPS) {
+    test(`the ${group} page keeps an edge or an outline on every fill`, async ({ page }) => {
+      await openKit(page, group, { width: 1440, height: 900, reducedMotion: true });
+      const before = await surfaces(page);
+      await page.emulateMedia({ forcedColors: 'active' });
+      expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+      const after = await surfaces(page);
+
+      const lost = Object.entries(before)
+        .filter(([name, mark]) => mark.filled && !NOT_A_SURFACE.has(name))
+        .filter(([name]) => after[name] !== undefined && !after[name].edged)
+        .map(([name]) => name);
+
+      expect(lost).toEqual([]);
+    });
+  }
+
+  // Break caught: a status told by a dot that forced colours erase (a `currentcolor` background becomes the page's ground), or a badge with no border.
+  test('keeps the dot and the border of a status badge', async ({ page }) => {
+    await openKit(page, 'badges', { forcedColors: true });
+    const badge = page.locator('.ui-status-badge').first();
+
+    expect(await edged(badge)).toBe(true);
+    expect(await colourOf(badge.locator('.ui-status-badge__dot'), 'backgroundColor')).toBe(
+      await system(page, 'CanvasText'),
+    );
+  });
+
+  // Break caught: the current view told by an underline that is a fill (a pseudo-element's background, which forced colours drop), or the current stage by a bar of the
+  // colour of the others.
+  test('tells the current view and the current stage by a system colour', async ({ page }) => {
+    await openKit(page, 'header', { forcedColors: true });
+    const current = page.locator('.ui-view-tabs__tab[data-state="active"]').first();
+    const other = page.locator('.ui-view-tabs__tab:not([data-state="active"])').first();
+    const highlight = await system(page, 'Highlight');
+    expect(await current.evaluate((element) => getComputedStyle(element).borderBottomColor)).toBe(
+      highlight,
+    );
+    expect(await other.evaluate((element) => getComputedStyle(element).borderBottomColor)).not.toBe(
+      highlight,
+    );
+
+    await openKit(page, 'panels', { forcedColors: true });
+    const bar = page
+      .locator('.ui-stage-tracker__stage[data-state="current"] .ui-stage-tracker__bar')
+      .first();
+    expect(await colourOf(bar, 'backgroundColor')).toBe(highlight);
+    expect(await edged(bar)).toBe(true);
+  });
+
+  // Break caught: a chosen row told by its tint alone, a bar of acts with no boundary over the rows, or an item of a menu that the keyboard is on but that is not drawn.
+  test('tells a chosen row, the bar of acts and the item a menu is on', async ({ page }) => {
+    await openKit(page, 'data', { forcedColors: true, width: 1440, height: 900 });
+    const two = specimen(page, 'Two lines (a code over a name)');
+    await two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' }).check();
+    const chosen = two.locator('tr[data-state="selected"]').first();
+    expect(await edged(chosen)).toBe(true);
+    expect(await chosen.evaluate((element) => getComputedStyle(element).outlineColor)).toBe(
+      await system(page, 'Highlight'),
+    );
+    expect(await edged(two.getByRole('group', { name: 'Actions for the chosen rows' }))).toBe(true);
+
+    await openKit(page, 'menus', { forcedColors: true });
+    await page.getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' }).first().focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowDown');
+    const item = page.getByRole('menuitem', { name: 'Escalate' });
+    await expect(item).toBeFocused();
+    const background = await colourOf(item, 'backgroundColor');
+    expect(
+      (await edged(item)) || background === (await system(page, 'Highlight')),
+      'the item the menu is on is drawn',
+    ).toBe(true);
+  });
+
+  // Break caught: a menu, a popover, a panel or a toast that is a card by its fill and its shadow alone, which forced colours drop: it would float over the page with no edge.
+  test('draws an edge on the menu, the popover, the panel and the toast', async ({ page }) => {
+    await openKit(page, 'menus', { forcedColors: true });
+    await page.getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' }).first().click();
+    expect(await edged(page.getByRole('menu'))).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Success', exact: true }).click();
+    expect(await edged(page.locator('.ui-toast').first())).toBe(true);
+
+    await openKit(page, 'header', { forcedColors: true });
+    await specimen(page, 'Three filters, with Clear all')
+      .getByRole('button', { name: 'Filter', exact: true })
+      .click();
+    expect(await edged(page.getByRole('dialog', { name: 'Filter' }))).toBe(true);
+
+    await openKit(page, 'panels', { forcedColors: true, width: 1440, height: 900 });
+    await specimen(page, 'Beside a list of sample requests')
+      .getByRole('button', { name: 'Open ACC-PR-7KQ2MZ' })
+      .click();
+    expect(await edged(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' }))).toBe(true);
+  });
+});
+
+/**
+ * The fix round of task R5.2 in a browser: what jsdom cannot show of it (a press that lands on something else, a control under a sticky header, a scroll the browser clamps, a
+ * top layer, a box that is narrow). Each test names the break it catches and failed before the fix it holds.
+ */
+test.describe('the fix round of task R5.2 in a browser', () => {
+  const NO_RECORD = 'No record is open.';
+
+  // Break caught: the stretched button that opens a row lying over a field in a cell, so that a press on the field opened the record and never reached the field (M4).
+  test('gives a press on a field in a cell to the field, and opens nothing', async ({ page }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const fields = specimen(page, 'A field in a cell');
+    const note = fields.getByRole('textbox', { name: /^Note for / }).first();
+    const hub = fields.getByRole('combobox', { name: /^Hub for / }).first();
+
+    for (const field of [note, hub]) {
+      await field.scrollIntoViewIfNeeded();
+      const at = await box(field);
+      await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+      await expect(field).toBeFocused();
+    }
+    await expect(fields.getByText(NO_RECORD)).toBeVisible();
+  });
+
+  // Break caught: only the 20px box of the checkbox being the target, so that a press beside it (in the cell, which is 44px wide) opened the record (M4): the whole cell is the
+  // box's, at least 24px in each direction (WCAG 2.5.8), and a press in it chooses the row and opens nothing.
+  test('chooses the row on a press beside the box, and opens nothing', async ({ page }) => {
+    // Motion is reduced, so that the bar of acts is where it will rest the moment it is there.
+    await openKit(page, 'data', { width: 1440, height: 900, reducedMotion: true });
+    const two = specimen(page, 'Two lines (a code over a name)');
+    const checkbox = two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' });
+    const target = checkbox.locator('xpath=ancestor::label[contains(@class,"ui-data-table__box")]');
+    await checkbox.scrollIntoViewIfNeeded();
+
+    const area = await box(target);
+    expect(area.width).toBeGreaterThanOrEqual(24);
+    expect(area.height).toBeGreaterThanOrEqual(24);
+    // The box is read again before each press: choosing a row brings the bar of acts in above the rows, which moves them down.
+    const pressBeside = async (side: 'left' | 'right') => {
+      const at = await box(checkbox);
+      await page.mouse.click(
+        side === 'left' ? at.x - 8 : at.x + at.width + 8,
+        at.y + at.height / 2,
+      );
+    };
+    for (const side of ['left', 'right'] as const) {
+      await pressBeside(side);
+      await expect(checkbox, `a press to the ${side} chooses`).toBeChecked();
+      await expect(two.getByRole('group', { name: 'Actions for the chosen rows' })).toBeVisible();
+      await pressBeside(side);
+      await expect(checkbox, `a second press to the ${side} clears`).not.toBeChecked();
+    }
+    await expect(two.getByText(NO_RECORD)).toBeVisible();
+  });
+
+  // Break caught: a control that takes focus under the sticky header of a box that has scrolled (the arrows move to a row that the header covers), which hides the focus
+  // from a person who cannot see where it went (WCAG 2.4.11) (M6).
+  test('keeps the control that takes focus clear of the header while the rows are scrolled', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const boxed = specimen(page, 'A box of its own');
+    const scroller = boxed.locator('.ui-data-table__scroller');
+    // The sticky cell, not the `thead` (a `thead` is not sticky: its cells are, and its own box scrolls away with the rows, so it is no reference).
+    const header = boxed.locator('thead th').first();
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const last = boxed.getByRole('button', { name: /^Open / }).last();
+    await last.focus();
+
+    for (let step = 0; step < 8; step += 1) {
+      await page.keyboard.press('ArrowUp');
+      const focused = page.locator(':focus');
+      const under = (await box(header)).y + (await box(header)).height;
+      expect((await box(focused)).y, `step ${String(step + 1)}`).toBeGreaterThanOrEqual(under - 1);
+    }
+  });
+
+  // Break caught: the place the person left put back while the table was still loading short rows, where the browser clamps the scroll to the top and nothing applies it again
+  // when the rows arrive (M7).
+  test('puts the place the person left back once the rows have arrived', async ({ page }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const scroller = specimen(page, 'Loading, then the rows').locator('.ui-data-table__scroller');
+
+    await expect
+      .poll(() => scroller.evaluate((element) => Math.round(element.scrollTop)))
+      .toBe(200);
+  });
+
+  // Break caught: a menu, a popover, a filter or a tooltip drawn into the page behind the dialog that opened it, under its top layer and inert, so that it cannot be seen or
+  // used (M8).
+  test('draws the menu, the popover, the filter and the tooltip into the dialog and reaches each', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays', { width: 1440, height: 900, reducedMotion: true });
+    await page.getByRole('button', { name: 'Open the request' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Request ACC-PR-7KQ2MZ' });
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' }).click();
+    const menu = page.locator('dialog [data-slot="dropdown-menu-content"]');
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Add a note' }).click();
+    await expect(menu).toHaveCount(0);
+
+    await dialog.getByRole('button', { name: 'Who can read this' }).hover();
+    await expect(page.locator('dialog [data-slot="tooltip-content"]').first()).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Choose a hub' }).click();
+    const popover = page.locator('dialog [data-slot="popover-content"]');
+    await expect(popover).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Filter the notes', exact: true }).click();
+    await expect(dialog.getByRole('dialog', { name: 'Filter the notes' })).toBeVisible();
+  });
+
+  // Break caught: a toast raised as a dialog closes, drawn behind the dialog's scrim and inert, where nobody sees or reaches it (M11): it is held, and shown after the dialog is gone.
+  test('shows a toast raised in a dialog after the dialog has closed, and not before', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays', { width: 1440, height: 900, reducedMotion: true });
+    await page.evaluate(() => {
+      const order: string[] = [];
+      (window as unknown as { order: string[] }).order = order;
+      document.addEventListener(
+        'close',
+        () => {
+          order.push('dialog closed');
+        },
+        true,
+      );
+      new MutationObserver(() => {
+        if (document.querySelector('.ui-toast') !== null && !order.includes('toast shown'))
+          order.push('toast shown');
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+
+    await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Add a note' })).toBeVisible();
+    await page.getByRole('button', { name: 'Save the note' }).click();
+
+    await expect(page.locator('.ui-toast', { hasText: 'The note is saved.' })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { order: string[] }).order)).toEqual([
+      'dialog closed',
+      'toast shown',
+    ]);
+  });
+
+  // Break caught: a toast over the submit bar that sticks to the bottom of a phone (it covers the one control the person needs), where the bar publishes its height and the
+  // toast stands above it (M11).
+  test('stands a toast above a bar at the bottom of a phone', async ({ page }) => {
+    await openKit(page, 'menus', { width: 390, height: 800, reducedMotion: true });
+    await page.getByRole('button', { name: 'Show a submit bar' }).click();
+    const bar = page.getByTestId('sticky-bar');
+    await expect(bar).toBeVisible();
+    await page.getByRole('button', { name: 'Success', exact: true }).click();
+    const toast = page.locator('.ui-toast', { hasText: 'Request ACC-PR-7KQ2MZ confirmed.' });
+    await expect(toast).toBeVisible();
+
+    const above = await box(toast);
+    expect(above.y + above.height).toBeLessThanOrEqual((await box(bar)).y + 0.5);
+  });
+
+  // Break caught: a table that scrolls sideways on a phone in place of cards, or cards where there is room for the table (M12): which is drawn follows the table's own box.
+  test('draws cards where its box is narrow and the table where it is wide, each card one press', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const narrow = specimen(page, 'Cards, where the box is narrow');
+    await expect(narrow.locator('.ui-data-table__cards')).toBeVisible();
+    await expect(narrow.getByRole('table')).toHaveCount(0);
+    // The second card is confirmed already, so it has no act at its end: a press at its far edge, where no control is, opens the record (the one button is stretched over the card).
+    const card = narrow.locator('.ui-data-table__card').nth(1);
+    await card.scrollIntoViewIfNeeded();
+    const at = await box(card);
+    await page.mouse.click(at.x + at.width - 8, at.y + at.height / 2);
+    await expect(narrow.getByText(/^Opened ACC-PR-4HT9WD/)).toBeVisible();
+    expect(
+      await narrow
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+
+    const wide = specimen(page, 'Single line, 36px rows');
+    await expect(wide.getByRole('table')).toBeVisible();
+    await expect(wide.locator('.ui-data-table__cards')).toHaveCount(0);
+  });
+
+  // Break caught: the lesser columns kept at a width that has no room for them, so that a side panel opened beside the table makes it scroll sideways (M12): the columns go
+  // by priority, the row's name and its box always staying.
+  test('lets the lesser columns go as the box narrows, and the others stay', async ({ page }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const sixty = specimen(page, 'Column priority at 60rem');
+    await expect(sixty.getByRole('columnheader', { name: 'Service date' })).toBeVisible();
+    await expect(sixty.getByRole('columnheader', { name: 'Packages' })).toHaveCount(0);
+
+    const forty = specimen(page, 'Column priority at 40rem');
+    await expect(forty.getByRole('columnheader', { name: 'State' })).toBeVisible();
+    await expect(forty.getByRole('columnheader', { name: 'Service date' })).toHaveCount(0);
+    expect(
+      await forty
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught: the filter popover opened on a phone with no margin from the edge of the screen, its text against the glass (M12).
+  test('keeps the filter popover clear of the edges of a 390px screen', async ({ page }) => {
+    await openKit(page, 'header', { width: 390, height: 800, reducedMotion: true });
+    const filter = specimen(page, 'Three filters, with Clear all').getByRole('button', {
+      name: 'Filter',
+      exact: true,
+    });
+    await filter.scrollIntoViewIfNeeded();
+    await filter.click();
+    const popover = await box(page.getByRole('dialog', { name: 'Filter' }));
+
+    expect(popover.x).toBeGreaterThanOrEqual(7.5);
+    expect(popover.x + popover.width).toBeLessThanOrEqual(382.5);
   });
 });

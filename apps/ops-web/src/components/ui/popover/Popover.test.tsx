@@ -4,7 +4,8 @@ import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
-import { POPOVER_OFFSET_PX, Popover } from './Popover';
+import { Dialog } from '../dialog/Dialog';
+import { POPOVER_COLLISION_PADDING_PX, POPOVER_OFFSET_PX, Popover } from './Popover';
 
 describe('Popover', () => {
   // Break caught: the offset changed from Melarc's 8px, which every popover would then draw.
@@ -111,5 +112,43 @@ describe('Popover', () => {
     await user.click(screen.getByRole('button', { name: 'Filter' }));
 
     expect(await wcagViolations(document.body)).toEqual([]);
+  });
+});
+
+describe('Popover: inside a modal dialog, and at the edge of the window (task R5.2, M8 and M12)', () => {
+  // Break caught: the popover drawn into the page's body, under the dialog's top layer: unseen and out of reach. A page passes no container: the component reads the dialog.
+  it('is drawn into the dialog that holds it, with no container given', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open title="Request ACC-PR-7KQ2MZ">
+        <Popover trigger={<button type="button">Filter</button>} label="Choose a filter">
+          <p>Service date</p>
+        </Popover>
+      </Dialog>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Filter' }));
+
+    const popover = screen.getByRole('dialog', { name: 'Choose a filter' });
+    expect(popover.closest('dialog:not([aria-label])')).toBe(document.querySelector('dialog'));
+    expect(document.querySelector('dialog')?.contains(popover)).toBe(true);
+  });
+
+  it('is drawn into the page when there is no dialog', async () => {
+    const user = userEvent.setup();
+    render(
+      <Popover trigger={<button type="button">Filter</button>} label="Choose a filter">
+        <p>Service date</p>
+      </Popover>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Filter' }));
+
+    expect(document.querySelector('dialog')).toBeNull();
+  });
+
+  // Break caught: a popover that sits on the edge of the window at 390px (no room kept): the constant is the one the content is given.
+  it('keeps 8px from the edge of the window', () => {
+    expect(POPOVER_COLLISION_PADDING_PX).toBe(8);
   });
 });

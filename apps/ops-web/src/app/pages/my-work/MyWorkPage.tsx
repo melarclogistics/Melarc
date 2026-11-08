@@ -1,7 +1,9 @@
+import { Link as RouterLink } from 'react-router';
+
 import { PageHeading } from '../../../components/PageHeading';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { formatCount } from '../../../components/ui/count-badge/CountBadge';
-import { Link } from '../../../components/ui/link/Link';
+import { Icon } from '../../../components/ui/icon/Icon';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { useHubScope } from '../../../platform/hub/active-hub';
@@ -41,7 +43,12 @@ function Cards({
             const since = queue.oldestAt === null ? undefined : formatInstant(queue.oldestAt);
             return (
               <li key={queue.queue} className="my-work-card">
-                <Link to={queueLink(queue.queue, holds)}>{QUEUE_WORDS[queue.queue].title}</Link>
+                {/* The card is one link, the name of the queue, stretched over the card: a whole-card link carries a chevron and no underline (the chevron is its other
+                    cue, COMPONENT_PATTERNS section 5, task R5.2 M16); the figure's own phrase stays outside the link, so that the link is named by the queue alone. */}
+                <RouterLink to={queueLink(queue.queue, holds)} className="my-work-card__link">
+                  <span>{QUEUE_WORDS[queue.queue].title}</span>
+                  <Icon name="next" size="sm" />
+                </RouterLink>
                 <p className="my-work-card__figure">
                   {/* The number is drawn and the whole phrase is read ("5 waiting for confirmation"), so that the number is not said twice. */}
                   <span aria-hidden="true">{formatCount(queue.count)}</span>

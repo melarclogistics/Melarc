@@ -174,15 +174,22 @@ describe('the counts beside the entries of the menu', () => {
     expect(link(/^Staff/).textContent).toBe('Staff');
   });
 
-  // Break caught: the count of a real 0 hidden as though it were missing, or drawn as work.
-  it('draws a count of 0 that was read, quietly', async () => {
-    open(answer([{ queue: 'STAFF_AWAITING_APPROVAL', count: 0 }]));
+  // Break caught (task R5.2, M16, which reverses the rule of task C1 that drew a 0 that was read, quietly): a pill of 0 beside an entry, in a column of entries of which
+  // one or two hold anything: a row of zeros is noise. The queue's count of 0 is still an answer, and is told where it is useful: My work's "Also clear" line. A count that
+  // was not read is still never drawn as 0 (the test above); the other queue is there so that the read is known to have happened.
+  it('draws no pill for a count of 0 that was read, and the entry is only its name', async () => {
+    open(
+      answer([
+        { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 3, oldest_at: WHEN },
+        { queue: 'STAFF_AWAITING_APPROVAL', count: 0 },
+      ]),
+    );
 
     await waitFor(() => {
       expect(badges()).toHaveLength(1);
     });
-    expect(badges()[0]).toHaveAttribute('data-quiet', 'true');
-    expect(screen.getByRole('link', { name: 'Staff 0 waiting for approval' })).toBeVisible();
+    expect(link(/^Staff/).textContent).toBe('Staff');
+    expect(screen.queryByRole('link', { name: /Staff 0 waiting/ })).toBeNull();
   });
 
   // Break caught: a 0 drawn while the first read is on its way.
@@ -417,7 +424,7 @@ describe('the menu with counts', () => {
     const view = open(
       answer([
         { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 5, oldest_at: WHEN },
-        { queue: 'STAFF_AWAITING_APPROVAL', count: 0 },
+        { queue: 'STAFF_AWAITING_APPROVAL', count: 2 },
       ]),
     );
     await waitFor(() => {

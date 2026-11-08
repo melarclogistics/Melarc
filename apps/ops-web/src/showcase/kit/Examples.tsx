@@ -17,8 +17,8 @@ import { Timeline } from '../../components/ui/timeline/Timeline';
 import { showToast } from '../../components/ui/toast/Toast';
 import { ViewTabs } from '../../components/ui/view-tabs/ViewTabs';
 import { requestColumns } from './DataGroup';
-import { RequestFacts, RequestMenu, REQUEST_STAGES } from './PanelsGroup';
-import { sampleRequests, type SampleRequest } from './sample-data';
+import { RequestMenu, RequestPanelContent, REQUEST_STAGES } from './PanelsGroup';
+import { SAMPLE_SENDER_PHONE, sampleRequests, type SampleRequest } from './sample-data';
 import { DescriptionList } from '../../components/ui/description-list/DescriptionList';
 
 type View = 'needs-decision' | 'confirmed' | 'cancelled' | 'all';
@@ -113,6 +113,13 @@ export function QueueWorkspaceExample() {
                         id: 'confirm',
                         label: (count) => `Confirm ${String(count)}`,
                         primary: true,
+                        // Only a request that is waiting can be confirmed: the others are left out, and the bar says how many.
+                        eligible: (chosenIds) =>
+                          chosenIds.filter(
+                            (id) => all.find((request) => request.id === id)?.state === 'PENDING',
+                          ),
+                        note: (left) =>
+                          `${String(left)} ${left === 1 ? 'is' : 'are'} already confirmed or cancelled`,
                         onRun: (ids) => {
                           showToast({
                             tone: 'success',
@@ -171,7 +178,7 @@ export function QueueWorkspaceExample() {
           }
           fullPage={{ to: '/__showcase/kit/example-record' }}
         >
-          {opened === undefined ? null : <RequestFacts request={opened} />}
+          {opened === undefined ? null : <RequestPanelContent request={opened} />}
         </SidePanel>
       </div>
     </div>
@@ -258,7 +265,7 @@ export function RecordPageExample() {
                       </span>
                     ),
                 },
-                { label: 'Phone', value: '+233******111' },
+                { label: 'Phone', value: SAMPLE_SENDER_PHONE },
               ]}
             />
           </Panel>

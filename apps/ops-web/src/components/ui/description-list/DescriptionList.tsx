@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
 import { OperationalCode } from '../code/OperationalCode';
-import { VisuallyHidden } from '../visually-hidden/VisuallyHidden';
 import './description-list.css';
 
 /** One fact of a record: what it is, and what the server states of it. */
@@ -68,11 +67,10 @@ export function DescriptionList({
           </div>
         ))}
       </dl>
-      {loading ? (
-        <p role="status" className="ui-description-list__status">
-          <VisuallyHidden>Loading the details</VisuallyHidden>
-        </p>
-      ) : null}
+      {/* In the page before it says anything (a region that arrives with its words is not announced by most screen readers). */}
+      <p role="status" className="ui-visually-hidden">
+        {loading ? 'Loading the details' : ''}
+      </p>
     </div>
   );
 }

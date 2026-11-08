@@ -9,7 +9,8 @@ import { RecordHeader } from '../../components/ui/record-header/RecordHeader';
 import { SidePanel } from '../../components/ui/side-panel/SidePanel';
 import { StatTile } from '../../components/ui/stat-tile/StatTile';
 import { StatusBadge } from '../../components/ui/status-badge/StatusBadge';
-import { sampleRequests, type SampleRequest } from './sample-data';
+import { showToast } from '../../components/ui/toast/Toast';
+import { SAMPLE_SENDER_PHONE, sampleRequests, type SampleRequest } from './sample-data';
 import { KitSection, Specimen } from './Section';
 
 export const REQUEST_STAGES = [
@@ -45,6 +46,34 @@ export function RequestMenu({ code }: { readonly code: string }) {
         },
       ]}
     />
+  );
+}
+
+/**
+ * What the panel holds for a sample request: its facts and, for a request that is waiting, **the record's primary action** (task R5.2, M16: the panel carries the act the row
+ * carries, so a person who opened the record to decide can decide there). A request that is already confirmed has none.
+ */
+export function RequestPanelContent({
+  request,
+  loading = false,
+}: {
+  readonly request: SampleRequest;
+  readonly loading?: boolean;
+}) {
+  return (
+    <div className="showcase-kit-stack">
+      <RequestFacts request={request} loading={loading} />
+      {loading || request.state !== 'PENDING' ? null : (
+        <Button
+          type="button"
+          onClick={() => {
+            showToast({ tone: 'success', message: `${request.code} confirmed.` });
+          }}
+        >
+          Confirm pickup
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -145,7 +174,7 @@ function SidePanelSpecimen() {
             {opened === undefined ? null : content === 'failed' ? (
               <p role="alert">This request could not be read. Try again.</p>
             ) : (
-              <RequestFacts request={opened} loading={content === 'loading'} />
+              <RequestPanelContent request={opened} loading={content === 'loading'} />
             )}
           </SidePanel>
         </div>
@@ -264,7 +293,7 @@ function DescriptionListSpecimens() {
               heading="Sender"
               items={[
                 { label: 'Name', value: request.sender_name },
-                { label: 'Phone', value: '+233******111' },
+                { label: 'Phone', value: SAMPLE_SENDER_PHONE },
                 { label: 'Landmark' },
               ]}
             />

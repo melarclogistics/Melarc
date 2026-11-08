@@ -32,7 +32,7 @@ const codeOf = (path: string): string =>
 const CLASS_SOURCES = [
   ...filesUnder(join(SRC, 'components/primitives'), /\.tsx?$/),
   join(SRC, 'showcase/PrimitivesShowcase.tsx'),
-  join(SRC, 'showcase/DataTableDemo.tsx'),
+  join(SRC, 'showcase/TablePrimitiveDemo.tsx'),
 ];
 const nameOf = (path: string): string => relative(SRC, path).replaceAll('\\', '/');
 

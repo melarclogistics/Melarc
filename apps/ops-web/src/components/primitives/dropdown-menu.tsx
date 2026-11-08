@@ -23,14 +23,20 @@ function DropdownMenuTrigger({
 /*
  * A menu floats: the raised surface, the default border, the one soft shadow, `motion.normal` in and out (design/DESIGN_SYSTEM.md section 9). Its
  * padding is the 4px that holds the frame's focus ring (2px, and 2px of offset) inside the list, so the ring on an item is never cut.
+ *
+ * `container` is not in the registry's source (design/DESIGN_SYSTEM.md section 29.6), as the popover's is not: the element the menu is drawn into, the body unless one is
+ * given. A modal `<dialog>` is in the top layer and the page behind it is inert, so a menu opened from inside one is drawn into the dialog, or it would open under it.
  */
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  container,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
+  container?: HTMLElement | null;
+}) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={container}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}

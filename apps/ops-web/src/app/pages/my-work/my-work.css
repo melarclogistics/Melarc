@@ -32,6 +32,7 @@
 }
 
 .my-work-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -42,11 +43,53 @@
   background: var(--color-surface-default);
 }
 
-/* The name of the queue is its link, in the label size and weight. */
-.my-work-card > a {
+/* A card that is a link is tinted under the pointer. */
+.my-work-card:has(.my-work-card__link):hover {
+  border-color: var(--color-border-default);
+  background: var(--color-surface-subtle);
+}
+
+/*
+ * The name of the queue is its link, in the label size and weight, with a chevron at the end. It is stretched over the whole card (its pseudo-element), so the card is one
+ * target: a press anywhere on it goes to the queue. It is not underlined, because it carries the chevron (a whole-card link may drop the underline that the kit's Link always
+ * has, COMPONENT_PATTERNS section 5); its colour is the primary text, since the card, not the words, is the link.
+ */
+.my-work-card__link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
   font-size: var(--text-body-md-size);
   font-weight: 600;
   line-height: var(--text-label-md-line-height);
+  text-decoration: none;
+}
+
+.my-work-card__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.my-work-card__link svg {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+/*
+ * The ring is the card's, not the words': the same ring as everywhere (base.css), drawn round the whole card that the link is, on the layer that covers it. The link's own
+ * ring is a transparent outline (never `none`: forced colours show a transparent outline, and no outline of the application is removed, scripts/design-tokens.test.ts).
+ */
+.my-work-card__link:focus-visible {
+  outline: var(--focus-width) solid transparent;
+}
+
+.my-work-card__link:focus-visible::after {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
 }
 
 .my-work-card__figure {

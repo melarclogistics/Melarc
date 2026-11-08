@@ -32,13 +32,32 @@ describe('readDayFirst', () => {
     ['01/01/2026', 2026, 1, 1],
     ['29/02/2028', 2028, 2, 29],
     ['31/12/9999', 9999, 12, 31],
-    ['05/01/0026', 26, 1, 5],
+    ['05/01/1900', 1900, 1, 5],
   ])('reads %s as the date it says', (text, year, month, day) => {
     const reading = readDayFirst(text);
 
     expect(reading?.ok).toBe(true);
     if (reading?.ok !== true) return;
     expect([reading.date.year, reading.date.month, reading.date.day]).toEqual([year, month, day]);
+  });
+
+  // Break caught (the Product Owner's decision of 7 November 2026, task R5.2, M15a): a year below 1900, written whole, accepted as a date (the year 26 of the first version, the year 0),
+  // or refused in other words than the year's: it is told with the words of a year in fewer than four digits, before anything else is said of the text.
+  it.each(['05/01/0026', '28/10/1899', '01/01/1000', '01/01/0000', '30/02/1899', '31/12/0001'])(
+    'refuses %j for its year, in the words of the year',
+    (text) => {
+      expect(readDayFirst(text)).toEqual({
+        ok: false,
+        problem: 'year',
+        message: DAY_FIRST_MESSAGES.year,
+      });
+    },
+  );
+
+  it('reads the earliest year, 1900, and the one after it', () => {
+    expect(readDayFirst('01/01/1900')?.ok).toBe(true);
+    expect(readDayFirst('31/12/1900')?.ok).toBe(true);
+    expect(readDayFirst('01/01/1901')?.ok).toBe(true);
   });
 
   // Break caught: a text that is not written DD/MM/YYYY accepted as a date, by any of the ways people write one.
@@ -88,7 +107,6 @@ describe('readDayFirst', () => {
     ['29/02/2026', '2026 has no 29 February'],
     ['29/02/2100', '2100 has no 29 February'],
     ['29/02/1900', '1900 has no 29 February'],
-    ['29/02/0100', '0100 has no 29 February'],
     ['30/02/2027', 'There is no 30 February'],
     ['30/02/2028', 'There is no 30 February'],
     ['31/04/2026', 'There is no 31 April'],
@@ -100,21 +118,16 @@ describe('readDayFirst', () => {
   });
 
   // Break caught: a day that is not on the calendar at all (the 0th, the 32nd, a month 13, the year 0) told as a day that its month does not have, or accepted for the shape alone.
-  it.each([
-    '00/10/2026',
-    '28/00/2026',
-    '28/13/2026',
-    '32/01/2026',
-    '45/10/2026',
-    '10/28/2026',
-    '01/01/0000',
-  ])('says %j is not a day on the calendar', (text) => {
-    expect(readDayFirst(text)).toEqual({
-      ok: false,
-      problem: 'calendar',
-      message: DAY_FIRST_MESSAGES.calendar,
-    });
-  });
+  it.each(['00/10/2026', '28/00/2026', '28/13/2026', '32/01/2026', '45/10/2026', '10/28/2026'])(
+    'says %j is not a day on the calendar',
+    (text) => {
+      expect(readDayFirst(text)).toEqual({
+        ok: false,
+        problem: 'calendar',
+        message: DAY_FIRST_MESSAGES.calendar,
+      });
+    },
+  );
 
   // Break caught: the 29th of February refused in a leap year (2000 is one: it is divisible by 400), or the last day of a month refused.
   it.each([
@@ -286,11 +299,13 @@ describe('stepDayFirst', () => {
   });
 
   // Break caught: a year that steps past the ends of the calendar, or keeps the 29th of February in a year that has none.
-  it('steps the year between 1 and 9999, keeping the day or the last day of February', () => {
+  it('steps the year between 1900 and 9999, keeping the day or the last day of February', () => {
     expect(step('2026-10-28', 'year', 1)).toBe('2027-10-28');
     expect(step('2026-10-28', 'year', -1)).toBe('2025-10-28');
     expect(step('2028-02-29', 'year', 1)).toBe('2029-02-28');
     expect(step('9999-12-31', 'year', 1)).toBe('9999-12-31');
-    expect(step('0001-01-01', 'year', -1)).toBe('0001-01-01');
+    expect(step('1900-01-01', 'year', -1)).toBe('1900-01-01');
+    expect(step('1900-02-28', 'year', -1)).toBe('1900-02-28');
+    expect(step('1901-06-15', 'year', -1)).toBe('1900-06-15');
   });
 });

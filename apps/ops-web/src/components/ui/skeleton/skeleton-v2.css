@@ -11,7 +11,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ui-skeleton-bar {
-    animation: ui-skeleton-bar-pulse 1.6s ease-in-out infinite;
+    animation: ui-skeleton-bar-pulse var(--motion-pulse) ease-in-out infinite;
   }
 }
 

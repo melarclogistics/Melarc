@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
+import { Dialog } from '../dialog/Dialog';
 import { TOOLTIP_DELAY_MS, TOOLTIP_OFFSET_PX, Tooltip } from './Tooltip';
 
 describe('Tooltip', () => {
@@ -58,5 +59,41 @@ describe('Tooltip', () => {
     expect(screen.getByRole('button', { name: 'Open' })).toHaveAccessibleDescription(
       'Open the record in full',
     );
+  });
+});
+
+describe('Tooltip: inside a modal dialog (task R5.2, M8)', () => {
+  // Break caught: the tooltip drawn into the page's body, under the dialog's top layer, where the page is inert: the words are never seen. (The top layer is proved in a
+  // browser, in `kit.spec.ts`; here, that the tooltip is inside the dialog's own element.)
+  it('is drawn into the dialog that holds its control', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open title="Request ACC-PR-7KQ2MZ">
+        <Tooltip content="Open the record">
+          <button type="button">Open</button>
+        </Tooltip>
+      </Dialog>,
+    );
+
+    // The dialog gives its first control focus when it opens, before the tooltip has a listener: the pointer is what shows the words here.
+    await user.hover(screen.getByRole('button', { name: 'Open' }));
+
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.closest('dialog')).toBe(document.querySelector('dialog'));
+  });
+
+  it('is drawn into the page when there is no dialog', async () => {
+    const user = userEvent.setup();
+    render(
+      <Tooltip content="Open the record">
+        <button type="button">Open</button>
+      </Tooltip>,
+    );
+
+    await user.tab();
+
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.closest('dialog')).toBeNull();
+    expect(document.body.contains(tooltip)).toBe(true);
   });
 });

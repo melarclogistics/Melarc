@@ -57,9 +57,13 @@
   padding-top: var(--space-6);
 }
 
-/* Content that runs to the edges (a table) takes the panel's border as its own frame, and is cut to its rounded corners (a square corner of the table would be drawn over them). */
+/*
+ * Content that runs to the edges (a table) takes the panel's border as its own frame, and is cut to its rounded corners (a square corner of the table would be drawn over them).
+ * It is cut with `overflow: clip` and not `hidden`: `hidden` makes the panel a scroll container, which never scrolls, and a bar that sticks to the top of the window inside it (the
+ * DataTable's bar of acts) would stick to the panel instead (task R5.2, M12).
+ */
 .ui-panel[data-padding='none'] {
-  overflow: hidden;
+  overflow: clip;
 }
 
 .ui-panel[data-padding='none'] .ui-panel__body {

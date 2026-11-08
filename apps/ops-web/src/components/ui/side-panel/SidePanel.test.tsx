@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
+import { MOTION_FALLBACK } from '../motion/motion-tokens';
 import { SidePanel, type SidePanelProps } from './SidePanel';
 
 afterEach(() => {
@@ -317,5 +318,111 @@ describe('SidePanel, as a sheet at 768px and below', () => {
     await screen.findByRole('dialog');
 
     expect(await wcagViolations(document.body)).toEqual([]);
+  });
+});
+
+// ---- SidePanel: focus is given back only from inside, and the reduced-motion test bound to the token (task R5.2, M7 and M14) ----
+function ClosedByThePage() {
+  const [open, setOpen] = useState(false);
+  return (
+    <MemoryRouter>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
+        Row one
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(false);
+        }}
+      >
+        Apply a filter
+      </button>
+      <SidePanel
+        open={open}
+        code="ACC-PR-7KQ2MZ"
+        onClose={() => {
+          setOpen(false);
+        }}
+      >
+        <p>The summary.</p>
+      </SidePanel>
+    </MemoryRouter>
+  );
+}
+
+describe('SidePanel: focus after a close that the page made (task R5.2, M7)', () => {
+  // Break caught: the panel closed by the page (a filter applied, a control used) while the person is on another control: focus pulled back to the row, away from where
+  // they are working. The row has it back only when it was in the panel (Escape, its close button) or nowhere.
+  it('leaves focus where the person is when the page closes it', async () => {
+    const user = userEvent.setup();
+    render(<ClosedByThePage />);
+    await user.click(screen.getByRole('button', { name: 'Row one' }));
+    await screen.findByRole('dialog');
+
+    await user.click(screen.getByRole('button', { name: 'Apply a filter' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: 'Apply a filter' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Row one' })).not.toHaveFocus();
+  });
+
+  it('still gives focus back to the row when the person was in the panel', async () => {
+    const user = userEvent.setup();
+    render(<ClosedByThePage />);
+    const row = screen.getByRole('button', { name: 'Row one' });
+    await user.click(row);
+    await screen.findByRole('dialog');
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(row).toHaveFocus();
+  });
+});
+
+describe('SidePanel: motion bound to the token (task R5.2, M14)', () => {
+  // Break caught: a panel that animates under reduced motion and a test that cannot tell: it waited a second (the default of `waitFor`) for a panel whose exit is 280ms,
+  // so a panel that DID animate passed it. Now it must be gone within half of `motion.slow`, and the control shows the same wait does not pass for a panel that animates.
+  it('is gone within half of motion.slow when the person asked for less motion', async () => {
+    setScreen(REDUCED_AND_WIDE);
+    const user = userEvent.setup();
+    render(<Page />);
+    await user.click(screen.getByRole('button', { name: 'Row one' }));
+    await screen.findByRole('dialog');
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      },
+      { timeout: MOTION_FALLBACK.duration.slow / 2, interval: 5 },
+    );
+  });
+
+  it('is still there at half of motion.slow when motion is welcome (the control of the test above)', async () => {
+    const user = userEvent.setup();
+    render(<Page />);
+    await user.click(screen.getByRole('button', { name: 'Row one' }));
+    await screen.findByRole('dialog');
+
+    await user.keyboard('{Escape}');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, MOTION_FALLBACK.duration.slow / 4);
+    });
+
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
   });
 });

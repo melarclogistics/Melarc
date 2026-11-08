@@ -69,6 +69,15 @@
   background: var(--color-brand-default);
 }
 
+/* A stage that is not one of the stages: every bar stays the border colour and every label the muted one (as a stage not reached does), and the words say so under them. */
+.ui-stage-tracker__unknown {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+}
+
 /*
  * Narrow: the labels would not fit side by side, so the stages stack with their bars. It is the room the tracker is in that is measured (the frame is the
  * container), not the window: a tracker in a 22rem column on a wide screen is as narrow as one on a phone.

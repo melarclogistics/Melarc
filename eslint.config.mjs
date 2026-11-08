@@ -71,10 +71,37 @@ const MOTION_PATTERNS = [
     message: MOTION_MESSAGE,
   },
 ];
+
+// TanStack Table is imported by the kit's `DataTable` (`components/ui/data-table/`) and nowhere else (task R5.2, M12; COMPONENT_PATTERNS section 37): a screen
+// hands the table its rows and columns, and the table keeps the row model, so that a second, hand-built grid cannot appear beside it.
+const TANSTACK_MESSAGE =
+  'TanStack Table is imported by the DataTable of components/ui/data-table only (COMPONENT_PATTERNS section 37): a screen gives the DataTable its columns and rows and never builds a grid of its own.';
+const TANSTACK_PATHS = ['@tanstack/react-table', '@tanstack/table-core'].map((name) => ({
+  name,
+  message: TANSTACK_MESSAGE,
+}));
+const TANSTACK_PATTERNS = [
+  {
+    group: ['@tanstack/react-table/*', '@tanstack/table-core/*'],
+    message: TANSTACK_MESSAGE,
+  },
+];
+
+// The page header of the redesign is `components/ui/page-header/PageHeader`. The older `components/PageHeader` stays only for the screens that are not rebuilt
+// yet: each of them names it on a line that carries its own `eslint-disable-next-line no-restricted-imports`, so that the list is the lines of that
+// directive, can only shrink (an unused directive is an error), and a new screen cannot import the old one without saying so (task R5.2, M12).
+const OLD_PAGE_HEADER_PATTERNS = [
+  {
+    group: ['**/components/PageHeader', '@/components/PageHeader'],
+    message:
+      'Use the PageHeader of components/ui/page-header (the redesign). The older components/PageHeader is kept only by the screens that are not rebuilt yet (each carries an eslint-disable-next-line for it); it is not imported by a new one.',
+  },
+];
+
 // The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
 // (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
 const DOOR_PACKAGES =
-  '^(motion|framer-motion|motion-dom|motion-utils|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker)(\\x2f|$)';
+  '^(motion|framer-motion|motion-dom|motion-utils|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker|@tanstack\\x2f(?:react-table|table-core))(\\x2f|$)';
 const DATE_HELPERS_MESSAGE =
   'The date helpers of the DatePicker read and write the date as the control types it. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
 const DATE_PATTERNS = [
@@ -224,12 +251,19 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
-          paths: [...OPS_RESTRICTED_PATHS, ...MOTION_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          paths: [
+            ...OPS_RESTRICTED_PATHS,
+            ...MOTION_PATHS,
+            ...PRIMITIVE_LIBRARY_PATHS,
+            ...TANSTACK_PATHS,
+          ],
           patterns: [
             ...DATE_PATTERNS,
             ...MOTION_PATTERNS,
             ...PRIMITIVE_LIBRARY_PATTERNS,
             ...PRIMITIVE_FILES_PATTERNS,
+            ...TANSTACK_PATTERNS,
+            ...OLD_PAGE_HEADER_PATTERNS,
           ],
         },
       ],
@@ -251,11 +285,11 @@ export default defineConfig(
         {
           // `no-restricted-imports` looks at import declarations only; a dynamic import is a door of its own.
           selector: `ImportExpression[source.value=/${DOOR_PACKAGES}/]`,
-          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} ${TANSTACK_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
         },
         {
           selector: `CallExpression[callee.name='require'][arguments.0.value=/${DOOR_PACKAGES}/]`,
-          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} ${TANSTACK_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
         },
       ],
       'no-eval': 'error',
@@ -291,8 +325,27 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
+          paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS, ...TANSTACK_PATHS],
+          patterns: [
+            ...PRIMITIVE_LIBRARY_PATTERNS,
+            ...TANSTACK_PATTERNS,
+            ...OLD_PAGE_HEADER_PATTERNS,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may import TanStack Table: the DataTable. It is a component of `components/ui`, so it states that block's rule again (a later block
+    // replaces the rule, it does not merge) with TanStack taken out.
+    files: ['apps/ops-web/src/components/ui/data-table/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
           paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
-          patterns: PRIMITIVE_LIBRARY_PATTERNS,
+          patterns: [...PRIMITIVE_LIBRARY_PATTERNS, ...OLD_PAGE_HEADER_PATTERNS],
         },
       ],
     },
@@ -305,8 +358,19 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
-          paths: [...OPS_RESTRICTED_PATHS, ...MOTION_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
-          patterns: [...DATE_PATTERNS, ...MOTION_PATTERNS, ...PRIMITIVE_LIBRARY_PATTERNS],
+          paths: [
+            ...OPS_RESTRICTED_PATHS,
+            ...MOTION_PATHS,
+            ...PRIMITIVE_LIBRARY_PATHS,
+            ...TANSTACK_PATHS,
+          ],
+          patterns: [
+            ...DATE_PATTERNS,
+            ...MOTION_PATTERNS,
+            ...PRIMITIVE_LIBRARY_PATTERNS,
+            ...TANSTACK_PATTERNS,
+            ...OLD_PAGE_HEADER_PATTERNS,
+          ],
         },
       ],
     },
@@ -320,7 +384,10 @@ export default defineConfig(
     rules: {
       'no-restricted-imports': [
         'error',
-        { paths: [...API_RESTRICTED_PATHS, ...MOTION_PATHS], patterns: MOTION_PATTERNS },
+        {
+          paths: [...API_RESTRICTED_PATHS, ...MOTION_PATHS, ...TANSTACK_PATHS],
+          patterns: [...MOTION_PATTERNS, ...TANSTACK_PATTERNS, ...OLD_PAGE_HEADER_PATTERNS],
+        },
       ],
     },
   },

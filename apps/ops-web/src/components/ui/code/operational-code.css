@@ -9,3 +9,18 @@
   letter-spacing: 0;
   white-space: nowrap;
 }
+
+/*
+ * Where a code is the content of a block that can be narrower than the code (a record's title, the value of a description list and a stop in a list, on a phone with the text
+ * at 200%: a 13-character code is 406px wide at the title's size), it breaks where it must, so that the page does not scroll sideways (WCAG 1.4.10; task R5.2, M9). It is an
+ * inline block, so that in a line of words it moves whole to the next line before it breaks, and it is never cut short: what is copied is the whole code. In a table cell, and
+ * everywhere else, it stays on one line.
+ */
+.ui-record-header__heading .ui-code,
+.ui-description-list__value .ui-code,
+.ui-reorder__content .ui-code {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

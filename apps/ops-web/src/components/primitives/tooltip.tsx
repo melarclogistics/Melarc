@@ -29,15 +29,20 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
  * WCAG 1.4.13 asks of content that appears on hover or focus: Escape dismisses it, the pointer can move onto it, and it stays until it is
  * left. It is the inverse of the page (the foreground as its ground), so it reads on a light page and on a dark one, and it fades in the
  * fast time of the tokens.
+ *
+ * `container` is not in the registry's source (design/DESIGN_SYSTEM.md section 29.6), as the popover's is not: the element the tooltip is drawn into, the body unless
+ * one is given. A modal `<dialog>` is in the top layer and the page behind it is inert, so a tooltip of a control inside one is drawn into the dialog, or it would
+ * open under it.
  */
 function TooltipContent({
   className,
   sideOffset = 4,
+  container,
   children,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & { container?: HTMLElement | null }) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={container}>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}

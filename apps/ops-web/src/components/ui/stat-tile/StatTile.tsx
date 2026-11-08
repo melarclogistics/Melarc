@@ -77,9 +77,6 @@ export function StatTile({
           <p className="ui-stat-tile__value" aria-hidden="true">
             <span className="ui-stat-tile__placeholder" />
           </p>
-          <p role="status" className="ui-stat-tile__status">
-            <VisuallyHidden>{`Loading: ${label}`}</VisuallyHidden>
-          </p>
         </>
       ) : missing ? (
         <p className="ui-stat-tile__value ui-stat-tile__value--missing">
@@ -99,6 +96,10 @@ export function StatTile({
         </p>
       )}
       {caption === undefined ? null : <p className="ui-stat-tile__caption">{caption}</p>}
+      {/* In the page before it says anything (a region that arrives with its words is not announced by most screen readers); out of the layout, so that it adds no gap. */}
+      <p role="status" className="ui-visually-hidden">
+        {loading ? `Loading: ${label}` : ''}
+      </p>
     </div>
   );
 }

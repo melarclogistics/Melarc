@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
@@ -165,5 +165,63 @@ describe('EmptyStateV2', () => {
     );
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+describe('EmptyStateV2: the region that announces (task R5.2, M10)', () => {
+  // Break caught: a region that arrives with its words (the whole block given a role when it is inserted): most screen readers announce a change of a region that was there,
+  // not one that appears. The region is in the page, empty, and is given the title.
+  it('has its region in the page before the title is said, and the same one says the next', async () => {
+    const view = render(
+      <EmptyStateV2
+        variant="filtered-empty"
+        title="Nothing fits these filters"
+        announce
+        action={<button type="button">Clear</button>}
+      >
+        No request has the state Cancelled.
+      </EmptyStateV2>,
+    );
+    const region = screen.getByRole('status');
+    await waitFor(() => {
+      expect(region).toHaveTextContent('Nothing fits these filters');
+    });
+
+    view.rerender(
+      <EmptyStateV2
+        variant="filtered-empty"
+        title="Nothing is cancelled"
+        announce
+        action={<button type="button">Clear</button>}
+      >
+        No request has the state Cancelled.
+      </EmptyStateV2>,
+    );
+
+    expect(screen.getByRole('status')).toBe(region);
+    await waitFor(() => {
+      expect(region).toHaveTextContent('Nothing is cancelled');
+    });
+  });
+
+  it('draws the visible block with no role, and no region without `announce`', () => {
+    const { container } = render(
+      <EmptyStateV2 variant="empty" title="Nothing is waiting" announce>
+        Every request has been dealt with.
+      </EmptyStateV2>,
+    );
+
+    expect(container.querySelector('.ui-empty-v2')).not.toHaveAttribute('role');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('has no region at all when nothing is announced', () => {
+    render(
+      <EmptyStateV2 variant="empty" title="Nothing is waiting">
+        Every request has been dealt with.
+      </EmptyStateV2>,
+    );
+
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

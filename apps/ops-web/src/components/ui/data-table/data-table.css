@@ -15,7 +15,7 @@
 }
 
 .ui-data-table[data-density='two-line'] {
-  --ui-data-table-row: 3.25rem;
+  --ui-data-table-row: var(--density-row-two-line);
 }
 
 .ui-data-table[data-density='touch'] {
@@ -27,9 +27,17 @@
   overflow: visible;
 }
 
+/*
+ * The box the rows are in is the container the columns' priorities are read from (`@container`, below): its own width, which a side panel opened beside the table shrinks, and
+ * not the window's. Focus that goes to a control is never left under the sticky header (`scroll-padding`), nor under the bar of acts above the rows (`scroll-margin`, which adds the
+ * bar's height as the table publishes it): a person tabbing backwards through a long table keeps the control in view (task R5.2, M6).
+ */
 .ui-data-table__scroller {
+  container-type: inline-size;
+  container-name: ui-data-table;
   overflow: auto;
   background: var(--color-surface-default);
+  scroll-padding-block-start: var(--density-row-compact);
 }
 
 /* The box that scrolls takes focus (so that the rows off to the side can be reached). Its ring is drawn inside it: a card that cuts what runs to its edges to its
@@ -41,7 +49,7 @@
 
 /* Separate borders, not collapsed ones: a collapsed border belongs to the table and does not stay with a sticky header. */
 .ui-data-table__table {
-  min-width: 36rem;
+  min-width: min(36rem, 100%);
   border-collapse: separate;
   border-spacing: 0;
   font-size: var(--text-body-md-size);
@@ -86,6 +94,19 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A column that matters less goes when the table's own box is narrow, the lesser first (`priority` of the column): at 1440px with a side panel open the table needs no sideways scroll. */
+@container ui-data-table (max-width: 64rem) {
+  .ui-data-table__table [data-priority='3'] {
+    display: none;
+  }
+}
+
+@container ui-data-table (max-width: 48rem) {
+  .ui-data-table__table [data-priority='2'] {
+    display: none;
+  }
+}
+
 /* ---- The row ---- */
 
 /* The row is the box the code button is stretched to. */
@@ -124,13 +145,30 @@
   inset: 0;
 }
 
-/* What is drawn over the row for the pointer is not the button: the box, the row action and any link or button of another cell keep their own reach above it. */
+/*
+ * What is drawn over the row for the pointer is not the button: the box, the row action and any link, button or **field** of another cell keep their own reach above it (a press on a
+ * select or an input in a cell is the field's, and never opens the record: task R5.2, M4). Only a real browser can show it: jsdom does no hit testing.
+ */
 .ui-data-table__select > *,
 .ui-data-table__actions > *,
 .ui-data-table__table td a,
-.ui-data-table__table td button {
+.ui-data-table__table td button,
+.ui-data-table__table td input,
+.ui-data-table__table td select,
+.ui-data-table__table td textarea,
+.ui-data-table__table td label,
+.ui-data-table__table td [role='switch'],
+.ui-data-table__table td [role='combobox'] {
   position: relative;
   z-index: 1;
+}
+
+/* A control reached by keyboard is scrolled to clear the sticky header and the bar of acts above the rows (the table publishes the bar's height). */
+.ui-data-table__table tbody :is(a, button, input, select, textarea, [tabindex]),
+.ui-data-table__cards :is(a, button, input, select, textarea, [tabindex]) {
+  scroll-margin-block-start: calc(
+    var(--density-row-compact) + var(--ui-data-table-bar, 0px) + var(--space-2)
+  );
 }
 
 /* The row the keyboard is on is tinted like the row the pointer is on (the ring of the control inside it is the global focus ring). */
@@ -144,9 +182,25 @@
   background: var(--color-surface-selected);
 }
 
-.ui-data-table__select {
+/* The cell of the box is the box's: it has no padding, so the label inside it is as big as the cell (44 by 36 at the desk, 44 by 56 on a tablet) and a press beside the box chooses the row. */
+.ui-data-table__table th.ui-data-table__select,
+.ui-data-table__table td.ui-data-table__select {
   width: 2.75rem;
-  padding-inline-end: 0;
+  padding: 0;
+}
+
+.ui-data-table__box {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 2.75rem;
+  min-height: calc(var(--ui-data-table-row) - 1px);
+  margin: 0;
+  cursor: pointer;
 }
 
 .ui-data-table__actions {
@@ -181,7 +235,7 @@
 
 .ui-data-table__title .ui-code {
   font-size: var(--text-body-sm-size);
-  line-height: 1.125rem;
+  line-height: var(--text-caption-line-height);
 }
 
 .ui-data-table__name {
@@ -289,16 +343,20 @@
 
 /* ---- The bar of acts on the chosen rows ---- */
 
-/* It stays at the foot of the box as the rows scroll and floats over the last rows, and it comes after the table, so that it never pushes a row. No shadow: a bar is not a menu. */
+/*
+ * It is above the rows and stays in view as the page scrolls, under the top bar of the shell (task R5.2, M12: it was below the rows, floating over the last of them). It
+ * pushes the rows down by its own height when the first row is chosen, once. No shadow: a bar is not a menu. A panel that holds the table and clips it must not be a scroll
+ * container (`overflow: clip`, panel.css), or the bar would stick to the panel, which never scrolls.
+ */
 .ui-data-table__bulk {
   position: sticky;
-  bottom: var(--space-3);
+  top: calc(var(--topbar-measured-height, var(--topbar-height, 0px)) + var(--space-2));
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-3);
-  margin: var(--space-3);
+  margin: var(--space-2) var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
@@ -312,6 +370,79 @@
   font-weight: var(--text-heading-sm-weight);
   line-height: var(--text-body-sm-line-height);
   font-variant-numeric: tabular-nums;
+}
+
+/* What the bar says of the chosen rows that no act can take: "1 is already confirmed". */
+.ui-data-table__bulk-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* ---- The card layout, where the table is narrow ---- */
+
+/* One card for a row: the box, and the facts with the one button that opens the record, stretched over the card, and the row's act. */
+.ui-data-table__cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-data-table__card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ui-data-table__card:last-child {
+  border-bottom: 0;
+}
+
+.ui-data-table__card:hover,
+.ui-data-table__card:focus-within {
+  background: var(--color-surface-subtle);
+}
+
+.ui-data-table__card[data-state='selected'],
+.ui-data-table__card[data-state='selected']:hover {
+  background: var(--color-surface-selected);
+}
+
+.ui-data-table__card[data-changed='true'] {
+  animation: ui-data-table-changed var(--motion-highlight) var(--motion-ease-exit) backwards;
+}
+
+.ui-data-table__card .ui-data-table__box {
+  flex: none;
+  width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.ui-data-table__card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The one button of the card holds its facts; no height of its own is kept beyond them. */
+.ui-data-table__card .ui-data-table__open {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 0;
+}
+
+/* A card has no hover to show the act: it is always there, above the stretched button like the other controls. */
+.ui-data-table__card .ui-data-table__action {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  opacity: 1;
 }
 
 .ui-data-table__footer {
@@ -337,5 +468,14 @@
 
   .ui-data-table__bulk {
     border: 1px solid CanvasText;
+  }
+
+  .ui-data-table__card {
+    border-bottom-color: CanvasText;
+  }
+
+  .ui-data-table__card[data-state='selected'] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
   }
 }

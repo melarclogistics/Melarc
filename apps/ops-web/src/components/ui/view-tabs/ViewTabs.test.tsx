@@ -100,8 +100,9 @@ describe('ViewTabs', () => {
     expect(screen.getByRole('tabpanel')).toHaveTextContent('The cancelled view');
   });
 
-  // Break caught: a list a keyboard cannot walk: Tab enters it at the current view and leaves it in one stop, the arrows move and choose, Home and End go to the ends.
-  it('is walked from the keyboard: one stop for Tab, the arrows and Home and End choose', async () => {
+  // Break caught: a list a keyboard cannot walk: Tab enters it at the current view and leaves it in one stop, the arrows and Home and End move focus, and Enter or Space
+  // chooses (task R5.2, M12: manual activation, so that an arrow passing over a tab does not ask the server for its view).
+  it('is walked from the keyboard: one stop for Tab, the arrows and Home and End move, Enter and Space choose', async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -115,13 +116,20 @@ describe('ViewTabs', () => {
     expect(tab(/^Needs decision/)).toHaveFocus();
     await user.keyboard('{ArrowRight}');
     expect(tab(/^Confirmed/)).toHaveFocus();
+    // Focus moved and nothing was chosen: the view is still the first, and the page was asked for nothing.
+    expect(tab(/^Confirmed/)).toHaveAttribute('aria-selected', 'false');
+    expect(tab(/^Needs decision/)).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{Enter}');
     expect(tab(/^Confirmed/)).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{End}');
     expect(tab('All')).toHaveFocus();
+    expect(tab('All')).toHaveAttribute('aria-selected', 'false');
     await user.keyboard('{ArrowRight}');
     expect(tab(/^Needs decision/)).toHaveFocus();
     await user.keyboard('{Home}');
     expect(tab(/^Needs decision/)).toHaveFocus();
+    await user.keyboard(' ');
+    expect(tab(/^Needs decision/)).toHaveAttribute('aria-selected', 'true');
     await user.tab();
     // The next stop is the panel's content or past it, never the next tab.
     expect(tab(/^Confirmed/)).not.toHaveFocus();
@@ -150,8 +158,8 @@ describe('ViewTabs', () => {
     expect(onValueChange).not.toHaveBeenCalledWith('two');
   });
 
-  // Break caught: two views with one id, or a current view that is not in the list, drawn as if nothing were wrong: a defect of the page.
-  it('throws for two views with one id, and for a current view that is not there', () => {
+  // Break caught: two views with one id drawn as if nothing were wrong: a defect of the page.
+  it('throws for two views with one id', () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(() =>
       render(
@@ -164,8 +172,27 @@ describe('ViewTabs', () => {
         />,
       ),
     ).toThrow(/have the id "a"/);
-    expect(() => render(<Host initial="nothing" />)).toThrow(/is not one of the views/);
     quiet.mockRestore();
+  });
+
+  // Break caught (task R5.2, M12): a current view that is not one of the views (an address that names a view that no longer exists) throwing, so that the whole page falls
+  // over for a stale link: the first view that can be chosen is drawn, and the page is asked for nothing.
+  it('draws the first view that can be chosen for a current view that is not there, and asks for nothing', () => {
+    const onValueChange = vi.fn();
+    render(
+      <Host
+        initial="nothing"
+        onValueChange={onValueChange}
+        tabs={[
+          { id: 'a', label: 'A', disabled: true },
+          { id: 'b', label: 'B' },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: 'B' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toBeInTheDocument();
+    expect(onValueChange).not.toHaveBeenCalled();
   });
 
   // Break caught: a tab with no name (a count alone), a panel not tied to its tab or any structure a rule of WCAG 2.2 can see without a layout engine.

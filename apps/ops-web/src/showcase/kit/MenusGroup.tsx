@@ -1,9 +1,50 @@
+import { useRef, useState } from 'react';
+
+import { ActionMenu, type ActionOutcome } from '../../components/ui/action-menu/ActionMenu';
 import { Button } from '../../components/ui/button/Button';
-import { ActionMenu } from '../../components/ui/action-menu/ActionMenu';
+import { Dialog, DialogActions } from '../../components/ui/dialog/Dialog';
+import { Field } from '../../components/ui/field/Field';
+import { Textarea } from '../../components/ui/textarea/Textarea';
 import { OperationalCode } from '../../components/ui/code/OperationalCode';
 import { showToast } from '../../components/ui/toast/Toast';
+import { useToastClearance } from '../../components/ui/toast/toast-clearance';
 import { RequestMenu } from './PanelsGroup';
 import { KitSection, Specimen } from './Section';
+
+/** An act that takes its time, and one that fails, in the page's own words: the question stays open and busy, and tells the failure. */
+function after(milliseconds: number, outcome: ActionOutcome): () => Promise<ActionOutcome> {
+  return () =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(outcome);
+      }, milliseconds);
+    });
+}
+
+/** A reason to give before an act: the act's own dialog, which the menu opens in place of its own question. */
+function RevokeDialog({ onClose }: { readonly onClose: () => void }) {
+  return (
+    <Dialog
+      open
+      role="alertdialog"
+      title="Revoke access for Demo Person?"
+      description="Every session of this person ends. This cannot be undone."
+      onRequestClose={onClose}
+    >
+      <Field label="Reason" required>
+        <Textarea />
+      </Field>
+      <DialogActions>
+        <Button type="button" variant="secondary" data-initial-focus onClick={onClose}>
+          Go back
+        </Button>
+        <Button type="button" variant="danger" onClick={onClose}>
+          Revoke access
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
 function ActionMenuSpecimens() {
   return (
@@ -23,6 +64,52 @@ function ActionMenuSpecimens() {
         </Specimen>
         <Specimen label="An act that cannot be taken, and a destructive one (open the menu)">
           <RequestMenu code="ACC-PR-7KQ2MZ" />
+        </Specimen>
+        <Specimen label="A destructive act that takes its time, and one that fails (open the menu)">
+          <ActionMenu
+            label="More actions for ACC-PR-5MN3XB"
+            items={[
+              {
+                id: 'cancel-slow',
+                label: 'Cancel request',
+                destructive: true,
+                confirm: {
+                  title: 'Cancel request ACC-PR-5MN3XB?',
+                  description: 'The vendor is told. A cancellation charge may apply.',
+                  confirmLabel: 'Cancel the request',
+                },
+                onSelect: after(1500, { ok: true }),
+              },
+              {
+                id: 'cancel-fail',
+                label: 'Remove from the run',
+                destructive: true,
+                confirm: {
+                  title: 'Remove ACC-PR-5MN3XB from the run?',
+                  description: 'The stop is taken off the rider’s list.',
+                  confirmLabel: 'Remove the stop',
+                },
+                onSelect: after(600, {
+                  ok: false,
+                  message: 'The rider has already started this stop. Nothing was removed.',
+                }),
+              },
+            ]}
+          />
+        </Specimen>
+        <Specimen label="An act with its own dialog, a reason to give (open the menu)">
+          <ActionMenu
+            label="More actions for Demo Person"
+            items={[
+              { id: 'note', label: 'Add a note', onSelect: () => undefined },
+              {
+                id: 'revoke',
+                label: 'Revoke access',
+                destructive: true,
+                dialog: ({ onClose }) => <RevokeDialog onClose={onClose} />,
+              },
+            ]}
+          />
         </Specimen>
         <Specimen label="Every act unavailable, each with its reason">
           <ActionMenu
@@ -45,6 +132,51 @@ function ActionMenuSpecimens() {
         </Specimen>
       </div>
     </KitSection>
+  );
+}
+
+/** A bar that sticks to the bottom of the window (a page's submit bar): it tells the toasts where it is, so that under 600px a toast stands above it and never covers it. */
+function StickyBar() {
+  const bar = useRef<HTMLDivElement>(null);
+  useToastClearance(bar);
+  return (
+    <div ref={bar} className="showcase-kit-sticky-bar" data-testid="sticky-bar">
+      <Button type="button">Book the pickup</Button>
+    </div>
+  );
+}
+
+function StickyBarSpecimen() {
+  const [shown, setShown] = useState(false);
+  return (
+    <Specimen label="A bar at the bottom of the window (under 600px a toast stands above it)">
+      <div className="showcase-kit-row">
+        <Button
+          type="button"
+          variant="secondary"
+          aria-pressed={shown}
+          onClick={() => {
+            setShown((now) => !now);
+          }}
+        >
+          {shown ? 'Take the bar away' : 'Show a submit bar'}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            showToast({
+              tone: 'info',
+              message: 'The booking is saved as a draft.',
+              id: 'draft-saved',
+            });
+          }}
+        >
+          Raise a toast
+        </Button>
+      </div>
+      {shown ? <StickyBar /> : null}
+    </Specimen>
   );
 }
 
@@ -144,6 +276,7 @@ function ToastSpecimens() {
           </Button>
         </div>
       </Specimen>
+      <StickyBarSpecimen />
     </KitSection>
   );
 }

@@ -40,7 +40,7 @@
   margin: 0;
   font-size: var(--text-heading-lg-size);
   font-weight: 700;
-  line-height: 1.875rem;
+  line-height: var(--text-page-title-line-height);
   letter-spacing: -0.02em;
 }
 

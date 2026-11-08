@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { PICKUP_STATE_MAP, serviceDateText } from '../../app/pages/pickup/pickup-presentation';
 import { Button } from '../../components/ui/button/Button';
@@ -9,7 +9,10 @@ import {
   type DataSort,
   type DataTableProps,
 } from '../../components/ui/data-table/DataTable';
+import { OperationalCode } from '../../components/ui/code/OperationalCode';
 import { EmptyState } from '../../components/ui/empty-state/EmptyState';
+import { Input } from '../../components/ui/input/Input';
+import { Select } from '../../components/ui/select/Select';
 import { StatusBadge } from '../../components/ui/status-badge/StatusBadge';
 import { KitSection, Specimen } from './Section';
 import { sampleRequests, type SampleRequest } from './sample-data';
@@ -43,9 +46,26 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
       id: 'packages',
       header: 'Packages',
       align: 'end',
+      // The column that goes first when the table's own box is narrow: the date and the state are what a queue is read by.
+      priority: 3,
       cell: (request) => String(request.declared_package_count),
     },
   ];
+}
+
+/** A sample request as a card, for a table that is narrow: its facts as words, with no control in it (the table draws the card's one button, its box and its act). */
+export function requestCard(request: SampleRequest): ReactNode {
+  return (
+    <span className="showcase-kit-card">
+      <OperationalCode>{request.code}</OperationalCode>
+      <span>{request.sender_name ?? 'Not recorded'}</span>
+      <span className="showcase-kit-card__facts">
+        <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
+        <span>{serviceDateText(request.scheduled_service_date)}</span>
+        <span>{`${String(request.declared_package_count)} packages`}</span>
+      </span>
+    </span>
+  );
 }
 
 const openLabel = (request: SampleRequest): string =>
@@ -135,6 +155,13 @@ function Workspace() {
             id: 'confirm',
             label: (count) => `Confirm ${String(count)}`,
             primary: true,
+            // Only a request that is waiting can be confirmed: the rest of the chosen rows are left out, and the bar says so.
+            eligible: (chosenIds) =>
+              chosenIds.filter(
+                (id) => shown.find((request) => request.id === id)?.state === 'PENDING',
+              ),
+            note: (left) =>
+              `${String(left)} ${left === 1 ? 'is' : 'are'} already confirmed or cancelled`,
             onRun: (ids) => {
               setConfirmed((current) => [...new Set([...current, ...ids])]);
               setChanged(ids);
@@ -151,6 +178,100 @@ function Workspace() {
           setConfirmed((current) => [...current, request.id]);
           setChanged([request.id]);
         },
+      }}
+    />
+  );
+}
+
+/** A field in a cell, beside the button that opens the row: a press on the field is the field's, and never opens the record. */
+function FieldsInCells() {
+  return (
+    <Plain
+      label="Pickup requests, with fields"
+      rows={sampleRequests(4)}
+      columns={[
+        ...requestColumns(false).slice(0, 2),
+        {
+          id: 'hub',
+          header: 'Hub',
+          cell: (request) => (
+            <Select aria-label={`Hub for ${request.code}`} defaultValue="accra">
+              <option value="accra">Accra Central</option>
+              <option value="tema">Tema</option>
+            </Select>
+          ),
+        },
+        {
+          id: 'note',
+          header: 'Note',
+          cell: (request) => <Input aria-label={`Note for ${request.code}`} defaultValue="" />,
+        },
+      ]}
+    />
+  );
+}
+
+/** The rows arrive after the box was first drawn: the place the person left is put back when they are there, once, and not while the table is still loading rows. */
+function LoadingThenReady() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setReady(true);
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <Plain
+      label="Pickup requests, returning to a place"
+      rows={ready ? sampleRequests(20) : []}
+      status={ready ? 'ready' : 'loading'}
+      loadingLabel="Loading pickup requests"
+      maxHeight="16rem"
+      initialScroll={{ left: 0, top: 200 }}
+    />
+  );
+}
+
+/** The lesser columns go as the table's own box narrows, the date and the state staying. */
+function Prioritised({ label }: { readonly label: string }) {
+  return (
+    <Plain
+      label={label}
+      rows={sampleRequests(4)}
+      columns={[
+        ...requestColumns(false).slice(0, 2),
+        {
+          id: 'date',
+          header: 'Service date',
+          priority: 2,
+          cell: (request) => serviceDateText(request.scheduled_service_date),
+        },
+        ...requestColumns(false).slice(3),
+      ]}
+    />
+  );
+}
+
+/** A table narrow enough to be cards: one button for a card, its box and its act. */
+function AsCards() {
+  const chosen = useChosen();
+  return (
+    <Plain
+      label="Pickup requests, as cards"
+      rows={sampleRequests(5)}
+      card={requestCard}
+      selection={{
+        selectedIds: chosen.ids,
+        onChange: chosen.set,
+        selectLabel: (request) => `Select ${request.code}`,
+      }}
+      rowAction={{
+        label: 'Confirm',
+        ariaLabel: (request) => `Confirm ${request.code}`,
+        isAvailable: (request) => request.state === 'PENDING',
+        onRun: () => undefined,
       }}
     />
   );
@@ -227,6 +348,30 @@ export function DataGroup() {
           width="34rem"
         >
           <Plain rows={sampleRequests(20)} maxHeight="16rem" label="Pickup requests, in a box" />
+        </Specimen>
+        <Specimen label="A field in a cell, beside the button that opens the row (sample data)">
+          <FieldsInCells />
+        </Specimen>
+        <Specimen label="Loading, then the rows: the place the person left is put back once the rows are there (sample data)">
+          <LoadingThenReady />
+        </Specimen>
+        <Specimen
+          label="Column priority at 60rem: the packages go, the date and the state stay (sample data)"
+          width="60rem"
+        >
+          <Prioritised label="Pickup requests, in 60rem" />
+        </Specimen>
+        <Specimen
+          label="Column priority at 40rem: the service date goes too, the state stays (sample data)"
+          width="40rem"
+        >
+          <Prioritised label="Pickup requests, in 40rem" />
+        </Specimen>
+        <Specimen
+          label="Cards, where the box is narrow (22rem): one button for each, its box and its act (sample data)"
+          width="22rem"
+        >
+          <AsCards />
         </Specimen>
         <Specimen label="Loading: rows of its own shape, never a number">
           <Plain

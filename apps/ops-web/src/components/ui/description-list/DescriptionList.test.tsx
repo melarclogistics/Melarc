@@ -138,3 +138,19 @@ describe('DescriptionList', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('DescriptionList: the region that says it is loading (task R5.2, M10)', () => {
+  // Break caught: a region that arrives with its words: most screen readers announce a change of a region that was there, not one that appears.
+  it('has its region in the page before it loads, and the same one says it is loading', () => {
+    const items = [{ label: 'Sender', value: 'Sample Fabrics Ltd' }];
+    const view = render(<DescriptionList items={items} />);
+    const region = screen.getByRole('status');
+    expect(region.textContent).toBe('');
+
+    view.rerender(<DescriptionList items={items} loading />);
+
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toHaveTextContent('Loading the details');
+    expect(region).toHaveClass('ui-visually-hidden');
+  });
+});

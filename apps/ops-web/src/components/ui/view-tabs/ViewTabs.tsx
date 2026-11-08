@@ -34,7 +34,9 @@ const NUMBER = new Intl.NumberFormat('en-GB');
 /**
  * The views of a queue as tabs with counts (PRODUCT_DESIGN_DIRECTION section 6.1; COMPONENT_PATTERNS, *ViewTabs*): the Tabs primitive (Radix UI) with an
  * Ink pill for the current view's count and an underline of 2px that grows in over `motion.normal` (a transition of the stylesheet on the tokens, off under
- * reduced motion). The keys are the primitive's: Tab enters the list at the current view, the arrows move and choose, Home and End go to the ends.
+ * reduced motion). The keys are the primitive's, with **manual activation** (task R5.2, M12): Tab enters the list at the current view, the arrows and Home and End move
+ * focus only, and Enter or Space chooses (a choice asks the server for a view, so an arrow that merely passes over a tab must not). A current view that is not one of the views (an
+ * address that names a view that no longer exists) draws the first view that can be chosen, and asks for nothing: the page decides whether to correct its address.
  * The counts are the server's, drawn as they are given.
  */
 export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTabsProps) {
@@ -44,11 +46,16 @@ export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTa
   if (duplicate !== undefined) {
     throw new Error(`Two views of "${label}" have the id "${duplicate.id}".`);
   }
-  if (!tabs.some((tab) => tab.id === value)) {
-    throw new Error(`The current view "${value}" is not one of the views of "${label}".`);
-  }
+  const current = tabs.some((tab) => tab.id === value)
+    ? value
+    : (tabs.find((tab) => tab.disabled !== true)?.id ?? tabs[0]?.id ?? value);
   return (
-    <Tabs value={value} onValueChange={onValueChange} className="ui-view-tabs">
+    <Tabs
+      value={current}
+      onValueChange={onValueChange}
+      activationMode="manual"
+      className="ui-view-tabs"
+    >
       <div className="ui-view-tabs__scroll">
         <TabsList aria-label={label} className="ui-view-tabs__list">
           {tabs.map((tab) => (
@@ -62,7 +69,7 @@ export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTa
               {tab.count === undefined ? null : (
                 <span
                   className="ui-view-tabs__count"
-                  data-current={tab.id === value ? 'true' : undefined}
+                  data-current={tab.id === current ? 'true' : undefined}
                   data-quiet={tab.count === 0 ? 'true' : undefined}
                 >
                   {NUMBER.format(tab.count)}
@@ -72,7 +79,7 @@ export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTa
           ))}
         </TabsList>
       </div>
-      <TabsContent value={value} className="ui-view-tabs__panel">
+      <TabsContent value={current} className="ui-view-tabs__panel">
         {children}
       </TabsContent>
     </Tabs>

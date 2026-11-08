@@ -103,6 +103,9 @@ describe('DatePicker: what a person sees', () => {
     render(<Host initial="2026-10-08" />);
 
     expect(parts()).toEqual(['08', '10', '2026']);
+    // The field's accessible value is its text (the three spinbuttons of the earlier control each had an `aria-valuenow`; a text field has none, task R5.2, M14b).
+    expect(field()).toHaveValue('08/10/2026');
+    expect(screen.getByRole('textbox', { name: /Service date/ })).toHaveDisplayValue('08/10/2026');
     expect(navigator.language).toBe('en-US');
   });
 
@@ -251,20 +254,22 @@ describe('DatePicker: typing a date', () => {
     const onChange = vi.fn();
     render(<Host initial="2026-10-28" onChange={onChange} />);
 
-    // The earlier field gave the page the day 2 as the first digit came off 28, and the calendar then opened on the 2nd. This field gives the page a date only when it is whole,
-    // so the person sets the day to 02 first (the page is given the 2nd), and then takes it off with the same two Backspaces.
-    await selectPart(user, 'day');
-    await user.keyboard('02');
+    // As in the earlier field's test, the person clicks into the day and takes it off with two Backspaces. This field gives the page a date only when it is whole, so, unlike the earlier
+    // field (which gave the page the day 2 as the first digit came off, so that the calendar opened on the 2nd), the page keeps 28 October while the day is out, and the calendar opens on
+    // that date: the one the person is correcting. ArrowRight then Enter gives the 29th (task R5.2, M14a: the input path restored, the two last values changed with it).
+    await clickPart(user, 'day');
     await user.keyboard('{Backspace}{Backspace}');
+    expect(parts()).toEqual(['dd', '10', '2026']);
     await user.click(calendarButton());
+    expect(day(/Wednesday, 28 October 2026 selected/)).toHaveFocus();
     await user.keyboard('{ArrowRight}');
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalledWith(null);
 
     await user.keyboard('{Enter}');
-    expect(onChange).toHaveBeenLastCalledWith('2026-10-03');
-    expect(parts()).toEqual(['03', '10', '2026']);
+    expect(onChange).toHaveBeenLastCalledWith('2026-10-29');
+    expect(parts()).toEqual(['29', '10', '2026']);
   });
 
   // Break caught: a date object made anew at every render, which the library takes for a new value and so draws again from, wiping a date
@@ -1097,5 +1102,164 @@ describe('DatePicker: what the one field adds', () => {
 
     expect(screen.getByText(DAY_FIRST_MESSAGES.shape)).toBeVisible();
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+// Task R5.2, H1 (the Product Owner's run of 7 November 2026): Enter in the field must not send the page's old date.
+describe('DatePicker: Enter in the field', () => {
+  /** A date field in a form, as the pickup request form and the manifest builder have it: the form sends what the page holds. */
+  function InForm({
+    initial = null,
+    onSubmit,
+    onChange,
+  }: {
+    initial?: string | null;
+    onSubmit: () => void;
+    onChange?: (value: string | null) => void;
+  }) {
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <Host initial={initial} onChange={onChange} />
+        <button type="submit">Send</button>
+      </form>
+    );
+  }
+
+  // Break caught: Enter sending the form with the date the page still holds while the field has a part taken out: the person took the date away and the
+  // old one is sent as if it were theirs. Enter settles the field as leaving it does (the date goes), and the second Enter sends.
+  it('does not send a form while a part of the date is taken out, and settles the field', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onChange = vi.fn();
+    render(<InForm initial="2026-10-28" onSubmit={onSubmit} onChange={onChange} />);
+
+    await clickPart(user, 'day');
+    await user.keyboard('{Backspace}{Backspace}');
+    expect(parts()).toEqual(['dd', '10', '2026']);
+    expect(onChange).not.toHaveBeenCalledWith(null);
+
+    await user.keyboard('{Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith(null);
+    expect(parts()).toEqual(['dd', 'mm', 'yyyy']);
+
+    await user.keyboard('{Enter}');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: Enter sending the form with a refused text in the field and no words about it.
+  it('does not send a form while the text is refused, and says why', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<InForm onSubmit={onSubmit} />);
+
+    await user.click(field());
+    await user.keyboard('281026{Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(DAY_FIRST_MESSAGES.year)).toBeVisible();
+    expect(field()).toHaveValue('28/10/26');
+  });
+
+  it('does not send a form while the date the page holds is the old one and the text is a day its month does not have', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onChange = vi.fn();
+    render(<InForm initial="2026-10-28" onSubmit={onSubmit} onChange={onChange} />);
+
+    await selectPart(user, 'day');
+    await user.keyboard('30');
+    await selectPart(user, 'month');
+    await user.keyboard('02');
+    expect(field()).toHaveValue('30/02/2026');
+    await user.keyboard('{Enter}');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/There is no 30 February/)).toBeVisible();
+    expect(onChange).toHaveBeenLastCalledWith(null);
+  });
+
+  // The control for the tests above: nothing else is stopped. A whole date and an empty field send at once, as any field in a form does.
+  it('sends a form at once with a whole date, and with an empty field', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<InForm onSubmit={onSubmit} />);
+
+    await user.click(field());
+    await user.keyboard('{Enter}');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    await user.keyboard('28102026{Enter}');
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(parts()).toEqual(['28', '10', '2026']);
+  });
+
+  it('leaves Enter to a field that cannot be changed', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <Host initial="2026-10-08" isReadOnly />
+        <button type="submit">Send</button>
+      </form>,
+    );
+
+    await user.click(field());
+    await user.keyboard('{Enter}');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Task R5.2, M15a (the Product Owner's decision of 7 November 2026): a year below 1900 is refused with the words of a year in fewer than four digits.
+describe('DatePicker: the earliest year', () => {
+  // Break caught: a year below 1900 typed whole and given to the page as a date (the year 26 of an earlier version, or any year before the calendar the company works in).
+  it('refuses a year below 1900 in the words of the year, and gives the page nothing', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Host onChange={onChange} />);
+
+    await user.click(field());
+    await user.keyboard('28101899');
+
+    expect(field()).toHaveValue('28/10/1899');
+    expect(screen.getByText(DAY_FIRST_MESSAGES.year)).toBeVisible();
+    expect(field()).toBeInvalid();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('gives 1900, the earliest year', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Host onChange={onChange} />);
+
+    await user.click(field());
+    await user.keyboard('05011900');
+
+    expect(onChange).toHaveBeenLastCalledWith('1900-01-05');
+    expect(screen.queryByText(DAY_FIRST_MESSAGES.year)).toBeNull();
+  });
+
+  // Break caught: the year arrow giving a date that typing refuses (it stopped at the year 1 before).
+  it('does not step the year below 1900 with the arrow keys', async () => {
+    const user = userEvent.setup();
+    render(<Host initial="1900-06-15" />);
+
+    await clickPart(user, 'year');
+    await user.keyboard('{ArrowDown}');
+
+    expect(field()).toHaveValue('15/06/1900');
+    await user.keyboard('{ArrowUp}');
+    expect(field()).toHaveValue('15/06/1901');
   });
 });

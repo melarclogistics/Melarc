@@ -748,3 +748,45 @@ describe('ReasonConfirmationDialog: accessibility', () => {
     );
   });
 });
+
+describe('ReasonConfirmationDialog: inside a form (task R5.2, M3)', () => {
+  // Break caught: the dialog's submit bubbling to a form that holds it: confirming the question sends the form too.
+  it('never submits a form that holds it', async () => {
+    api.on(`GET ${LIST}`, answerWithCatalogue);
+    const submitted = vi.fn();
+    const send = vi.fn<(command: unknown, key: string) => Promise<string>>(() =>
+      Promise.resolve('done'),
+    );
+    const view = renderWithProviders(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted();
+        }}
+      >
+        <ReasonConfirmationDialog<string>
+          open
+          title="Reset this demo person’s second factor?"
+          consequence={<p>Every session of this demo person ends. This cannot be undone.</p>}
+          confirmLabel="Reset the second factor"
+          operation="resetStaffMfa"
+          branch="FACTOR_ACTIVE"
+          version={'"v1"'}
+          send={send}
+          onDone={vi.fn()}
+          onCancel={vi.fn()}
+          onReload={vi.fn()}
+        />
+      </form>,
+      { signedIn: true },
+    );
+
+    await view.user.selectOptions(await reasonField(), 'DEMO_ONE');
+    await view.user.click(confirm());
+
+    await waitFor(() => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+    expect(submitted).not.toHaveBeenCalled();
+  });
+});

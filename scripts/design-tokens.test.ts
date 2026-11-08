@@ -154,6 +154,13 @@ describe('the token file against DESIGN_SYSTEM', () => {
       '--sidebar-heading-space-before',
       '--sidebar-heading-space-after',
       '--hub-mark-size',
+      // The sizes the kit of redesign step R5 sets outside the scales (task R5.2, 8 November 2026): component tokens, each named for the component that uses it.
+      '--text-page-title-line-height',
+      '--text-record-title-size',
+      '--text-stat-figure-size',
+      '--text-stat-figure-line-height',
+      '--density-row-two-line',
+      '--motion-pulse',
       // The three sizes of an icon (section 24), in rem so that enlarged text enlarges them.
       '--icon-size-sm',
       '--icon-size-md',

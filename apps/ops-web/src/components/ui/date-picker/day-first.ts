@@ -9,7 +9,7 @@ import { CalendarDate, daysInMonth, isRealDate, monthName } from './date-value';
  */
 
 /**
- * Why a text is not a date: it is not written as DD/MM/YYYY (`shape`), the year has fewer than four digits (`year`), the day is one that its month does not have
+ * Why a text is not a date: it is not written as DD/MM/YYYY (`shape`), the year has fewer than four digits or is below 1900 (`year`), the day is one that its month does not have
  * (`no-such-day`: the 29th to the 31st), or the day, month or year is not on the calendar at all (`calendar`: a month 13, a day 0 or 45, the year 0).
  */
 export type DayFirstProblem = 'shape' | 'year' | 'no-such-day' | 'calendar';
@@ -42,6 +42,13 @@ export function noSuchDayMessage(day: number, month: number, year: number): stri
   return `There is no ${String(day)} ${monthName(month)}`;
 }
 
+/**
+ * The earliest year the field gives (the Product Owner's decision of 7 November 2026): a year below it, typed whole, is refused with the words of a year in fewer than
+ * four digits (`Enter the year in full, for example 2026`), and the year arrow keys stop at it, so that the keys cannot give what typing refuses. A date the *page* holds from
+ * before (`0026-01-05`) is still drawn as it is (`dateFromText` is not changed): the field refuses only what a person writes.
+ */
+export const EARLIEST_YEAR = 1900;
+
 /** The shape of a whole date: the only one read. */
 export const DAY_FIRST_SHAPE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
 
@@ -71,6 +78,7 @@ export function readDayFirst(text: string): DayFirstReading | undefined {
       : { ok: false, problem: 'shape', message: DAY_FIRST_MESSAGES.shape };
   }
   const [day, month, year] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (year < EARLIEST_YEAR) return { ok: false, problem: 'year', message: DAY_FIRST_MESSAGES.year };
   if (isRealDate(year, month, day)) return { ok: true, date: new CalendarDate(year, month, day) };
   if (year >= 1 && month >= 1 && month <= 12 && day >= 29 && day <= 31) {
     return { ok: false, problem: 'no-such-day', message: noSuchDayMessage(day, month, year) };
@@ -90,7 +98,7 @@ export function dayFirstPartAt(position: number): DayFirstPart {
 
 /**
  * The date one step up (`1`) or down (`-1`) in one part, as the arrow keys step it: the day goes round within its month (the 31st up is the 1st), the month round the year
- * (December up is January, with the day kept, or moved to the last day of a shorter month) and the year stays between 1 and 9999.
+ * (December up is January, with the day kept, or moved to the last day of a shorter month) and the year stays between 1900 and 9999.
  */
 export function stepDayFirst(
   date: CalendarDate,
@@ -109,7 +117,7 @@ export function stepDayFirst(
     const month = ((date.month - 1 + direction + 12) % 12) + 1;
     return new CalendarDate(date.year, month, Math.min(date.day, daysInMonth(date.year, month)));
   }
-  const year = Math.min(9999, Math.max(1, date.year + direction));
+  const year = Math.min(9999, Math.max(EARLIEST_YEAR, date.year + direction));
   return new CalendarDate(year, date.month, Math.min(date.day, daysInMonth(year, date.month)));
 }
 

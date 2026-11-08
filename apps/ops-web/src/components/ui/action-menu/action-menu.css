@@ -4,7 +4,8 @@
  * taken stays focusable, is dimmed (and its reason, said in words, is not only a colour), and shows its reason on hover, on focus and when it is chosen.
  */
 .ui-action-menu__content {
-  min-width: 14rem;
+  /* Never wider than the screen, whatever the size of the text: min-width wins over max-width, so it is bounded here (task R5.2, M9: 14rem was 448px at 200% on a 320px screen). */
+  min-width: min(14rem, calc(100vw - 1rem));
   max-width: min(22rem, calc(100vw - 1rem));
 }
 

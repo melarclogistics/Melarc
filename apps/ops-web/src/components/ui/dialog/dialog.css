@@ -26,6 +26,15 @@
   line-height: var(--text-body-md-line-height);
 }
 
+/*
+ * Inside a modal dialog the overlays the kit draws (the date field's calendar, an action menu, a popover such as the filter bar's, a tooltip) are drawn into the dialog: the page
+ * behind it is inert and its top layer is above the body, so one drawn there would be unseen and out of reach (task R5.2, M8; before it, only the calendar was). The dialog scrolls,
+ * so one longer than the dialog would be cut off at its edge: while one is open, the dialog lets it overhang.
+ */
+.ui-dialog:has(.ui-date-picker__popover, .ui-popover, .ui-action-menu__content, .ui-tooltip) {
+  overflow: visible;
+}
+
 .ui-dialog::backdrop {
   background: var(--color-surface-inverse);
   opacity: 0.55;

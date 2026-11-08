@@ -14,21 +14,30 @@ export interface StageTrackerProps {
   readonly label: string;
   /** The stages in the order the record goes through them. */
   readonly stages: readonly Stage[];
-  /** The stage the record is at now: the server's fact, passed as given. The ones before it are done and the ones after it are not reached. */
+  /**
+   * The stage the record is at now: the server's fact, passed as given. The ones before it are done and the ones after it are not reached. A stage that is **not one of
+   * `stages`** (a state the page does not know yet) is drawn as unknown, never as done or not reached: see `unknownLabel` (task R5.2, M12).
+   */
   readonly currentId: string;
+  /** What is said when the current stage is not one of the stages: the words, never the server's raw value. Default "Unknown stage". */
+  readonly unknownLabel?: string;
 }
 
 /**
  * Where a record stands on its way (PRODUCT_DESIGN_DIRECTION section 6.2; COMPONENT_PATTERNS, *RecordHeader and StageTracker*): segmented bars with labels. The
  * stages before the current one are drawn in the secondary text colour, the current one in the brand crimson with a small square beside its label, and the
  * ones after it in the border colour. The state is also told in words for whoever hears the page, so colour is never alone. It decides nothing about
- * which stage a record is at.
+ * which stage a record is at, and degrades as `StatusBadge` does on a state it does not know: every bar neutral, no stage current, none called done or not reached, and
+ * "Unknown stage" said under them (never the raw value).
  */
-export function StageTracker({ label, stages, currentId }: StageTrackerProps) {
+export function StageTracker({
+  label,
+  stages,
+  currentId,
+  unknownLabel = 'Unknown stage',
+}: StageTrackerProps) {
   const current = stages.findIndex((stage) => stage.id === currentId);
-  if (current === -1) {
-    throw new Error(`The current stage "${currentId}" is not one of the stages of "${label}".`);
-  }
+  const known = current !== -1;
   const duplicate = stages.find(
     (stage, index) => stages.findIndex((other) => other.id === stage.id) !== index,
   );
@@ -40,7 +49,13 @@ export function StageTracker({ label, stages, currentId }: StageTrackerProps) {
     <div className="ui-stage-tracker__frame">
       <ol className="ui-stage-tracker" aria-label={label} role="list">
         {stages.map((stage, index) => {
-          const state = index < current ? 'done' : index === current ? 'current' : 'future';
+          const state = !known
+            ? 'unknown'
+            : index < current
+              ? 'done'
+              : index === current
+                ? 'current'
+                : 'future';
           return (
             <li
               key={stage.id}
@@ -50,19 +65,22 @@ export function StageTracker({ label, stages, currentId }: StageTrackerProps) {
             >
               <span className="ui-stage-tracker__bar" aria-hidden="true" />
               <span className="ui-stage-tracker__label">
-                <VisuallyHidden>
-                  {state === 'done'
-                    ? 'Done: '
-                    : state === 'current'
-                      ? 'Current stage: '
-                      : 'Not reached: '}
-                </VisuallyHidden>
+                {state === 'unknown' ? null : (
+                  <VisuallyHidden>
+                    {state === 'done'
+                      ? 'Done: '
+                      : state === 'current'
+                        ? 'Current stage: '
+                        : 'Not reached: '}
+                  </VisuallyHidden>
+                )}
                 {stage.label}
               </span>
             </li>
           );
         })}
       </ol>
+      {known ? null : <p className="ui-stage-tracker__unknown">{unknownLabel}</p>}
     </div>
   );
 }

@@ -6,7 +6,7 @@
 .ui-description-list__heading {
   margin: 0 0 var(--space-3);
   color: var(--color-text-muted);
-  font-size: 0.71875rem;
+  font-size: var(--text-section-label-size);
   font-weight: var(--text-heading-sm-weight);
   line-height: var(--text-caption-line-height);
   letter-spacing: 0.06em;
@@ -57,10 +57,6 @@
   background: var(--color-border-default);
 }
 
-.ui-description-list__status {
-  margin: 0;
-}
-
 @media (max-width: 24rem) {
   .ui-description-list__pair {
     grid-template-columns: minmax(0, 1fr);
@@ -70,7 +66,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ui-description-list__placeholder {
-    animation: ui-description-list-pulse 1.6s ease-in-out infinite;
+    animation: ui-description-list-pulse var(--motion-pulse) ease-in-out infinite;
   }
 }
 

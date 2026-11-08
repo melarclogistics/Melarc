@@ -1,12 +1,14 @@
-import { useContext, useState } from 'react';
+import { useState } from 'react';
 
+import { ActionMenu } from '../../components/ui/action-menu/ActionMenu';
 import { Button } from '../../components/ui/button/Button';
 import { AlertDialog } from '../../components/ui/dialog/AlertDialog';
 import { Dialog, DialogActions } from '../../components/ui/dialog/Dialog';
-import { DialogContainer } from '../../components/ui/dialog/dialog-container';
 import { Field } from '../../components/ui/field/Field';
+import { FilterBar } from '../../components/ui/filter-bar/FilterBar';
 import { Popover } from '../../components/ui/popover/Popover';
 import { Textarea } from '../../components/ui/textarea/Textarea';
+import { showToast } from '../../components/ui/toast/Toast';
 import { Tooltip } from '../../components/ui/tooltip/Tooltip';
 import { KitSection, Specimen } from './Section';
 
@@ -100,12 +102,10 @@ function PopoverSpecimens() {
   );
 }
 
-/** A popover opened inside a dialog is drawn into the dialog, or it would open under it, unseen. */
+/** A popover opened inside a dialog is drawn into the dialog by the kit itself (no container is given: the component reads it), or it would open under it, unseen. */
 function HubChoiceInDialog() {
-  const container = useContext(DialogContainer);
   return (
     <Popover
-      container={container}
       trigger={
         <Button type="button" variant="secondary">
           Choose a hub
@@ -119,6 +119,88 @@ function HubChoiceInDialog() {
         ))}
       </ul>
     </Popover>
+  );
+}
+
+/** The four overlays of the kit that open from a control, inside one dialog: each is drawn into the dialog, reachable, and closes on its own. */
+function OverlaysInDialog() {
+  const [open, setOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [chips, setChips] = useState([{ id: 'hub', label: 'Hub: Accra Central' }]);
+  return (
+    <Specimen label="A menu, a popover, a filter and a tooltip inside a dialog">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
+        Open the request
+      </Button>
+      <Dialog
+        open={open}
+        title="Request ACC-PR-7KQ2MZ"
+        description="Every overlay below opens in front of this dialog and can be reached."
+        onRequestClose={() => {
+          setOpen(false);
+        }}
+      >
+        <div className="showcase-kit-stack">
+          <div className="showcase-kit-row">
+            <ActionMenu
+              label="More actions for ACC-PR-7KQ2MZ"
+              items={[
+                { id: 'note', label: 'Add a note', onSelect: () => undefined },
+                {
+                  id: 'cancel',
+                  label: 'Cancel request',
+                  destructive: true,
+                  confirm: {
+                    title: 'Cancel request ACC-PR-7KQ2MZ?',
+                    description: 'The vendor is told. A cancellation charge may apply.',
+                    confirmLabel: 'Cancel the request',
+                  },
+                  onSelect: () => undefined,
+                },
+              ]}
+            />
+            <Tooltip content="What the staff of the hub can read.">
+              <Button type="button" variant="secondary">
+                Who can read this
+              </Button>
+            </Tooltip>
+            <HubChoiceInDialog />
+          </div>
+          <FilterBar
+            label="Filters of the request"
+            chips={chips}
+            onRemove={(id) => {
+              setChips((current) => current.filter((chip) => chip.id !== id));
+            }}
+            filterLabel="Filter the notes"
+            filterOpen={filterOpen}
+            onFilterOpenChange={setFilterOpen}
+            filterPanel={
+              <Field label="Written by">
+                <Textarea />
+              </Field>
+            }
+          />
+        </div>
+        <DialogActions>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Close the request
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Specimen>
   );
 }
 
@@ -169,6 +251,8 @@ function DialogSpecimens() {
               <Button
                 type="button"
                 onClick={() => {
+                  // The toast is raised while the dialog is still open: it is held until the dialog has closed, and then shown, so that it is never behind the scrim.
+                  showToast({ tone: 'success', message: 'The note is saved.', id: 'note-saved' });
                   setNoteOpen(false);
                 }}
               >
@@ -177,6 +261,7 @@ function DialogSpecimens() {
             </DialogActions>
           </Dialog>
         </Specimen>
+        <OverlaysInDialog />
         <Specimen label="A question before an act that cannot be undone">
           <Button
             type="button"

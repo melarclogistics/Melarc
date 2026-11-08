@@ -43,32 +43,12 @@
   overflow-wrap: anywhere;
 }
 
-/* The remove control is a bare icon button at the end of the chip: 24px square at the least. */
-.ui-filter-bar__remove {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+/* The remove control is the kit's IconButton at the end of the chip, made 24px square here (a chip is not the 36px that an IconButton keeps; the target is above the 24px of WCAG 2.5.8). */
+.ui-filter-bar__chip .ui-icon-button {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
   padding: 0;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast),
-    color var(--motion-fast);
-}
-
-.ui-filter-bar__remove:hover {
-  background: var(--color-surface-subtle);
-  color: var(--color-text-primary);
-}
-
-.ui-filter-bar__remove:active {
-  background: var(--button-pressed-background);
 }
 
 /* The Filter button is the primitive's outline button with a dashed boundary: an invitation to add, where the chips are what is already there. */

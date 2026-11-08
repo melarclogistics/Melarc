@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { FormPage } from '../../../components/FormPage';
+// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
 import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';

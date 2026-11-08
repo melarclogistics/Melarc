@@ -60,7 +60,8 @@ test.describe('the kit in a production build under the strict content-security p
   test('the table, its bar of acts and a changed row raise no violation', async ({ page }) => {
     const { violations, problems } = await open(page, 'data');
     const two = page.getByRole('figure', { name: /^Two lines \(a code over a name\)/ });
-    await two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' }).check();
+    // A request that is waiting: only one of those can be confirmed (the bar's act is for the chosen rows it can be taken on, and says "Confirm 0" for the others).
+    await two.getByRole('checkbox', { name: 'Select ACC-PR-7KQ2MZ' }).check();
     await expect(two.getByRole('group', { name: 'Actions for the chosen rows' })).toBeVisible();
     await two.getByRole('button', { name: 'Confirm 1' }).click();
     await expect(two.locator('tr[data-changed="true"]')).toHaveCount(1);

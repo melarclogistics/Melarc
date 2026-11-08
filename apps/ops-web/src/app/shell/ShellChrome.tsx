@@ -35,7 +35,8 @@ import { shortcutHint, usePalette } from './use-palette';
 /**
  * The groups of the sidebar with the count of each entry's queue beside it, where the summary holds one (task C1; `AC-QSUM-07`). An entry whose
  * queue the summary does not hold, and every entry while the summary is being read or when it could not be, has no count and draws none: **a count
- * that is not there is never drawn as `0`**. Which entries belong to which queue is the registry's; the words after the number are `QUEUE_WORDS`.
+ * that is not there is never drawn as `0`**. **A count of 0 that was read draws no pill either** (task R5.2, M16: a row of zeros is noise beside the entries that hold
+ * something; My work's "Also clear" line still names the queue). Which entries belong to which queue is the registry's; the words after the number are `QUEUE_WORDS`.
  */
 export function sidebarGroups(
   navigation: Navigation,
@@ -53,7 +54,7 @@ export function sidebarGroups(
         to: entry.to,
         label: entry.label,
         icon: entry.icon,
-        ...(counted === undefined || entry.queue === undefined
+        ...(counted === undefined || entry.queue === undefined || counted.count === 0
           ? {}
           : { badge: { count: counted.count, meaning: QUEUE_WORDS[entry.queue].meaning } }),
       };

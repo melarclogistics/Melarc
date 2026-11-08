@@ -427,42 +427,24 @@ test.describe('the primitives in a browser: overlays by keyboard', () => {
     await expect(box).toBeChecked();
   });
 
-  // Break caught: a data table whose sort the keyboard cannot reach or whose order is not told in words (`aria-sort`), or a selection that does not
-  // reach the table's own count.
-  test('the data table sorts from the keyboard, tells the order, and counts the rows that are chosen', async ({
+  // Break caught: a choice of a row that does not reach the table's own count or its row's selected state, or a box that the keyboard cannot reach. (The sort of a data
+  // table is the kit's `DataTable`'s, and is proved with it; the table primitive sorts nothing, task R5.2.)
+  test('the table primitive counts the rows that are chosen, from the keyboard', async ({
     page,
   }) => {
     await openShowcase(page);
     const table = page.getByRole('table');
-    const vendors = () =>
-      table
-        .getByRole('row')
-        .evaluateAll((rows) =>
-          rows.slice(1).map((row) => row.querySelectorAll('td')[2]?.textContent ?? ''),
-        );
-    const unsorted = await vendors();
-    expect(unsorted[0]).toBe('Demo Bakery');
-
-    const sort = table.getByRole('button', { name: 'Vendor' });
-    await sort.focus();
-    await page.keyboard.press('Enter');
-    await expect(table.getByRole('columnheader', { name: 'Vendor' })).toHaveAttribute(
-      'aria-sort',
-      'ascending',
-    );
-    expect(await vendors()).toEqual([...unsorted].sort());
-    await page.keyboard.press('Enter');
-    await expect(table.getByRole('columnheader', { name: 'Vendor' })).toHaveAttribute(
-      'aria-sort',
-      'descending',
-    );
-    expect(await vendors()).toEqual([...unsorted].sort().reverse());
 
     await expect(table.getByText('None chosen.')).toBeVisible();
     await table.getByRole('checkbox', { name: 'Select DEMO-0104' }).focus();
     await page.keyboard.press('Space');
     await expect(table.getByText('1 chosen.')).toBeVisible();
     await expect(table.locator('tr[data-state="selected"]')).toHaveCount(1);
+
+    await table.getByRole('checkbox', { name: 'Select all demo requests' }).focus();
+    await page.keyboard.press('Space');
+    await expect(table.getByText('6 chosen.')).toBeVisible();
+    await expect(table.locator('tr[data-state="selected"]')).toHaveCount(6);
   });
 });
 

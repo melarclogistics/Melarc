@@ -1,8 +1,9 @@
 import { useRef, type ReactNode } from 'react';
 
 import { Button } from '../../primitives/button';
-import { Popover, PopoverContent, PopoverTrigger } from '../../primitives/popover';
 import { Icon } from '../icon/Icon';
+import { IconButton } from '../icon-button/IconButton';
+import { Popover } from '../popover/Popover';
 import './filter-bar.css';
 
 /** One filter that is applied: the words of the choice, as they would be said ("Service date: this week"). */
@@ -27,6 +28,12 @@ export interface FilterBarProps {
   readonly filterPanel?: ReactNode;
   /** What the button and its popover are called. Default "Filter". */
   readonly filterLabel?: string;
+  /**
+   * The page opens and closes the popover (task R5.2, M12): give both, and the bar draws it open exactly when `filterOpen` is true and asks `onFilterOpenChange` for every
+   * change the person makes (the button, Escape, a click outside). A page that applies a filter closes it so. Leave both out and the popover opens and closes itself.
+   */
+  readonly filterOpen?: boolean;
+  readonly onFilterOpenChange?: (open: boolean) => void;
   /** How the rows are ordered, in words ("Sorted by oldest first"), at the end of the bar. The bar sorts nothing: the screen does, and says so here. */
   readonly sortLabel?: string;
 }
@@ -44,6 +51,8 @@ export function FilterBar({
   onClearAll,
   filterPanel,
   filterLabel = 'Filter',
+  filterOpen,
+  onFilterOpenChange,
   sortLabel,
 }: FilterBarProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -78,10 +87,11 @@ export function FilterBar({
           {chips.map((chip, index) => (
             <li key={chip.id} className="ui-filter-bar__chip">
               <span className="ui-filter-bar__chip-label">{chip.label}</span>
-              <button
+              <IconButton
                 type="button"
-                className="ui-filter-bar__remove"
-                aria-label={`Remove filter: ${chip.label}`}
+                icon="close"
+                size="sm"
+                label={`Remove filter: ${chip.label}`}
                 ref={(node) => {
                   if (node === null) removers.current.delete(chip.id);
                   else removers.current.set(chip.id, node);
@@ -89,16 +99,19 @@ export function FilterBar({
                 onClick={() => {
                   remove(index);
                 }}
-              >
-                <Icon name="close" size="sm" />
-              </button>
+              />
             </li>
           ))}
         </ul>
       )}
       {filterPanel === undefined ? null : (
-        <Popover>
-          <PopoverTrigger asChild>
+        <Popover
+          label={filterLabel}
+          align="start"
+          className="ui-filter-bar__panel"
+          {...(filterOpen === undefined ? {} : { open: filterOpen })}
+          {...(onFilterOpenChange === undefined ? {} : { onOpenChange: onFilterOpenChange })}
+          trigger={
             <Button
               ref={adder}
               type="button"
@@ -109,10 +122,9 @@ export function FilterBar({
               <Icon name="plus" size="sm" />
               {filterLabel}
             </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" aria-label={filterLabel} className="ui-filter-bar__panel">
-            {filterPanel}
-          </PopoverContent>
+          }
+        >
+          {filterPanel}
         </Popover>
       )}
       {onClearAll !== undefined && chips.length >= 2 ? (

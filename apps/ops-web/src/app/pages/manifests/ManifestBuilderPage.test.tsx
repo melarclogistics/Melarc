@@ -817,3 +817,59 @@ describeInterfaceStates('the manifest builder', {
     },
   },
 });
+
+// Task R5.2, H1: Enter in the date field must not send the run with the day the page still holds while the person has taken a part of it out.
+describe('Enter in the date field', () => {
+  // Break caught: the form sent by Enter from the field with the old day (the page keeps the day until the person leaves the field).
+  it('does not make the manifest while the day is half cleared, and says why', async () => {
+    const { user } = open({
+      [CREATE]: () => json(201, manifestFixture(), etag('v1')),
+      [`GET /pickup-manifests/${MANIFEST_ID}`]: () => json(200, manifestFixture(), etag('v1')),
+    });
+    await user.click(await box('ACC-PR-7KQ2MZ'));
+    await typeDate(user, '04112026');
+
+    await user.keyboard('{Backspace}{Enter}');
+
+    expect(creates()).toHaveLength(0);
+    expect(await screen.findByText('Enter the year in full, for example 2026')).toBeVisible();
+
+    // The control: the day typed in full is sent by Enter, as any field in a form sends it.
+    await user.keyboard('6{Enter}');
+    await waitFor(() => {
+      expect(creates()).toHaveLength(1);
+    });
+    expect(await bodyOf()).toEqual({
+      pickup_request_ids: [REQUEST_ONE_ID],
+      service_date: '2026-11-04',
+    });
+  });
+});
+
+// Task R5.2, M15b: a session that lists no hub at all is told so, in plain words, and not to choose a hub it has none of.
+describe('a session that lists no hub', () => {
+  // Break caught: "Choose the hub first" shown to a person with no hub to choose, and nothing of the run drawn or asked for.
+  it('is told there is nothing to build a run from, and is not told to choose a hub', async () => {
+    open({}, KEYS, []);
+
+    expect(
+      await screen.findByText(
+        'Your session lists no hub, so there is nothing to build a run from: a manifest is made for one hub.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'A run is for one hub, and your session lists none, so there is nothing to build here.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/Choose the hub/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'The hub of the run' })).toBeNull();
+    expect(screen.queryByRole('group', { name: /Service date/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create the manifest' })).toBeNull();
+    expect(
+      screen.queryByRole('table', { name: 'Confirmed pickups waiting for a manifest' }),
+    ).toBeNull();
+    // No role and no permission key is named.
+    expect(document.body.textContent).not.toMatch(/manifest\.|staff\.|pickup\.|role/i);
+  });
+});

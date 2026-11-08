@@ -61,17 +61,15 @@ test.describe('the primitives in a production build under the strict content-sec
     await button(page, 'Show a confirmation').click();
     await expect(page.locator('[data-sonner-toast]')).toHaveCount(1);
 
-    // The calendar changes month, the table sorts, a tab is chosen, the theme is switched.
+    // The calendar changes month, the table is drawn (the primitive alone: its sorting is the kit's DataTable, run under the policy by kit-policy), a tab is chosen, the theme is switched.
     await page
       .getByRole('button', { name: /next month/i })
       .first()
       .click();
     await expect(page.getByText('December 2026').first()).toBeVisible();
-    await page.getByRole('table').getByRole('button', { name: 'Vendor' }).click();
-    await expect(page.getByRole('columnheader', { name: 'Vendor' })).toHaveAttribute(
-      'aria-sort',
-      'ascending',
-    );
+    await expect(
+      page.getByRole('table').getByRole('columnheader', { name: 'Vendor' }),
+    ).toBeVisible();
     await page.getByRole('tab', { name: 'History', exact: true }).click();
     await button(page, 'Dark').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

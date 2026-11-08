@@ -863,3 +863,34 @@ describeInterfaceStates('The booking', {
     },
   },
 });
+
+// Task R5.2, H1: Enter in the date field must not book with the day the page still holds while the person has taken a part of it out.
+describe('Enter in the date field', () => {
+  // Break caught: the form sent by Enter from the field with the old day (the page keeps the day until the person leaves the field).
+  it('does not book while the day is half cleared, and says why', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A vendor’s own packages');
+    await chooseVendor(user);
+    await user.selectOptions(
+      await screen.findByRole('combobox', { name: 'Saved location' }),
+      OTHER_LOCATION_ID,
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: /What is being sent today/ }),
+      'Fabric rolls',
+    );
+    await fillCommon(user);
+
+    const group = screen.getByRole('group', { name: /Service date/ });
+    await user.click(within(group).getByRole('textbox'));
+    await user.keyboard('{End}{Backspace}{Enter}');
+
+    expect(creates()).toHaveLength(0);
+    expect(await screen.findByText('Enter the year in full, for example 2026')).toBeVisible();
+
+    // The control: the day typed in full is booked by Enter, as any field in a form sends it.
+    await user.keyboard('6{Enter}');
+    expect(await screen.findByRole('heading', { name: 'Pickup booked' })).toBeVisible();
+    expect(creates()).toHaveLength(1);
+  });
+});

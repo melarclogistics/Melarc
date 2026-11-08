@@ -1,6 +1,7 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, type ReactNode } from 'react';
 
+// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
 import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';

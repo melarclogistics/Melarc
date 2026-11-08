@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 import './empty-state-v2.css';
 
@@ -12,7 +12,10 @@ interface CommonProps {
   readonly headingLevel?: 2 | 3 | 4;
   /** One line: why, or what it means. */
   readonly children: ReactNode;
-  /** Set when the empty result appears because of something that just happened, such as a filter: it is then announced politely. */
+  /**
+   * Set when the empty result appears because of something that just happened, such as a filter: it is then announced politely, by a region that is in the page before it
+   * speaks (a region that arrives with its words is not announced by most screen readers) and says the title.
+   */
   readonly announce?: boolean;
 }
 
@@ -41,12 +44,15 @@ const HEADING_ELEMENT = { 2: 'h2', 3: 'h3', 4: 'h4' } as const;
 export function EmptyStateV2(props: EmptyStateV2Props) {
   const { variant, title, headingLevel = 2, children, announce = false, action } = props;
   const Heading = HEADING_ELEMENT[headingLevel];
+  // The region is mounted empty and given the title in an effect, so that the words are a change of a region that was there. It is written through its element and not held
+  // in state: a state set in an effect would draw the page twice for a line of text that only the region needs.
+  const region = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (region.current !== null) region.current.textContent = announce ? title : '';
+  }, [announce, title]);
   return (
-    <div
-      className={`ui-empty-v2 ui-empty-v2--${variant}`}
-      data-variant={variant}
-      role={announce ? 'status' : undefined}
-    >
+    <div className={`ui-empty-v2 ui-empty-v2--${variant}`} data-variant={variant}>
+      {announce ? <p ref={region} role="status" className="ui-visually-hidden" /> : null}
       <span className="ui-empty-v2__motif" aria-hidden="true" />
       <Heading className="ui-empty-v2__title">{title}</Heading>
       <p className="ui-empty-v2__line">{children}</p>

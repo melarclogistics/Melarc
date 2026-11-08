@@ -635,6 +635,8 @@ How they are shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.
 - Numbers use tabular numerals everywhere (decided 5 November 2026): `font-variant-numeric: tabular-nums` is set in the base type (`base.css`), so that a column of counts, times and amounts lines up, and a test says so.
 - **Sizes the signed-in shell sets outside this scale** (the Product Owner's brief for redesign step R4, 6 November 2026; built on 7 November and awaiting acceptance, COMPONENT_PATTERNS §12.6). The title of a page inside the shell is 24px on a 30px line, weight 700 and 0.02em tighter, where `text.heading.xl` above is 28/36/600 (the title of the neutral frame and of the pre-sign-in pages keeps `text.heading.xl`). The sidebar's entries are 13.5px at weight 500, and 700 on the current entry. The headings of the sidebar's groups are 11px, weight 600, in capitals, 0.08em apart; the labels of the sections of My work and of the top bar's menus are 11.5px, weight 600, in capitals, 0.06em apart; the key hint of the search is 11px; the figure on a card of My work is 32px at weight 700. The three sizes under 12px depart from the first rule and the bold weights from the second: they are labels and hints that name a group or a shortcut and never carry the information themselves, and they are written here so that the departure is on record and does not spread. **Decided on 7 November 2026 (the audit of the redesign): they are tokens, and the number is written once.** The sizes that are not the scale's are component tokens of `tokens.css` (§3.3), each named for the one component that uses it and in `rem`: `--text-nav-entry-size` (the name of a sidebar entry), `--text-group-label-size` and its line height (a group's heading, and the key hint of the search), `--text-section-label-size` and its line height (the labels of the sections of the menus and of My work), `--sidebar-icon-size`, `--sidebar-heading-space-before` and `--sidebar-heading-space-after`, and `--hub-mark-size` (the hub switcher's square); the figure on a card of My work takes `text.display.sm`'s 32px on 40px at weight 700. `scripts/design-tokens.test.ts` records each as a component token with its reason, and no stylesheet of a component carries these numbers.
 
+- **Sizes the kit of redesign step R5 sets outside this scale** (task R5.2, 8 November 2026; the component stylesheets carried them as literals, against the rule above that the number is written once). Each is a component token (§3.3), in `tokens.css` and nowhere else, in rem so that enlarged text enlarges it, and named for the component that uses it: `--text-page-title-line-height` (30px: the title of a page, which the shell's page frame and the kit's PageHeader share, 24px on 30px), `--text-record-title-size` (26px: the code in a record's header, on the 32px line of `text.heading.lg`), `--text-stat-figure-size` and `--text-stat-figure-line-height` (22px on 28px: the figure of a stat tile). A size that already had a token takes it (the 11.5px label of a section is `--text-section-label-size`, the 18px caption line `--text-caption-line-height`, the 20px label line `--text-label-md-line-height`), and `apps/ops-web/test/component-sizes.test.ts` fails on a font size, a line height or an animation length written in a component's stylesheet, but for three it names with their reasons (the avatar's 11px initials, a spinner's turn, the earlier Skeleton's pulse). The two rows of §9 and §10 below have one token each, recorded in the same way.
+
 ---
 
 ## 6. Spacing
@@ -729,6 +731,7 @@ Motion confirms what happened (Product Owner, 5 November 2026).
 
 - Success lands as a toast.
 - Under `prefers-reduced-motion: reduce` every duration token is `0ms`: the token file sets them to zero, so nothing that takes its duration from a token moves. The easings are not durations and are left alone. Motion whose length does not come from a token (a spinner, a keyframe with a length of its own) still needs its own reduced-motion rule.
+- **The pulse** of a skeleton bar and of a loading line is `--motion-pulse`, 1.6 seconds, recorded on 8 November 2026 (task R5.2): slow and quiet, an ease in and out that repeats while something loads. It is the one length here that is not a working duration, and it is **not** zeroed with the four durations above under reduced motion: the stylesheets run it only inside `@media (prefers-reduced-motion: no-preference)`, so under reduced motion it does not run at all, and a zero-length animation that repeats forever would be worse than none.
 
 ---
 
@@ -743,6 +746,8 @@ Rows and controls come in three heights (Product Owner, 5 November 2026). They a
 | `density.row.compact` | `36px` | desk queue rows |
 | `density.row.standard` | `44px` | form controls and list rows |
 | `density.row.touch` | `56px` | tablet rows (§12) |
+
+A fourth height, `density.row.two-line` (`--density-row-two-line`, **52px**, recorded on 8 November 2026 under task R5.2), is the row of a table that holds two lines of text in a row (a name over a detail), between the standard and the touch row. It is a height of the kit's DataTable only, set with the `data-density` of the table; a screen does not choose it for anything else.
 
 ### 10.1 Spacious
 
@@ -1442,7 +1447,7 @@ The redesign replaces the list of components that were deferred until real scree
 - EmptyState v2;
 - Skeleton v2.
 
-**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as BUILT):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion.
+**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as IMPLEMENTING):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion.
 
 **Built (redesign step R5, second half, 7 November 2026; COMPONENT_PATTERNS §37 records each as IMPLEMENTING):** StatusBadge v2 (the five status pairs of §4.4, a 6px dot, and one table of every state of the portal), CountBadge's variants (`subtle`, `strong`, `on-crimson`), EmptyState v2, Skeleton v2 with LoadingRow, Avatar, and the Tooltip and Popover wrappers (300ms and 8px, on the floating shadow of §8). The Dialog wrapper is the Dialog and AlertDialog of COMPONENT_PATTERNS §20, which gained the default motion on 7 November 2026 (afternoon); the Toast gained its second action then, and the one toaster is drawn by the signed-in shell.
 
@@ -1608,6 +1613,7 @@ Each is made in the file and says so there.
 - **command**: the hidden title and description are inside the panel, where the dialog names itself from them (the registry's leave a heading in the page while it is closed). `CommandDialog` forwards `onCloseAutoFocus`, because a palette opened by a button has no `DialogTrigger` to give focus back to. Its separator is `aria-hidden`, because a list box holds only options and groups (axe `aria-required-children`).
 - **calendar** is in English as written in the United Kingdom and starts its week on Monday by default, as the date field does (COMPONENT_PATTERNS §22a), not in the browser's language.
 - **popover** gains a `container` prop (the element the popover is drawn into, the body by default): a modal `<dialog>` is in the top layer and the page behind it is inert, so the date field's calendar, opened from inside one, is drawn into the dialog or it would open under it, unseen and out of reach.
+- **dropdown-menu** and **tooltip** gain the same `container` prop (task R5.2, M8): the kit's `ActionMenu` and `Tooltip` read the dialog they are in and pass it, so a menu or a hint opened inside a modal `<dialog>` is drawn into the dialog and not under it. The kit's `Popover` does the same by default.
 - **scroll-area**: the viewport is a stop of the keyboard, so that what scrolls can be reached without a pointer (WCAG 2.1.1; axe `scrollable-region-focusable`).
 - **button** has no `xs` sizes (they would be 24px targets, below the smallest control height) and gains the `brand` variant: the crimson of the New button, and nothing else. `destructive` is the outline Danger recipe of §4.6, since no filled Danger button is part of the system (§16.3).
 - **badge** gains the five status variants, `success`, `warning`, `danger`, `info` and `neutral`, from the pairs of §4.4.

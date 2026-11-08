@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 
+// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
 import { PageHeader } from '../../../components/PageHeader';
 import { Button } from '../../../components/ui/button/Button';
 import { EmptyState } from '../../../components/ui/empty-state/EmptyState';

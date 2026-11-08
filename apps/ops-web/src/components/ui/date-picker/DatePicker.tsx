@@ -278,6 +278,19 @@ export function DatePicker({
             }
           }}
           onKeyDown={(event) => {
+            // Enter in a form sends it, with whatever the page holds, and while the text is not a date the page still holds the date it had (the field
+            // gives it none until the person leaves, `leave`): it would send the old date as if it were the person's. So while the text is not a date, Enter
+            // does not send the form: it settles the field as leaving it does (a part taken out clears the date, a refused text says its words), and a
+            // second Enter, the field now settled, sends. A whole date, or an empty field, sends at once. Never while a composition is open (an input
+            // method's own Enter chooses a character), and never in a field that cannot be changed.
+            if (event.key === 'Enter') {
+              if (event.nativeEvent.isComposing || isReadOnly || isDisabled) return;
+              if (problem !== undefined) {
+                event.preventDefault();
+                leave();
+              }
+              return;
+            }
             // The arrow keys step the part of a whole date that the caret is in; with anything else typed, or the field read-only, they are the browser's.
             if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
             if (isReadOnly || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {

@@ -141,3 +141,28 @@ describe('StatTile', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('StatTile: the region that says it is loading (task R5.2, M10)', () => {
+  // Break caught: a region that arrives with its words (the loading line inserted with its role): most screen readers announce a change of a region that was there, not one that appears.
+  it('has its region in the page before it loads, and the same one says it is loading', () => {
+    const view = render(<StatTile label="Waiting" value={4} />);
+    const region = screen.getByRole('status');
+    expect(region.textContent).toBe('');
+
+    view.rerender(<StatTile label="Waiting" value={undefined} loading />);
+
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toHaveTextContent('Loading: Waiting');
+
+    view.rerender(<StatTile label="Waiting" value={4} />);
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region.textContent).toBe('');
+  });
+
+  // Break caught: the empty region taking room in the tile (it is a flex child, and the tile's gap is added for it).
+  it('keeps the region out of the layout', () => {
+    render(<StatTile label="Waiting" value={4} />);
+
+    expect(screen.getByRole('status')).toHaveClass('ui-visually-hidden');
+  });
+});

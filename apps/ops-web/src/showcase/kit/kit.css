@@ -120,7 +120,7 @@
 .showcase-kit-specimen__label {
   margin-bottom: var(--space-2);
   color: var(--color-text-muted);
-  font-size: 0.71875rem;
+  font-size: var(--text-section-label-size);
   font-weight: var(--text-heading-sm-weight);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -218,6 +218,37 @@
   text-align: end;
 }
 
+/* A request as a card of the narrow table: the code, the sender, and the facts under them. */
+.showcase-kit-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.showcase-kit-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The submit bar of the toast specimen: it sticks to the bottom of the window, as a task form's does. */
+.showcase-kit-sticky-bar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-surface-default);
+}
+
 .showcase-kit-opened {
   margin: var(--space-2) 0 0;
   color: var(--color-text-secondary);
@@ -294,4 +325,13 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* A table of the primitive in a named box that scrolls sideways and takes focus (`ScrollRegion`): the primitive's own box does not scroll, so that this is the one. */
+.showcase-kit-scroll {
+  overflow-x: auto;
+}
+
+.showcase-kit-scroll [data-slot='table-container'] {
+  overflow: visible;
 }
