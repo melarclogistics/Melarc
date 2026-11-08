@@ -2,6 +2,7 @@ import { expect, type BrowserContext, type Page } from '@playwright/test';
 
 import type { StackConnection } from '../connection.ts';
 import { Authenticator } from '../totp.ts';
+import { cookieNamesSent } from './cookies-sent.ts';
 import {
   CSRF_COOKIE,
   SESSION_COOKIE,
@@ -301,12 +302,13 @@ export async function signInOnRememberedBrowser(
     const answer = await issued;
     expect(answer.status()).toBe(200);
     await expectLanding(page, name);
-    // The cookie header as the browser sent it, judged and never printed.
-    const sent = (await answer.request().allHeaders()).cookie ?? '';
+    // The names of the cookies the browser sent, judged and never printed: the wire header where the engine reports it, the browser's own
+    // jar for the address where it does not (WebKit; see cookies-sent.ts).
+    const sent = await cookieNamesSent(page.context(), answer.request());
     return {
       setCookies: await setCookieLines(answer),
       askedForCode: secondStep.length > 0,
-      sentCredential: sent.includes(`${TRUSTED_COOKIE}=`),
+      sentCredential: sent.includes(TRUSTED_COOKIE),
     };
   } finally {
     page.off('request', watch);
