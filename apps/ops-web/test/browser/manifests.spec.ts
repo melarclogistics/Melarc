@@ -170,7 +170,8 @@ test.describe('building a manifest', () => {
     await page.getByRole('button', { name: /Previous page/ }).click();
 
     await expect(page.getByRole('checkbox', { name: 'Choose ACC-PR-7KQ2MZ' })).toBeChecked();
-    await expect(page.getByText(/2 requests chosen/)).toBeVisible();
+    // The run's own line (the button that goes to the run, on a narrow page, says it too).
+    await expect(page.getByText('2 requests chosen.', { exact: true })).toBeVisible();
     const pool = api.calls.filter((call) => call.path === '/api/v1/pickup-requests');
     expect(
       pool.every(
@@ -188,7 +189,7 @@ test.describe('building a manifest', () => {
     await page.getByRole('checkbox', { name: 'Choose ACC-PR-9WXH4T' }).check();
     await page.getByRole('checkbox', { name: 'Choose ACC-PR-7KQ2MZ' }).check();
     await typeDate(page, '04112026');
-    await expect(page.getByRole('heading', { level: 3, name: 'ACC-PR-9WXH4T' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 4, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     await page
       .getByRole('combobox', { name: /Why it is carried over/ })
       .selectOption('RUN_WAS_FULL');
@@ -1077,7 +1078,7 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
       await open(page, '/manifests/new');
       await page.getByRole('checkbox', { name: 'Choose ACC-PR-9WXH4T' }).first().check();
       await typeDate(page, '04112026');
-      await expect(page.getByRole('heading', { level: 3, name: 'ACC-PR-9WXH4T' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 4, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     },
   },
   {

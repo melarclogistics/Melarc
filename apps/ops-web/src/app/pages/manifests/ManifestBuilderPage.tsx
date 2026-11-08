@@ -1,24 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { AlertDialog } from '../../../components/ui/dialog/AlertDialog';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import { DataTable, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
-import { QueuePanel, QueueTable } from '../../../components/ui/queue-table/QueueTable';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
-import type { TableColumn } from '../../../components/ui/table/Table';
+import {
+  Builder,
+  BuilderRunList,
+  type BuilderRunItem,
+} from '../../../components/ui/templates/Builder';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
 import { useApiClient } from '../../../platform/api/api-client';
 import type { Violation } from '../../../platform/api/api-response';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
@@ -29,13 +31,9 @@ import {
   type NewManifest,
 } from '../../../platform/manifest/manifest-commands';
 import { MAX_STOPS } from '../../../platform/manifest/manifest-shape';
-import {
-  calendarDateOf,
-  type PickupRequestPageView,
-  type PickupRequestView,
-} from '../../../platform/pickup/pickup-shape';
+import { calendarDateOf, type PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import { usePickupReasons, usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
-import { copyFor } from '../../../platform/problem/problem-copy';
+import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
@@ -114,20 +112,15 @@ const isFinishedDate = (date: string | null): date is string =>
 const POOL_COLUMNS = (
   isCarriedOver: (promised: string) => boolean,
   hubs: readonly { readonly id: string; readonly display_name: string }[],
-): readonly TableColumn<PickupRequestView>[] => [
+): readonly DataColumn<PickupRequestView>[] => [
   {
-    key: 'request',
+    id: 'request',
     header: 'Request / sender',
     rowHeader: true,
-    cell: (row) => (
-      <span className="manifest-lines">
-        <span className="manifest-nowrap">{row.code}</span>
-        <span className="manifest-support">{row.sender_name ?? NOT_RECORDED}</span>
-      </span>
-    ),
+    cell: (row) => <RowTitle code={row.code} name={row.sender_name ?? NOT_RECORDED} />,
   },
   {
-    key: 'promised',
+    id: 'promised',
     header: 'Promised for',
     cell: (row) => (
       <span className="manifest-lines">
@@ -139,8 +132,9 @@ const POOL_COLUMNS = (
     ),
   },
   {
-    key: 'where',
+    id: 'where',
     header: 'Pickup address / hub',
+    priority: 2,
     cell: (row) => (
       <span className="manifest-lines">
         <span>{row.resolved_pickup_location?.address ?? NOT_RECORDED}</span>
@@ -148,9 +142,10 @@ const POOL_COLUMNS = (
       </span>
     ),
   },
-  { key: 'packages', header: 'Packages', cell: (row) => packagesText(row) },
+  { id: 'packages', header: 'Packages', priority: 3, cell: (row) => packagesText(row) },
 ];
 
+/** A request of the pool as a card, for a pool too narrow for the columns: the table draws the card's one control (the box that chooses it), so the card holds none. */
 function PoolCard({
   request,
   carriedOver,
@@ -160,7 +155,7 @@ function PoolCard({
 }) {
   return (
     <>
-      <h2 className="manifest-card__title">{request.code}</h2>
+      <span className="manifest-card__title">{request.code}</span>
       <p className="manifest-support">{request.sender_name ?? NOT_RECORDED}</p>
       <dl className="manifest-card__facts">
         <div className="manifest-card__fact">
@@ -291,10 +286,15 @@ export function ManifestBuilderPage() {
   const overdue = [...chosen.values()].filter((request) => isCarriedOver(request.promised));
   const reasons = usePickupReasons('PICKUP_CARRYOVER', overdue.length > 0);
 
+  const [made, setMade] = useState<string | undefined>();
+  useEffect(() => {
+    if (made !== undefined) void navigate(`/manifests/${made}`, { state: { created: true } });
+  }, [made, navigate]);
   const command = useConfirmedCommand<NewManifest, ManifestRecord>({
     send: (body, key) => createPickupManifest(client, body, key),
+    // The manifest is made: the page follows it once the form no longer holds anything unsent (the guard against leaving is off by then), and not in the same breath.
     onDone: (record) => {
-      void navigate(`/manifests/${record.manifest.id}`, { state: { created: true } });
+      setMade(record.manifest.id);
     },
     // The pool is read again: what the officer chose may have been taken, and what the server says is what the pool is.
     onReload: () => pool.refetch(),
@@ -318,14 +318,15 @@ export function ManifestBuilderPage() {
     if (recovering) form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();
   }, [command.phase, recovering]);
 
-  // A move to a page with nothing to draw leaves the pager button it was made from gone: focus goes to the message, once.
+  // A move to another page leaves the pager button it was made from gone while the page loads: once it has been read, whatever it holds, focus goes to the results, once.
   const { takeFocus } = paging;
   const settled = !pool.isFetching && (pool.isSuccess || pool.isError);
-  const hasRows = pool.isSuccess && pool.data.items.length > 0;
   useEffect(() => {
-    if (!settled || hasRows || !takeFocus()) return;
-    queue.current?.querySelector<HTMLElement>('.ui-read-state')?.focus({ preventScroll: true });
-  }, [settled, hasRows, takeFocus]);
+    if (!settled || !takeFocus()) return;
+    queue.current
+      ?.querySelector<HTMLElement>('.ui-data-table__scroller')
+      ?.focus({ preventScroll: true });
+  }, [settled, pool.dataUpdatedAt, takeFocus]);
 
   if (me === undefined) return null;
   const locked = command.locked;
@@ -350,18 +351,6 @@ export function ManifestBuilderPage() {
     setRun({ ...run, proposal: undefined });
   }
 
-  function toggle(request: PickupRequestView, ticked: boolean): void {
-    // A request of another hub is never chosen: the pool is the run's hub's, so this holds off a row that is not (a stale answer, a foreign one).
-    if (ticked && request.responsible_hub_id !== runHubId) return;
-    setChosen((current) => {
-      const next = new Map(current);
-      if (ticked) next.set(request.id, chosenOf(request));
-      else next.delete(request.id);
-      return next;
-    });
-    setInvalid((current) => ({ ...current, none: undefined }));
-    command.dismiss();
-  }
   function remove(id: string): void {
     setChosen((current) => {
       const next = new Map(current);
@@ -434,198 +423,265 @@ export function ManifestBuilderPage() {
   }
 
   const dateError = invalid.date ?? marks.date;
-  const poolColumns = POOL_COLUMNS(isCarriedOver, me.session.authorized_hubs);
+  const poolColumnsOf = POOL_COLUMNS(isCarriedOver, me.session.authorized_hubs);
   const proposedHub = hubs.find((hub) => hub.id === run.proposal);
 
+  /**
+   * The rows ticked in the pool, as the table reports them (every id of the choice, from every page): what is new is read from the page now shown, and what is gone is taken out. A
+   * ticked row can always be cleared; a row can be ticked while the run has room, and only the pool's own rows can be.
+   */
+  function choose(ids: readonly string[]): void {
+    const wanted = new Set(ids);
+    const items = pool.isSuccess ? pool.data.items : [];
+    setChosen((current) => {
+      const next = new Map<string, Chosen>();
+      for (const [id, entry] of current) if (wanted.has(id)) next.set(id, entry);
+      for (const id of ids) {
+        if (next.has(id) || current.has(id)) continue;
+        const request = items.find((candidate) => candidate.id === id);
+        // A request of another hub is never chosen: the pool is the run's hub's, so this holds off a row that is not (a stale answer, a foreign one).
+        if (
+          request !== undefined &&
+          request.responsible_hub_id === runHubId &&
+          next.size < MAX_STOPS
+        ) {
+          next.set(id, chosenOf(request));
+        }
+      }
+      return next;
+    });
+    setCarryover((current) => {
+      const next = new Map(current);
+      for (const id of current.keys()) if (!wanted.has(id)) next.delete(id);
+      return next;
+    });
+    setInvalid((current) => ({ ...current, none: undefined }));
+    command.dismiss();
+  }
+
+  const updatedAt =
+    pool.dataUpdatedAt > 0 ? formatInstant(new Date(pool.dataUpdatedAt).toISOString()) : undefined;
+
+  // What stands in the place of the pool's rows: loading, a failure in the page's words, or one of the three kinds of nothing.
+  const poolLoading = pool.status === 'pending' || (pool.isFetching && pool.status === 'success');
+  const poolProblem =
+    pool.status === 'error'
+      ? problemOf(pool.error, { operation: 'listPickupRequests', context: 'pool' })
+      : undefined;
+  const poolFailure =
+    poolProblem === undefined ||
+    poolProblem.kind === 'session-ended' ||
+    poolProblem.kind === 'stale'
+      ? undefined
+      : {
+          message:
+            poolProblem.kind === 'forbidden'
+              ? 'Your account cannot read pickup requests. Ask an administrator to give you access.'
+              : poolProblem.reference === undefined
+                ? poolProblem.message
+                : `${poolProblem.message} Reference: ${poolProblem.reference}`,
+          ...(poolProblem.kind === 'unavailable' || poolProblem.kind === 'rate-limited'
+            ? {
+                onRetry: () => {
+                  void pool.refetch();
+                },
+              }
+            : {}),
+        };
+  const poolRows = pool.isSuccess && !poolLoading ? pool.data.items : [];
+  const poolEmpty =
+    paging.page > 1 ? (
+      <EmptyStateV2
+        variant="filtered-empty"
+        title="No requests on this page"
+        headingLevel={3}
+        announce
+        action={
+          <Button type="button" variant="secondary" onClick={paging.toFirstPage}>
+            Back to first page
+          </Button>
+        }
+      >
+        {`Page ${String(paging.page)} has no requests now. Earlier pages may still have some.`}
+      </EmptyStateV2>
+    ) : hubs.length > 1 && runHub !== undefined ? (
+      // The run's hub is a filter of the pool (audit B1): the pool of this hub is empty, which says nothing of the others, and a run is for one hub, so the way on is another hub and
+      // never *All hubs*.
+      <EmptyStateV2
+        variant="filtered-empty"
+        title={`Nothing at ${runHub.display_name}`}
+        headingLevel={3}
+        announce
+        action={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              hubField.current?.querySelector('select')?.focus();
+            }}
+          >
+            Choose another hub
+          </Button>
+        }
+      >
+        {`No confirmed pickup at ${runHub.display_name} is waiting for a manifest. A confirmed pickup appears here until a manifest holds it. A run is for one hub: choose another hub to build one for it.`}
+      </EmptyStateV2>
+    ) : (
+      <EmptyStateV2 variant="empty" title="The pool is empty" headingLevel={3}>
+        No confirmed pickup is waiting for a manifest. A confirmed pickup appears here until a
+        manifest holds it.
+      </EmptyStateV2>
+    );
+
+  const items: BuilderRunItem[] = [...chosen.values()].map((request) => {
+    const mark = marks.requests.get(request.id);
+    return {
+      id: request.id,
+      code: request.code,
+      title: request.sender,
+      detail: request.address,
+      ...(mark === undefined ? {} : { refusal: mark }),
+      remove: {
+        label: `Remove ${request.code} from the choice`,
+        disabled: locked,
+        onClick: () => {
+          remove(request.id);
+        },
+      },
+    };
+  });
   return (
     <>
       <title>Build a manifest · Melarc Ops Portal</title>
-      <p className="pickup-back">
-        <Link to="/manifests">Back to manifests</Link>
-      </p>
-      <PageHeader
-        title="Build a manifest"
-        description={
-          runHub === undefined
-            ? hubs.length === 0
-              ? NO_HUB_DESCRIPTION
-              : 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the manifest.'
-            : `Run for ${runHub.display_name}. Choose confirmed pickups for one run, on one day. Nothing is made until you create the manifest.`
-        }
-      />
-      <form
-        ref={form}
-        noValidate
-        aria-busy={command.phase === 'sending' ? true : undefined}
+      <Builder
+        header={{
+          title: 'Build a manifest',
+          description:
+            runHub === undefined
+              ? hubs.length === 0
+                ? NO_HUB_DESCRIPTION
+                : 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the manifest.'
+              : `Run for ${runHub.display_name}. Choose confirmed pickups for one run, on one day. Nothing is made until you create the manifest.`,
+          breadcrumb: [{ label: 'Manifests', to: '/manifests' }],
+        }}
+        formRef={form}
+        busy={command.phase === 'sending'}
+        dirty={made === undefined && (chosen.size > 0 || serviceDate !== null)}
         onSubmit={submit}
-      >
-        <CommandOutcomeNotice
-          command={command}
-          unknownText={copyFor({ operation: 'createPickupManifest', context: 'unknown-outcome' })}
-        />
-
-        {hubs.length > 1 ? (
-          <section className="pickup-form-section" aria-labelledby="builder-hub">
-            <h2 id="builder-hub">The hub of the run</h2>
-            <div ref={hubField}>
-              <Field
-                label="Hub"
-                required
-                help="A run is for one hub, and the pool below is that hub’s. Changing the hub clears the requests already chosen, after asking."
-              >
-                <Select
-                  value={runHubId ?? ''}
-                  disabled={locked}
-                  onChange={(event) => {
-                    chooseHub(event.target.value);
-                  }}
-                >
-                  {runHubId === undefined ? <option value="">Choose a hub</option> : null}
-                  {hubs.map((hub) => (
-                    <option key={hub.id} value={hub.id}>
-                      {hub.display_name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          </section>
-        ) : null}
-
-        {runHubId === undefined ? (
-          <p className="manifest-note">
-            {hubs.length === 0
-              ? NO_HUB_NOTE
-              : 'Choose the hub first: the pool, the review and the manifest are that hub’s.'}
-          </p>
-        ) : null}
-
-        {runHubId === undefined ? null : (
+        alerts={
+          <CommandOutcomeNotice
+            command={command}
+            unknownText={copyFor({ operation: 'createPickupManifest', context: 'unknown-outcome' })}
+          />
+        }
+        setup={
           <>
-            <section className="pickup-form-section" aria-labelledby="builder-day">
-              <h2 id="builder-day">The day of the run</h2>
-              <Field
-                label="Service date"
-                required
-                help="The day the run is worked: Monday to Saturday, today or later. Pickups promised for an earlier day are carried over to it."
-                {...(dateError === undefined ? {} : { error: dateError })}
-              >
-                <DatePicker
-                  value={serviceDate}
-                  isDisabled={locked}
-                  onChange={(next) => {
-                    setServiceDate(next);
-                    setInvalid((current) => ({ ...current, date: undefined }));
-                    command.dismiss();
-                  }}
-                />
-              </Field>
-            </section>
-
-            <section className="pickup-form-section" aria-labelledby="builder-pool">
-              <h2 id="builder-pool">The pool of confirmed pickups</h2>
-              <p className="manifest-note">
-                These are the confirmed pickups of {runHub?.display_name} that no manifest holds, as
-                the server lists them. A pickup whose late booking waits for an Ops decision is not
-                in it. Choose up to {MAX_STOPS}; your choice is kept as you move between pages.
-              </p>
-              {invalid.none === undefined ? null : (
-                <p className="manifest-carryover__error" role="alert">
-                  {invalid.none}
-                </p>
-              )}
-              <div className="manifest-queue" ref={queue}>
-                <QueuePanel>
-                  <div className="manifest-freshness">
-                    <p className="manifest-freshness__text">
-                      {pool.dataUpdatedAt > 0
-                        ? `Last checked ${formatInstant(new Date(pool.dataUpdatedAt).toISOString()) ?? ''}.`
-                        : ''}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      loading={pool.isFetching}
+            {hubs.length > 1 ? (
+              <section className="pickup-form-section" aria-labelledby="builder-hub">
+                <h2 id="builder-hub">The hub of the run</h2>
+                <div ref={hubField}>
+                  <Field
+                    label="Hub"
+                    required
+                    help="A run is for one hub, and the pool below is that hub’s. Changing the hub clears the requests already chosen, after asking."
+                  >
+                    <Select
+                      value={runHubId ?? ''}
                       disabled={locked}
-                      onClick={() => {
-                        void pool.refetch({ cancelRefetch: false });
+                      onChange={(event) => {
+                        chooseHub(event.target.value);
                       }}
                     >
-                      Refresh the pool
-                    </Button>
-                  </div>
-                  <ReadState<PickupRequestPageView>
-                    query={
-                      pool.isFetching && pool.status === 'success'
-                        ? {
-                            status: 'pending',
-                            data: undefined,
-                            error: null,
-                            refetch: pool.refetch,
-                            isFetching: true,
-                          }
-                        : pool
-                    }
-                    isEmpty={(data) => data.items.length === 0}
-                    empty={
-                      paging.page > 1 ? (
-                        <EmptyState
-                          kind="filtered"
-                          heading="No requests on this page"
-                          announce
-                          action={
-                            <Button type="button" variant="secondary" onClick={paging.toFirstPage}>
-                              Back to first page
-                            </Button>
-                          }
-                        >
-                          Page {paging.page} has no requests now. Earlier pages may still have some.
-                        </EmptyState>
-                      ) : hubs.length > 1 && runHub !== undefined ? (
-                        // The run's hub is a filter of the pool (audit B1): the pool of this hub is empty, which says nothing of the others, and a run is for
-                        // one hub, so the way on is another hub and never *All hubs*.
-                        <EmptyState
-                          kind="filtered"
-                          heading={`Nothing at ${runHub.display_name}`}
-                          announce
-                          action={
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              onClick={() => {
-                                hubField.current?.querySelector('select')?.focus();
-                              }}
-                            >
-                              Choose another hub
-                            </Button>
-                          }
-                        >
-                          No confirmed pickup at {runHub.display_name} is waiting for a manifest. A
-                          confirmed pickup appears here until a manifest holds it. A run is for one
-                          hub: choose another hub to build one for it.
-                        </EmptyState>
-                      ) : (
-                        <EmptyState kind="none" heading="The pool is empty">
-                          No confirmed pickup is waiting for a manifest. A confirmed pickup appears
-                          here until a manifest holds it.
-                        </EmptyState>
-                      )
-                    }
-                    loadingLabel="Loading the pool…"
-                    skeleton={<Skeleton lines={5} />}
-                    permission="pickup.read"
-                    operation="listPickupRequests"
-                    context="pool"
-                  >
-                    {(data) => (
-                      <QueueTable
-                        caption="Confirmed pickups waiting for a manifest"
-                        columns={poolColumns}
-                        rows={data.items}
-                        rowKey={(row) => row.id}
-                        noun={{ one: 'request', other: 'requests' }}
-                        paging={paging}
-                        nextPageToken={data.nextPageToken}
+                      {runHubId === undefined ? <option value="">Choose a hub</option> : null}
+                      {hubs.map((hub) => (
+                        <option key={hub.id} value={hub.id}>
+                          {hub.display_name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+              </section>
+            ) : null}
+            {runHubId === undefined ? null : (
+              <section className="pickup-form-section" aria-labelledby="builder-day">
+                <h2 id="builder-day">The day of the run</h2>
+                <Field
+                  label="Service date"
+                  required
+                  help="The day the run is worked: Monday to Saturday, today or later. Pickups promised for an earlier day are carried over to it."
+                  {...(dateError === undefined ? {} : { error: dateError })}
+                >
+                  <DatePicker
+                    value={serviceDate}
+                    isDisabled={locked}
+                    onChange={(next) => {
+                      setServiceDate(next);
+                      setInvalid((current) => ({ ...current, date: undefined }));
+                      command.dismiss();
+                    }}
+                  />
+                </Field>
+              </section>
+            )}
+          </>
+        }
+        {...(runHubId === undefined
+          ? {
+              note:
+                hubs.length === 0
+                  ? NO_HUB_NOTE
+                  : 'Choose the hub first: the pool, the review and the manifest are that hub’s.',
+            }
+          : {
+              panes: {
+                pool: {
+                  title: 'The pool of confirmed pickups',
+                  description: (
+                    <>
+                      These are the confirmed pickups of {runHub?.display_name} that no manifest
+                      holds, as the server lists them. A pickup whose late booking waits for an Ops
+                      decision is not in it. Choose up to {MAX_STOPS}; your choice is kept as you
+                      move between pages.
+                      {invalid.none === undefined ? null : (
+                        <span className="manifest-carryover__error" role="alert">
+                          {` ${invalid.none}`}
+                        </span>
+                      )}
+                    </>
+                  ),
+                  toolbar: (
+                    <div className="manifest-freshness manifest-freshness--bare">
+                      <p className="manifest-freshness__text">
+                        {updatedAt === undefined ? '' : `Last checked ${updatedAt}.`}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        loading={pool.isFetching}
+                        disabled={locked}
+                        onClick={() => {
+                          void pool.refetch({ cancelRefetch: false });
+                        }}
+                      >
+                        Refresh the pool
+                      </Button>
+                    </div>
+                  ),
+                  children: (
+                    <div ref={queue}>
+                      <DataTable<PickupRequestView>
+                        label="Confirmed pickups waiting for a manifest"
+                        columns={poolColumnsOf}
+                        rows={poolRows}
+                        rowId={(row) => row.id}
+                        density="two-line"
+                        status={
+                          poolLoading ? 'loading' : poolFailure === undefined ? 'ready' : 'error'
+                        }
+                        loadingLabel="Loading the pool"
+                        {...(poolFailure === undefined ? {} : { error: poolFailure })}
+                        emptyState={poolEmpty}
                         card={(row) => (
                           <PoolCard
                             request={row}
@@ -633,195 +689,197 @@ export function ManifestBuilderPage() {
                           />
                         )}
                         selection={{
-                          selected: new Set(chosen.keys()),
-                          rowLabel: (row) => `Choose ${row.code}`,
-                          isDisabled: () => full || locked,
-                          onToggle: toggle,
+                          selectedIds: [...chosen.keys()],
+                          onChange: choose,
+                          selectLabel: (row) => `Choose ${row.code}`,
+                          isSelectable: (row) => (chosen.has(row.id) ? !locked : !full && !locked),
                         }}
+                        {...(pool.isSuccess && !poolLoading
+                          ? {
+                              footer: (
+                                <QueuePager
+                                  label="Pages of the pool"
+                                  noun={{ one: 'request', other: 'requests' }}
+                                  shown={poolRows.length}
+                                  page={paging.page}
+                                  hasNext={pool.data.nextPageToken !== null}
+                                  onNext={() => {
+                                    if (pool.data.nextPageToken !== null) {
+                                      paging.toNextPage(pool.data.nextPageToken);
+                                    }
+                                  }}
+                                  onPrevious={paging.toPreviousPage}
+                                />
+                              ),
+                            }
+                          : {})}
                       />
-                    )}
-                  </ReadState>
-                </QueuePanel>
-              </div>
-            </section>
-
-            {overdue.length > 0 ? (
-              <section
-                className="pickup-form-section manifest-carryover"
-                aria-labelledby="builder-carryover"
-              >
-                <h2 id="builder-carryover">Carried over from an earlier day</h2>
-                <p className="manifest-note">
-                  These pickups were promised for an earlier day than the run’s. Each is carried
-                  over for a reason you give for that pickup, and it keeps the day it was promised,
-                  so it stays late against that promise.
-                </p>
-                <ReadState
-                  query={reasons}
-                  operation="listReasonDefinitions"
-                  context="carryover"
-                  permission="settings.reason.read"
-                  loadingLabel="Loading the carry-over reasons…"
-                  isEmpty={(list) => list.length === 0}
-                  empty={
-                    <Alert variant="danger">
-                      <p>
-                        No carry-over reason is configured yet, so a manifest holding a pickup from
-                        an earlier day cannot be made. The reasons are added to the reason catalogue
-                        by a holder of <code>settings.reason.manage</code>.
-                      </p>
-                    </Alert>
-                  }
-                >
-                  {(list) => (
+                    </div>
+                  ),
+                },
+                run: {
+                  title: 'Review',
+                  summary:
+                    chosen.size === 0
+                      ? 'No request is chosen yet.'
+                      : `${String(chosen.size)} ${chosen.size === 1 ? 'request' : 'requests'} chosen${
+                          day === undefined ? '' : ` for ${serviceDateText(day)}`
+                        }${overdue.length === 0 ? '' : `, ${String(overdue.length)} carried over`}.`,
+                  children: (
                     <>
-                      {overdue.map((request) => {
-                        const entry = carryover.get(request.id);
-                        const reason = list.find(
-                          (candidate) => candidate.code === entry?.reasonCode,
-                        );
-                        const error =
-                          invalid.carryover.get(request.id) ?? marks.carryover.get(request.id);
-                        return (
-                          <div key={request.id} className="manifest-carryover__entry">
-                            <h3>{request.code}</h3>
-                            <p className="manifest-support">
-                              {`${request.sender}. Promised for ${serviceDateText(request.promised)}.`}
-                            </p>
-                            {error === undefined ? null : (
-                              <p className="manifest-carryover__error">{error}</p>
-                            )}
-                            <Field label="Why it is carried over" required>
-                              <Select
-                                name={`carryover-reason-${request.id}`}
-                                value={reason === undefined ? '' : reason.code}
-                                disabled={locked}
-                                onChange={(event) => {
-                                  setEntry(request.id, { reasonCode: event.target.value });
-                                }}
-                              >
-                                <option value="">Choose a reason</option>
-                                {list.map((candidate) => (
-                                  <option key={candidate.code} value={candidate.code}>
-                                    {candidate.label}
-                                  </option>
-                                ))}
-                              </Select>
-                            </Field>
-                            <Field
-                              label="Note"
-                              required={reason?.requiresNote === true}
-                              help="One line, kept with the stop. Leave out phone numbers and email addresses."
-                            >
-                              <Input
-                                name={`carryover-note-${request.id}`}
-                                value={entry?.note ?? ''}
-                                autoComplete="off"
-                                readOnly={locked}
-                                onChange={(event) => {
-                                  setEntry(request.id, { note: event.target.value });
-                                }}
-                              />
-                            </Field>
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
-                </ReadState>
-              </section>
-            ) : null}
-
-            <section className="manifest-builder__summary" aria-labelledby="builder-review">
-              <h2 id="builder-review">Review</h2>
-              {chosen.size === 0 ? (
-                <p>No request is chosen yet.</p>
-              ) : (
-                <>
-                  <p>
-                    {`${String(chosen.size)} ${chosen.size === 1 ? 'request' : 'requests'} chosen${
-                      day === undefined ? '' : ` for ${serviceDateText(day)}`
-                    }${
-                      overdue.length === 0 ? '' : `, ${String(overdue.length)} carried over`
-                    }. The stops take this order; you can change it after the manifest is made, until it is dispatched.`}
-                  </p>
-                  {full ? <p className="manifest-support">{AT_MOST_STOPS}</p> : null}
-                  <ol
-                    className="manifest-builder__chosen"
-                    aria-label="The requests chosen, in order"
-                  >
-                    {[...chosen.values()].map((request) => {
-                      const mark = marks.requests.get(request.id);
-                      return (
-                        <li key={request.id}>
-                          <span className="manifest-lines">
-                            <span>{`${request.code}: ${request.sender}`}</span>
-                            <span className="manifest-support">{request.address}</span>
-                            {mark === undefined ? null : (
-                              <span className="manifest-carryover__error">{mark}</span>
-                            )}
-                          </span>{' '}
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={locked}
-                            aria-label={`Remove ${request.code} from the choice`}
-                            onClick={() => {
-                              remove(request.id);
-                            }}
+                      {chosen.size === 0 ? null : (
+                        <p>
+                          The stops take this order; you can change it after the manifest is made,
+                          until it is dispatched.
+                        </p>
+                      )}
+                      {full ? <p className="manifest-support">{AT_MOST_STOPS}</p> : null}
+                      <BuilderRunList
+                        label="The requests chosen, in order"
+                        items={items}
+                        emptyText="Choose requests from the pool to build the run."
+                      />
+                      {overdue.length > 0 ? (
+                        <section className="manifest-carryover" aria-labelledby="builder-carryover">
+                          <h3 id="builder-carryover">Carried over from an earlier day</h3>
+                          <p className="manifest-note">
+                            These pickups were promised for an earlier day than the run’s. Each is
+                            carried over for a reason you give for that pickup, and it keeps the day
+                            it was promised, so it stays late against that promise.
+                          </p>
+                          <ReadState
+                            query={reasons}
+                            operation="listReasonDefinitions"
+                            context="carryover"
+                            permission="settings.reason.read"
+                            loadingLabel="Loading the carry-over reasons…"
+                            isEmpty={(list) => list.length === 0}
+                            empty={
+                              <Alert variant="danger">
+                                <p>
+                                  No carry-over reason is configured yet, so a manifest holding a
+                                  pickup from an earlier day cannot be made. The reasons are added
+                                  to the reason catalogue by an administrator of the settings.
+                                </p>
+                              </Alert>
+                            }
                           >
-                            Remove
-                          </Button>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </>
-              )}
-              <div className="manifest-builder__actions">
-                {recovering ? (
-                  <Button key="check" type="button" data-recovery onClick={command.checkRecord}>
-                    {command.phase === 'conflict' ? 'Reload the pool' : 'Check the pool'}
-                  </Button>
-                ) : (
-                  <Button key="create" type="submit" loading={command.phase === 'sending'}>
-                    Create the manifest
-                  </Button>
-                )}
-                {command.canRetry ? (
-                  <Button
-                    key="retry"
-                    type="button"
-                    onClick={() => {
-                      void command.retry();
-                    }}
-                  >
-                    Try again
-                  </Button>
-                ) : null}
-                <Link to="/manifests">Cancel</Link>
-              </div>
-            </section>
-          </>
-        )}
-      </form>
-      {/* Outside the form on purpose: a submit inside the dialog would otherwise reach the form's own, and make a manifest. */}
-      <AlertDialog
-        open={proposedHub !== undefined && runHub !== undefined}
-        title={`Make the run for ${proposedHub?.display_name ?? 'another hub'}?`}
-        confirmLabel={`Make the run for ${proposedHub?.display_name ?? 'another hub'}`}
-        cancelLabel={`Keep ${runHub?.display_name ?? 'this hub'}`}
-        onConfirm={changeHub}
-        onCancel={keepHub}
-      >
-        {`A run is for one hub. ${
-          chosen.size === 1 ? 'The request' : `The ${String(chosen.size)} requests`
-        } chosen for ${runHub?.display_name ?? 'this hub'} ${
-          chosen.size === 1 ? 'is' : 'are'
-        } taken out of the choice, with anything written for ${chosen.size === 1 ? 'it' : 'them'}, and the pool becomes ${
-          proposedHub?.display_name ?? 'the other hub'
-        }’s.`}
-      </AlertDialog>
+                            {(list) => (
+                              <>
+                                {overdue.map((request) => {
+                                  const entry = carryover.get(request.id);
+                                  const reason = list.find(
+                                    (candidate) => candidate.code === entry?.reasonCode,
+                                  );
+                                  const error =
+                                    invalid.carryover.get(request.id) ??
+                                    marks.carryover.get(request.id);
+                                  return (
+                                    <div key={request.id} className="manifest-carryover__entry">
+                                      <h4>{request.code}</h4>
+                                      <p className="manifest-support">
+                                        {`${request.sender}. Promised for ${serviceDateText(request.promised)}.`}
+                                      </p>
+                                      {error === undefined ? null : (
+                                        <p className="manifest-carryover__error">{error}</p>
+                                      )}
+                                      <Field label="Why it is carried over" required>
+                                        <Select
+                                          name={`carryover-reason-${request.id}`}
+                                          value={reason === undefined ? '' : reason.code}
+                                          disabled={locked}
+                                          onChange={(event) => {
+                                            setEntry(request.id, {
+                                              reasonCode: event.target.value,
+                                            });
+                                          }}
+                                        >
+                                          <option value="">Choose a reason</option>
+                                          {list.map((candidate) => (
+                                            <option key={candidate.code} value={candidate.code}>
+                                              {candidate.label}
+                                            </option>
+                                          ))}
+                                        </Select>
+                                      </Field>
+                                      <Field
+                                        label="Note"
+                                        required={reason?.requiresNote === true}
+                                        help="One line, kept with the stop. Leave out phone numbers and email addresses."
+                                      >
+                                        <Input
+                                          name={`carryover-note-${request.id}`}
+                                          value={entry?.note ?? ''}
+                                          autoComplete="off"
+                                          readOnly={locked}
+                                          onChange={(event) => {
+                                            setEntry(request.id, { note: event.target.value });
+                                          }}
+                                        />
+                                      </Field>
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </ReadState>
+                        </section>
+                      ) : null}
+                    </>
+                  ),
+                  actions: (
+                    <>
+                      {recovering ? (
+                        <Button
+                          key="check"
+                          type="button"
+                          data-recovery
+                          onClick={command.checkRecord}
+                        >
+                          {command.phase === 'conflict' ? 'Reload the pool' : 'Check the pool'}
+                        </Button>
+                      ) : (
+                        <Button key="create" type="submit" loading={command.phase === 'sending'}>
+                          Create the manifest
+                        </Button>
+                      )}
+                      {command.canRetry ? (
+                        <Button
+                          key="retry"
+                          type="button"
+                          onClick={() => {
+                            void command.retry();
+                          }}
+                        >
+                          Try again
+                        </Button>
+                      ) : null}
+                      <Link to="/manifests">Cancel</Link>
+                    </>
+                  ),
+                },
+              },
+            })}
+        // Outside the form on purpose: a submit inside the dialog would otherwise reach the form's own, and make a manifest.
+        outside={
+          <AlertDialog
+            open={proposedHub !== undefined && runHub !== undefined}
+            title={`Make the run for ${proposedHub?.display_name ?? 'another hub'}?`}
+            confirmLabel={`Make the run for ${proposedHub?.display_name ?? 'another hub'}`}
+            cancelLabel={`Keep ${runHub?.display_name ?? 'this hub'}`}
+            onConfirm={changeHub}
+            onCancel={keepHub}
+          >
+            {`A run is for one hub. ${
+              chosen.size === 1 ? 'The request' : `The ${String(chosen.size)} requests`
+            } chosen for ${runHub?.display_name ?? 'this hub'} ${
+              chosen.size === 1 ? 'is' : 'are'
+            } taken out of the choice, with anything written for ${chosen.size === 1 ? 'it' : 'them'}, and the pool becomes ${
+              proposedHub?.display_name ?? 'the other hub'
+            }’s.`}
+          </AlertDialog>
+        }
+      />
     </>
   );
 }

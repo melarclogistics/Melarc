@@ -118,8 +118,16 @@ function open(
   return renderApp('/manifests/new');
 }
 
-const poolTable = () =>
-  screen.findByRole('table', { name: 'Confirmed pickups waiting for a manifest' });
+const poolTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', {
+    name: 'Confirmed pickups waiting for a manifest',
+  });
+  // The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited.
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
 const box = async (code: string) =>
   within(await poolTable()).getByRole('checkbox', { name: `Choose ${code}` });
 
@@ -216,7 +224,7 @@ describe('the day and the carried-over requests', () => {
     await typeDate(user, '04112026');
 
     const section = await screen.findByRole('region', { name: 'Carried over from an earlier day' });
-    expect(within(section).getByRole('heading', { level: 3, name: 'ACC-PR-9WXH4T' })).toBeVisible();
+    expect(within(section).getByRole('heading', { level: 4, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     expect(within(section).queryByRole('heading', { name: 'ACC-PR-7KQ2MZ' })).toBeNull();
     expect(within(section).getByRole('combobox', { name: /Why it is carried over/ })).toBeVisible();
     // The pool also says which of its rows are carried over.
@@ -258,13 +266,14 @@ describe('the day and the carried-over requests', () => {
     expect(screen.getByRole('textbox', { name: /Note/ })).toBeRequired();
   });
 
-  it('says plainly that no carry-over reason is configured, naming the key that adds one', async () => {
+  it('says plainly that no carry-over reason is configured, and who adds one, naming no key', async () => {
     const { user } = open({ [REASONS]: () => json(200, []) });
     await user.click(await box('ACC-PR-9WXH4T'));
     await typeDate(user, '04112026');
 
     expect(await screen.findByText(/No carry-over reason is configured yet/)).toBeVisible();
-    expect(screen.getByText('settings.reason.manage')).toBeVisible();
+    expect(screen.getByText(/added to the reason catalogue by an administrator/)).toBeVisible();
+    expect(document.body.textContent).not.toContain('settings.reason.manage');
   });
 });
 
@@ -751,7 +760,7 @@ describeInterfaceStates('the manifest builder', {
   loading: {
     test: async () => {
       open({ [POOL]: () => new Promise<Response>(() => undefined) });
-      expect(await screen.findByText('Loading the pool…')).toBeVisible();
+      expect(await screen.findByText('Loading the pool')).toBeInTheDocument();
     },
   },
   empty: {
@@ -771,9 +780,11 @@ describeInterfaceStates('the manifest builder', {
   error: {
     test: async () => {
       open({ [POOL]: () => refusal(500, 'INTERNAL_ERROR') });
-      expect(
-        await screen.findByText('The pool of confirmed pickups could not be loaded.'),
-      ).toBeVisible();
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'The pool of confirmed pickups could not be loaded.',
+        );
+      });
     },
   },
   retry: {
@@ -813,7 +824,13 @@ describeInterfaceStates('the manifest builder', {
   'permission-restricted': {
     test: async () => {
       open({ [POOL]: () => refusal(403, 'PERMISSION_DENIED') }, KEYS);
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      // The refusal is told as what the person lacks, in plain words, and names no key.
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Your account cannot read pickup requests. Ask an administrator to give you access.',
+        );
+      });
+      expect(document.body.textContent).not.toContain('pickup.read');
     },
   },
 });
@@ -871,5 +888,39 @@ describe('a session that lists no hub', () => {
     ).toBeNull();
     // No role and no permission key is named.
     expect(document.body.textContent).not.toMatch(/manifest\.|staff\.|pickup\.|role/i);
+  });
+});
+
+/**
+ * The builder is drawn by the builder template (redesign step R6): the pool and the run in two panes, and a guard against leaving a run that holds a choice that was not sent. The
+ * builder's own rules are the tests above; these hold the frame.
+ */
+describe('the builder: leaving', () => {
+  // Break caught: a choice lost to a link, without a word.
+  it('asks before the application leaves a run that holds a choice, and the safe answer is to stay', async () => {
+    const { user, router } = open();
+    await user.click(await box('ACC-PR-7KQ2MZ'));
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    const question = await screen.findByRole('alertdialog', { name: 'Leave this page?' });
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe('/manifests/new');
+    await user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(await box('ACC-PR-7KQ2MZ')).toBeChecked();
+  });
+
+  it('asks nothing of a run that holds nothing', async () => {
+    const { router } = open();
+    await box('ACC-PR-7KQ2MZ');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
   });
 });

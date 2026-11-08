@@ -168,3 +168,9 @@
     border-inline-start-color: CanvasText;
   }
 }
+
+/* The freshness line and the pool's refresh, inside the builder's pool pane (the pane has its own padding and hairlines). */
+.manifest-freshness--bare {
+  padding: 0;
+  border-bottom: 0;
+}
