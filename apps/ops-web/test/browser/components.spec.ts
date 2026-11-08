@@ -777,3 +777,30 @@ test.describe('the components in a browser: a healthy page', () => {
     await expect(frame.getByRole('button')).toHaveCount(0);
   });
 });
+
+test.describe('the accessibility scan in a browser', () => {
+  // Break caught: the scan measuring a colour that is still fading. A button that has just become enabled goes from its disabled grey to
+  // its own colour over a moment, WCAG judges the colour it settles on, and the white label is under 4.5:1 for most of the fade, so a scan
+  // that does not wait reports a failure nobody sees, which comes and goes with timing (riders.spec.ts, the hosted run of 8 November 2026).
+  // The probe fades over 2 s, far longer than a scan takes, so that without the wait the scan always lands inside it.
+  test('waits for a colour that is still changing and judges the colour it settles on', async ({
+    page,
+  }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        button { padding: 8px 16px; border: 0; color: #ffffff; background: #eaecf0; transition: background-color 2s linear; }
+        button.enabled { background: #b4232e; }
+      </style></head><body><main><h1>Probe</h1><button type="button">Go</button></main></body></html>`);
+    const button = page.getByRole('button', { name: 'Go' });
+    const background = (): Promise<string> =>
+      button.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await button.evaluate((element) => {
+      element.classList.add('enabled');
+    });
+
+    // The probe is really mid-fade when the scan starts: its colour is not yet the one it settles on.
+    expect(await background()).not.toBe('rgb(180, 35, 46)');
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(await background()).toBe('rgb(180, 35, 46)');
+  });
+});
