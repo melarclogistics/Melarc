@@ -34,6 +34,11 @@ export interface Violation {
 /** The most violations kept. A request that breaks more than this has broken the form, not the field. */
 export const MAX_VIOLATIONS = 32;
 
+/** The most stops a refusal names: a manifest holds at most 64. */
+export const MAX_NAMED_STOPS = 64;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const MAX_POINTER_LENGTH = 256;
 const PLACE = /^[a-z]{1,16}$/;
 const RULE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
@@ -70,6 +75,32 @@ function violationsOf(body: unknown): Violation[] {
 }
 
 /**
+ * What a refusal that is not a validation declares in its `details`: the **rule** that was broken (`service_date_passed`,
+ * `request_not_confirmed`), a machine name the screen words itself, and the **stops** it names, as identifiers. Nothing else of the
+ * details is kept: a value, a date or a text of the server's is not drawn, and the rule is dropped unless it is a name.
+ */
+export interface ConflictDetail {
+  readonly rule?: string;
+  readonly stops?: readonly string[];
+}
+
+function conflictOf(body: unknown): ConflictDetail {
+  if (typeof body !== 'object' || body === null) return {};
+  const details = (body as Record<string, unknown>).details;
+  if (typeof details !== 'object' || details === null) return {};
+  const { rule, stops } = details as Record<string, unknown>;
+  const named = Array.isArray(stops)
+    ? (stops as unknown[])
+        .filter((stop): stop is string => typeof stop === 'string' && UUID.test(stop))
+        .slice(0, MAX_NAMED_STOPS)
+    : [];
+  return {
+    ...(typeof rule === 'string' && RULE.test(rule) ? { rule } : {}),
+    ...(named.length > 0 ? { stops: named } : {}),
+  };
+}
+
+/**
  * A call the API refused or could not answer, with the declared details `ApiError` leaves out. It is an `ApiError`
  * (same kind, status, code, request id and message), so the end of a session is noticed in the one place it is, and a
  * page that only wants the code needs nothing else.
@@ -77,8 +108,12 @@ function violationsOf(body: unknown): Violation[] {
 export class OperationFailure extends ApiError {
   override name = 'OperationFailure';
   readonly violations: readonly Violation[];
+  /** The rule a refusal declares (`details.rule`), when it is a machine name. A refusal that declares none has none. */
+  readonly rule: string | undefined;
+  /** The stops a refusal names (`details.stops`), as identifiers; none when it names none. */
+  readonly stops: readonly string[];
 
-  constructor(base: ApiError, violations: readonly Violation[]) {
+  constructor(base: ApiError, violations: readonly Violation[], conflict: ConflictDetail = {}) {
     super({
       kind: base.kind,
       ...(base.status === undefined ? {} : { status: base.status }),
@@ -86,6 +121,8 @@ export class OperationFailure extends ApiError {
       ...(base.requestId === undefined ? {} : { requestId: base.requestId }),
     });
     this.violations = violations;
+    this.rule = conflict.rule;
+    this.stops = conflict.stops ?? [];
   }
 }
 
@@ -113,6 +150,7 @@ export function answerOf<D>(result: {
     throw new OperationFailure(
       apiErrorFromResponse(response, result.error),
       violationsOf(result.error),
+      conflictOf(result.error),
     );
   }
   return {

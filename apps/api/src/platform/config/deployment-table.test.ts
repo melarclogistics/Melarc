@@ -738,7 +738,26 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
     expect(workerRow('DELIVERY_CAPTURE_DIRECTORY')?.[2]).toBe('with capture');
     expect(refusedWithout('DELIVERY_CAPTURE_DIRECTORY')).toBe(true);
     for (const key of ['DELIVERY_PROVIDER_APPROVAL_REF', 'DELIVERY_PROVIDER_ALLOWLIST']) {
-      expect(workerRow(key)?.[2], key).toBe('in Staging with a real provider');
+      expect(workerRow(key)?.[2], key).toBe(
+        'in Staging with a real provider, and in a local run with the real notification provider',
+      );
+    }
+    // The notification lane's settings (S1.12d): the table says when each is needed, and the loader agrees (worker-config.test.ts).
+    for (const key of ['DELIVERY_PROVIDER_MESSAGE_CAP', 'DELIVERY_PROVIDER_WINDOW_ENDS_AT']) {
+      expect(workerRow(key)?.[2], key).toBe(
+        'with the real notification provider outside production',
+      );
+    }
+    expect(workerRow('NOTIFICATION_SMS_ADAPTER')?.[2]).toBe('no');
+    expect(workerRow('NOTIFICATION_SMS_ADAPTER')?.[3]).toBe('`capture`');
+    for (const key of [
+      'NOTIFICATION_SMS_ENDPOINT',
+      'NOTIFICATION_SMS_TIMEOUT_MS',
+      'HUBTEL_SMS_CLIENT_ID',
+      'HUBTEL_SMS_CLIENT_SECRET',
+      'HUBTEL_SMS_SENDER_ID',
+    ]) {
+      expect(workerRow(key)?.[2], key).toBe('with `provider`');
     }
   });
 
@@ -804,7 +823,9 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
   // Break caught: the refusals the document states drifting from the loader: Staging and the window, a deployed worker's separate
   // credentials, and the API's own refusal of the worker's login.
   it('states the refusals the loader makes', () => {
-    expect(section).toMatch(/Staging refuses a real provider unless/);
+    expect(section).toMatch(
+      /Staging, and a local run with the real notification provider, refuse a real provider unless/,
+    );
     expect(section).toMatch(
       /refuses an environment that carries the API's connection \(`DATABASE_URL`\)/,
     );

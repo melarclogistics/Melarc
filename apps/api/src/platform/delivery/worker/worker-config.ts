@@ -3,6 +3,7 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 
 import {
+  DELIVERY_ADAPTERS,
   EXPECTED,
   OPTIONAL_KEYS,
   envShape,
@@ -10,7 +11,10 @@ import {
   isLoopbackAddress,
   type ConfigKey,
 } from '../../config/config-settings.js';
-import { deliveryAdapterProblems } from '../../config/delivery-adapter-problems.js';
+import {
+  deliveryAdapterProblems,
+  endpointNeedsHttps,
+} from '../../config/delivery-adapter-problems.js';
 import {
   KEY_PURPOSES,
   keyEnvName,
@@ -27,6 +31,13 @@ import type {
 import { Secret } from '../../config/secret.js';
 import { parsePostgresUrl } from '../../database/postgres-url.js';
 import { WORKER_RUNTIME_ROLE } from '../../database/technical-roles.js';
+import {
+  SENDER_ID_PATTERN,
+  UTC_INSTANT_PATTERN,
+  windowEndRefusal,
+  type NotificationSmsConfig,
+  type ProviderWindowConfig,
+} from '../../notifications/notification-sms-config.js';
 import { parseAllowList } from './delivery-allow-list.js';
 
 /**
@@ -83,6 +94,14 @@ export const WORKER_ONLY_KEYS = [
   'DELIVERY_CAPTURE_DIRECTORY',
   'DELIVERY_PROVIDER_APPROVAL_REF',
   'DELIVERY_PROVIDER_ALLOWLIST',
+  'DELIVERY_PROVIDER_MESSAGE_CAP',
+  'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
+  'NOTIFICATION_SMS_ADAPTER',
+  'NOTIFICATION_SMS_ENDPOINT',
+  'NOTIFICATION_SMS_TIMEOUT_MS',
+  'HUBTEL_SMS_CLIENT_ID',
+  'HUBTEL_SMS_CLIENT_SECRET',
+  'HUBTEL_SMS_SENDER_ID',
   'DELIVERY_WORKER_METRICS_HOST',
   'DELIVERY_WORKER_METRICS_PORT',
   'DELIVERY_WORKER_METRICS_SECRET',
@@ -114,9 +133,25 @@ export const WORKER_EXPECTED: Readonly<Record<WorkerOnlyKey, string>> = {
   DELIVERY_CAPTURE_DIRECTORY:
     'an absolute path, outside the checkout, to a directory only this user can read, without a ".." segment; required when a channel uses the capture adapter',
   DELIVERY_PROVIDER_APPROVAL_REF:
-    'a reference of 4 to 64 letters, digits and . _ : - to the written approval of the controlled window; required in Staging with a real provider, absent with capture and in production',
+    'a reference of 4 to 64 letters, digits and . _ : - to the written approval of the controlled window; required in Staging with a real provider and in a local run with the real notification provider, absent with capture and in production',
   DELIVERY_PROVIDER_ALLOWLIST:
-    'one to 50 comma-separated email addresses or numbers in the form of E.164, none repeated; required in Staging with a real provider, absent with capture and in production',
+    'one to 50 comma-separated email addresses or numbers in the form of E.164, none repeated; required in Staging with a real provider and in a local run with the real notification provider, absent with capture and in production',
+  DELIVERY_PROVIDER_MESSAGE_CAP:
+    'an integer from 1 to 1000: the most messages the controlled window may send in total; required with the real notification provider in a local run and in Staging, absent otherwise',
+  DELIVERY_PROVIDER_WINDOW_ENDS_AT:
+    'an instant in UTC, written with a Z (for example 2026-11-05T23:59:59Z), after the moment the worker starts and at most 14 days after it; required with the real notification provider in a local run and in Staging, absent otherwise',
+  NOTIFICATION_SMS_ADAPTER:
+    'one of: capture, provider; the lane that sends text messages (default capture); capture is refused when APP_ENV is production',
+  NOTIFICATION_SMS_ENDPOINT:
+    'an https URL of the messages resource of the provider (plain http only to a loopback host in a local run), without user information, query or fragment; required with the provider, absent with capture',
+  NOTIFICATION_SMS_TIMEOUT_MS:
+    'an integer from 100 to 60000: how long a send to the provider may take; required with the provider, absent with capture',
+  HUBTEL_SMS_CLIENT_ID:
+    "Hubtel's SMS client id: 1 to 200 printable characters without spaces; a secret, held only by the worker; required with the provider, absent with capture",
+  HUBTEL_SMS_CLIENT_SECRET:
+    "Hubtel's SMS client secret: 1 to 200 printable characters without spaces; a secret, held only by the worker; required with the provider, absent with capture",
+  HUBTEL_SMS_SENDER_ID:
+    'the sender ID registered with Hubtel: 3 to 11 letters or digits; required with the provider, absent with capture',
   DELIVERY_WORKER_METRICS_HOST:
     'a host name or IP address without spaces; a loopback address unless DELIVERY_WORKER_METRICS_SECRET is set',
   DELIVERY_WORKER_METRICS_PORT:
@@ -152,6 +187,14 @@ const OPTIONAL_WORKER_KEYS: readonly string[] = [
   'DELIVERY_CAPTURE_DIRECTORY',
   'DELIVERY_PROVIDER_APPROVAL_REF',
   'DELIVERY_PROVIDER_ALLOWLIST',
+  'DELIVERY_PROVIDER_MESSAGE_CAP',
+  'DELIVERY_PROVIDER_WINDOW_ENDS_AT',
+  'NOTIFICATION_SMS_ADAPTER',
+  'NOTIFICATION_SMS_ENDPOINT',
+  'NOTIFICATION_SMS_TIMEOUT_MS',
+  'HUBTEL_SMS_CLIENT_ID',
+  'HUBTEL_SMS_CLIENT_SECRET',
+  'HUBTEL_SMS_SENDER_ID',
   'DELIVERY_WORKER_METRICS_PORT',
   'DELIVERY_WORKER_METRICS_SECRET',
   ...OPTIONAL_KEYS.filter((key) => (WORKER_SHARED_KEYS as readonly string[]).includes(key)),
@@ -188,6 +231,26 @@ const workerSchema = z.object({
     .string()
     .refine((text) => parseAllowList(text) !== undefined)
     .optional(),
+  DELIVERY_PROVIDER_MESSAGE_CAP: integerBetween(1, 1000).optional(),
+  DELIVERY_PROVIDER_WINDOW_ENDS_AT: z
+    .string()
+    .regex(UTC_INSTANT_PATTERN)
+    .refine((text) => !Number.isNaN(new Date(text).getTime()))
+    .optional(),
+  // The lane that sends text messages: capture unless Hubtel is selected. Its endpoint and timeout are the delivery channels' shapes.
+  NOTIFICATION_SMS_ADAPTER: z.enum(DELIVERY_ADAPTERS).default('capture'),
+  NOTIFICATION_SMS_ENDPOINT: envShape.DELIVERY_SMS_ENDPOINT,
+  NOTIFICATION_SMS_TIMEOUT_MS: envShape.DELIVERY_SMS_TIMEOUT_MS,
+  // Hubtel's credentials are printable characters without a space; the sender ID is what Hubtel shows beside a message.
+  HUBTEL_SMS_CLIENT_ID: z
+    .string()
+    .regex(/^[\x21-\x7e]{1,200}$/)
+    .optional(),
+  HUBTEL_SMS_CLIENT_SECRET: z
+    .string()
+    .regex(/^[\x21-\x7e]{1,200}$/)
+    .optional(),
+  HUBTEL_SMS_SENDER_ID: z.string().regex(SENDER_ID_PATTERN).optional(),
   // The worker's own private metrics endpoint (S0.68), by the rules of the API's (`METRICS_*`) and on a port of its own.
   DELIVERY_WORKER_METRICS_HOST: envShape.METRICS_HOST,
   DELIVERY_WORKER_METRICS_PORT: envShape.METRICS_PORT,
@@ -205,11 +268,10 @@ export interface WorkerDeliveryConfig {
   readonly pollIntervalMs: number;
   /** Where the capture adapter's sink is, when a channel uses it. */
   readonly captureDirectory?: string;
+  /** How the notification lane sends its text messages: into the capture sink, or through Hubtel. */
+  readonly notificationSms: NotificationSmsConfig;
   /** The controlled real-provider window, when a real provider is selected and the window is configured. */
-  readonly providerWindow?: {
-    readonly approvalRef: string;
-    readonly allowList: readonly string[];
-  };
+  readonly providerWindow?: ProviderWindowConfig;
 }
 
 export interface WorkerConfig {
@@ -247,7 +309,7 @@ const deliveryAdapter = (
 /** The splitting an allow-list was validated by: the entries as written, trimmed, in order. */
 const allowListEntries = (text: string): string[] => text.split(',').map((entry) => entry.trim());
 
-function relationProblems(env: ParsedEnv): ConfigProblem[] {
+function relationProblems(env: ParsedEnv, now: Date): ConfigProblem[] {
   const problems: ConfigProblem[] = [];
   const invalid = (key: string, expected?: string): void => {
     problems.push({ key, problem: 'invalid', expected: expected ?? expectedText(key) });
@@ -285,12 +347,41 @@ function relationProblems(env: ParsedEnv): ConfigProblem[] {
     missing('DELIVERY_CAPTURE_DIRECTORY');
   }
 
-  // DEPLOYMENT_AND_ENVIRONMENTS.md §4.1: the window belongs to a real provider in Staging. The worker refuses to start in Staging with
-  // one selected unless both are configured; it refuses them with capture (there is nothing to allow-list) and in production.
-  const provider = channels.includes('provider');
+  // The notification lane's text messages (S1.12): capture, or Hubtel. The provider needs its endpoint (https, or plain http to a
+  // loopback host in a local run), its timeout, its credentials and its sender ID; capture has none of them.
+  const notificationProvider = env.NOTIFICATION_SMS_ADAPTER === 'provider';
+  const hubtel = [
+    ['NOTIFICATION_SMS_ENDPOINT', env.NOTIFICATION_SMS_ENDPOINT],
+    ['NOTIFICATION_SMS_TIMEOUT_MS', env.NOTIFICATION_SMS_TIMEOUT_MS],
+    ['HUBTEL_SMS_CLIENT_ID', env.HUBTEL_SMS_CLIENT_ID],
+    ['HUBTEL_SMS_CLIENT_SECRET', env.HUBTEL_SMS_CLIENT_SECRET],
+    ['HUBTEL_SMS_SENDER_ID', env.HUBTEL_SMS_SENDER_ID],
+  ] as const;
+  for (const [key, value] of hubtel) {
+    if (notificationProvider && value === undefined) missing(key);
+    else if (!notificationProvider && value !== undefined) invalid(key);
+  }
+  if (
+    notificationProvider &&
+    env.NOTIFICATION_SMS_ENDPOINT !== undefined &&
+    endpointNeedsHttps(env.NOTIFICATION_SMS_ENDPOINT, env.APP_ENV)
+  ) {
+    invalid('NOTIFICATION_SMS_ENDPOINT');
+  }
+
+  // DEPLOYMENT_AND_ENVIRONMENTS.md §4.1: the window belongs to a real provider outside production. The worker refuses to start in
+  // Staging with a real provider (of the credential channels or the notification lane) unless the approval reference and the recipient
+  // allow-list are configured, and in a local run with the real notification provider unless they are; it refuses them with capture
+  // (there is nothing to allow-list) and in production. The real notification provider outside production also has the most messages the
+  // window may send and the moment it ends, which must lie after the start and no later than the controlled fortnight; they are refused
+  // everywhere else. A real provider for the credential channels is still refused in a local run, as the owner decided on 11 October 2026.
+  const provider = channels.includes('provider') || notificationProvider;
   const window = [env.DELIVERY_PROVIDER_APPROVAL_REF, env.DELIVERY_PROVIDER_ALLOWLIST];
   const windowKeys = ['DELIVERY_PROVIDER_APPROVAL_REF', 'DELIVERY_PROVIDER_ALLOWLIST'] as const;
-  if (env.APP_ENV === 'staging' && provider) {
+  if (
+    (env.APP_ENV === 'staging' && provider) ||
+    (env.APP_ENV === 'local' && notificationProvider)
+  ) {
     windowKeys.forEach((key, index) => {
       if (window[index] === undefined) missing(key);
     });
@@ -298,6 +389,21 @@ function relationProblems(env: ParsedEnv): ConfigProblem[] {
     windowKeys.forEach((key, index) => {
       if (window[index] !== undefined) invalid(key);
     });
+  }
+  if (notificationProvider && env.APP_ENV !== 'production') {
+    if (env.DELIVERY_PROVIDER_MESSAGE_CAP === undefined) missing('DELIVERY_PROVIDER_MESSAGE_CAP');
+    if (env.DELIVERY_PROVIDER_WINDOW_ENDS_AT === undefined) {
+      missing('DELIVERY_PROVIDER_WINDOW_ENDS_AT');
+    } else if (
+      windowEndRefusal(new Date(env.DELIVERY_PROVIDER_WINDOW_ENDS_AT), now) !== undefined
+    ) {
+      invalid('DELIVERY_PROVIDER_WINDOW_ENDS_AT');
+    }
+  } else {
+    if (env.DELIVERY_PROVIDER_MESSAGE_CAP !== undefined) invalid('DELIVERY_PROVIDER_MESSAGE_CAP');
+    if (env.DELIVERY_PROVIDER_WINDOW_ENDS_AT !== undefined) {
+      invalid('DELIVERY_PROVIDER_WINDOW_ENDS_AT');
+    }
   }
 
   if (env.DELIVERY_WORKER_METRICS_PORT === undefined) {
@@ -322,21 +428,39 @@ function refusals(config: WorkerConfig): ConfigProblem[] {
   const refuse = (key: string): void => {
     problems.push({ key, problem: 'invalid', expected: expectedText(key) });
   };
+  const notificationProvider = config.delivery.notificationSms.kind === 'provider';
   const provider =
-    config.delivery.email.kind === 'provider' || config.delivery.sms.kind === 'provider';
+    config.delivery.email.kind === 'provider' ||
+    config.delivery.sms.kind === 'provider' ||
+    notificationProvider;
+  const guards = (): void => {
+    refuse('DELIVERY_PROVIDER_APPROVAL_REF');
+    refuse('DELIVERY_PROVIDER_ALLOWLIST');
+    refuse('DELIVERY_PROVIDER_MESSAGE_CAP');
+    refuse('DELIVERY_PROVIDER_WINDOW_ENDS_AT');
+  };
   if (config.appEnv === 'production') {
     // There is no production key custody yet, so a production start is refused until a task builds one (OB-36).
     if (config.keys.custody === 'local') refuse('KEY_CUSTODY');
     if (config.delivery.email.kind === 'capture') refuse('DELIVERY_EMAIL_ADAPTER');
     if (config.delivery.sms.kind === 'capture') refuse('DELIVERY_SMS_ADAPTER');
-    if (config.delivery.providerWindow !== undefined) {
-      refuse('DELIVERY_PROVIDER_APPROVAL_REF');
-      refuse('DELIVERY_PROVIDER_ALLOWLIST');
-    }
+    // The text messages of the lane are sent for real in production: capture would drop them quietly.
+    if (!notificationProvider) refuse('NOTIFICATION_SMS_ADAPTER');
+    if (config.delivery.providerWindow !== undefined) guards();
   }
   if (config.appEnv === 'staging' && provider && config.delivery.providerWindow === undefined) {
     refuse('DELIVERY_PROVIDER_APPROVAL_REF');
     refuse('DELIVERY_PROVIDER_ALLOWLIST');
+  }
+  // Outside production the real notification provider has the whole window: the two guards of the credential channels, the most
+  // messages it may send and the moment it ends. A configuration made by hand without one of them is refused as the environment is.
+  if (config.appEnv !== 'production' && notificationProvider) {
+    const window = config.delivery.providerWindow;
+    if (window === undefined) guards();
+    else {
+      if (window.messageCap === undefined) refuse('DELIVERY_PROVIDER_MESSAGE_CAP');
+      if (window.endsAt === undefined) refuse('DELIVERY_PROVIDER_WINDOW_ENDS_AT');
+    }
   }
   // A local run, and CI, which runs as one, uses the capture adapter only (OB-127, closed by the owner's decision of 11 October 2026).
   if (config.appEnv === 'local') {
@@ -395,6 +519,7 @@ function forbiddenProblems(env: Readonly<Record<string, string | undefined>>): C
 /** Validates the process environment for the delivery worker. Pure: reads only the keys the worker owns or shares. */
 export function loadWorkerConfig(
   env: Readonly<Record<string, string | undefined>>,
+  options: { readonly now?: Date } = {},
 ): LoadWorkerConfigResult {
   // A blank optional setting is an absent one: a copied template leaves its optional lines empty.
   const input = Object.fromEntries(
@@ -418,17 +543,41 @@ export function loadWorkerConfig(
   }
 
   const values = parsed.data;
-  const problems = [...relationProblems(values), ...forbidden];
+  const problems = [...relationProblems(values, options.now ?? new Date()), ...forbidden];
   if (problems.length > 0) return { ok: false, problems };
 
-  const window =
+  const window: ProviderWindowConfig | undefined =
     values.DELIVERY_PROVIDER_APPROVAL_REF !== undefined &&
     values.DELIVERY_PROVIDER_ALLOWLIST !== undefined
       ? Object.freeze({
           approvalRef: values.DELIVERY_PROVIDER_APPROVAL_REF,
           allowList: Object.freeze(allowListEntries(values.DELIVERY_PROVIDER_ALLOWLIST)),
+          ...(values.DELIVERY_PROVIDER_MESSAGE_CAP === undefined
+            ? {}
+            : { messageCap: values.DELIVERY_PROVIDER_MESSAGE_CAP }),
+          ...(values.DELIVERY_PROVIDER_WINDOW_ENDS_AT === undefined
+            ? {}
+            : { endsAt: new Date(values.DELIVERY_PROVIDER_WINDOW_ENDS_AT) }),
         })
       : undefined;
+  const notificationSms: NotificationSmsConfig =
+    values.NOTIFICATION_SMS_ADAPTER === 'provider' &&
+    values.NOTIFICATION_SMS_ENDPOINT !== undefined &&
+    values.NOTIFICATION_SMS_TIMEOUT_MS !== undefined &&
+    values.HUBTEL_SMS_CLIENT_ID !== undefined &&
+    values.HUBTEL_SMS_CLIENT_SECRET !== undefined &&
+    values.HUBTEL_SMS_SENDER_ID !== undefined
+      ? Object.freeze({
+          kind: 'provider',
+          endpoint: values.NOTIFICATION_SMS_ENDPOINT,
+          timeoutMs: values.NOTIFICATION_SMS_TIMEOUT_MS,
+          hubtel: Object.freeze({
+            clientId: new Secret(values.HUBTEL_SMS_CLIENT_ID),
+            clientSecret: new Secret(values.HUBTEL_SMS_CLIENT_SECRET),
+            senderId: values.HUBTEL_SMS_SENDER_ID,
+          }),
+        })
+      : Object.freeze({ kind: 'capture' });
   const metricsPort = values.DELIVERY_WORKER_METRICS_PORT;
   const metricsSecret = values.DELIVERY_WORKER_METRICS_SECRET;
   const config: WorkerConfig = {
@@ -438,9 +587,9 @@ export function loadWorkerConfig(
     shutdown: Object.freeze({ timeoutMs: values.SHUTDOWN_TIMEOUT_MS }),
     database: Object.freeze({
       url: values.DATABASE_WORKER_URL,
-      // One connection for each lane, one to poll and one for the cleanup, and one for the metrics endpoint's read of the queue when it
-      // is on: nothing is held across a send.
-      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 2 + (metricsPort === undefined ? 0 : 1),
+      // One connection for each lane, one to poll, one for the cleanup and one for the notification lane (S1.12), and one for the
+      // metrics endpoint's read of the queue when it is on: nothing is held across a send.
+      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 3 + (metricsPort === undefined ? 0 : 1),
       deadlines: Object.freeze({
         acquireTimeoutMs: values.DATABASE_ACQUIRE_TIMEOUT_MS,
         lockTimeoutMs: values.DATABASE_LOCK_TIMEOUT_MS,
@@ -462,6 +611,7 @@ export function loadWorkerConfig(
         values.DELIVERY_SMS_ENDPOINT,
         values.DELIVERY_SMS_TIMEOUT_MS,
       ),
+      notificationSms,
       concurrency: values.DELIVERY_WORKER_CONCURRENCY,
       pollIntervalMs: values.DELIVERY_WORKER_POLL_INTERVAL_MS,
       ...(values.DELIVERY_CAPTURE_DIRECTORY === undefined

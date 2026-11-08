@@ -22,7 +22,7 @@ import type { AuditEventCode } from './audit-event-codes.js';
  *   and is recorded in the plan as such.
  */
 
-/** The events the catalogue makes enhanced, wherever they sit: 76 of the 190, read from the rows of `contracts/audit.md`. */
+/** The events the catalogue makes enhanced, wherever they sit: 79 of the 200, read from the rows of `contracts/audit.md`. */
 export const ENHANCED_CODES = [
   'pickup.cancellation_charge.waived',
   'pickup.handshake.fallback_override',
@@ -31,6 +31,7 @@ export const ENHANCED_CODES = [
   'fleet.custody.accepted',
   'pickup.attempt.extended',
   'pickup.request.escalated',
+  'pickup.request.cutoff_exception_resolved',
   'pickup.handshake.manually_resolved',
   'pickup.request.hub_reassigned',
   'pickup.service_window.overridden',

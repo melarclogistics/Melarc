@@ -140,9 +140,14 @@ describe('the invariants the matrix keeps (SECURITY_DESIGN.md §14.1, §14.17b; 
   // count that decides is made inside the database function (migration 0005) and the identity itself reads nothing, so every table
   // of the capability is insert only, and the restriction says by what.
   it('lets seed insert and nothing else, the seven reference tables by the initialization function only', () => {
+    // The hub's configuration (migration 0042) has its own function: the same shape, for three further tables.
+    const hubConfiguration = ['ServiceZone', 'ServiceZoneAlias', 'HubSetting'];
     for (const entry of CAPABILITY_ACCESS.seed.tables) {
       expect(entry.statements, entry.table).toEqual(['INSERT']);
-      if (entry.table !== 'RiderIdentity') {
+      if (hubConfiguration.includes(entry.table)) {
+        expect(entry.restriction, entry.table).toMatch(/melarc\.seed_hub_configuration/);
+        expect(entry.restriction, entry.table).toMatch(/holds no privilege/);
+      } else if (entry.table !== 'RiderIdentity') {
         expect(entry.restriction, entry.table).toMatch(/melarc\.initialize_reference_data/);
         expect(entry.restriction, entry.table).toMatch(/holds no privilege/);
       }

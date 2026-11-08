@@ -54,8 +54,8 @@ describe('ErrorCode: the contract’s enumeration, all of it', () => {
     expect(new Set(Object.values(ErrorCode)).size).toBe(Object.values(ErrorCode).length);
   });
 
-  it('has 121 codes, which the contract’s own header counts', () => {
-    expect(Object.values(ErrorCode)).toHaveLength(121);
+  it('has 123 codes, which the contract’s own header counts', () => {
+    expect(Object.values(ErrorCode)).toHaveLength(123);
   });
 
   // Break caught: two names for one code, or a name that is not its code, which makes a grep for the code miss its uses.

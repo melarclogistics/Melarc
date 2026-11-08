@@ -11,6 +11,7 @@ export const PERMISSION_KEYS: readonly string[] = [
   'pickup.request.cancel_chargeable',
   'pickup.cancellation_charge.waive',
   'pickup.handshake.override',
+  'pickup.handshake.resolve',
   'pickup.exception.request',
   'pickup.exception.approve',
   'pickup.request.reassign_hub',

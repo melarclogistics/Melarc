@@ -9,17 +9,19 @@ import { API_RUNTIME_ROLE } from '../config/load-config.js';
  * - The API runtime is the only login the API's configuration may name (`load-config.ts` refuses any other).
  * - The worker base identity holds no protected-business-table grant of its own. A worker runs as the base identity plus
  *   exactly the capabilities its task class needs (§14.17b), and a capability is a `melarc_worker_cap_<task>` grant-set role
- *   that is put in front of its process. The one worker of this slice is the credential-delivery worker (S0.18), so
- *   `provisionRoles` grants its capability to the base login (the login inherits the grants and cannot `SET ROLE` to the
- *   role): the base role itself reads no business table (`GBT-Y5`), what the login reaches is the delivery job and nothing
- *   else, and a process cannot acquire a second capability by asking (`GBT-Y9`). A later worker with another capability is
- *   given it by the task that builds it.
+ *   that is put in front of its process. The delivery worker (S0.18) carries two: the credential delivery and, since S1.12a,
+ *   the notification lane (one process, two lanes), so `provisionRoles` grants both capabilities to the base login (the login
+ *   inherits the grants and cannot `SET ROLE` to either role): the base role itself reads no business table (`GBT-Y5`), what
+ *   the login reaches is the delivery job and the lane's tables and nothing else, and a process cannot acquire a further
+ *   capability by asking (`GBT-Y9`). A later worker with another capability is given it by the task that builds it.
  * - The provisioning identity runs the approved seed and bootstrap procedures as `SYSTEM`. It is in no API's, worker's or
  *   request path's configuration.
  */
 export { API_RUNTIME_ROLE };
 export const WORKER_RUNTIME_ROLE = 'melarc_worker_runtime';
 export const WORKER_CREDENTIAL_DELIVERY_ROLE = 'melarc_worker_cap_credential_delivery';
+/** The grant set of the notification lane (S1.12a): the same login, a second capability, and no more than the lane's tables. */
+export const WORKER_NOTIFICATION_ROLE = 'melarc_worker_cap_notification';
 export const PROVISIONING_ROLE = 'melarc_provisioning';
 /**
  * The role migrations run as (SECURITY_DESIGN.md §14.17a). `tools/database/safety.ts` holds the same string, because it cannot

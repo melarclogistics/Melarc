@@ -11,6 +11,7 @@ import {
   bundleLockKey,
   fixedLockKey,
   isInt32,
+  NOTIFICATION_LIMITS,
   rateLimitLockKey,
 } from './lock-keys.js';
 
@@ -33,9 +34,11 @@ describe('the advisory lock classes (SECURITY_DESIGN.md §13.10a)', () => {
     expect(AUTH_POLICY_FIXED).toBe(1296844337);
     expect(RATE_LIMIT_KEY).toBe(1296847409);
     expect(RATE_LIMIT_CAPACITY).toBe(1296847411);
+    expect(NOTIFICATION_LIMITS).toBe(1296976945);
     expect(Object.keys(ADVISORY_CLASSES).toSorted()).toEqual([
       'AUTH_POLICY_BUNDLE',
       'AUTH_POLICY_FIXED',
+      'NOTIFICATION_LIMITS',
       'RATE_LIMIT_CAPACITY',
       'RATE_LIMIT_KEY',
     ]);

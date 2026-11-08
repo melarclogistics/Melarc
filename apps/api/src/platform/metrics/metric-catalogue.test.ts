@@ -7,7 +7,7 @@ import {
   ATTESTATION_INTEGRITY_CAUSES,
   ATTESTATION_UNAVAILABLE_CAUSES,
 } from '../auth/ports/attestation-verifier.port.js';
-import { RATE_LIMIT_BUCKETS } from '../auth/ports/rate-limiter.port.js';
+import { RATE_LIMIT_COUNTERS } from '../auth/ports/rate-limiter.port.js';
 import { DELIVERY_CHANNELS, TERMINAL_FAILURE_CLASSES } from '../delivery/delivery-vocabulary.js';
 import { METRIC_DEFINITIONS, labelPolicyFor, metricNames } from './metric-catalogue.js';
 
@@ -39,13 +39,14 @@ describe('the metric catalogue', () => {
     ).toEqual(['outcome']);
   });
 
-  // Break caught: the rate-limited counter carrying a seventh bucket, or an unlisted cause (the document counts per bucket and per cause).
-  it('counts RATE_LIMITED per bucket and per cause, over the six buckets and no other', () => {
+  // Break caught: the rate-limited counter carrying a counter the limiter does not hold (a seventh bucket), or an unlisted cause (the document counts per bucket and per cause).
+  // The six buckets and the one sub-ceiling inside the authenticated-API bucket are the counters (settings.md 7.7).
+  it('counts RATE_LIMITED per bucket and per cause, over the six buckets, the sub-ceiling and no other', () => {
     const definition = METRIC_DEFINITIONS.rate_limited_total;
 
     expect(definition.kind).toBe('counter');
     expect(Object.keys(definition.labels)).toEqual(['bucket', 'cause']);
-    expect(definition.labels.bucket).toEqual([...RATE_LIMIT_BUCKETS]);
+    expect(definition.labels.bucket).toEqual([...RATE_LIMIT_COUNTERS]);
     expect(definition.labels.cause).toEqual([
       'BUCKET_CEILING',
       'STORE_CAPACITY',

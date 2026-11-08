@@ -144,6 +144,13 @@ export async function riderHandsets({ page, context, stack }: JourneyContext): P
   // Locked: the right PIN from the registered handset is refused as the lock, and nothing says how many wrong ones there were.
   const locked = await replacement.signIn(RIDER_PHONE, NEW_PIN);
   expect([locked.status, locked.code]).toEqual([422, 'CREDENTIAL_LOCKED']);
+  // The rider's registered handset stays for the journeys after this one (the manifest journey hands a run to this rider).
+  world.riders.set('one', {
+    name: RIDER_NAME,
+    phone: RIDER_PHONE,
+    pin: NEW_PIN,
+    handset: replacement,
+  });
   await signOut(page);
 }
 

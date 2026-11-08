@@ -45,6 +45,11 @@ import {
   type SessionStore,
 } from './session-store.port.js';
 import {
+  TEXT_MESSAGE_SENDER,
+  TEXT_MESSAGE_SENDER_DESCRIPTOR,
+  type TextMessageSender,
+} from './text-message-sender.port.js';
+import {
   TOKEN_SERVICE,
   TOKEN_SERVICE_DESCRIPTOR,
   type TokenService,
@@ -72,6 +77,7 @@ export interface PortTypes {
   UnitOfWork: UnitOfWork;
   DeliveryQueue: DeliveryQueue;
   DeliveryProvider: DeliveryProvider;
+  TextMessageSender: TextMessageSender;
   AttestationVerifier: AttestationVerifier;
   Metrics: Metrics;
 }
@@ -105,6 +111,11 @@ export const PORTS: readonly PortRegistryEntry[] = [
   { name: 'UnitOfWork', token: UNIT_OF_WORK, descriptor: UNIT_OF_WORK_DESCRIPTOR },
   { name: 'DeliveryQueue', token: DELIVERY_QUEUE, descriptor: DELIVERY_QUEUE_DESCRIPTOR },
   { name: 'DeliveryProvider', token: DELIVERY_PROVIDER, descriptor: DELIVERY_PROVIDER_DESCRIPTOR },
+  {
+    name: 'TextMessageSender',
+    token: TEXT_MESSAGE_SENDER,
+    descriptor: TEXT_MESSAGE_SENDER_DESCRIPTOR,
+  },
   {
     name: 'AttestationVerifier',
     token: ATTESTATION_VERIFIER,

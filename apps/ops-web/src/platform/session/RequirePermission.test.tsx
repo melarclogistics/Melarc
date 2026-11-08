@@ -71,6 +71,45 @@ describe('RequirePermission', () => {
     expect(screen.queryByText('The protected content')).toBeNull();
   });
 
+  // Break caught (ops-portal.md section 7, `/pickup-requests/{id}/exception`): a page whose request another person decides refused as "you lack
+  // access", when the rule is that it reads as who decides, by the key, and never a role.
+  it('tells a page that another person decides as who decides, by the key', () => {
+    render(
+      <MemoryRouter>
+        <SessionContext value={signedInWith(['pickup.read'])}>
+          <RequirePermission
+            permission="pickup.exception.request"
+            decidedBy="pickup.exception.approve"
+          >
+            <p>The protected content</p>
+          </RequirePermission>
+        </SessionContext>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('The protected content')).toBeNull();
+    expect(screen.getByRole('heading', { level: 1, name: 'Approval is needed' })).toBeVisible();
+    expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/do not have access|senior ops|admin|role/i);
+  });
+
+  it('shows what it guards to a session that holds the key, whoever decides', () => {
+    render(
+      <MemoryRouter>
+        <SessionContext value={signedInWith(['pickup.exception.request'])}>
+          <RequirePermission
+            permission="pickup.exception.request"
+            decidedBy="pickup.exception.approve"
+          >
+            <p>The protected content</p>
+          </RequirePermission>
+        </SessionContext>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('The protected content')).toBeVisible();
+  });
+
   it('refuses when the session lists no permissions at all', () => {
     renderWith(signedInWith(undefined), 'staff.read');
 

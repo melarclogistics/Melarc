@@ -144,7 +144,7 @@ describe('the local default', () => {
 });
 
 describe('what it runs', () => {
-  it('runs the reference seed by default and reports each table', async () => {
+  it('runs the reference seed and then the hub configuration by default and reports each table', async () => {
     const { run, plans, lines, closed } = build();
     await run([], { DATABASE_SEED_URL: URL, APP_ENV: 'production' });
     expect(plans).toEqual([
@@ -157,11 +157,23 @@ describe('what it runs', () => {
         'setting',
         'reason_code',
       ],
+      ['service_zone', 'hub_setting'],
     ]);
     expect(lines.some((line) => /^seeded hub: 1 row$/.test(line))).toBe(true);
     expect(lines.some((line) => /^seeded permission: \d+ rows$/.test(line))).toBe(true);
     expect(closed).toHaveBeenCalledOnce();
   });
+
+  // Break caught: the hub configuration unreachable on a database seeded before migration 0042, or refused in production, where it is
+  // real reference data and not a fixture.
+  it.each(['local', 'staging', 'production'])(
+    'runs only the hub configuration with --hub-configuration in %s',
+    async (appEnv) => {
+      const { run, plans } = build();
+      await run(['--hub-configuration'], { DATABASE_SEED_URL: URL, APP_ENV: appEnv });
+      expect(plans).toEqual([['service_zone', 'hub_setting']]);
+    },
+  );
 
   // Break caught: the fixtures reachable in production by any route, flag included. The command refuses before it opens a
   // connection, and the runner refuses again.

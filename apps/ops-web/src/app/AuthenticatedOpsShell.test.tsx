@@ -358,6 +358,12 @@ describe('the authenticated Ops shell: where it is not', () => {
 
     expect(entries()).toEqual([
       'Overview',
+      'Pickup requests',
+      'Book a pickup',
+      'Exceptions to approve',
+      'Messages',
+      'Manifests',
+      'Build a manifest',
       'Staff',
       'Add a staff profile',
       'Sessions',

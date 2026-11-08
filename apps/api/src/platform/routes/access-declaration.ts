@@ -110,6 +110,13 @@ export interface RecordScope {
   readonly entity: string;
   /** The path parameter that carries the record's id. */
   readonly param: string;
+  /**
+   * The surfaces whose callers are asked about the record here, when they are some of the surfaces the route serves (S1.24): for the others
+   * the guard looks nothing up, and the operation answers them itself. A route that serves staff and riders and must tell a rider "this is
+   * not your work" (`NOT_ASSIGNED_RIDER`) rather than "there is no such record" (`NOT_FOUND`) names the surface of the staff here, so that
+   * staff keep the answer that tells their hubs apart (`HUB_SCOPE_VIOLATION`). Left out, every surface the route serves is asked.
+   */
+  readonly surfaces?: readonly ServedSurface[];
 }
 
 /**
@@ -144,6 +151,15 @@ export interface AuthenticatedRouteOptions {
   readonly record?: RecordScope;
   /** The tier the operation needs, if it needs one beyond holding the key. Not for a `self` operation, which has no grant. */
   readonly tier?: TierDeclaration;
+  /**
+   * The operation can cause an outbound text (SMS) or a payment call, so its request is also admitted by the sub-ceiling
+   * `provider_initiating_operation_ceiling_per_minute` (settings.md §7.7; R76), by the session, after the authenticated-API bucket and
+   * before anything of the operation runs. Left out, the operation is held to the bucket alone. A request counts when it is admitted, whatever
+   * the operation then answers (a replay of an idempotent request, a refusal of a rule and a failure each took their place), and a request the
+   * ceiling refuses counts nothing against the ceiling and never reaches the operation. Which operations carry it is pinned by the route inventory
+   * and by a test that finds every operation that writes a notification envelope.
+   */
+  readonly providerInitiating?: true;
 }
 
 export interface AccessDetail {
@@ -263,6 +279,12 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
       throw new TypeError('A tier rule derives what a record needs, so the route names the record');
     }
   }
+  const providerInitiating: unknown = given.providerInitiating;
+  if (providerInitiating !== undefined && providerInitiating !== true) {
+    throw new TypeError(
+      'An operation that can cause an outbound text states it with providerInitiating: true, or states nothing',
+    );
+  }
   const record: unknown = given.record;
   if (record !== undefined) {
     const named = record as Record<string, unknown>;
@@ -278,12 +300,35 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
         'A record scope names an entity and the path parameter that carries its id',
       );
     }
+    const only: unknown = named.surfaces;
+    if (
+      only !== undefined &&
+      (!Array.isArray(only) ||
+        only.length === 0 ||
+        !only.every(
+          (each) => typeof each === 'string' && (surfaces as readonly string[]).includes(each),
+        ))
+    ) {
+      throw new TypeError(
+        'A record scope limited to surfaces names some of the surfaces the route serves',
+      );
+    }
   }
   return Object.freeze({
     surfaces: Object.freeze([...(surfaces as ServedSurface[])]),
     activity: given.activity as ActivityPolicy,
-    ...(record === undefined ? {} : { record: Object.freeze({ ...(record as RecordScope) }) }),
+    ...(record === undefined
+      ? {}
+      : {
+          record: Object.freeze({
+            ...(record as RecordScope),
+            ...((record as RecordScope).surfaces === undefined
+              ? {}
+              : { surfaces: Object.freeze([...((record as RecordScope).surfaces ?? [])]) }),
+          }),
+        }),
     ...(tier === undefined ? {} : { tier: Object.freeze({ ...(tier as TierDeclaration) }) }),
+    ...(providerInitiating === true ? { providerInitiating: true as const } : {}),
   });
 }
 

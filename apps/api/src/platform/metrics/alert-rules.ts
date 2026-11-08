@@ -24,7 +24,8 @@ export interface AlertRule {
   /** The rule's own name. */
   readonly id: string;
   /** The row of the alert table it implements. */
-  readonly alert: 'Credential delivery' | 'Provider down' | 'Attestation trust data aging';
+  readonly alert:
+    'Credential delivery' | 'Text messages' | 'Provider down' | 'Attestation trust data aging';
   readonly severity: Severity;
   /** What firing means, for the person who is paged. Never a value of a series. */
   readonly summary: string;
@@ -121,6 +122,28 @@ const anyInstance = (history: readonly Scrape[], test: (scrapes: Scrape[]) => bo
 const AGE = 'credential_delivery_oldest_due_age_seconds';
 const age = (scrape: Scrape): number => total(scrape, AGE);
 const hasAge = (scrape: Scrape): boolean => [...scrape.samples.keys()].some((key) => key === AGE);
+
+const TEXT_AGE = 'notification_oldest_due_age_seconds';
+const textAge = (scrape: Scrape): number => total(scrape, TEXT_AGE);
+const hasTextAge = (scrape: Scrape): boolean =>
+  [...scrape.samples.keys()].some((key) => key === TEXT_AGE);
+
+/** The attempts to send a business text, and the ones that did not go well: refused, answered by nothing that could be read, or given up. */
+const TEXT_FAILURES = ['REJECTED', 'RETRY', 'SCHEDULE_EXHAUSTED'] as const;
+const textFailures = (scrape: Scrape): number =>
+  TEXT_FAILURES.reduce(
+    (sum, result) => sum + total(scrape, 'notification_sends_total', { result }),
+    0,
+  );
+const textAttempts = (scrape: Scrape): number =>
+  total(scrape, 'notification_sends_total', { result: 'SENT' }) + textFailures(scrape);
+/** The envelopes that went to the dead letter for a reason other than scope: an event no message answers, or a relay that gave up. */
+const DEAD_OUTCOMES = ['UNKNOWN_EVENT', 'SCHEDULE_EXHAUSTED'] as const;
+const deadLettered = (scrape: Scrape): number =>
+  DEAD_OUTCOMES.reduce(
+    (sum, outcome) => sum + total(scrape, 'notification_relay_total', { outcome }),
+    0,
+  );
 
 /** Provider answers of one channel: what counts as an attempt and what counts as a failure (a rejection or a timeout). */
 const PROVIDER_FAILURES = ['REJECTED', 'UNKNOWN'] as const;
@@ -278,6 +301,60 @@ export const ALERT_RULES: readonly AlertRule[] = Object.freeze([
             15 * MINUTE,
           ) > 0,
       ),
+  },
+  {
+    id: 'text_messages_backlog_warning',
+    alert: 'Text messages',
+    severity: 'SEV-3',
+    summary:
+      'A business text or an outbox envelope has been due for more than 5 minutes, for 15 minutes.',
+    runbook: '§4.1',
+    fires: (history) =>
+      anyInstance(history, (scrapes) =>
+        sustained(scrapes, (scrape) => hasTextAge(scrape) && textAge(scrape) > 5 * 60, 15 * MINUTE),
+      ),
+  },
+  {
+    id: 'text_messages_scope_mismatch',
+    alert: 'Text messages',
+    severity: 'SEV-2',
+    summary:
+      'An outbox envelope and its aggregate disagree about scope: a security signal, and nothing was sent for it.',
+    runbook: '§4.1',
+    fires: (history) =>
+      anyInstance(
+        history,
+        (scrapes) =>
+          increase(
+            scrapes,
+            (scrape) => total(scrape, 'notification_relay_total', { outcome: 'SCOPE_MISMATCH' }),
+            15 * MINUTE,
+          ) > 0,
+      ),
+  },
+  {
+    id: 'text_messages_dead_letter',
+    alert: 'Text messages',
+    severity: 'SEV-3',
+    summary:
+      'An outbox envelope went to the dead letter, for an event no message answers or after the relay gave up: an act whose messages were never made.',
+    runbook: '§4.1',
+    fires: (history) =>
+      anyInstance(history, (scrapes) => increase(scrapes, deadLettered, 15 * MINUTE) > 0),
+  },
+  {
+    id: 'text_messages_provider_failure_rate',
+    alert: 'Text messages',
+    severity: 'SEV-3',
+    summary:
+      'The text provider refused, gave no answer or gave up on more than 10% of at least 20 business texts in 15 minutes.',
+    runbook: '§4.1',
+    fires: (history) =>
+      anyInstance(history, (scrapes) => {
+        const attempted = increase(scrapes, textAttempts, 15 * MINUTE);
+        const failed = increase(scrapes, textFailures, 15 * MINUTE);
+        return attempted >= PROVIDER_MINIMUM_ATTEMPTS && failed / attempted > 0.1;
+      }),
   },
   ...providerRules('EMAIL'),
   ...providerRules('SMS'),

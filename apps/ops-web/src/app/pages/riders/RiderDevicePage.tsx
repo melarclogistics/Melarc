@@ -24,7 +24,7 @@ import { useRider, type RiderRecord } from '../../../platform/rider/use-rider-qu
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { UUID } from '../staff/WithProfile';
 import { CodeRecovery } from './CodeRecovery';
-import { EnrolmentCode, LapsedCode } from './EnrolmentCode';
+import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNoAccess, RiderNotFound, RiderOutsideHubs } from './RiderDetailPage';
 import { deviceSentence, mayBindDevice, RIDER_STATUS_MAP } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
@@ -167,12 +167,10 @@ function ReplaceDevice({
           void navigate(`/admin/riders/${id}`);
         }}
         onNew={asked}
-        renewing={command.phase === 'sending'}
       />
     );
   }
-  if (code.status === 'expired')
-    return <LapsedCode onNew={asked} renewing={command.phase === 'sending'} />;
+  if (code.status === 'expired') return <LapsedCode onNew={asked} />;
 
   return (
     <form
@@ -182,6 +180,7 @@ function ReplaceDevice({
       aria-busy={command.phase === 'sending' ? true : undefined}
       onSubmit={submit}
     >
+      {code.withdrawn ? <WithdrawnCode /> : null}
       <ReasonSelect
         query={reasons}
         value={choice}

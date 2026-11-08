@@ -277,7 +277,10 @@ export type Arrangement =
   | readonly ['age-trusted-browsers', workEmail: string, days: string]
   | readonly ['lapse-lock', workEmail: string]
   | readonly ['lapse-rider-challenge-window']
-  | readonly ['expire-vendor-setup-grant', accountIdentifier: string];
+  | readonly ['expire-vendor-setup-grant', accountIdentifier: string]
+  | readonly ['lapse-rider-lock', phone: string]
+  // The pool of a day's confirmed pickups of the demonstration vendor (at most eight; the codes are `fixturePickupCode` of the arrangements).
+  | readonly ['add-confirmed-pickups', vendor: string, day: string, count: string];
 
 export async function arrange(database: string, ...arrangement: Arrangement): Promise<number> {
   const [name, ...args] = arrangement;

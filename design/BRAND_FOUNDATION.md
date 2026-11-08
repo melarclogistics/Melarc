@@ -21,6 +21,8 @@ Detailed semantic tokens, accessibility pairings, responsive behavior, density r
 
 Implemented component patterns belong in `design/COMPONENT_PATTERNS.md`.
 
+The experience direction (how screens are composed, which references inform them, and when a proposal needs a product decision) belongs in [PRODUCT_DESIGN_DIRECTION.md](PRODUCT_DESIGN_DIRECTION.md).
+
 ---
 
 ## 2. Decision status
@@ -48,6 +50,8 @@ The following values are working design inputs, not immutable brand law:
 - exact spacing, radius, elevation, motion, and responsive values.
 
 These values may be refined in the Design System when accessibility and real component usage are verified.
+
+**Settled since.** The Product Owner approved the interface crimson `#B4232E`, the interface ink `#172033` and Inter as the active values on 6 October 2026 ([DESIGN_SYSTEM §36](DESIGN_SYSTEM.md#36-current-design-system-decision-summary)). Read the PROVISIONAL and RECOMMENDED labels of this section and of §22, and the open typeface item of §2.3, accordingly for those three.
 
 ### 2.3 Open asset/design confirmations
 
@@ -758,7 +762,9 @@ Design-system refinements that do not change the approved brand identity belong 
 
 Component-specific decisions belong in `design/COMPONENT_PATTERNS.md`.
 
-Do not duplicate the same rule across all three documents when one document clearly owns it.
+Experience direction (page patterns, inspiration, how a significant proposal is raised) belongs in `design/PRODUCT_DESIGN_DIRECTION.md`.
+
+Do not duplicate the same rule across all four documents when one document clearly owns it.
 
 ---
 

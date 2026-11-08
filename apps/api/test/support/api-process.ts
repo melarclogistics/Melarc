@@ -16,6 +16,10 @@ export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
 export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
+/** The upgrade check of migration 0064 (S1.21): a command the owner runs between building and migrating. */
+export const DB_COMMITMENT_MARKS = resolve(API_ROOT, 'dist/tools/db-commitment-marks.js');
+/** The upgrade check of migration 0065 (S1.22): does a cancelled request still hold a stop to be worked? Read-only. */
+export const DB_OPEN_STOPS = resolve(API_ROOT, 'dist/tools/db-open-stops.js');
 /** The two bootstrap commands (S0.30): processes an operator starts as the provisioning login, which nothing in the application runs. */
 export const BOOTSTRAP_SEED = resolve(API_ROOT, 'dist/tools/bootstrap-seed.js');
 export const BOOTSTRAP_RESUME = resolve(API_ROOT, 'dist/tools/bootstrap-resume.js');
@@ -74,6 +78,7 @@ export function requireBuild(): void {
     DB_RESET,
     DB_SEED,
     DB_ORPHANS,
+    DB_COMMITMENT_MARKS,
     BOOTSTRAP_SEED,
     BOOTSTRAP_RESUME,
     WORKER_MAIN,

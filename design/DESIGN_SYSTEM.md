@@ -5,7 +5,7 @@
 > **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4.6, §11, §13.1, §14, §22, §24–§26, §29, §36)  
 > **Repository path:** `design/DESIGN_SYSTEM.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`  
-> **Owns:** semantic design tokens, accessibility rules, typography scale, spacing, radius, elevation, focus treatment, responsive behavior, density, UI state presentation, token naming, and the initial UI-foundation implementation scope  
+> **Owns:** semantic design tokens, accessibility rules, typography scale, spacing, radius, elevation, focus treatment, responsive behavior, density, UI state presentation, token naming, the web UI library policy (§23, §24a), and the initial UI-foundation implementation scope  
 > **Does not own:** product workflows, business rules, API behavior, domain state semantics, logo source artwork, or speculative component APIs
 
 ---
@@ -1130,6 +1130,13 @@ Initial rules:
 
 The first design-system gate does **not** require a complete generic data-grid abstraction.
 
+**Advanced grid behavior is weighed against a screen before it is built by hand.** Selection, resizing, column pinning, virtualization
+and in-place editing are not built on speculation. When a concrete screen's requirements exceed this table, a specialist grid is
+evaluated against those requirements first, on the terms of §24a: one door behind a Melarc component, appearance from the portal's
+tokens alone, no inline style under the content-security policy, the accessibility baseline (§14) met, a licence that ships with the build. Only if no grid serves
+the screen is the behavior built here. Either way it is a new pattern (COMPONENT_PATTERNS §37) and a change of technical foundation,
+surfaced before it is built ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)).
+
 ---
 
 ## 24. Icons
@@ -1199,6 +1206,13 @@ not built. The two builds were scratch work and are not kept in the repository; 
   shown day, month, year, with the week from Monday and English month names, **fixed by the portal and not taken from the browser**
   (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and
   03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
+- **No framework migration.** React Aria Components is a source of behaviour behind the portal's components, not a step towards a component
+  framework. The web applications are not migrated project-wide to Ant Design, MUI or another UI framework (decided 1 November 2026): each
+  brings a look and a token system of its own, which BRAND_FOUNDATION §14 does not let a library impose. The semantic tokens control
+  appearance. Proposing one is a foundation change (§34) and is surfaced first
+  ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)).
+- **Web only.** This policy is for the web applications, the Ops Portal and, when it is built, the Vendor PWA. It does not prescribe
+  Android implementation libraries: the Rider app maps the same semantic foundations to native Android (§30).
 
 ---
 
@@ -1472,6 +1486,9 @@ Those should be selected based on the actual web implementation and project cons
 
 The selected technology must serve this design system, not redefine it.
 
+Since 1 November 2026 a project-wide move to Ant Design, MUI or another UI framework is outside the approved direction, and a specialist grid
+is weighed against a concrete screen before advanced grid behavior is built by hand (§24a, §23).
+
 ---
 
 ## 34. Design review expectations
@@ -1554,6 +1571,7 @@ Each pattern should eventually document:
 | Layout of the pre-sign-in screens (§13.1, §13.1a) | **DECIDED** 25 October 2026 (Product Owner): a **split screen**, photography beside the form; the photographs are theirs (`design/images`), their licence is theirs to confirm |
 | Icon family (§24) | **DECIDED** 25 October 2026 (Product Owner): **Lucide**, through one registry; IconButton is built |
 | Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field is its first component |
+| Web library policy (§23, §24a) | **DECIDED** 1 November 2026 (Product Owner): native elements first; React Aria Components behind Melarc's components; the semantic tokens control appearance; **no project-wide migration** to Ant Design, MUI or another UI framework; a **specialist grid is weighed against a concrete screen's requirements** before advanced grid behavior is built by hand; a web policy that does not prescribe Android libraries |
 | Date entry and display (§24a; COMPONENT_PATTERNS §22a) | **DECIDED** 28 October 2026 (Product Owner): day, month, year, week from Monday, English; fixed by the portal and not the browser's; "today" is Accra's |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
 | Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |

@@ -119,19 +119,35 @@ describe('the real application against the real contract', () => {
   // operation with no live route and no description must fail, and say which operation it was.
   it('fails when the scope claims an operation that has no route', async () => {
     const { app } = await start();
+    // An operation of the contract that this implementation does not claim: found in the contract, so that the test does not go stale
+    // each time a task implements the one it used to name. A read without a path parameter, so that its place is simple to state.
+    const unclaimed = Object.entries(
+      (REAL_CONTRACT.paths ?? {}) as Record<string, Record<string, { operationId?: string }>>,
+    )
+      .filter(([path]) => !path.includes('{'))
+      .flatMap(([path, item]) =>
+        Object.entries(item)
+          .filter(([method]) => method === 'get')
+          .map(([method, operation]) => ({ path, method, id: operation.operationId })),
+      )
+      .find((each) => each.id !== undefined && !IMPLEMENTED_OPERATIONS.includes(each.id));
+    if (unclaimed?.id === undefined)
+      throw new Error('the contract has no unclaimed read to test with');
 
     const report = await checkApplication(app, {
       contract: REAL_CONTRACT,
-      scope: [...IMPLEMENTED_OPERATIONS, 'getPickupRequest'],
+      scope: [...IMPLEMENTED_OPERATIONS, unclaimed.id],
     });
 
     expect(codes(report.findings).toSorted()).toEqual([
       'OPERATION_NOT_DESCRIBED',
       'OPERATION_NOT_LIVE',
     ]);
-    expect(report.findings.every((finding) => finding.at === 'GET /pickup-requests/{id}')).toBe(
-      true,
-    );
+    expect(
+      report.findings.every(
+        (finding) => finding.at === `${unclaimed.method.toUpperCase()} ${unclaimed.path}`,
+      ),
+    ).toBe(true);
   });
 
   // Break caught: a business route added without the contract having an operation for it. The real

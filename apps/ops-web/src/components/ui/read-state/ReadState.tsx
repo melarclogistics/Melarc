@@ -33,6 +33,11 @@ export interface ReadStateProps<Data> {
   /** The `operationId` of the read, so that its failures are worded for it. */
   readonly operation?: string;
   readonly context?: string;
+  /**
+   * A way out of a failure that a retry is not (asking again for the same thing would fail the same way), offered under the message: the
+   * screen's own control, such as the first page of a queue whose saved page the server will not open. Shown for a failure only.
+   */
+  readonly recovery?: ReactNode;
 }
 
 function RefusalOrFailure({
@@ -40,11 +45,13 @@ function RefusalOrFailure({
   permission,
   onRetry,
   retrying,
+  recovery,
 }: {
   readonly problem: Problem;
   readonly permission: string | undefined;
   readonly onRetry: () => void;
   readonly retrying: boolean;
+  readonly recovery: ReactNode;
 }): ReactNode {
   if (problem.kind === 'session-ended' || problem.kind === 'stale') return null;
 
@@ -87,6 +94,7 @@ function RefusalOrFailure({
           </Button>
         </p>
       ) : null}
+      {recovery === undefined ? null : <p className="ui-read-state__retry">{recovery}</p>}
     </>
   );
 }
@@ -111,6 +119,7 @@ export function ReadState<Data>({
   permission,
   operation,
   context,
+  recovery,
 }: ReadStateProps<Data>) {
   const region = useRef<HTMLDivElement>(null);
   const place = {
@@ -132,6 +141,7 @@ export function ReadState<Data>({
         problem={problemOf(query.error, place)}
         permission={permission}
         retrying={query.isFetching}
+        recovery={recovery}
         onRetry={() => {
           region.current?.focus();
           void query.refetch();

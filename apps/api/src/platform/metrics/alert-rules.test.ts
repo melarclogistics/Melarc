@@ -30,6 +30,202 @@ const AGE = 'credential_delivery_oldest_due_age_seconds';
 const attempts = (channel: string, result: string) =>
   `credential_delivery_attempts_total{channel="${channel}",result="${result}"}`;
 
+describe('the alert rules of the business texts (S1.12e; the Product Owner’s thresholds of 30 October 2026)', () => {
+  const TEXT_AGE = 'notification_oldest_due_age_seconds';
+  const sends = (result: string) => `notification_sends_total{result="${result}"}`;
+  const relay = (outcome: string) => `notification_relay_total{outcome="${outcome}"}`;
+  /** Scrapes every five minutes up to `minutes`, the series growing linearly from `from` to `to`. */
+  const growing = (minutes: number, series: Record<string, readonly [number, number]>): Scrape[] =>
+    Array.from({ length: minutes / 5 + 1 }, (_, step) =>
+      scrape(
+        step * 5,
+        Object.fromEntries(
+          Object.entries(series).map(([name, [from, to]]) => [
+            name,
+            from + ((to - from) * step) / (minutes / 5),
+          ]),
+        ),
+      ),
+    );
+
+  it('fire nothing on a quiet history', () => {
+    expect(
+      firing(
+        growing(20, {
+          [TEXT_AGE]: [0, 0],
+          [sends('SENT')]: [10, 30],
+          [relay('MATERIALISED')]: [5, 25],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  describe('the backlog of business texts', () => {
+    // Break caught: a backlog alert that pages on one slow reading, or never pages on one that lasts.
+    it('warns when work has been due for more than 5 minutes for 15 minutes, and not for less', () => {
+      const old = Array.from({ length: 16 }, (_, minute) =>
+        scrape(minute, { [TEXT_AGE]: 301 + minute * 60 }),
+      );
+      expect(firing(old)).toEqual(['text_messages_backlog_warning']);
+      expect(firing(old.slice(0, 14))).toEqual([]);
+      const brief = Array.from({ length: 16 }, (_, minute) =>
+        scrape(minute, { [TEXT_AGE]: minute === 7 ? 0 : 400 }),
+      );
+      expect(firing(brief)).toEqual([]);
+    });
+
+    // Break caught: the boundary read as the other side, so that exactly five minutes pages.
+    it('does not warn at exactly 5 minutes', () => {
+      expect(
+        firing(Array.from({ length: 16 }, (_, minute) => scrape(minute, { [TEXT_AGE]: 300 }))),
+      ).toEqual([]);
+    });
+
+    // Break caught: a worker that predates the series read as one with a backlog of zero, or of everything.
+    it('does not warn of a worker that serves no such gauge', () => {
+      expect(
+        firing(Array.from({ length: 16 }, (_, minute) => scrape(minute, { [AGE]: 0 }))),
+      ).toEqual([]);
+    });
+  });
+
+  describe('the dead letter', () => {
+    // Break caught: an act whose messages were never made, going unnoticed because the message log cannot show it.
+    it.each(['UNKNOWN_EVENT', 'SCHEDULE_EXHAUSTED'])(
+      'raises a finding when an envelope goes to the dead letter as %s',
+      (outcome) => {
+        expect(
+          firing([scrape(0, { [relay(outcome)]: 0 }), scrape(5, { [relay(outcome)]: 1 })]),
+        ).toEqual(['text_messages_dead_letter']);
+      },
+    );
+
+    // Break caught: the ordinary outcomes of a relay read as dead letters.
+    it.each(['MATERIALISED', 'NOTHING_TO_SEND', 'RETRY'])(
+      'does not for a relay that ends as %s',
+      (outcome) => {
+        expect(
+          firing([scrape(0, { [relay(outcome)]: 0 }), scrape(5, { [relay(outcome)]: 40 })]),
+        ).toEqual([]);
+      },
+    );
+
+    // Break caught: a window shorter than a quarter of an hour, so that a dead letter ten minutes old is no longer a finding.
+    it('is still a finding ten minutes later, within the quarter of an hour', () => {
+      expect(
+        firing([
+          scrape(0, { [relay('UNKNOWN_EVENT')]: 0 }),
+          scrape(10, { [relay('UNKNOWN_EVENT')]: 1 }),
+          scrape(20, { [relay('UNKNOWN_EVENT')]: 1 }),
+        ]),
+      ).toEqual(['text_messages_dead_letter']);
+    });
+
+    it('does not for a dead letter that was already there, or one older than the window', () => {
+      expect(
+        firing([
+          scrape(0, { [relay('UNKNOWN_EVENT')]: 2 }),
+          scrape(5, { [relay('UNKNOWN_EVENT')]: 2 }),
+        ]),
+      ).toEqual([]);
+      expect(
+        firing([
+          scrape(0, { [relay('UNKNOWN_EVENT')]: 0 }),
+          scrape(5, { [relay('UNKNOWN_EVENT')]: 1 }),
+          scrape(25, { [relay('UNKNOWN_EVENT')]: 1 }),
+        ]),
+      ).toEqual([]);
+    });
+  });
+
+  describe('the scope mismatch', () => {
+    // Break caught: the security signal of SECURITY_DESIGN.md §14.7 step 8 raised as an ordinary finding, or not at all.
+    it('raises the security signal, as SEV-2, and not the dead-letter finding', () => {
+      const history = [
+        scrape(0, { [relay('SCOPE_MISMATCH')]: 0 }),
+        scrape(5, { [relay('SCOPE_MISMATCH')]: 1 }),
+      ];
+      expect(firing(history)).toEqual(['text_messages_scope_mismatch']);
+      expect(firingAlerts(history).map((rule) => rule.severity)).toEqual(['SEV-2']);
+    });
+
+    // Break caught: the same window shortened, so that a mismatch ten minutes old is no longer a signal.
+    it('is still a signal ten minutes later, within the quarter of an hour', () => {
+      expect(
+        firing([
+          scrape(0, { [relay('SCOPE_MISMATCH')]: 0 }),
+          scrape(10, { [relay('SCOPE_MISMATCH')]: 1 }),
+          scrape(20, { [relay('SCOPE_MISMATCH')]: 1 }),
+        ]),
+      ).toEqual(['text_messages_scope_mismatch']);
+    });
+
+    it('does not for the same count read again', () => {
+      expect(
+        firing([
+          scrape(0, { [relay('SCOPE_MISMATCH')]: 3 }),
+          scrape(5, { [relay('SCOPE_MISMATCH')]: 3 }),
+        ]),
+      ).toEqual([]);
+    });
+
+    // Break caught: the window lengthened, so that a mismatch from twenty minutes ago is still read as a new one.
+    it('does not for a mismatch older than the quarter of an hour', () => {
+      expect(
+        firing([
+          scrape(0, { [relay('SCOPE_MISMATCH')]: 0 }),
+          scrape(5, { [relay('SCOPE_MISMATCH')]: 1 }),
+          scrape(25, { [relay('SCOPE_MISMATCH')]: 1 }),
+        ]),
+      ).toEqual([]);
+    });
+  });
+
+  describe('the provider’s refusals, silences and exhausted schedules (at least 20 texts, 15 minutes)', () => {
+    // Break caught: a percentage read on too little traffic (section 3.2a), or the threshold read as at-or-above.
+    it('flags more than 10% of at least 20 texts, and not 10% or fewer texts', () => {
+      expect(
+        firing(growing(15, { [sends('SENT')]: [0, 17], [sends('REJECTED')]: [0, 3] })),
+      ).toEqual(['text_messages_provider_failure_rate']);
+      expect(
+        firing(growing(15, { [sends('SENT')]: [0, 18], [sends('REJECTED')]: [0, 2] })),
+      ).toEqual([]);
+      expect(
+        firing(growing(15, { [sends('SENT')]: [0, 9], [sends('REJECTED')]: [0, 10] })),
+      ).toEqual([]);
+    });
+
+    // Break caught: an unanswered attempt, the first sign of an outage, read as a success until its schedule ends hours later.
+    it.each(['REJECTED', 'RETRY', 'SCHEDULE_EXHAUSTED'])('counts %s as a failure', (result) => {
+      expect(firing(growing(15, { [sends('SENT')]: [0, 14], [sends(result)]: [0, 6] }))).toEqual([
+        'text_messages_provider_failure_rate',
+      ]);
+    });
+
+    // Break caught: a window shorter than a quarter of an hour, so that failures ten minutes old no longer count.
+    it('still flags failures ten minutes old, within the quarter of an hour', () => {
+      expect(
+        firing([
+          scrape(0, { [sends('SENT')]: 0, [sends('REJECTED')]: 0 }),
+          scrape(10, { [sends('SENT')]: 14, [sends('REJECTED')]: 6 }),
+          scrape(20, { [sends('SENT')]: 24, [sends('REJECTED')]: 6 }),
+        ]),
+      ).toEqual(['text_messages_provider_failure_rate']);
+    });
+
+    // Break caught: the failures of an hour ago paging now.
+    it('judges the last 15 minutes and not the history', () => {
+      const history = [
+        scrape(0, { [sends('SENT')]: 0, [sends('REJECTED')]: 0 }),
+        scrape(20, { [sends('SENT')]: 10, [sends('REJECTED')]: 30 }),
+        scrape(30, { [sends('SENT')]: 40, [sends('REJECTED')]: 30 }),
+        scrape(45, { [sends('SENT')]: 70, [sends('REJECTED')]: 30 }),
+      ];
+      expect(firing(history)).toEqual([]);
+    });
+  });
+});
+
 describe('the alert rules of the credential path and the trust data (S0.68)', () => {
   it('read what the exposition writes', () => {
     const metrics = new BoundedMetrics({
@@ -230,6 +426,15 @@ describe('the alert rules of the credential path and the trust data (S0.68)', ()
       'older than 24 hours**, or the accepted roots cannot be loaded',
     );
     expect(row('Dead letters')).toContain('**any** financial or security-sensitive dead letter');
+    // The business texts (decided by the Product Owner on 30 October 2026).
+    expect(row('Business texts')).toContain(
+      'the oldest due text or envelope **>5 minutes** for 15 minutes',
+    );
+    expect(row('Business texts')).toContain(
+      '**>10%** of the sends in 15 minutes across **at least 20 attempts**',
+    );
+    expect(row('Business texts')).toContain('a relay ending in `SCOPE_MISMATCH`');
+    expect(document).toContain('| **Text messages** *(30 October 2026)*|');
     expect(document).toContain('| **Provider percentage thresholds**| **20 provider attempts**|');
     expect(new Set(ALERT_RULES.map((rule) => rule.id)).size).toBe(ALERT_RULES.length);
   });

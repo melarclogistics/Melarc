@@ -3,6 +3,8 @@ import { Module } from '@nestjs/common';
 import { vendorAccountsProviders } from './vendor-accounts-providers.js';
 import { VendorAccountsController } from './vendor-accounts.controller.js';
 import { vendorCredentialAdministrationProviders } from './vendor-credential-administration-providers.js';
+import { vendorPickupLocationsProviders } from './vendor-pickup-locations-providers.js';
+import { VendorPickupLocationsController } from './vendor-pickup-locations.controller.js';
 import { VendorCredentialAdministrationController } from './vendor-credential-administration.controller.js';
 
 /**
@@ -12,7 +14,15 @@ import { VendorCredentialAdministrationController } from './vendor-credential-ad
  * Creating, approving and suspending a vendor are SLICE-008's.
  */
 @Module({
-  controllers: [VendorAccountsController, VendorCredentialAdministrationController],
-  providers: [...vendorAccountsProviders, ...vendorCredentialAdministrationProviders],
+  controllers: [
+    VendorAccountsController,
+    VendorCredentialAdministrationController,
+    VendorPickupLocationsController,
+  ],
+  providers: [
+    ...vendorAccountsProviders,
+    ...vendorCredentialAdministrationProviders,
+    ...vendorPickupLocationsProviders,
+  ],
 })
 export class VendorModule {}

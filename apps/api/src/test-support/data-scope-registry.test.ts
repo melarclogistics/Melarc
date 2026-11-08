@@ -23,6 +23,15 @@ describe('the data scope registry as the tests read it (GBT-S1, S2)', () => {
   it('reads every section, with the table counts the document states', () => {
     const count = (scopeClass: string) =>
       rows.filter((row) => row.scopeClass === scopeClass).length;
+    // The figures are the ones the document's own headings state ("### 4.2 `HUB` — 47 tables"), read from it, so a row
+    // added with its heading changed does not mean editing a literal here: a heading that disagrees with its rows fails.
+    const stated: Record<string, number> = {};
+    for (const match of REGISTRY.matchAll(/^### 4\.\d+ `([A-Z_]+)` — (\d+) tables?\s*$/gm)) {
+      stated[match[1] ?? ''] = Number(match[2]);
+    }
+    expect(Object.keys(stated).toSorted()).toEqual(
+      ['AUDIT', 'HUB', 'PLATFORM', 'RIDER_ASSIGNMENT', 'SYSTEM', 'VENDOR'].toSorted(),
+    );
     expect({
       PLATFORM: count('PLATFORM'),
       HUB: count('HUB'),
@@ -30,7 +39,7 @@ describe('the data scope registry as the tests read it (GBT-S1, S2)', () => {
       RIDER_ASSIGNMENT: count('RIDER_ASSIGNMENT'),
       AUDIT: count('AUDIT'),
       SYSTEM: count('SYSTEM'),
-    }).toEqual({ PLATFORM: 19, HUB: 47, VENDOR: 10, RIDER_ASSIGNMENT: 2, AUDIT: 2, SYSTEM: 4 });
+    }).toEqual(stated);
   });
 
   it('lists a table once', () => {

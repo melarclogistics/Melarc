@@ -99,7 +99,7 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 | Corridor, **off** its batch day| **`corridor_off_day_fee`** + `single_package_pickup_fee`|
 | Outside Accra| **No estimate returned** — the carrier's charge is unknown until itemization|
 
-**It is still provisional, and for a reason that survives:** the size class is selected by a receiving officer at itemization. What no longer happens is a **2.6×** surprise on a destination the system already held — a single package to Kasoa on a Tuesday showed GH₵35 and was charged GH₵90.
+**It is still provisional, and for a reason that survives:** the size class is selected by a receiving officer at itemization. What no longer happens is a surprise on a destination the system already held — a single package to a corridor on a non-batch day was shown at the batch fee and charged the off-day fee plus the pickup fee.
 
 **The client still never sends a price.** It sends an address; the server resolves the area and computes the figure (§42.3).
 4. The request waits in the unmanifested pool until a manifest claims it (§21.2).
@@ -108,9 +108,9 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 
 | Path| Behaviour| Error code|
 |---|---|---|
-| Fewer than 2 packages, no exception| Refused. Self-booking a single package is barred for both customer types (§21.1)| `PICKUP_MINIMUM_NOT_MET`|
+| Fewer than 2 packages, no exception| Refused for a vendor or ad-hoc sender session: self-booking a single package is barred for both customer types (§21.1). Ops may create a one-package request, which then waits for its exception (next row)| `PICKUP_MINIMUM_NOT_MET`|
 | Corridor destination off its batch day| **Accepted and priced at `corridor_off_day_fee`**, not refused. Only a day with no batch run *and* no configured off-day fee is refused| `CORRIDOR_DAY_NOT_PERMITTED`|
-| One-package exception| Ops requests; **any holder of `pickup.exception.approve` approves** — Senior Ops, Platform Admin, or Ops Staff explicitly granted it, and never the requester unless the approver is a Platform Admin. **Recipient name, phone and delivery address become mandatory** (§21.1). **Additionally carries `single_package_pickup_fee`, GH₵20** — approval decides whether Melarc goes, the fee prices the dedicated trip. The two are independent: approval does not waive the fee| `SELF_APPROVAL_FORBIDDEN`|
+| One-package exception| Ops creates the request with its one package (`createPickupRequest` accepts a single package from an Ops session only) and requests the exception; the request stays `PENDING` and cannot be confirmed until the exception is approved. **Any holder of `pickup.exception.approve` approves** — Ops Staff, Senior Ops or Platform Admin — and never the requester unless the approver is a Platform Admin; the approving actor is recorded in the audit trail. **Recipient name, phone and delivery address become mandatory** (§21.1) and travel with the exception request. **Additionally carries `single_package_pickup_fee`, GH₵20** — approval decides whether Melarc goes, the fee prices the dedicated trip. The two are independent: approval does not waive the fee| `SELF_APPROVAL_FORBIDDEN`, `PICKUP_MINIMUM_NOT_MET`|
 | Sunday, or zone not serviced that day| Refused. Uniform Monday–Saturday calendar, no zone variation (§21.1, `MSC-DEC-149`)| `SERVICE_DATE_NOT_PERMITTED`, `ZONE_NOT_SERVICED_ON_DATE`|
 | **Past the hub booking cutoff**| **Confirms and queues for Ops review** — neither auto-scheduled nor blocked (§21.1). Ops approves a same-day exception or reschedules to the next operating day| **none** — a late booking is not an error|
 | Suspended sender| Refused; existing non-terminal requests go on controlled hold, preserved not cancelled| `SENDER_SUSPENDED`|
@@ -124,7 +124,7 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 
 ### 5.3 Cancellation, and the charge that may follow
 
-**The request never becomes uncancellable.** Office cancellation is available at every point; what changes after rider assignment is that it **may** carry a charge.
+**The request never becomes uncancellable.** Office cancellation is available at every point; what changes after rider assignment is that it **may** carry a charge. **A cancellation by the office takes effect at once on the stop that holds the request**, on a draft manifest and on a dispatched one, in the same transaction: the stop is skipped with the system's reason `REQUEST_CANCELLED` (and a stop already collected, failed or skipped is left as it is), the rider's acknowledgement decides nothing, and the charge is decided as below whatever happens to the stop ([pickup-manifest.md](pickup-manifest.md) §5.2).
 
 | Who| When| Charge|
 |---|---|---|
@@ -132,6 +132,8 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 | Ops| Any point, own hub| None before rider assignment|
 | Ops| After rider assignment, reason attributed `CUSTOMER` or `EXTERNAL`| **Discretionary** `cancellation_charge_amount` — GH₵20 at the Accra hub|
 | Ops| After rider assignment, reason attributed **`MELARC`**| **None, and not at Ops’ discretion**. Outcome records `EXEMPT`|
+
+**"After rider assignment" means the request is committed to a rider now** (the Product Owner, 2 November 2026; OB-S1-35): its current, unreleased claim sits on a manifest that has a rider. A rider who was once assigned establishes nothing. The mark on the request (`rider_assigned`) records exactly that: `assignRider` raises it on every confirmed request the manifest holds, and `cancelPickupManifest` lowers it, in the transaction that releases the claims, on the requests that are still confirmed. A request returned to the pool by the cancellation of its manifest is therefore **not committed**: its later cancellation by the office is free of any charge decision, as for any request no rider holds, and the mark is raised again only if a later manifest claims it and is given a rider. Giving a draft another rider keeps the commitment. What was decided is not recalculated: a request cancelled while it was committed keeps its charge decision, its snapshot and its mark (a cancelled request is frozen), and the cancellation of its manifest changes none of them; the assignment history and the audit trail (`pickup.manifest.rider_assigned`, `pickup.manifest.cancelled` with the commitments it ended) remain. The vendor's own cancellation of a confirmed request is dormant in Version 1 (`MSC-DEC-196`) and stays so: the mark acts today on the office's decision and not on the vendor. The cancellation is judged on the mark of the request the officer has locked, not on a read of the stop or the manifest, which a vendor or an officer of another hub could not make; an officer who read the request before the commitment changed is told to read again (`STATE_CONFLICT`: the mark is part of the request's `ETag`).
 
 **Discretionary means the permission does not mandate the charge.** `MSC-DEC-197` is explicit: holding `pickup.request.cancel_chargeable` lets Ops apply the charge, it does not require them to. A build that charges automatically on every post-assignment cancellation has implemented a different policy from the approved one, and it will look correct in every test that only checks the happy path.
 
@@ -216,7 +218,7 @@ Fields whose behaviour here is non-obvious: `attempt_number` (capped at 3), `rep
 
 ## 12. API operations — *pointer*
 
-`createPickupRequest`, `listPickupRequests`, `getPickupRequest`, `confirmPickupRequest`, `cancelPickupRequest`, `waiveCancellationCharge`, `escalatePickupRequest`, `extendPickupAttempts`, `requestOnePackageException`, `approveOnePackageException` — [openapi.yaml](../../contracts/openapi.yaml).
+`createPickupRequest`, `listPickupRequests` (its `manifested` filter is the manifest pool), `getPickupRequest`, `confirmPickupRequest`, `resolveCutoffException`, `amendPickupRequest`, `findAdHocSender`, `listVendorPickupLocations`, `cancelPickupRequest`, `waiveCancellationCharge`, `escalatePickupRequest`, `extendPickupAttempts`, `requestOnePackageException`, `approveOnePackageException` — [openapi.yaml](../../contracts/openapi.yaml).
 
 **The last three were added on 23 August**. Their permissions had existed since the catalogue was written; the calls had not.
 
@@ -252,17 +254,19 @@ And no request is created.
 ### `AC-SLICE-001-03` — One-package exception needs the permission and recipient details
 
 ```text
-Given an Ops user has requested a one-package exception,
-When a user WITHOUT pickup.exception.approve attempts to approve it,
-Then the backend rejects the approval with PERMISSION_DENIED,
-And when any holder of pickup.exception.approve approves it - Senior Ops, Platform Admin,
-  or an Ops Staff member explicitly granted it - recipient name, phone and delivery
-  address are mandatory,
+Given an Ops user has created a one-package request and requested the exception with the
+  recipient's name, phone and delivery address,
+When the request is confirmed before the exception is approved,
+Then the backend rejects the confirmation with PICKUP_MINIMUM_NOT_MET,
+And when a user WITHOUT pickup.exception.approve attempts to approve the exception,
+  the backend rejects the approval with PERMISSION_DENIED,
+And when any holder of pickup.exception.approve approves it - Ops Staff, Senior Ops or
+  Platform Admin - the request can then be confirmed and the approving actor is audited,
 And a drafting user who is not a Platform Admin may not approve their own request,
-And the approved GH20 single-package fee becomes due on acceptance.
+And the approved GH₵20 single-package fee becomes due on acceptance.
 ```
 
-**Governs:** §21.1, §11.4 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `PERMISSION_DENIED`, `SELF_APPROVAL_FORBIDDEN`
+**Governs:** §21.1, §11.4 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `PICKUP_MINIMUM_NOT_MET`, `PERMISSION_DENIED`, `SELF_APPROVAL_FORBIDDEN`
 
 ### `AC-SLICE-001-04` — A late booking queues, it does not fail
 
@@ -286,7 +290,7 @@ And the request remains CONFIRMED,
 And office cancellation of the same request still succeeds.
 ```
 
-**Governs:** `MSC-DEC-196` · **Surface:** Melarc Vendor · **Test level:** API · **Code:** `PERMISSION_DENIED`
+**Governs:** §21.6, §11.4, `MSC-DEC-196` · **Surface:** Melarc Vendor · **Test level:** API · **Code:** `PERMISSION_DENIED`
 
 ### `AC-SLICE-001-06` — Reschedule creates a linked clone, never an edit
 
@@ -403,7 +407,7 @@ And the original snapshotted amount and version remain readable on the record,
 And no request carrying a partial waiver amount is accepted.
 ```
 
-**Governs:** §3.7, §21.6, `MSC-DEC-197` · **Surface:** Melarc Ops · **Test level:** API
+**Governs:** §3.7, §21.6, `MSC-DEC-197` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`
 
 ---
 
@@ -418,6 +422,8 @@ And a request supplying collection_point or collection_item is REJECTED as mis-d
 And a transaction-specific description is accepted where this shipment differs from the profile.
 ```
 
+**Governs:** §21.1, §35.2, `MSC-DEC-335` · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** API · **Code:** `VALIDATION_FAILED`
+
 ### `AC-SLICE-001-70` — A `COLLECT_FOR_VENDOR` request sends the rider to the collection point
 
 ```text
@@ -431,6 +437,8 @@ And use_vendor_default_destination against a Vendor with no default is REJECTED,
 And no operation exists by which a rider pays or collects for the merchandise.
 ```
 
+**Governs:** §21.1, §35.2, `MSC-DEC-335` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `DESTINATION_UNRESOLVED`
+
 ### `AC-SLICE-001-71` — A first-time ad-hoc sender is creatable, and a returning one is reused
 
 ```text
@@ -442,6 +450,8 @@ And a request supplying both ad_hoc_sender_id and new_ad_hoc_sender is REJECTED,
 And a request supplying neither is REJECTED.
 ```
 
+**Governs:** §21.1, §35.2, `MSC-DEC-335` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `SENDER_IDENTITY_AMBIGUOUS`
+
 ### `AC-SLICE-001-72` — Today's goods are captured for every ad-hoc booking
 
 ```text
@@ -452,6 +462,8 @@ And current_item_description is REQUIRED on this request,
 And the description from their previous shipment is not carried forward as this one's,
 And resolved_pickup_location is non-null.
 ```
+
+**Governs:** §21.1, §35.2, `MSC-DEC-335` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`
 
 ### `AC-SLICE-001-79` — A vendor reaches only its own requests, and is never told another's exists
 
@@ -466,6 +478,20 @@ And an Ops user who reads an existing request outside their hubs is told HUB_SCO
 
 **Governs:** §37.3, §37.6, §43.2, `MSC-DEC-432` · **Surface:** Melarc Vendor, Melarc Ops · **Test level:** API · **Code:** `NOT_FOUND`, `HUB_SCOPE_VIOLATION`
 
+### `AC-SLICE-001-81` — A declared value above the threshold needs the liability-cap acknowledgement at booking
+
+```text
+Given a pickup request whose declared value is above the hub's value_declaration_threshold,
+When the request is created without liability_cap_acknowledged,
+Then the backend rejects it with VALUE_DECLARATION_REQUIRED,
+And when liability_cap_acknowledged is true the request is accepted,
+And a declared value at or below the threshold needs no acknowledgement.
+```
+
+**Governs:** §23.4, `MSC-DEC-212`, `MSC-DEC-220` · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** API · **Code:** `VALUE_DECLARATION_REQUIRED`
+
+---
+
 ## 14. Open questions blocking this feature
 
 | ID| What it blocks here| Type|
@@ -478,7 +504,7 @@ And an Ops user who reads an existing request outside their hubs is told HUB_SCO
 
 **Nothing outstanding.** Every dependency this feature named has closed. It contributes no blocker to its slice's Definition of Ready.
 
-**Both surface documents exist** — this section said `surfaces/ops-portal.md` and `surfaces/vendor-pwa.md` did not. Their page inventories were accepted under `MSC-DEC-223`. `booking_cutoff_time` and the cancellation charge were set on 23 August, and chargeable cancellation is now specified at §5.3–§5.4 with five criteria.
+**Both surface documents exist** — this section said `surfaces/ops-portal.md` and `surfaces/vendor-pwa.md` did not. Their route and screen inventories were accepted as the low-fidelity interaction specification under `MSC-DEC-223`; [surfaces/overview.md](../../surfaces/overview.md) still lists the full page-level inventory as owed (`OQ-030`). `booking_cutoff_time` and the cancellation charge were set on 23 August, and chargeable cancellation is now specified at §5.3–§5.4 with five criteria.
 
 **Readiness is not assessed here.** [definition-of-ready.md](../../standards/definition-of-ready.md) assesses it **for the complete vertical slice** and records the verdict in the slice document; a feature cannot answer §44.3 or §44.4 alone. This section feeds that assessment instead of duplicating it (`MSC-DEC-239`, closing `CONFLICT-029`).
 
@@ -486,8 +512,8 @@ And an Ops user who reads an existing request outside their hubs is told HUB_SCO
 
 | Surface| Status| Gap|
 |---|---|---|
-| Melarc Ops| ⚪ not built| Everything|
-| Melarc Vendor| ⚪ not built| Everything|
+| Melarc Ops| 🟡 built, Chromium-verified (29 October 2026)| The five screens and every act of this feature (`SLICE-001`, S1.13 to S1.19) exist. The API half is verified against a real PostgreSQL; the screens against a stand-in API (the integrated journeys are S1.49). Owed: Firefox and WebKit, the hosted run, the owner's acceptance of the composed screens, the cancellation reason codes (D-05: none are seeded, so a cancellation cannot be chosen from the dialog yet)|
+| Melarc Vendor| 🟡 API built; the app is not| The vendor's own operations exist and are verified in the API (create, read, list, cancel its own `PENDING` request); the Vendor PWA screens are `SLICE-015`'s (the Product Owner's decision of 29 October 2026)|
 | Melarc Rider| N/A| No request-creation role (§21.1)|
 | Recipient channel| N/A| Recipient unknown at this stage for a standard request|
 
@@ -495,5 +521,5 @@ And an Ops user who reads an existing request outside their hubs is told HUB_SCO
 
 - **Downstream:** `features/pickup/pickup-manifest.md`, `features/pickup/pickup-collection.md` — a confirmed request enters the unmanifested pool
 - **Contracts:** all seven, `APPROVED`
-- **Slice:** `SLICE-001` in `delivery/IMPLEMENTATION_PLAN.md` *(not yet written)*
-- **Surfaces:** `surfaces/ops-portal.md`, `surfaces/vendor-pwa.md` *(not yet written — see §15)*
+- **Slice:** [SLICE-001](../../delivery/slices/SLICE-001.md)
+- **Surfaces:** `surfaces/ops-portal.md`, `surfaces/vendor-pwa.md`

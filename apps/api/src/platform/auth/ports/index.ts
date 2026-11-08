@@ -20,6 +20,7 @@ export * from './port-registry.js';
 export * from './rate-limiter.port.js';
 export * from './secret-cipher.port.js';
 export * from './session-store.port.js';
+export * from './text-message-sender.port.js';
 export * from './token-service.port.js';
 export * from './totp-verifier.port.js';
 export * from './unit-of-work.port.js';

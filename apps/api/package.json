@@ -12,7 +12,8 @@
     "start": "node dist/main.js",
     "start:local": "node --env-file=.env dist/main.js",
     "start:worker": "node dist/delivery-worker-main.js",
-    "start:worker:local": "node --env-file=.env dist/delivery-worker-main.js",
+    "start:worker:local": "node --env-file=.env --env-file-if-exists=.env.sms dist/delivery-worker-main.js",
+    "sms:smoke": "node --env-file=.env --env-file-if-exists=.env.sms dist/tools/sms-smoke.js",
     "openapi:generate": "node dist/tools/generate-openapi.js",
     "contract:check": "node dist/tools/check-contract.js",
     "db:generate": "drizzle-kit generate",
@@ -22,6 +23,8 @@
     "db:seed": "node dist/tools/db-seed.js",
     "db:reset": "node dist/tools/db-reset.js",
     "db:orphans": "node dist/tools/db-orphans.js",
+    "db:commitment-marks": "node dist/tools/db-commitment-marks.js",
+    "db:open-stops": "node dist/tools/db-open-stops.js",
     "bootstrap:seed": "node dist/tools/bootstrap-seed.js",
     "bootstrap:resume": "node dist/tools/bootstrap-resume.js"
   },

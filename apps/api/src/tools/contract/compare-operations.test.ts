@@ -51,6 +51,13 @@ const CONFIRM_AT = 'POST /pickup-requests/{id}/confirm';
 /** Where `confirmPickupRequest` is in the document. */
 const CONFIRM_OPERATION = ['paths', '/pickup-requests/{id}/confirm', 'post'] as const;
 const SCHEMAS = ['components', 'schemas'] as const;
+/**
+ * The error answers of the sample operation as the contract declares them, each of which carries the contract's `Error` body: the tests of
+ * the drift in that body expect one finding for each, however many the contract gives the operation (the first test pins the list itself).
+ */
+const CONFIRM_ERRORS = Object.keys(describeIn(CONTRACT, CONFIRM).responses)
+  .filter((status) => status !== '200')
+  .toSorted();
 
 describe('describing an operation', () => {
   // Break caught: a description that misses part of an operation, which would make that part invisible to
@@ -65,10 +72,13 @@ describe('describing an operation', () => {
     expect(operation.parameters['path:id']?.schema.format).toBe('uuid');
     expect(Object.keys(operation.responses).toSorted()).toEqual([
       '200',
+      '400',
       '401',
       '403',
+      '404',
       '409',
       '422',
+      '429',
     ]);
     expect(operation.security.alternatives).toEqual([
       ['browserSession', 'csrfToken'],
@@ -252,13 +262,10 @@ describe('deliberate drift: enums', () => {
       );
     });
 
-    expect(codes(findings)).toEqual(['SCHEMA_ENUM', 'SCHEMA_ENUM', 'SCHEMA_ENUM', 'SCHEMA_ENUM']);
-    expect(where(findings, 'SCHEMA_ENUM').map((at) => at.split(' > ')[1])).toEqual([
-      'response 401',
-      'response 403',
-      'response 409',
-      'response 422',
-    ]);
+    expect(codes(findings)).toEqual(CONFIRM_ERRORS.map(() => 'SCHEMA_ENUM'));
+    expect(where(findings, 'SCHEMA_ENUM').map((at) => at.split(' > ')[1])).toEqual(
+      CONFIRM_ERRORS.map((status) => 'response ' + status),
+    );
     expect(findings[0]?.message).toContain('"STATE_CONFLICT"');
   });
 
@@ -340,13 +347,12 @@ describe('deliberate drift: error responses', () => {
       copy.set([...SCHEMAS, 'Error', 'required'], ['code', 'message']);
     });
 
-    expect(codes(findings)).toEqual([
-      'SCHEMA_REQUIRED',
-      'SCHEMA_REQUIRED',
-      'SCHEMA_REQUIRED',
-      'SCHEMA_REQUIRED',
-    ]);
-    expect(findings.every((finding) => /response (401|403|409|422) >/.test(finding.at))).toBe(true);
+    expect(codes(findings)).toEqual(CONFIRM_ERRORS.map(() => 'SCHEMA_REQUIRED'));
+    expect(
+      findings.every((finding) =>
+        new RegExp('response (' + CONFIRM_ERRORS.join('|') + ') >').test(finding.at),
+      ),
+    ).toBe(true);
     expect(findings[0]?.message).toContain('"request_id"');
   });
 

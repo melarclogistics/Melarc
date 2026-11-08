@@ -12,7 +12,7 @@
     "build": "turbo run build",
     "typecheck": "pnpm run typecheck:root && turbo run typecheck",
     "typecheck:root": "tsc --project tsconfig.json",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "node --max-old-space-size=6144 ./node_modules/eslint/bin/eslint.js . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "api-client:generate": "pnpm --filter @melarc/api-client run generate",

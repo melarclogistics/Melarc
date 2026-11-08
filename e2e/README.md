@@ -47,7 +47,11 @@ Ops half), registered by two thin specs: `tests/staff-journeys.secret.test.ts` r
 diagnostic**, the session cookies are `Secure`) and `tests/https-staff-journeys.secret.test.ts` runs the same list over the trusted HTTPS origin in
 Chromium, Firefox and WebKit (`pnpm run test:e2e:https`: **the evidence**, CI). Both are `*.secret.test.ts`: passwords, setup keys, codes and links are
 typed into and read from real pages, so the recorders are off and a journey compares facts and never a secret (`SecretText` prints as nothing). The
-journeys are one story told in order, so they run serially and a failure stops the rest. Nothing in them edits a row by hand.
+journeys are one story told in order, so they run serially and a failure stops the rest. Nothing in them edits a row by hand. The last of them
+(S1.25, `harness/journeys/manifest-journeys.ts`) walks the manifest and custody screens against the real API: Ops builds a run from the pool, assigns
+a rider and dispatches, a rider handset (a client, as the Rider app does not exist) starts it and accepts a custody handover, and a second tab acts on
+a stale read. Its pool of confirmed requests is the arrangement `add-confirmed-pickups`, because a booking needs what the seed does not hold; the
+dispatch text is read from the capture sink with `readTexts`, since a text of the notification lane carries its words and no link.
 
 ## The trusted HTTPS origin (S0.23)
 

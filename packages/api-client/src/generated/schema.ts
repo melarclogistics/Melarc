@@ -2,12 +2,40 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.77.0-slice-000-reconciliation
- *   SHA-256 9eba6cd897facf4e55dd8b0f97397b94474f4e3f54ad87799cb72f1d88a09b9d (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.90.0-slice-001-review-closeout
+ *   SHA-256 80f3283b98682ddf6f111d32ab8a1f98f8243ed678a90bdc4424b0ad83ca6e25 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
 export interface paths {
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the notifications of the hubs of the grant
+         * @description The Ops message log (section 31.6): every message the platform raised about an act, newest first, with what became of it. Ops
+         *     can tell the queued, sent, delivered, failed, waiting-for-a-retry, held-back (`SUPPRESSED`, with its reason) and expired messages
+         *     apart. **An entry holds no destination, no text and no code**: the person's number appears only as a masked hint
+         *     (`+233******111`), the wording only as the version it was rendered from, and the end of the message only as a closed word, so no
+         *     read of the log can show a message or a handshake code. The Ops feed is this list with `channel=FEED&audience=OPS_FEED`.
+         *
+         *     Scoped server-side to the hubs of the caller's grant (section 37.6); filters are authorization-checked, never trusted
+         *     (section 42.4). A vendor and a rider hold no `notification.read` and are refused. A read of another hub, where the grant reaches
+         *     it, is audited without contents, as every staff read is.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pickup-requests": {
         parameters: {
             query?: never;
@@ -26,8 +54,18 @@ export interface paths {
          * Create a pickup request
          * @description Permission `pickup.request.create`. A vendor account may create only for itself
          *     (§37.3). Creates in `PENDING`; carries payer **intent** only — no *authoritative* price
-         *     exists at this point (§5.2.1). The response carries an **indicative estimate**;
-         *     the request entity itself stores no monetary amount.
+         *     exists at this point (§5.2.1). The response carries an **indicative estimate**
+         *     (`indicative_estimate`), computed from the hub's settings in force and kept as its inputs,
+         *     never as a price; the request entity stores no monetary amount.
+         *
+         *     **A single package** is accepted only from an Ops session, which then requests the
+         *     one-package exception (`requestOnePackageException`); the request waits in `PENDING` and
+         *     cannot be confirmed until the exception is approved. A vendor or ad-hoc session that sends
+         *     fewer than two packages is refused `PICKUP_MINIMUM_NOT_MET`.
+         *
+         *     **`DESTINATION_UNRESOLVED` and `SENDER_IDENTITY_AMBIGUOUS`** are the codes of the
+         *     `COLLECT_FOR_VENDOR` and `ADHOC_SENDER` rules below; the schema checks that name them
+         *     only as `VALIDATION_FAILED` shapes, and the service answers with the specific code.
          *
          *     **Idempotency-Key added 23 August.** `createPickupManifest` and `createDeliveryRun` both
          *     carried one; this - the highest-volume vendor-facing write in the product, submitted from
@@ -96,13 +134,22 @@ export interface paths {
         /**
          * Confirm a pickup request
          * @description Permission `pickup.request.confirm`. Guards, each returning its own code:
-         *     `PICKUP_MINIMUM_NOT_MET`, `EXCEPTION_NOT_AVAILABLE_TO_SELF_SERVICE`,
-         *     `SERVICE_DATE_NOT_PERMITTED`, `ZONE_NOT_SERVICED_ON_DATE`, `BOOKING_CUTOFF_PASSED`,
-         *     `SENDER_SUSPENDED`, `PICKUP_ATTEMPT_LIMIT_REACHED`.
+         *     `PICKUP_MINIMUM_NOT_MET` (a single package whose exception is not approved),
+         *     `SERVICE_DATE_NOT_PERMITTED`, `ZONE_NOT_SERVICED_ON_DATE`, `SENDER_SUSPENDED`,
+         *     `PICKUP_ATTEMPT_LIMIT_REACHED`.
+         *
+         *     **A booking past the hub's cutoff is not refused** (§21.1, `CONFLICT-024`): the request
+         *     confirms and `cutoff_exception_state` becomes `PENDING_OPS_REVIEW`; `BOOKING_CUTOFF_PASSED`
+         *     is withdrawn. Ops resolves the exception with `resolveCutoffException`.
          *
          *     Returns an INDICATIVE estimate — base fee × package count, assuming SMALL and in-area
          *     doorstep (MSC-DEC-211, superseding MSC-DEC-175). Creates no credit reservation and no
          *     charge (§5.2.1). The estimate is not a quote and the surface must present it as provisional.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the confirmation text, so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers (a missing token, a
+         *     stale `If-Match` and a refusal for state each count); a retry is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["confirmPickupRequest"];
         delete?: never;
@@ -132,6 +179,20 @@ export interface paths {
          *     point; after rider assignment it carries a **discretionary** charge. A
          *     client presenting any refusal here as a dead end misrepresents the policy.
          *
+         *     **The cancellation takes effect at once, on the rider's stop too.** In the same transaction
+         *     that cancels the request, the stop that holds it (on a draft manifest or a dispatched one)
+         *     is resolved if it is still to be worked: a `PENDING` or `ARRIVED` stop becomes `SKIPPED`,
+         *     with `skipped.reason_code` `REQUEST_CANCELLED` (the system's reason, not one of the
+         *     `PICKUP_STOP_SKIP` reasons Ops chooses) and no `skipped.note`. The stop keeps its place in
+         *     the order and the arrival it recorded, and its claim is **not** released, so the cancelled
+         *     request never returns to the unmanifested pool. A rider's acknowledgement decides nothing:
+         *     the rider's next read of the manifest shows the stop skipped, and an act of the rider on
+         *     it afterwards is refused by the stop's own state. A stop already `COLLECTED`,
+         *     `PARTIALLY_COLLECTED`, `FAILED` or `SKIPPED` is left exactly as it is: a cancellation
+         *     erases no custody and turns no collected stop into a skip. The charge of the cancellation
+         *     is decided as above, whatever happens to the stop. No notification is the guarantee of any
+         *     of this.
+         *
          *     **A missing charge setting does not block the cancellation.** An unset amount
          *     yields `cancellation_charge_outcome: UNAVAILABLE` and the cancellation proceeds. An
          *     operational decision is never held hostage to missing commercial configuration.
@@ -147,6 +208,29 @@ export interface paths {
          *     submission over a flaky Ops connection is exactly `createPickupManifest`'s risk of two
          *     priced records for one logical act, not a state a guard alone catches cleanly once the
          *     source has already left its prior state.
+         *
+         *     `reason_code` and `charge_reason_code` are codes of the `PICKUP_CANCELLATION` reason domain. A
+         *     cancellation of a request no rider holds records no charge outcome, and `apply_charge` or
+         *     `charge_reason_code` offered for it is `VALIDATION_FAILED`; while a rider holds it either one
+         *     missing is `REASON_REQUIRED`. **A rider holds the request while it is committed to one**
+         *     (`rider_assigned`: its current, unreleased claim sits on a manifest that has a rider); a rider who
+         *     was once assigned to a manifest that has since been cancelled holds nothing, and the request's
+         *     `ETag` moves when the commitment changes, so a cancellation made on an earlier read is
+         *     `STATE_CONFLICT`. A vendor that sends either is `PERMISSION_DENIED`, as is Ops electing a charge
+         *     without `pickup.request.cancel_chargeable`.
+         *
+         *     **`create_replacement: true` is the reschedule of a failed attempt (§21.6)** and belongs to Ops: a vendor that
+         *     sends it is `PERMISSION_DENIED`, and only a `CONFIRMED` request is rescheduled (`STATE_CONFLICT` otherwise; a
+         *     `PENDING` request was never attempted). In the same transaction the source becomes `CANCELLED` with its reason,
+         *     and a new `PENDING` request is made for the next operating day after the later of the source's date and today
+         *     (the same booking: `attempt_number + 1`, `replaces_request_id`, and the exception and the extension it carries);
+         *     the answer is the source, whose `replacement_request_id` names the new request, and the two are never active
+         *     together. **The next attempt is refused as `PICKUP_ATTEMPT_LIMIT_REACHED`** when it would pass
+         *     `MELARC_MAX_PICKUP_ATTEMPTS` and the extension the request carries, and nothing is cancelled; only hub Senior
+         *     Ops (`extendPickupAttempts`) allows another. A cap that is unset or invalid blocks nothing, and the audit event
+         *     records that it was not applied. The cancellation charge is decided as for any cancellation.
+         *     The day of the replacement of a failed attempt is provisional: the contract names the day only for a late
+         *     booking.
          */
         post: operations["cancelPickupRequest"];
         delete?: never;
@@ -204,6 +288,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pickup-requests/{id}/cutoff-exception": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a late booking queued for Ops review
+         * @description `pickup.request.confirm`. A request confirmed after the hub's cutoff is not refused: it confirms
+         *     with `cutoff_exception_state = PENDING_OPS_REVIEW`, and Ops either approves a same-day exception
+         *     (`SAME_DAY_APPROVED`) or reschedules it to the next operating day (§21.1, state-machines.md 3).
+         *     `RESCHEDULE_NEXT_DAY` is the cancel-plus-clone of 21.6 in one act: the source becomes
+         *     `CANCELLED`, the clone is `PENDING` for the next operating day, and the source carries
+         *     `RESCHEDULED` and `replacement_request_id`. A request not in `PENDING_OPS_REVIEW` is
+         *     `STATE_CONFLICT`.
+         *
+         *     The answer is the request that was resolved (the source); after a reschedule it carries
+         *     `replacement_request_id`, the request to go on with. The clone is the same booking and keeps
+         *     the source's attempt number: no pickup was attempted, so the attempt cap does not apply to it.
+         *     Its date is the next operating day (Monday to Saturday) after the later of the source's
+         *     service date and today on the hub's clock, so a request confirmed days late is not rescheduled
+         *     into the past. A note that is blank (spaces only) is `REASON_REQUIRED`.
+         */
+        post: operations["resolveCutoffException"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-requests/{id}/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend a request's origin or payer arrangement before the price freezes
+         * @description `pickup.request.create` - a vendor on its own `PENDING` request, Ops at the hub on a `PENDING`
+         *     or `CONFIRMED` request whose run has not started. Two edits, both allowed only until the
+         *     authoritative price is frozen (23.5, 23.6):
+         *
+         *     - **The origin** (AC-SLICE-001-57). The request keeps one origin; the origin zone is
+         *       re-resolved once for the request and every later order carries that snapshot. It is no longer a
+         *       pricing input, so changing it changes no fee. A location whose zone is not serviced on the
+         *       scheduled date is `ZONE_NOT_SERVICED_ON_DATE`.
+         *     - **The default payer arrangement** (AC-SLICE-001-55). It applies to parcels not yet itemized; an
+         *       itemized order's allocation is frozen with its price, and changing that one is
+         *       `requestPayerCorrection`. Edits are transaction overrides and never rewrite a saved sender
+         *       default (21.1).
+         *
+         *     A request that has left the editable states is `STATE_CONFLICT`.
+         */
+        post: operations["amendPickupRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pickup-requests/{id}/escalate": {
         parameters: {
             query?: never;
@@ -241,6 +397,15 @@ export interface paths {
          *     **Idempotency-Key added — CRIT-05 audit remediation**, alongside CRIT-09's new
          *     `pickup.request.escalated` audit event: a State guard alone stops a second escalation
          *     from landing, but not a second audit row from a client that never saw the first response.
+         *
+         *     **What it records, and what it needs (S1.18).** It sets `escalated_at` on the request once, under the
+         *     `If-Match` of the request's read; the actor, the trigger (`OPS`) and the note are in the enhanced audit event.
+         *     Only a request that was `CONFIRMED` is escalated, and only once: a pending, declined or cancelled request, or
+         *     one already escalated, is `STATE_CONFLICT`. A blank note is `REASON_REQUIRED`; a note the ledger would not keep
+         *     (a number or an address of a person) is `VALIDATION_FAILED`. Escalating changes nothing else: the request can
+         *     still be cancelled, and a Senior Ops extension still opens a further attempt. **A failure can be recorded
+         *     now (`reportPickupFailure`, S1.28), but the request still need not have failed to be escalated**: that guard, and
+         *     the scheduled backstop that records `trigger: BACKSTOP`, are the rest of S1.28 and are not built yet.
          */
         post: operations["escalatePickupRequest"];
         delete?: never;
@@ -277,6 +442,26 @@ export interface paths {
          *     **Idempotency-Key added — CRIT-05 audit remediation.** The extension is a ceiling raised
          *     for this request; nothing in this contract states it is measured rather than accumulated,
          *     and a Senior Ops officer retrying an unclear submission must not risk raising it twice.
+         *
+         *     **What an extension reaches, and what it needs (S1.18).** It permits **one** further attempt: the attempt after
+         *     the request's own. The request then carries `attempt_extension_id`, its reschedule makes that attempt and the
+         *     new request carries the extension so that it can be confirmed, and a further reschedule needs a further
+         *     extension. The contract left the reach open ("exact extension ceilings remain domain-design follow-up", §21.6);
+         *     this is the narrowest reading of "permits a further attempt" and it is the Product Owner's to widen. It needs a
+         *     `CONFIRMED` request that cannot go on without it (its next attempt would pass
+         *     `MELARC_MAX_PICKUP_ATTEMPTS` and any extension it carries, **or its stop failed as a refused collection that no extension of its own
+         *     has released**) under the `If-Match` of the request's read; a request that can go on, a request in any other state, a hub whose cap is unset or invalid (no ceiling applies), and a
+         *     request already extended for this attempt are `STATE_CONFLICT`. A blank reason is `REASON_REQUIRED`.
+         *     `INSUFFICIENT_AUTHORITY` is not declared: only a Senior Ops or Platform Admin grant carries the key, and a caller
+         *     without it is `PERMISSION_DENIED`. **An extension does what the request needs, and says so** (migration `0073`): it lifts the ceiling by one where
+         *     the request is at the hub's cap, and it releases a refused collection (a request whose stop failed as `REFUSED_COLLECTION` is
+         *     escalation-only until a Senior Ops officer releases it) for exactly that attempt; it may do both, and the record states which
+         *     (`releases_refused_collection`, and the ceiling before and after only where one was lifted). A refused collection below the cap
+         *     is released without any ceiling being recorded as lifted, and the audit event never presents the request's own attempt number as
+         *     the ceiling that was in force. The release is the request's own: the replacement that carries the extension so that its attempt
+         *     can be confirmed is not itself released. The extension is a record of its own (actor, reason, moment, the ceiling before
+         *     and after where one was lifted, and whether it released a refused collection) that is never changed or removed, and is audited as
+         *     the enhanced `pickup.attempt.extended`.
          */
         post: operations["extendPickupAttempts"];
         delete?: never;
@@ -310,7 +495,8 @@ export interface paths {
          *     Refused with `NO_CHARGE_APPLIED` where the cancellation recorded
          *     `cancellation_charge_outcome: UNAVAILABLE`, `NOT_APPLIED` or `EXEMPT` - there is nothing to waive,
          *     and a waiver recorded against no charge would corrupt the very frequency data that makes
-         *     this control work.
+         *     this control work. A request that is not cancelled carries no charge and is `STATE_CONFLICT`;
+         *     a note that is blank is `REASON_REQUIRED`; a body naming an amount is `VALIDATION_FAILED`.
          */
         post: operations["waiveCancellationCharge"];
         delete?: never;
@@ -333,7 +519,16 @@ export interface paths {
         put?: never;
         /**
          * @description Maker side. Permission `pickup.exception.request` — **Ops only**. A vendor account
-         *     attempting this receives `EXCEPTION_NOT_AVAILABLE_TO_SELF_SERVICE` (§35.2.4).
+         *     holds no such key and is refused `PERMISSION_DENIED` (§35.2.4).
+         *
+         *     **The recipient travels with the exception.** §21.1 makes the recipient's name, phone and
+         *     delivery address mandatory for a one-package request, and the request has no field for
+         *     them, so they are required here.
+         *
+         *     The request must be a `PENDING` request of one package with no live exception (a requested or an
+         *     approved one), or `STATE_CONFLICT`; a refused one does not block a new request. A note that is
+         *     blank is `REASON_REQUIRED`. The request is not changed by being asked about, and cannot be
+         *     confirmed until the exception is approved (`PICKUP_MINIMUM_NOT_MET`).
          */
         post: operations["requestOnePackageException"];
         delete?: never;
@@ -355,8 +550,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * @description Checker side. Permission `pickup.exception.approve` — held by **Senior Ops, Platform
-         *     Admin, or an Ops Staff member explicitly granted it**. **The permission is
+         * @description Checker side. Permission `pickup.exception.approve` — held by **Ops Staff, Senior Ops and
+         *     Platform Admin** (the Product Owner's decision of 29 October 2026; the approving actor is
+         *     audited). **The permission is
          *     authoritative, not the role**: a hub-floor judgement routed to the busiest authority
          *     in the product stops being asked for.
          *
@@ -370,8 +566,61 @@ export interface paths {
          *     settlement follows the Vendor's eligibility: posted to statement for an
          *     allowance-enabled unrestricted Vendor, settled before pickup proceeds where
          *     VendorOperationalEligibility.requires_prepayment.
+         *
+         *     The approval links the exception to the request, which is what makes it confirmable. An exception
+         *     that is not waiting (none was asked for, or it is already decided) is `STATE_CONFLICT`. The
+         *     maker-checker refusal is last, after the permission, the hub and the state. The fee is recorded
+         *     on the exception as due, snapshotted with the setting key and version it was read from, and a fee
+         *     that cannot be read never blocks the approval (the exception then shows no fee). Posting the fee
+         *     to the Vendor's statement or gating the pickup behind prepayment is a later slice's.
          */
         post: operations["approveOnePackageException"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-stops/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read one pickup stop
+         * @description `pickup.read`. **The read that returns the stop's `ETag`** (Implementation Plan 4c), which
+         *     `recordCollection`, `reportPickupFailure` and `skipPickupStop` take as `If-Match`. A rider
+         *     reads only a stop on a run assigned to it, a vendor only the stop of its own request, and any
+         *     other stop is answered exactly as one that does not exist (37.6).
+         *
+         *     **What a refusal reveals depends on who asks**, as for `getPickupManifest`: a staff member
+         *     who asks for an existing stop outside their hubs is `HUB_SCOPE_VIOLATION` and one who asks
+         *     for a stop that does not exist is `NOT_FOUND`; **a Rider who asks for a stop on a run that is
+         *     not assigned to them, that is still a draft, or that was cancelled before it was dispatched
+         *     is `NOT_FOUND`, identical in status, code, body shape and timing class to a stop that does
+         *     not exist.** A stop on a run cancelled after its dispatch, and on a completed one, stays
+         *     readable to the rider it was assigned to. An authorised staff read of a stop in another hub
+         *     is audited, without contents.
+         *
+         *     The representation **is the stop of the manifest read**, member for member, for staff and
+         *     for the rider alike: the same closed projection, so the rider's stop detail has the privacy
+         *     boundary of the rider's manifest read. The `ETag` is the token the stop's operations hand
+         *     back for the same stop (`arriveAtPickupStop` returns it), and it moves with the stop.
+         *
+         *     The rider's stop detail stays readable offline from the manifest read, which embeds the same
+         *     projection; this read exists for the `ETag` and for a vendor reaching its own stop. *The
+         *     vendor's read of the stop of its own request is a deferred capability (OB-S1-23): until a
+         *     vendor policy for stops exists a vendor is `PERMISSION_DENIED`, as it is for the manifest
+         *     reads.*
+         */
+        get: operations["getPickupStop"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -393,22 +642,37 @@ export interface paths {
         /**
          * Mark arrival at a pickup stop
          * @description `pickup.run.execute` - the assigned rider only. PENDING to ARRIVED (5), guarded on the
-         *     manifest being IN_PROGRESS (`MANIFEST_NOT_STARTED`).
+         *     manifest being IN_PROGRESS (`MANIFEST_NOT_STARTED` for a run that is only dispatched,
+         *     `STATE_CONFLICT` for one that is over), **in any order of the stops**: the recommended next
+         *     stop is advice and is never enforced.
          *
          *     **Arrival is a command, not a screen event.** 36.1: a record must not change state
          *     because a screen changed. The delivery side has had `arriveAtDeliveryStop` since
          *     26 August; this side was recorded as CONFLICT-038 and had no operation behind it
-         *     until MSC-DEC-392.
+         *     until MSC-DEC-392. A state a client can assert is a state a client can trigger.
          *
-         *     **The cancellation window closes here**. That is the whole
-         *     reason this cannot be a screen event: a commercial consequence - the vendor's
-         *     self-service cancellation ending - hangs on this transition, and a state a client can
-         *     assert is a charge a client can trigger.
+         *     **It writes the stop and nothing else.** *Superseded (S1.22):* "the cancellation window closes
+         *     here". The vendor's window to cancel closed when the rider was assigned (MSC-DEC-195,
+         *     `AC-SLICE-001-12`), and the request is committed to the rider from that moment until its
+         *     claim is released, so arrival closes nothing and writes nothing to the request.
+         *
+         *     **The stop must be the rider's and still to be worked.** A stop on a run assigned to another
+         *     rider, on a draft, on a run cancelled before it went out, and an id that matches nothing are
+         *     **one answer**, `NOT_ASSIGNED_RIDER` (a rider who *acts* on work that is not its own is told
+         *     so). A stop that is not `PENDING` is `STATE_CONFLICT`: a pickup the office cancelled has had
+         *     its stop skipped by the cancellation in its own transaction, so it is refused here from an
+         *     outdated screen, and one already arrived at, collected or failed is too. The cancellation
+         *     and the skip are one transaction that the database holds for every writer (a cancelled
+         *     request never coexists with a stop still to be worked), so the arrival needs no read of the
+         *     request. An arrival that commits first is kept: the cancellation that follows skips the
+         *     stop and keeps the moment of the arrival.
          *
          *     Idempotent - for connection resilience, not offline capability (rule 4): arrival
-         *     requires a connection in Version 1, and a retried arrival must not close
-         *     the window twice. *Superseded:* "this is an offline command (35.3.9), the same as
-         *     `recordCollection`".
+         *     requires a connection in Version 1, and a retried arrival (the same `Idempotency-Key`)
+         *     replays the original answer and records one arrival. The same key for another stop is
+         *     `IDEMPOTENCY_KEY_CONFLICT`, and another key for a stop already arrived at is
+         *     `STATE_CONFLICT`. *Superseded:* "this is an offline command (35.3.9), the same as
+         *     `recordCollection`". One event, `pickup.stop.arrived`, is written in the rider's name.
          */
         post: operations["arriveAtPickupStop"];
         delete?: never;
@@ -431,21 +695,66 @@ export interface paths {
         put?: never;
         /**
          * Record the physical collection result
-         * @description Rider only, assigned stop only (`NOT_ASSIGNED_RIDER`). Idempotent — for connection
+         * @description `pickup.collection.confirm` - the **assigned rider only**, on a stop it has arrived at (the key is a
+         *     vendor's too, to enter a code, and a vendor is `PERMISSION_DENIED` here). Idempotent - for connection
          *     resilience, not offline capability (rule 4): **collection requires a connection in
          *     Version 1**. *Superseded:* "this is an offline command (§35.3.9)".
          *
-         *     `collected_count` of zero is a **failed pickup** and may not accompany a collected stop:
-         *     `ZERO_COLLECTION_IS_FAILURE` (§36.4).
+         *     **The count makes the record; the handshake closes the stop** (the Product Owner's decision of
+         *     29 October 2026, "count, then confirm": D-04 option 1). The stop stays `ARRIVED` after this
+         *     operation, with its record; the handshake (`verifyHandshake` and the fallbacks) is what moves it to
+         *     `COLLECTED` or `PARTIALLY_COLLECTED`. The record is one per stop (a second is `STATE_CONFLICT`,
+         *     `details.rule` `collection_recorded`) and is never empty.
          *
-         *     **Partial collection is permitted**. A short count requires
-         *     `variance_reason_code`, or `REASON_REQUIRED`. A short collection also raises the office
-         *     notification at the time of the shortfall — it supplements the rider's phone call and
-         *     does not replace it.
+         *     **`collected_count` is the actual count, never the declared one**, and `declared_count` is what the
+         *     stop declared when it was dispatched. Zero is a **failed pickup**, whatever else is true:
+         *     `ZERO_COLLECTION_IS_FAILURE`, and nothing is made - no record, no promoted sender, no handover.
+         *     `variance` is recorded on every collection: `MATCH` when the counts are equal, `SHORT` when
+         *     fewer were collected. **More than was declared is `VALIDATION_FAILED`** (`details.violations`
+         *     `/collected_count`, rule `above_declared`): neither section of the specification names a
+         *     variance for it, and nothing is invented.
+         *
+         *     **A short count** requires `variance_reason_code`, a code of the `PICKUP_SHORT_COUNT` catalogue,
+         *     or `REASON_REQUIRED` (and `REASON_NOT_ACTIVE` for a code the catalogue refuses); the reason's
+         *     own metadata may make a note mandatory in turn, and a reason that makes a photo mandatory is
+         *     `REASON_REQUIRED` (`details.rule` `photo`) until evidence can be stored. The record keeps the
+         *     reason as the catalogue holds it **at the moment it is made**, and the database holds the record to
+         *     that for every writer: a catalogue that changes between the reading of the reason and the record
+         *     (its label, its attribution, its being active) is `REASON_NOT_ACTIVE`, nothing is kept, the
+         *     `Idempotency-Key` is free, and the same request is then a retry that reads the catalogue again.
+         *     A count that matches has no reason: one sent with it is `VALIDATION_FAILED` (rule `not_short`).
+         *     **A short count raises the office flag in the same transaction** (`office_notified_at` is the
+         *     database's own instant, the moment of the recording, and the event says that it was raised): it
+         *     supplements the rider's phone call and does not replace it.
+         *
+         *     **Evidence**: `evidence_ids` names records that must be `STORED`; none can be yet, so any
+         *     reference is `EVIDENCE_NOT_STORED`.
+         *
+         *     **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
+         *     `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
+         *     (`AC-SLICE-001-28`).
+         *
+         *     **What it requires, in the order it is judged.** The stop is the rider's: a stop on a run
+         *     assigned to another rider, on a draft, and an id that matches nothing are **one answer**,
+         *     `NOT_ASSIGNED_RIDER`. A run that is only dispatched is `MANIFEST_NOT_STARTED`, and one that is
+         *     over `STATE_CONFLICT`. `If-Match` is the stop's `ETag` (`getPickupStop`); a stale token is
+         *     `STATE_CONFLICT`. A stop not yet arrived at is `STATE_CONFLICT` (`stop_not_arrived`), and one
+         *     already worked or skipped `STATE_CONFLICT` (`stop_resolved`). **A stop with a record is never
+         *     skipped or failed**: the cancellation of its request and Ops's skip are `STATE_CONFLICT`
+         *     (`collection_recorded`), and the database holds it for every writer.
+         *
+         *     A retried collection (the same `Idempotency-Key`) replays the original answer and makes one
+         *     record; the same key for another body is `IDEMPOTENCY_KEY_CONFLICT`.
          *
          *     **The hub blind count still runs independently.** `collected_count` never seeds
          *     `HubIntake.rider_declared_count`. They are two checks, and a package lost between the
-         *     door and the hub is visible only in the second (MSC-DEC-194 part 3).
+         *     door and the hub is visible only in the second (MSC-DEC-194 part 3). One event is written
+         *     in the rider's name, the count's own, `pickup.collection.recorded`, the same for a clean count and
+         *     a short one: its object is the record, it names the stop, its run and request, the rider and the
+         *     hub, it carries the counts, the variance, whether the flag was raised and the direction of the
+         *     handshake, and it records that the stop is still `ARRIVED`. It carries no note. The events that say
+         *     a stop closed, `pickup.stop.collected` and `pickup.stop.partially_collected`, are written by the
+         *     handshake that closes it, not by this operation.
          */
         post: operations["recordCollection"];
         delete?: never;
@@ -467,8 +776,63 @@ export interface paths {
         get?: never;
         put?: never;
         /**
+         * Report that a stop failed
          * @description Rider only, owned dispatched stop. Requires a categorized reason **and whatever that
          *     reason's metadata makes mandatory** — note, photo, or contact attempt (§35.4.1, §35.9.2).
+         *
+         *     **As built (S1.28, the part that stands alone).** The stop becomes `FAILED`, which is
+         *     terminal: nothing moves it back, and the only way forward is a new request cloned from the
+         *     source by the office. `category` is one of the four fixed values and `reason_code` a code of
+         *     the `PICKUP_FAILURE` catalogue; the catalogue does not bind a reason to a category and nothing
+         *     checks the pairing. A missing note, or a contact attempt the reason asks for
+         *     (`details.rule` `contact_attempt`), is `REASON_REQUIRED`, and a code the catalogue refuses is
+         *     `REASON_NOT_ACTIVE`. **Evidence:** `evidence_ids` names records that must be `STORED`; none
+         *     can be yet, so any reference is `EVIDENCE_NOT_STORED`, and a reason that makes a photo
+         *     mandatory (`details.rule` `photo`; today `ENTRY_REFUSED_BY_SECURITY` and `LOCATION_CLOSED`) is
+         *     `REASON_REQUIRED` until evidence can be stored. `contact_attempts` are at most ten, each an
+         *     instant and what came of it, and are kept on the stop.
+         *
+         *     The stop keeps the reason as the catalogue holds it **at the moment of the report**, and the
+         *     database holds it to that for every writer: a catalogue that changes between the reading of
+         *     the reason and the write (its label, its attribution, its being active) is `REASON_NOT_ACTIVE`,
+         *     nothing is kept, the `Idempotency-Key` is free, and the same request is then a retry that reads
+         *     the catalogue again. **The moment of the failure is the database's own**
+         *     (`failure.reported_at`).
+         *
+         *     **What it requires, in the order it is judged.** The stop is the rider's: a stop on a run
+         *     assigned to another rider, on a draft, and an id that matches nothing are **one answer**,
+         *     `NOT_ASSIGNED_RIDER`. A run that is only dispatched is `MANIFEST_NOT_STARTED`, and one that is
+         *     over `STATE_CONFLICT` (`run_not_in_progress`). `If-Match` is the stop's `ETag`
+         *     (`getPickupStop`); a stale token is `STATE_CONFLICT`. A stop not yet arrived at is
+         *     `STATE_CONFLICT` (`stop_not_arrived`), one already collected, failed or skipped
+         *     `STATE_CONFLICT` (`stop_resolved`), and **a stop with a record of a count is never failed**
+         *     (`collection_recorded`; the database holds it for every writer).
+         *
+         *     **What it writes**, in one transaction: the stop (`failure_category` and `failure`, and nothing
+         *     else of it: it keeps its place, its arrival and its claim); one event in the rider's name,
+         *     `pickup.stop.failed`, ordinary tier, that names the reason, the stop's run and request, the
+         *     category and the number of contact attempts (the note is on the stop and in no event); and,
+         *     when this was the last stop to be worked on a run in which nothing was collected, the
+         *     completion of the run by the system (`pickup.manifest.completed`, cause `LAST_STOP_FAILED`).
+         *     **The request is not written**: it stays `CONFIRMED` with its claim held, and the office
+         *     reschedules, cancels or escalates it. **A refused collection (`REFUSED_COLLECTION`) is
+         *     escalation-only**: a reschedule of it (`cancelPickupRequest` with a replacement) is
+         *     `PICKUP_ATTEMPT_LIMIT_REACHED`, whatever the cap, until hub Senior Ops force-extends it
+         *     (`extendPickupAttempts`; the extension's reach is provisional).
+         *
+         *     A retried report (the same `Idempotency-Key`) replays the original answer; the same key for
+         *     another body is `IDEMPOTENCY_KEY_CONFLICT`.
+         *
+         *     **Not built yet:** the evidence photo (S1.11), the scheduled backstop that
+         *     escalates an undecided failure, the narrowing of `escalatePickupRequest` to a failed stop, and
+         *     the notices of a failure.
+         *
+         *     **The door wait (review of 5 November 2026).** A failure of the category `VENDOR_UNAVAILABLE` is accepted only once the hub's `rider_door_wait_minutes` (10 at the launch hub) have
+         *     passed since the rider arrived at the stop - the arrival the server recorded, measured on the database's clock; a vendor who is simply busy is no fallback trigger, the rider waits and may then
+         *     fail the stop (pickup-collection.md). Before that it is `PICKUP_DOOR_WAIT_NOT_ELAPSED` (422), whose `details` say `door_wait_minutes`, `available_at` and `retry_after_seconds`, and nothing is
+         *     written. The other three categories carry no wait. The pairing of a reason with a category is not checked, so the wait follows the category the rider reports. A hub whose door wait is not set
+         *     cannot be told one: the report of this category fails as an operational failure (`503`, no code) and invents no wait. **The contact attempts** are a method (`PHONE_CALL`, `SMS`,
+         *     `IN_PERSON`), a moment, an outcome and an optional note; at most ten, and the wait is not among them (it is derived from the arrival).
          */
         post: operations["reportPickupFailure"];
         delete?: never;
@@ -515,6 +879,30 @@ export interface paths {
          *     CONFIRMED to CANCELLED (replacement), which increments attempt_number, or cancel outright.
          *     Nothing is created automatically, because three of the four reasons reschedule and
          *     STOP_RAISED_IN_ERROR must not re-raise the stop it removed.
+         *
+         *     **What the act is, as built (S1.23).** `If-Match` is the stop's `ETag` (`getPickupStop`, or the
+         *     answer of an earlier act on the stop); a stale, missing or foreign token is `STATE_CONFLICT`. The
+         *     stop is `PENDING` or `ARRIVED`, on a manifest of any state that still has it to be worked: a
+         *     stop already `COLLECTED`, `PARTIALLY_COLLECTED`, `FAILED` or `SKIPPED` is `STATE_CONFLICT`. The stop
+         *     keeps its place, its arrival and its claim; it is `SKIPPED` with the code, the note and the moment.
+         *     A stop of another hub is `HUB_SCOPE_VIOLATION` and an id that matches nothing is `NOT_FOUND`. The
+         *     `Idempotency-Key` replays the original answer for a retry; the same key for another stop or body is
+         *     `IDEMPOTENCY_KEY_CONFLICT`.
+         *
+         *     **The run may close in the same transaction.** When the skip leaves a run in progress with every
+         *     stop terminal, none of them collected, and no custody handover pending, the manifest becomes
+         *     `COMPLETED` by System, with no handover and no intake (state-machines.md 4); where anything was
+         *     collected the hub handover is the completion and the skip only makes it possible. The answer is the
+         *     stop; the manifest is read again to see its state.
+         *
+         *     **The Vendor's notice is queued in the same transaction** with the request, the reason and the
+         *     requested vendor action, and `vendor.pickup_skip.notified` records it. An individual sender (an
+         *     ad-hoc sender) is not a Vendor and has no notice; the audit event says so.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the vendor's notice of the skip, so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+         *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["skipPickupStop"];
         delete?: never;
@@ -653,6 +1041,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/hub-intakes/{id}/condition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The receiver records a condition and its evidence
+         * @description `hub.intake.count` - the receiver, an Ops Staff user included (22.5, AC-SLICE-001-41 and 42). The
+         *     condition is independent of the count and of any dispute, and may be recorded on a count that
+         *     matches. `DAMAGED` and `TAMPERED` require stored evidence (`REASON_REQUIRED` when none is
+         *     attached, `EVIDENCE_NOT_STORED` for a record not yet stored) and route the case to Senior Ops,
+         *     who adjudicates with `adjudicateDiscrepancy`; an Ops Staff user who tries that is
+         *     `PERMISSION_DENIED`. Only after the blind count has committed.
+         */
+        post: operations["recordIntakeCondition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub-intakes/{id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The vendor-facing summary of a closed intake
+         * @description `pickup.read` - a vendor reads the summary of its own closed intake; staff read it too. Available
+         *     only once the intake is `CLOSED` (`intake.completed`, 23.10); before that it is answered as one
+         *     that does not exist. **Field-filtered by construction**: the schema carries no blind count, no
+         *     declaration, no discrepancy, no evidence and no adjudication (22.9), so no code path can leak one.
+         */
+        get: operations["getIntakeSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/hub-intakes/{id}/orders": {
         parameters: {
             query?: never;
@@ -718,6 +1160,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read one order
+         * @description `pricing.read`. **The read that returns the order's `ETag`**, which `requestPayerCorrection` takes.
+         *     Staff see the whole order. A vendor reads only its own orders and sees the locked price, never
+         *     its inputs: `recipient`, `serial_imei`, `size_class_selected_by` and `carrier_cost` are absent for
+         *     a vendor session, and another vendor's order is answered as one that does not exist (37.6).
+         *     The authoritative price is shown visibly distinct from the booking estimate (AC-SLICE-001-56).
+         */
+        get: operations["getOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders/{id}/payer-correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ops asks to change a frozen order's payer allocation
+         * @description `pricing.correction.create` - maker side (23.5, AC-SLICE-001-55). After the price froze, an edit of
+         *     the payer arrangement is a correction that Senior Ops approves: the locked price is never rewritten
+         *     and complete before and after history is kept. Approval re-runs the commercial gate from the new
+         *     allocation (`approvePayerCorrection`). A correction already `REQUESTED` for the order is
+         *     `STATE_CONFLICT`.
+         */
+        post: operations["requestPayerCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/payer-corrections/{id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Senior Ops decides a payer correction
+         * @description `pricing.correction.approve` - checker side, Senior Ops and Platform Admin. The approver may not be
+         *     the requester (`SELF_APPROVAL_FORBIDDEN`) unless a Platform Admin (permissions.md section 6).
+         *     `APPROVE` re-evaluates the commercial gate from the new allocation, testing the zero branch first:
+         *     the order moves to `NO_VENDOR_CHARGE`, `CREDIT_RESERVED` or `PAYMENT_REQUIRED`, and an existing
+         *     reservation is adjusted without double-counting. `REJECT` changes nothing. A correction not
+         *     `REQUESTED` is `STATE_CONFLICT`.
+         */
+        post: operations["approvePayerCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/hub-intakes/{id}/close": {
         parameters: {
             query?: never;
@@ -764,6 +1288,21 @@ export interface paths {
          * List manifests for the acting hub
          * @description Permission `pickup.read`. **Hub-scoped, never vendor-scoped.**
          *
+         *     Staff see the manifests of the hubs of their grant. A Rider sees only the manifests
+         *     assigned to it, and only from the moment they are dispatched: a draft is never shown to
+         *     it, a manifest cancelled after its dispatch and a completed one stay readable to the rider
+         *     they were assigned to, and a manifest cancelled before its dispatch never is. A Vendor
+         *     sees none.
+         *
+         *     Ordered by creation, oldest first, then by id, so that a page does not move under a
+         *     reader who is paging. **Two filters narrow what the reader is already shown and widen
+         *     nothing** (OB-S1-25, settled for the manifest screens): `state` and `service_date`, each
+         *     optional and each exact, combined as "and". A value that is not one (a state of another
+         *     case, an unknown state, a day that does not exist, an empty or repeated parameter) is
+         *     `VALIDATION_FAILED` naming the parameter, and not an empty list. A page token is a
+         *     position in this order and is used with the filters it was given. A list carries neither
+         *     the stops nor an `ETag`: `getPickupManifest` carries both.
+         *
          *     **Paginated — CRIT-10 audit remediation.** This was the one list operation in the
          *     contract still returning an unbounded raw array; every other list response carries
          *     `next_page_token` and this one now matches `listPickupRequests`'s envelope exactly.
@@ -780,6 +1319,43 @@ export interface paths {
          *
          *     Only `CONFIRMED` requests in the unmanifested pool are eligible. A request already on
          *     a manifest is rejected with `ALREADY_MANIFESTED`.
+         *
+         *     **Which requests.** All of them belong to one hub, and none is awaiting the review of its
+         *     booking cutoff (`cutoff_exception_state` `PENDING_OPS_REVIEW`). A request the caller cannot
+         *     see is refused as unavailable, exactly as one that does not exist, before any claim is
+         *     judged, so `ALREADY_MANIFESTED` is only ever told about requests the caller may see. The
+         *     refusals of a list are reported together, each at the place of its request in the list
+         *     (`VALIDATION_FAILED`, `ALREADY_MANIFESTED`), and a refused list creates nothing.
+         *
+         *     **The day.** `service_date` is the day the run is to be worked: a day the hub operates
+         *     (Monday to Saturday) and not in the past on the hub's clock. It is not the day any request
+         *     was promised. A request keeps the day it was promised (`scheduled_service_date`), which a
+         *     manifest never changes: it may go on a manifest for that day or a later one, and a request
+         *     carried over to a later day stays late against its promise. A request promised for a later
+         *     day than the manifest's is refused. A request that is to be promised a different day is
+         *     cancelled and rebooked, or rescheduled, and so has a new promise.
+         *
+         *     **Carried-over requests need a reason.** A request promised for an earlier day than the
+         *     manifest's is overdue and is carried over, and never silently: `carryover` holds one entry
+         *     for each such request, with a `reason_code` of the `PICKUP_CARRYOVER` reason domain (and a
+         *     `note` where the reason's metadata asks for one). Work is never refused for its age, and
+         *     one reason covers several requests only because it is given, expressly, for each of them
+         *     and is true of each. A carried-over request with no entry is `REASON_REQUIRED`; a code the
+         *     catalogue does not hold active for the domain is `REASON_NOT_ACTIVE` (so that, until the
+         *     codes are seeded, a manifest holding an overdue request cannot be made); an entry for a
+         *     request that is not listed, is on its own day or is repeated is `VALIDATION_FAILED`. The
+         *     stop keeps the reason and its label as given, and never changes them. The promise itself
+         *     is never rewritten: a carried-over request stays late against it, and the reporting
+         *     dictionary counts the backlog and the late completions apart.
+         *
+         *     **Order and size.** The stops take the order in which the requests are listed, which is
+         *     their initial sequence; `setManifestStopOrder` changes it. A manifest holds one to 64
+         *     requests. That is the Version 1 limit of the batch the software accepts, not a statement
+         *     of what a rider can carry or finish (parcel volume, weight, geography and working time are
+         *     separate operational limits); a larger workload uses more than one manifest. Version 5.79
+         *     states it as `maxItems: 64`, which narrows the range this input declared before it (one
+         *     or more requests, with no upper bound), and so is a contract change and not an editorial
+         *     one.
          */
         post: operations["createPickupManifest"];
         delete?: never;
@@ -805,10 +1381,49 @@ export interface paths {
          *     asks for a manifest that does not exist is `NOT_FOUND`; **a Rider who asks for a manifest that is
          *     not assigned to them is `NOT_FOUND`, identical in status, code, body shape and timing class to a
          *     manifest that does not exist** (19.2, 37.3). A rider is never told that a colleague's run exists.
+         *
+         *     A rider reads a manifest only from its dispatch: one that is still a draft, or that was
+         *     cancelled before it was dispatched, is answered exactly as one that does not exist. A
+         *     manifest cancelled after its dispatch and a completed one stay readable to the rider they
+         *     were assigned to. Reassigning a manifest moves the access to the new rider at once.
          */
         get: operations["getPickupManifest"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-manifests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a manifest that has not started
+         * @description `pickup.manifest.create`. `DRAFT` or `DISPATCHED` to `CANCELLED`, Ops only (state-machines.md 4):
+         *     the stops still to be worked move to `SKIPPED` with the system's reason `MANIFEST_CANCELLED`, and
+         *     **every claim the manifest holds is released** (an explicit, authorized release), so the requests
+         *     that are still `CONFIRMED` return to the pool, **and their rider commitment ends in the same
+         *     transaction** (`rider_assigned` becomes false: a request in the pool is not treated as one a rider
+         *     holds because a rider was once assigned). A request that was cancelled meanwhile is frozen and
+         *     keeps its charge decision and its mark. A stop already skipped because its request was
+         *     cancelled keeps its reason (`REQUEST_CANCELLED`) and has its claim released. The `note` is
+         *     mandatory (blank is `REASON_REQUIRED`) and is recorded with the act. A rider the manifest was
+         *     dispatched to still reads it, cancelled. A run that has started is `RUN_ALREADY_STARTED`; from then
+         *     the way out is a skip or a custody handover; a completed or cancelled manifest is
+         *     `STATE_CONFLICT`.
+         */
+        post: operations["cancelPickupManifest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -839,6 +1454,13 @@ export interface paths {
          *     open across rider assignment**, which sets a field and does not change the state;
          *     the window closes at dispatch. Corrected at MSC-DEC-405: this read
          *     `DRAFT`/`ASSIGNED`, naming a state the signed machine does not declare.
+         *
+         *     **The list is every stop of the manifest, once** (not a delta): a stop left out is
+         *     `VALIDATION_FAILED` (`incomplete`), one named twice (`duplicate`) and an id that is not a stop
+         *     of this manifest (`not_on_manifest`) are refused at their places. A stop skipped because its
+         *     request was cancelled is ordered like any other. `If-Match` is the manifest's `ETag`, which
+         *     digests the stops, so a client that read the manifest before a request on it was cancelled is
+         *     `STATE_CONFLICT` and reads again.
          *
          *     **Audited as `pickup.manifest.stops_ordered`** — CRIT-09 audit remediation; this
          *     operation existed with no event at all until now.
@@ -876,7 +1498,24 @@ export interface paths {
          *     with a charge. Implementations that place the cutoff at dispatch or at
          *     run start are wrong by one and two steps respectively.
          *
-         *     Assignment does **not** start the run.
+         *     Assignment does **not** start the run, and does not dispatch it.
+         *
+         *     **Who may be assigned.** A rider who is `ACTIVE` and belongs to the manifest's hub (the rider's
+         *     primary hub). The reach of the caller's grant is not the rider's eligibility, and the temporary
+         *     assignment to another hub that could widen it (`HubAssignment`) is not built, so no rider is
+         *     eligible for a hub it does not belong to (the Product Owner's decision of 2 November 2026). A
+         *     rider the caller cannot see, one that does not exist, one that is not active and one of another hub
+         *     are one answer, `RIDER_UNAVAILABLE`. The serviceable-motorcycle check is not made yet:
+         *     `NO_SERVICEABLE_MOTORCYCLE` stays declared and is not emitted until the fleet slice (the owner's
+         *     decision of 29 October 2026).
+         *
+         *     **What it records.** `assigned_rider_id` and `assigned_at`, and every `CONFIRMED` request the
+         *     manifest holds is marked as committed to a rider (`rider_assigned`), which is the moment a
+         *     cancellation by the office becomes a chargeable decision, for as long as the manifest holds the
+         *     request (cancelling the manifest ends the commitment). Naming the rider the manifest already has
+         *     changes nothing, and giving a draft another rider keeps the commitment.
+         *     Assignment is of a `DRAFT` manifest (`STATE_CONFLICT` otherwise): giving a manifest to a rider
+         *     is dispatch's act, because that is the moment its stops reach a rider.
          */
         post: operations["assignRider"];
         delete?: never;
@@ -899,11 +1538,41 @@ export interface paths {
         put?: never;
         /**
          * Dispatch the manifest to the assigned rider
-         * @description Permission `pickup.manifest.dispatch`. Requires an assigned rider.
+         * @description Permission `pickup.manifest.dispatch`. `DRAFT` to `DISPATCHED`, Ops only (state-machines.md 4).
+         *     Requires an assigned rider.
          *
          *     **Dispatch notifies; it does not start the run.** Only the rider starts a run. Three
          *     distinct moments exist here and collapsing any two of them loses a rule: assignment
          *     (cancellation closes), dispatch (rider notified), run start (rider acts).
+         *
+         *     **What it requires, in the order it is judged** (under the manifest's lock, so of two officers
+         *     who hold the same `ETag` one wins and the other is `STATE_CONFLICT`). The manifest is a draft.
+         *     **Its day has not passed on the hub's clock**: a run whose day has passed is never sent out
+         *     (`STATE_CONFLICT`, `details.rule` `service_date_passed`); it is cancelled, and the requests that
+         *     are still to be collected are planned again for a day that has not passed, each carried over for a
+         *     stated reason (the Product Owner, 2 November 2026). A manifest for a **later** day may be dispatched
+         *     in advance: that is publication to the assigned rider, and the run is started on its day
+         *     (`startRun`). It has a rider (`RIDER_UNAVAILABLE`) who is
+         *     still `ACTIVE` and belongs to the manifest's hub (`RIDER_UNAVAILABLE`). A stop is still to be worked
+         *     (`MANIFEST_EMPTY`: a manifest all of whose stops are resolved has nothing to send). And **the
+         *     request of every stop still to be worked is still `CONFIRMED`** (`STATE_CONFLICT`,
+         *     `details.rule` `request_not_confirmed`, `details.stops` naming the stops): a cancelled request is
+         *     never sent to a rider. The cancellation of a request resolves its stop itself, so that refusal is a
+         *     second safeguard; a refused dispatch sends nothing, queues no message and leaves the manifest a
+         *     draft. The serviceable-motorcycle check is not made yet: `NO_SERVICEABLE_MOTORCYCLE` stays
+         *     declared and is not emitted until the fleet slice (the owner's decision of 29 October 2026).
+         *
+         *     **What it does.** The manifest becomes `DISPATCHED` with `dispatched_at`, and from that moment its
+         *     stops are readable by the assigned rider and by no other rider. Each stop still to be worked gets
+         *     its `pickup_summary`, made once from its request and kept on the stop; a stop already resolved gets
+         *     none. One run-level text for the rider is queued in the same transaction (D-11). The text is a
+         *     courtesy and never the guarantee: the rider reads the stops in the app. A manifest is dispatched
+         *     once, and the rider of a dispatched manifest is not changed by `assignRider`, which is of a draft.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the dispatch texts, so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers (a missing token, a
+         *     stale `If-Match` and a refusal for state each count); a retry is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["dispatchManifest"];
         delete?: never;
@@ -926,7 +1595,38 @@ export interface paths {
         put?: never;
         /**
          * Rider starts the run
-         * @description Rider only, assigned rider only (`NOT_ASSIGNED_RIDER`).
+         * @description Rider only, assigned rider only (`NOT_ASSIGNED_RIDER`). `DISPATCHED` to `IN_PROGRESS`
+         *     (state-machines.md 4). It records the moment of the start and **changes nothing else**: the
+         *     work of the run is "in the active context" because its manifest is in progress, and no stop is
+         *     written.
+         *
+         *     **Dispatch is publication and the start is the day** (decided on 2 November 2026). A manifest
+         *     for a later day may be dispatched in advance (`dispatchManifest` only shows its stops to the
+         *     assigned rider), but **a run is started on its `service_date` on the hub's clock and not
+         *     before it or after it has passed**: either is `STATE_CONFLICT`, told apart by `details.rule`
+         *     (`service_date_not_reached`, `service_date_passed`), with the run's `service_date` in
+         *     `details`. A run already started when midnight passes goes on, keeps its `service_date` and its
+         *     actual moments, attributes each pickup's outcome to the local date of its own event, and is
+         *     not cancelled, completed or redated by the system at midnight; starting it again is a plain
+         *     `STATE_CONFLICT`, refused by its state and not by its day.
+         *
+         *     **What it requires, in the order it is judged**, under the manifest's lock. The run is the
+         *     rider's: a run assigned to another rider, a draft, a run cancelled before it went out and an
+         *     id that matches nothing are **one answer**, `NOT_ASSIGNED_RIDER` (a rider who *acts* on work
+         *     that is not its own is told so, and one who *looks it up* is told `NOT_FOUND`; nothing here
+         *     says which of the four it was). `If-Match` is the `ETag` of the run as it is now, stops
+         *     included (`STATE_CONFLICT`: a cancelled pickup or any other change to the run moves it, and the
+         *     rider reads the run again before it goes out). The run is `DISPATCHED` (`STATE_CONFLICT`). Its
+         *     day is today (`STATE_CONFLICT` with the rule above). **A stop of it is still to be worked**
+         *     (`MANIFEST_EMPTY`, the declared error `dispatchManifest` answers a manifest with nothing to
+         *     send): a run whose every pickup was cancelled or resolved is not started, stays `DISPATCHED`,
+         *     and Ops cancels it unstarted (`cancelPickupManifest`). A rejected start writes nothing and no
+         *     event. One event, `pickup.manifest.started`, is written in the rider's name; the start sends
+         *     no message.
+         *
+         *     **It carries no `Idempotency-Key`; `If-Match` is what makes a repeat safe.** A start that went
+         *     through has moved the run's `ETag`, so a second attempt with the token it was sent with is
+         *     `STATE_CONFLICT` and writes nothing, and the rider reads the run again to see it has started.
          */
         post: operations["startRun"];
         delete?: never;
@@ -959,6 +1659,20 @@ export interface paths {
          *
          *     **Opening a handover moves nothing.** Custody stays with the original rider until acceptance,
          *     so no window exists in which nobody holds the parcels.
+         *
+         *     **What the act is, as built (S1.24).** `If-Match` is the manifest's `ETag` (`getPickupManifest`),
+         *     and a stale token is `STATE_CONFLICT`. The run is `IN_PROGRESS` (any other state is
+         *     `STATE_CONFLICT`, `details.rule` `run_not_in_progress`) and has **no handover pending**: one run has at most one open handover, so a
+         *     second request, a double click included, is `STATE_CONFLICT` (`custody_handover_pending`). The origin is the run's **current
+         *     custody holder**, read from the run and never sent: the assigned rider, or the receiver of a
+         *     completed handover; a run whose custody is with the hub has no rider to hand it on and is
+         *     `STATE_CONFLICT` (`custody_with_hub`). A destination rider must be `ACTIVE`, of the run's hub, and not the holder
+         *     (`RIDER_UNAVAILABLE`, one answer for a rider the caller cannot see, one that does not exist and
+         *     one that is unavailable); the hub destination must be the run's own hub (`VALIDATION_FAILED`
+         *     otherwise). Both or neither of the two destinations is `VALIDATION_FAILED`; a blank note is
+         *     `REASON_REQUIRED`. A manifest of another hub is `HUB_SCOPE_VIOLATION` and an id that matches
+         *     nothing `NOT_FOUND`. The answer is the handover and its own `ETag`, which
+         *     `acceptRunCustodyHandover` and `failRunCustodyHandover` take as `If-Match`.
          */
         post: operations["initiateRunCustodyHandover"];
         delete?: never;
@@ -993,8 +1707,53 @@ export interface paths {
          *
          *     **Completed-stop attribution is unchanged.** Stops worked before the transfer stay attributed
          *     to the original rider (43.4). The receiver inherits the remaining work, never the record.
+         *
+         *     **What the act is, as built (S1.24).** The path names the run; the act is on the run's one pending
+         *     handover. `If-Match` is that handover's `ETag` (`getRunCustodyHandover`, or the answer of the act
+         *     that opened it); a stale token is `STATE_CONFLICT`. A rider who is not the named receiver, a run
+         *     that is not theirs and an id that matches nothing are one answer, `NOT_ASSIGNED_RIDER` (the rider
+         *     reads the handover it is party to and never the run). Ops accepts only a handover whose
+         *     destination is the hub; a handover to a rider is the rider's, and Ops is `PERMISSION_DENIED`. A
+         *     run with no pending handover is `STATE_CONFLICT` for staff (`details.rule` `no_custody_handover_pending`;
+         *     `run_not_in_progress` for a run that is not in progress). The `Idempotency-Key` replays the
+         *     original answer for a retry; the same key for another request is `IDEMPOTENCY_KEY_CONFLICT`. When
+         *     the acceptance leaves a run in progress with every stop terminal and none collected, the run is
+         *     completed by System in the same transaction (the manifest is read again to see it).
          */
         post: operations["acceptRunCustodyHandover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-manifests/{id}/custody-handover/fail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record that the named receiver did not take custody
+         * @description `fleet.custody.initiate`. `PENDING` to `FAILED`, Ops (state-machines.md 4.1, AC-SLICE-001-68):
+         *     custody stays with the original rider, the run remains `IN_PROGRESS` and a further handover
+         *     may be opened. Not `PENDING` is `STATE_CONFLICT`.
+         *
+         *     **What the act is, as built (S1.24).** The path names the run; the act is on the run's one
+         *     pending handover, and `If-Match` is that handover's `ETag` (a stale token is `STATE_CONFLICT`).
+         *     A blank note is `REASON_REQUIRED`. A run that is not in progress, or that has no pending handover,
+         *     is `STATE_CONFLICT` (`details.rule` `run_not_in_progress`, `no_custody_handover_pending`). The
+         *     `Idempotency-Key` replays the original answer for a
+         *     retry. A handover that resolves can leave a run in progress with every stop terminal and none
+         *     collected, which is then completed by System in the same transaction.
+         */
+        post: operations["failRunCustodyHandover"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1027,11 +1786,118 @@ export interface paths {
          *     stops (state-machines.md 5, an OPS transition), and the custody holder submits the hub
          *     handover with the manifest id this record carries. The receiver never needs the stop list.
          *
-         *     **Paginated**, the envelope every list in this contract uses.
+         *     **Paginated**, the envelope every list in this contract uses. `manifest_id` and `state` narrow
+         *     the list to the handovers of one run, or to the open ones; they widen nothing, since the scope
+         *     above is applied first. A list carries no `ETag`: `getRunCustodyHandover` on the chosen
+         *     handover does.
          */
         get: operations["listRunCustodyHandovers"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/run-custody-handovers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read one custody handover and the ETag the acts on it take
+         * @description `fleet.custody.read`. **The read `acceptRunCustodyHandover` and `failRunCustodyHandover` take
+         *     their `If-Match` from** (the identity-domain rule of the contract's third principle, applied to a
+         *     record that had no read of its own: the slice that builds an act adds the read it needs).
+         *
+         *     The scope is the list's, applied to one record: a rider reads a handover it is a party to, as
+         *     the originating rider or as the named receiver; Ops, Senior Ops and Platform Admin read their
+         *     hubs'. A staff caller outside the hub is `HUB_SCOPE_VIOLATION`; for a rider, a handover it is not
+         *     a party to is `NOT_FOUND`, the same as one that does not exist. The `ETag` changes when the
+         *     handover changes (it resolves) and when nothing else does not.
+         */
+        get: operations["getRunCustodyHandover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-stops/{id}/handshake/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve an expired or exhausted handshake by hand
+         * @description `pickup.handshake.resolve` - Senior Ops and Platform Admin (state-machines.md 6). An `EXPIRED`
+         *     or `EXHAUSTED` handshake routes to Ops (AC-SLICE-001-26): late self-confirmation by the vendor is
+         *     refused, and this is the one way the collection is then established. The handshake becomes
+         *     `MANUALLY_RESOLVED`, the stop closes as the recorded count says, and the physical state is not
+         *     otherwise changed. A handshake in any other state is `STATE_CONFLICT`.
+         *
+         *     **As built (S1.27).** Also a live code whose life has passed: it is marked `EXPIRED` in the same change and
+         *     then resolved. A code that is still live is `STATE_CONFLICT` (`details.rule` `code_live`), and so is a
+         *     stop that is not `ARRIVED` or whose handshake has ended; a handshake that was never asked for is
+         *     `STATE_CONFLICT` (`handshake_not_started`) and a stop that was never counted is
+         *     `COLLECTION_NOT_RECORDED`. The note is required (`REASON_REQUIRED`); `evidence_ids` are
+         *     `EVIDENCE_NOT_STORED` until the evidence store (S1.28) exists. The stop the path names is found in the
+         *     officer's hubs or refused (`HUB_SCOPE_VIOLATION`, `NOT_FOUND`) before the request is validated. The enhanced
+         *     event `pickup.handshake.manually_resolved` records the note.
+         */
+        post: operations["resolveHandshake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-stops/{id}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The vendor disputes a collection
+         * @description `pickup.collection.confirm` - the vendor, on its own pickup (21.4, AC-SLICE-001-27). Raises a
+         *     reconciliation item and sets the handshake `DISPUTED`. **It never reverses physical
+         *     completion**: the stop stays as it closed, and the manifest does not wait for the dispute. A stop
+         *     that has not closed is `STATE_CONFLICT`; another vendor's stop is answered as one that does not exist.
+         *
+         *     **As built (S1.29).** The vendor whose pickup it is, from the Vendor app, on a stop that has closed through its
+         *     handshake (`COLLECTED` or `PARTIALLY_COLLECTED`): the item is raised `OPEN`, the handshake becomes `DISPUTED` and one
+         *     event carries the vendor's note, in one change; the stop is not touched, and the manifest completes as it would have.
+         *     A stop that has not closed, a skipped one and a failed one are `STATE_CONFLICT` (`details.rule` `stop_not_closed`; a
+         *     failed stop has no dispute form by design), and a second dispute of the same collection is `STATE_CONFLICT` (`dispute_open`).
+         *     The note is required (`REASON_REQUIRED` when blank) and is bounded as the ledger bounds a note (`VALIDATION_FAILED`); a note that the ledger's
+         *     screening would change (a secret that travels inside the text, such as a `token=` value or a credential inside an address) is refused whole, as
+         *     `VALIDATION_FAILED` with the rule `format`, so that the item, the event and the answer hold exactly what the vendor wrote.
+         *     No operation resolves an item in `SLICE-001`, and **no operation lists or reads one yet** (Ops's side is S1.30's and the vendor's own view is a
+         *     later screen's; both need operations added to this contract first).
+         */
+        post: operations["disputeCollection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1127,6 +1993,23 @@ export interface paths {
          *     **The code value is never returned to any surface but the rider's, never logged, and
          *     never written to an audit event** — audit records that a code was generated, never what
          *     it was.
+         *
+         *     **As built (S1.27).** The rider that recorded the count, while it is the run's assigned rider, on a stop it
+         *     has arrived at (custody alone gives the receiving rider none of this: `NOT_ASSIGNED_RIDER`; a vendor is
+         *     `PERMISSION_DENIED`). The direction was fixed by the count: a vendor's pickup answers with `display_code`
+         *     (the rider shows it to the vendor); an individual sender's pickup answers without one, and the code is
+         *     **texted to the sender** by the notification lane, whose request is written in the same change. The code is
+         *     derived and never stored (the database keeps a keyed digest of the live one); a retry with the same
+         *     `Idempotency-Key` shows it again only while it is still the live code. Before the count is recorded:
+         *     `COLLECTION_NOT_RECORDED`; a stop that is not `ARRIVED`, or that already has its handshake:
+         *     `STATE_CONFLICT` (`details.rule` `stop_not_arrived`, `handshake_exists`). If the length of a code that the platform holds moved while the
+         *     code was being made, nothing is kept and the answer is `STATE_CONFLICT` (`details.rule` `code_length_changed`): the rider asks again, and the next code is made at
+         *     the length now held (the length of a code is kept with it, migration `0073`).
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the individual sender's code (a vendor's code is shown and not sent, and the request counts all the same), so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+         *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["initiateHandshake"];
         delete?: never;
@@ -1157,6 +2040,19 @@ export interface paths {
          *     **The channel is always recorded**, even on the primary path. A stop whose channel is
          *     null is a defect: persistent fallback use is only visible as data if the ordinary case
          *     is recorded too.
+         *
+         *     **As built (S1.27).** Entered by the vendor whose pickup it is (the code its rider shows) or by the rider that
+         *     counted the stop (the code an individual sender received, or, after the SMS fallback, the code the vendor
+         *     read out from its registered number); a rider cannot enter the code it displays itself
+         *     (`PERMISSION_DENIED`), and a stop that is not the caller's is `NOT_FOUND` for a vendor and
+         *     `NOT_ASSIGNED_RIDER` for a rider. A wrong, expired or exhausted code is **committed before it is refused**:
+         *     the attempt is counted by the database whatever the application does (`CODE_INVALID`; the last one is
+         *     `ATTEMPTS_EXHAUSTED`), an expired code is marked expired and routes to Ops (`CODE_EXPIRED`: late
+         *     self-confirmation is refused, AC-SLICE-001-26), and an entry after either is the same answer. A text that
+         *     cannot be a code is a wrong code. The stop closes in the same change, as the count says: `COLLECTED`
+         *     for a count that matched, `PARTIALLY_COLLECTED` for a short one. A stop with no handshake, or whose
+         *     handshake has ended, is `STATE_CONFLICT` (`details.rule` `handshake_not_started`, `handshake_closed`).
+         *     No `Idempotency-Key`: a repeated code is a repeated attempt.
          */
         post: operations["verifyHandshake"];
         delete?: never;
@@ -1197,6 +2093,28 @@ export interface paths {
          *     (`authoriseHandshakeOverride`) is the ladder's next rung, built for exactly this case.
          *
          *     Every use is logged, so persistent fallback use becomes visible data.
+         *
+         *     **As built (S1.27).** Only the rider that counted the stop, for a registered vendor's pickup (an individual
+         *     sender is texted in the first place: `STATE_CONFLICT`, `details.rule` `fallback_not_applicable`). It makes a
+         *     **new code the rider has not seen** and texts it to the vendor's registered number, which the vendor reads out
+         *     to the rider, who enters it (`verifyHandshake`, channel `SMS_FALLBACK`); the code the rider displayed no
+         *     longer verifies, and the wrong attempts already counted stay counted. The cap and the cooldown are the
+         *     database's, for every process and every caller (`SMS_FALLBACK_LIMIT_REACHED`), and a refusal sends
+         *     nothing. The trigger is a technical failure (`NO_DATA`, `PORTAL_DOWN`); `VENDOR_BUSY` is
+         *     `VALIDATION_FAILED` (`/trigger`, rule `not_a_technical_failure`). Without a handshake yet it makes one
+         *     (a portal that was down from the start). A code that had run out is marked expired and nothing is sent: the
+         *     answer is `STATE_CONFLICT` (`details.rule` `code_expired`), the handshake routes to Ops, and a retry of
+         *     the same request is told the same. If the length of a code that the platform holds moved while the new code was being made, nothing is kept or sent and the
+         *     answer is `STATE_CONFLICT` (`details.rule` `code_length_changed`): ask again. **The registered number is the phone of the vendor's
+         *     credential** (F-23, migration `0073`; the Product Owner's confirmation is open): `recovery_phone` of the credential whose `delivery_channel` is `PHONE`,
+         *     the number its own setup and recovery messages go to. The business contact number is not an authentication channel and is never used; a vendor with no such
+         *     number is `NO_REGISTERED_NUMBER`. The code is made again from the stop and its generation by the lane, which is given the number for this request alone and only while
+         *     the code is live.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the code to the vendor's registered number, so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+         *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["requestSmsHandshakeFallback"];
         delete?: never;
@@ -1227,6 +2145,15 @@ export interface paths {
          *
          *     This is a policy waiver rather than a verification step, so it sits with Ops under
          *     MSC-DEC-204's override-authority principle.
+         *
+         *     **As built (S1.27).** From a stop that has been counted and arrived at, whatever the handshake stood at (not
+         *     begun, a live code, expired, exhausted): the handshake becomes `VERIFIED` on channel `OPS_OVERRIDE` with the
+         *     officer as `authorised_by`, and the stop closes as the count says (`COLLECTED` or
+         *     `PARTIALLY_COLLECTED`). The note is required (`REASON_REQUIRED`). The stop the path names is found in the
+         *     officer's hubs or refused (`HUB_SCOPE_VIOLATION` for another hub's, `NOT_FOUND` for an id that matches
+         *     nothing) before the request is validated. A stop that has not been counted is `COLLECTION_NOT_RECORDED`;
+         *     one that is not `ARRIVED`, or whose handshake has ended, is `STATE_CONFLICT`. The enhanced event
+         *     `pickup.handshake.fallback_override` records the note.
          */
         post: operations["authoriseHandshakeOverride"];
         delete?: never;
@@ -2482,7 +3409,7 @@ export interface paths {
          * Declare an evidence record and obtain upload instructions
          * @description **Evidence holds no authority of its own.** `x-permission: owner` means the caller must hold
          *     the write permission of the act this evidence attaches to - a rider capturing collection proof
-         *     needs `pickup.run.execute`, a receiving officer recording condition needs `hub.osd.adjudicate`.
+         *     needs `pickup.run.execute`, a receiving officer recording condition needs `hub.intake.count`.
          *     11.6 draws `domain` from a closed seventeen-item list and **`evidence` is not on it**, which
          *     this reads as correct rather than as an omission: evidence is always captured in the course of
          *     another act, so its authorization is that act's authorization. MSC-DEC-253 confirmed that
@@ -5909,6 +6836,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ad-hoc-senders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find a returning ad-hoc sender by verified phone
+         * @description `vendor.read` - staff only; the registry denies a vendor and a rider any read of a sender
+         *     (AC-SLICE-001-72). Returns zero or one sender: the profile of a walk-in who has used Melarc before,
+         *     found by the phone the SMS OTP verified (MSC-DEC-172). The sender's identity, contact and locations
+         *     are then reused, while today's goods are not (`current_item_description` is required per request).
+         *     An unknown phone is an empty list and not an error.
+         */
+        get: operations["findAdHocSender"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vendor-organizations/{id}/pickup-locations": {
         parameters: {
             query?: never;
@@ -5919,7 +6870,12 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List a vendor's saved pickup locations
+         * @description `vendor.pickup_location.manage` - the vendor on its own record, Ops at the vendor's own hub. Active
+         *     and inactive locations, the default first. A booking offers the active ones (AC-SLICE-001-69).
+         */
+        get: operations["listVendorPickupLocations"];
         put?: never;
         /**
          * Save a pickup location for a vendor
@@ -7246,7 +8202,7 @@ export interface components {
              *     withdrawn code is absent here, which is what makes "never reused" structural.
              * @enum {string}
              */
-            code: "ACCOUNT_OVERDUE" | "ALLOWANCE_DISABLED" | "ATTEMPTS_EXHAUSTED" | "BLIND_COUNT_VIOLATED" | "CARRIER_COST_REQUIRED" | "CARRIER_NOT_APPROVED" | "CASH_HANDOVER_VARIANCE" | "CHALLENGE_EXPIRED" | "CHALLENGE_UNUSABLE" | "CODE_EXPIRED" | "CODE_INVALID" | "COLLECTION_NOT_RECORDED" | "COMMITMENT_REASON_REQUIRED" | "COMMITMENT_SOURCE_UNRESOLVED" | "CORRIDOR_DAY_NOT_PERMITTED" | "CREDENTIAL_DELIVERY_FAILED" | "CREDENTIAL_LOCKED" | "CREDIT_LIMIT_EXCEEDED" | "CSRF_VALIDATION_FAILED" | "CUSTODY_NOT_RETURNED" | "DELIVERY_CHANNEL_FAILED" | "DESTINATION_UNRESOLVED" | "DEVICE_INTEGRITY_FAILED" | "DEVICE_NOT_ENROLLED" | "DEVICE_PROOF_INVALID" | "DEVICE_SECURITY_UNSUPPORTED" | "DISPATCH_NOT_CLEARED" | "DOORSTEP_WAIT_NOT_ELAPSED" | "EVIDENCE_NOT_STORED" | "EVIDENCE_REQUIRED" | "EVIDENCE_UPLOAD_EXPIRED" | "EXCEPTION_NOT_AVAILABLE_TO_SELF_SERVICE" | "EXPORT_FILE_EXPIRED" | "EXPORT_RETENTION_NOT_CONFIGURED" | "EXPORT_SOURCE_NOT_EVENT_COMPLETE" | "FALLBACK_AUTHORIZATION_ALREADY_CONSUMED" | "FALLBACK_AUTHORIZATION_DEMAND_MISMATCH" | "FALLBACK_AUTHORIZATION_METHOD_MISMATCH" | "FALLBACK_AUTHORIZATION_SUPERSEDED" | "FALLBACK_REQUIRES_AUTHORIZATION" | "FINANCIAL_CLOSURE_INCOMPLETE" | "HANDOFF_NOT_RECORDED" | "HANDSHAKE_NOT_VERIFIED" | "HUB_SCOPE_VIOLATION" | "IDEMPOTENCY_KEY_CONFLICT" | "INSUFFICIENT_AUTHORITY" | "INVALID_CREDENTIALS" | "MANIFEST_EMPTY" | "MANIFEST_NOT_STARTED" | "MARGIN_NOT_CONFIGURED" | "MFA_ENROLMENT_REQUIRED" | "MFA_PROOF_INVALID" | "MFA_REQUIRED" | "NOTIFICATION_FAILED" | "NOT_ASSIGNED_RIDER" | "NOT_CUSTODY_HOLDER" | "NOT_FOUND" | "NO_CHARGE_APPLIED" | "NO_PRICING_CHANGE" | "NO_REGISTERED_NUMBER" | "NO_SERVICEABLE_MOTORCYCLE" | "ORDER_NOT_COMMERCIALLY_CLEARED" | "ORDER_NOT_ON_RUN" | "ORDER_UNPRICED" | "OTP_INVALID" | "OUTBOUND_CHARGE_UNPAID" | "PARCEL_NOT_ACCEPTABLE" | "PARCEL_NOT_IN_HUB_CUSTODY" | "PARITY_NOT_MET" | "PAYMENT_ALREADY_PENDING" | "PAYMENT_ALREADY_SETTLED" | "PAYMENT_AMOUNT_MISMATCH" | "PAYMENT_COLLECTION_NOT_ALLOWED" | "PAYMENT_FALLBACK_NOT_VERIFIED" | "PAYMENT_NOT_CONFIRMED" | "PAYMENT_PROVIDER_UNAVAILABLE" | "PAYMENT_STATUS_UNKNOWN" | "PERIOD_NOT_RECONCILED" | "PERMISSION_DENIED" | "PICKUP_ATTEMPT_LIMIT_REACHED" | "PICKUP_MINIMUM_NOT_MET" | "RATE_LIMITED" | "REASON_NOT_ACTIVE" | "REASON_NOT_VALID_FOR_CHECKPOINT" | "REASON_REQUIRED" | "RECIPIENT_NOT_CONFIRMED" | "RECIPIENT_PAYMENT_OUTSTANDING" | "RECOVERY_TOKEN_INVALID" | "REPLACEMENT_REQUIRED" | "RETURN_FEE_OUTSTANDING" | "RIDER_UNAVAILABLE" | "ROAD_EXPENSE_ALREADY_APPLIED" | "ROAD_EXPENSE_NOT_APPROVED" | "RUN_ALREADY_STARTED" | "SELF_APPROVAL_FORBIDDEN" | "SELF_CANCEL_NOT_PERMITTED_AFTER_ASSIGNMENT" | "SENDER_IDENTITY_AMBIGUOUS" | "SENDER_SUSPENDED" | "SERVICE_DATE_NOT_PERMITTED" | "SERVICE_WINDOW_OVERRIDE_REASON_REQUIRED" | "SESSION_INVALID" | "SESSION_SUPERSEDED" | "SETTING_INVALID" | "SETTING_MISSING" | "SETUP_GRANT_INVALID" | "SINGLE_PACKAGE_APPROVAL_REQUIRED" | "SIZE_CLASS_REQUIRED" | "SMS_FALLBACK_LIMIT_REACHED" | "SOURCE_STILL_ACTIVE" | "STATE_CONFLICT" | "STOPS_UNRESOLVED" | "STOP_NOT_QUALIFYING" | "TERMINAL_FOR_STATION_DROP" | "TRUST_DATA_UNAVAILABLE" | "VALIDATION_FAILED" | "VALUE_DECLARATION_REQUIRED" | "VERIFICATION_FALLBACK_NOT_AUTHORIZED" | "WAYBILL_REQUIRED" | "WORK_EMAIL_IN_USE" | "ZERO_COLLECTION_IS_FAILURE" | "ZONE_NOT_SERVICED_ON_DATE";
+            code: "ACCOUNT_OVERDUE" | "ALLOWANCE_DISABLED" | "ALREADY_MANIFESTED" | "ATTEMPTS_EXHAUSTED" | "BLIND_COUNT_VIOLATED" | "CARRIER_COST_REQUIRED" | "CARRIER_NOT_APPROVED" | "CASH_HANDOVER_VARIANCE" | "CHALLENGE_EXPIRED" | "CHALLENGE_UNUSABLE" | "CODE_EXPIRED" | "CODE_INVALID" | "COLLECTION_NOT_RECORDED" | "COMMITMENT_REASON_REQUIRED" | "COMMITMENT_SOURCE_UNRESOLVED" | "CORRIDOR_DAY_NOT_PERMITTED" | "CREDENTIAL_DELIVERY_FAILED" | "CREDENTIAL_LOCKED" | "CREDIT_LIMIT_EXCEEDED" | "CSRF_VALIDATION_FAILED" | "CUSTODY_NOT_RETURNED" | "DELIVERY_CHANNEL_FAILED" | "DESTINATION_UNRESOLVED" | "DEVICE_INTEGRITY_FAILED" | "DEVICE_NOT_ENROLLED" | "DEVICE_PROOF_INVALID" | "DEVICE_SECURITY_UNSUPPORTED" | "DISPATCH_NOT_CLEARED" | "DOORSTEP_WAIT_NOT_ELAPSED" | "EVIDENCE_NOT_STORED" | "EVIDENCE_REQUIRED" | "EVIDENCE_UPLOAD_EXPIRED" | "EXCEPTION_NOT_AVAILABLE_TO_SELF_SERVICE" | "EXPORT_FILE_EXPIRED" | "EXPORT_RETENTION_NOT_CONFIGURED" | "EXPORT_SOURCE_NOT_EVENT_COMPLETE" | "FALLBACK_AUTHORIZATION_ALREADY_CONSUMED" | "FALLBACK_AUTHORIZATION_DEMAND_MISMATCH" | "FALLBACK_AUTHORIZATION_METHOD_MISMATCH" | "FALLBACK_AUTHORIZATION_SUPERSEDED" | "FALLBACK_REQUIRES_AUTHORIZATION" | "FINANCIAL_CLOSURE_INCOMPLETE" | "HANDOFF_NOT_RECORDED" | "HANDSHAKE_NOT_VERIFIED" | "HUB_SCOPE_VIOLATION" | "IDEMPOTENCY_KEY_CONFLICT" | "INSUFFICIENT_AUTHORITY" | "INVALID_CREDENTIALS" | "MANIFEST_EMPTY" | "MANIFEST_NOT_STARTED" | "MARGIN_NOT_CONFIGURED" | "MFA_ENROLMENT_REQUIRED" | "MFA_PROOF_INVALID" | "MFA_REQUIRED" | "NOTIFICATION_FAILED" | "NOT_ASSIGNED_RIDER" | "NOT_CUSTODY_HOLDER" | "NOT_FOUND" | "NO_CHARGE_APPLIED" | "NO_PRICING_CHANGE" | "NO_REGISTERED_NUMBER" | "NO_SERVICEABLE_MOTORCYCLE" | "ORDER_NOT_COMMERCIALLY_CLEARED" | "ORDER_NOT_ON_RUN" | "ORDER_UNPRICED" | "OTP_INVALID" | "OUTBOUND_CHARGE_UNPAID" | "PARCEL_NOT_ACCEPTABLE" | "PARCEL_NOT_IN_HUB_CUSTODY" | "PARITY_NOT_MET" | "PAYMENT_ALREADY_PENDING" | "PAYMENT_ALREADY_SETTLED" | "PAYMENT_AMOUNT_MISMATCH" | "PAYMENT_COLLECTION_NOT_ALLOWED" | "PAYMENT_FALLBACK_NOT_VERIFIED" | "PAYMENT_NOT_CONFIRMED" | "PAYMENT_PROVIDER_UNAVAILABLE" | "PAYMENT_STATUS_UNKNOWN" | "PERIOD_NOT_RECONCILED" | "PERMISSION_DENIED" | "PICKUP_ATTEMPT_LIMIT_REACHED" | "PICKUP_DOOR_WAIT_NOT_ELAPSED" | "PICKUP_MINIMUM_NOT_MET" | "RATE_LIMITED" | "REASON_NOT_ACTIVE" | "REASON_NOT_VALID_FOR_CHECKPOINT" | "REASON_REQUIRED" | "RECIPIENT_NOT_CONFIRMED" | "RECIPIENT_PAYMENT_OUTSTANDING" | "RECOVERY_TOKEN_INVALID" | "REPLACEMENT_REQUIRED" | "RETURN_FEE_OUTSTANDING" | "RIDER_UNAVAILABLE" | "ROAD_EXPENSE_ALREADY_APPLIED" | "ROAD_EXPENSE_NOT_APPROVED" | "RUN_ALREADY_STARTED" | "SELF_APPROVAL_FORBIDDEN" | "SELF_CANCEL_NOT_PERMITTED_AFTER_ASSIGNMENT" | "SENDER_IDENTITY_AMBIGUOUS" | "SENDER_SUSPENDED" | "SERVICE_DATE_NOT_PERMITTED" | "SERVICE_WINDOW_OVERRIDE_REASON_REQUIRED" | "SESSION_INVALID" | "SESSION_SUPERSEDED" | "SETTING_INVALID" | "SETTING_MISSING" | "SETUP_GRANT_INVALID" | "SINGLE_PACKAGE_APPROVAL_REQUIRED" | "SIZE_CLASS_REQUIRED" | "SMS_FALLBACK_LIMIT_REACHED" | "SOURCE_STILL_ACTIVE" | "STATE_CONFLICT" | "STOPS_UNRESOLVED" | "STOP_NOT_QUALIFYING" | "TERMINAL_FOR_STATION_DROP" | "TRUST_DATA_UNAVAILABLE" | "VALIDATION_FAILED" | "VALUE_DECLARATION_REQUIRED" | "VERIFICATION_FALLBACK_NOT_AUTHORIZED" | "WAYBILL_REQUIRED" | "WORK_EMAIL_IN_USE" | "ZERO_COLLECTION_IS_FAILURE" | "ZONE_NOT_SERVICED_ON_DATE";
             /**
              * @description Diagnostic English. Never parsed, never shown to a vendor or rider — display copy
              *     is mapped from `code` by the surface (§36.13, OQ-037).
@@ -7326,7 +8282,9 @@ export interface components {
              * @description COLLECT_FOR_VENDOR destination - a Vendor saved location or an approved alternative.
              */
             destination_location_id?: string | null;
-            /** @description The sender's own pickup address. For COLLECT_FOR_VENDOR the collection point carries the address instead, and this is omitted. */
+            /** @description COLLECT_FOR_VENDOR only: resolve the destination to the Vendor's default saved location. The server refuses the request (DESTINATION_UNRESOLVED) if that Vendor has none, rather than accepting a collection with no destination. Present on any other intent it is mis-declared and refused. */
+            use_vendor_default_destination?: boolean;
+            /** @description The sender's own pickup address. For COLLECT_FOR_VENDOR the collection point carries the address instead, and this is omitted. For ADHOC_SENDER it is the address of this request; a first-time sender may give it as new_ad_hoc_sender.pickup_location instead, which is then both this request's address and the new profile's, and neither one given is VALIDATION_FAILED. */
             pickup_location?: components["schemas"]["Location"];
             /** @description Today's goods - women's shoes, clothes, phone accessories, books. REQUIRED for ADHOC_SENDER, because identity is reusable and goods are not. Optional for OWN_PACKAGES, where the Vendor's established goods profile satisfies 21.1 and an established Vendor is not re-onboarded daily. */
             current_item_description?: string;
@@ -7340,7 +8298,8 @@ export interface components {
             /**
              * @description Minimum 2 unless an approved one-package exception exists (§35.2.3). Accepting 1 here
              *     lets the server return `PICKUP_MINIMUM_NOT_MET` with its reason rather than a bare
-             *     schema rejection.
+             *     schema rejection, and lets an Ops session create the single-package request that the
+             *     exception then attaches to.
              */
             declared_package_count: number;
             /** @enum {string} */
@@ -7366,7 +8325,74 @@ export interface components {
              *     customer learns the real limit BEFORE Melarc takes custody, not after a loss.
              */
             liability_cap_acknowledged?: boolean;
+            /**
+             * Format: uuid
+             * @description OWN_PACKAGES: the saved pickup location this request uses. Omit for the vendor's default. A location of another vendor is answered as one that does not exist.
+             */
+            vendor_pickup_location_id?: string;
+            /** @description E.164 or as entered; normalised server-side. Required for ADHOC_SENDER and COLLECT_FOR_VENDOR, reused from the vendor for OWN_PACKAGES. */
+            primary_phone?: string;
+            secondary_phone?: string;
         } & (unknown & unknown & unknown & unknown & unknown);
+        /** @description One message to one audience over one channel and what became of it (section 31.6; SLICE-001, S1.12). **It holds no destination in clear, no text and no code.** */
+        NotificationLogEntry: {
+            /** Format: uuid */
+            id: string;
+            /** @description The message of the platform's list this is (`PICKUP_CONFIRMED_SENDER`): a stable name, never wording. */
+            message_kind: string;
+            /** @description The version of the wording it was rendered from, so that a later edit never rewrites what was said. The wording itself is not part of the entry. */
+            template_version: number;
+            /** @enum {string} */
+            audience: "AD_HOC_SENDER" | "VENDOR_NUMBER" | "RIDER" | "RECIPIENT" | "VENDOR_FEED" | "OPS_FEED";
+            /** @enum {string} */
+            channel: "SMS" | "FEED";
+            /**
+             * @description `QUEUED` and `RETRYABLE` wait for an attempt; `LEASED` is being sent; `SENT` was accepted by the provider and waits for the network's word; `DELIVERED`, `FAILED`, `SUPPRESSED` and `EXPIRED` are final. A feed entry is `DELIVERED` when written.
+             * @enum {string}
+             */
+            state: "QUEUED" | "LEASED" | "RETRYABLE" | "SENT" | "DELIVERED" | "FAILED" | "SUPPRESSED" | "EXPIRED";
+            /**
+             * @description Why a `SUPPRESSED` message was held back and never sent; present exactly when the state is `SUPPRESSED`. `DESTINATION_REFUSED` is reserved for the day the provider's refusals can be told apart; until then every refusal by the provider is a `FAILED` message with the provider's closed word.
+             * @enum {string|null}
+             */
+            suppression_reason?: "KILL_SWITCH" | "NUMBER_LIMIT" | "DAY_LIMIT" | "WINDOW_LIMIT" | "DESTINATION_NOT_ALLOWED" | "DESTINATION_REFUSED" | "NO_DESTINATION" | "OVERTAKEN" | "WORDING_NOT_APPROVED" | null;
+            /**
+             * @description How the last attempt or the message ended, as a closed word and never as a provider's text.
+             * @enum {string|null}
+             */
+            outcome_class?: "ACCEPTED" | "UNKNOWN" | "REJECTED" | "DELIVERY_FAILED" | "SCHEDULE_EXHAUSTED" | "EXPIRED" | "RELINQUISHED" | null;
+            /** @description The closed word of a refusal, for the Ops reader: the provider's own (`REQUEST_INVALID`) or the lane's when the lane itself could not make the text (`UNKNOWN_MESSAGE`, `TEMPLATE_UNUSABLE`). Never a provider's text. */
+            provider_outcome_class?: string | null;
+            /** @description The country part and the last three digits of the number (`+233******111`): enough to tell two numbers apart, and no more. Null for a feed entry and for a message that never had a number. For a text to a vendor's registered number (the phone of its credential, which no member of staff is shown any part of) it is null as well: nothing of that number is kept in the log. */
+            destination_hint?: string | null;
+            attempt_count: number;
+            /** @description The record the message announces, from which Ops opens it. */
+            subject: {
+                /** @enum {string} */
+                type: "PICKUP_REQUEST" | "PICKUP_MANIFEST";
+                /** Format: uuid */
+                id: string;
+            };
+            /** Format: uuid */
+            responsible_hub_id: string;
+            /**
+             * Format: date-time
+             * @description When the provider took the text; null for a feed entry and for a message that never left.
+             */
+            sent_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the network said the text arrived; null until it does, and for a feed entry.
+             */
+            delivered_at?: string | null;
+            /**
+             * Format: date-time
+             * @description After this a text is not sent (a confirmation after an outage of hours is noise); for a feed entry, its retention.
+             */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         PickupRequest: {
             /** Format: uuid */
             id: string;
@@ -7443,6 +8469,67 @@ export interface components {
             created_at?: string;
             /** Format: date-time */
             confirmed_at?: string | null;
+            /**
+             * @description Set when the request was confirmed after the hub's booking cutoff (§21.1). Not a rejection: `PENDING_OPS_REVIEW` queues the request for `resolveCutoffException`.
+             * @enum {string|null}
+             */
+            cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED" | null;
+            /**
+             * Format: uuid
+             * @description The saved location the request selected (OWN_PACKAGES); null where the default was used or the intent is another.
+             */
+            vendor_pickup_location_id?: string | null;
+            /** @description E.164, normalised; as captured on this request. */
+            primary_phone?: string | null;
+            /** @description Optional second contact (§21.1). */
+            secondary_phone?: string | null;
+            /**
+             * Format: uuid
+             * @description The clone created when this request was rescheduled; the clone carries replaces_request_id.
+             */
+            replacement_request_id?: string | null;
+            /** @description The booking estimate (MSC-DEC-211). Computed from the hub's settings in force and kept as its inputs, never as a price: it is not the locked price and creates no charge. */
+            readonly indicative_estimate?: components["schemas"]["IndicativeEstimate"] | null;
+            /** @description The cancellation charge as it stood when applied (domain model 3.7): amount, setting key and effective version. Stays readable after a waiver, which relieves it in full. */
+            cancellation_charge_snapshot?: {
+                amount_minor?: number;
+                setting_key?: string;
+                effective_version?: string;
+            } | null;
+            /** @description The sender's name for a person to read: the registered vendor's trading name (its legal name when it has none) or the ad-hoc sender's name. A label, never an identifier and never an authority. */
+            readonly sender_name?: string | null;
+            /**
+             * @description Set only when default_payer_intent is SPLIT. Intent, never a price.
+             * @enum {string|null}
+             */
+            split_basis?: "FIXED_AMOUNT" | "PERCENTAGE" | null;
+            /** @description Set when split_basis is FIXED_AMOUNT. */
+            split_sender_amount?: components["schemas"]["Money"] | null;
+            /** @description Set when split_basis is PERCENTAGE. */
+            split_sender_percentage?: number | null;
+            /** @description The transaction override given at booking (section 35.2.6); it never rewrote a saved default. */
+            location_overrides?: components["schemas"]["Location"] | null;
+            /**
+             * Format: uuid
+             * @description The Senior Ops force-extension past MELARC_MAX_PICKUP_ATTEMPTS that applies to this request (extendPickupAttempts); null when there is none.
+             */
+            attempt_extension_id?: string | null;
+            /** Format: date-time */
+            cancelled_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When Ops judged a failed request out of its own hands (escalatePickupRequest); null until it does. It is a recorded judgement and never taken back, and a cancellation that follows keeps it. Who escalated it, the note and the trigger are in the audit event, not here.
+             */
+            readonly escalated_at?: string | null;
+            /** @description The reason selected at cancellation, with its label as it stood then (domain model 3.7). Null unless the request is CANCELLED. */
+            readonly cancellation_reason?: {
+                code?: string;
+                label?: string;
+            } | null;
+            /** @description **True while the request is committed to a rider: a stop that has not released its claim holds it on a manifest that has a rider**, and at no other time (the Product Owner, 2 November 2026). Raised by assignRider and lowered by cancelPickupManifest in the transaction that releases the claim: the moment a vendor's own cancellation closes (dormant in Version 1) and an Ops cancellation can carry a charge. A rider who was once assigned establishes nothing, so a request returned to the pool by the cancellation of its manifest is not committed and its later cancellation by the office records no charge decision. Giving a draft another rider keeps it. A request that is cancelled is frozen and keeps the value its cancellation was decided on, with its charge decision. It moves the request's ETag, so a cancellation made on a read from before it changed is a STATE_CONFLICT. A fact, never the rider's identity. */
+            readonly rider_assigned?: boolean;
+            /** @description The one-package exception of this request in whatever state it is in (REQUESTED until a holder of pickup.exception.approve decides), with the recipient it carries. Null when none was requested. one_package_exception_id is set once it is APPROVED. **By who is reading**: staff read the exception in whole (OnePackageException: who asked, who decided it and why are always present); every other principal reads its outcome only (OnePackageExceptionOutcome: none of the three, and nothing else of staff's). The two are never both a valid answer for one reader. */
+            readonly one_package_exception?: components["schemas"]["OnePackageException"] | components["schemas"]["OnePackageExceptionOutcome"] | null;
         };
         /**
          * @description The uniform maker-checker record (§37.4, MSC-DEC-135). `approved_by` may never equal
@@ -7460,11 +8547,62 @@ export interface components {
             reason_code?: string;
             note?: string;
         };
-        /** @description Persisted, never kept only in transient UI state (§35.7.2). */
+        /** @description The one-package exception as **staff** read it, in whole: the Approval of the maker-checker shape with the recipient it carries (section 21.1). **requested_by (who asked), approved_by (who decided it, null until someone has) and note (why) are staff's, and are always present here**: the maker-checker screens judge an exception by them, and one that arrives without them is not an answer for staff. approved_by may never equal requested_by unless the approver is a Platform Admin. Every other principal reads OnePackageExceptionOutcome, which has none of the three (the Product Owner, 29 October 2026). The two are the same exception for two readers, and a request offers one of them, never both. */
+        OnePackageException: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "REQUESTED" | "APPROVED" | "REJECTED";
+            /** Format: uuid */
+            requested_by: string;
+            /** Format: date-time */
+            requested_at: string;
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            decided_at?: string | null;
+            note: string;
+            recipient: {
+                name: string;
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+            /** @description The single-package fee that became due on approval, as snapshotted from the hub's setting; null until then. Due, not collected. */
+            single_package_fee?: components["schemas"]["Money"] | null;
+        };
+        /** @description What every principal that is not staff reads of an exception, a Vendor among them: **the outcome only** (the Product Owner, 29 October 2026). The state, when it was asked for and decided, the recipient and the fee that became due, and **never the note or the ids of the staff who asked for or decided it**. **The omission is the guard**: the schema is closed, so a member of staff's added to what these readers are given is an answer the contract refuses, and it is OnePackageException without exactly requested_by, approved_by and note (a test holds the two together). It repeats the members the two share instead of composing them, because a closed schema inside an allOf refuses every member its sibling adds. The audience is derived from the principal and fails closed: only a staff principal reads OnePackageException. */
+        OnePackageExceptionOutcome: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "REQUESTED" | "APPROVED" | "REJECTED";
+            /** Format: date-time */
+            requested_at: string;
+            /** Format: date-time */
+            decided_at?: string | null;
+            recipient: {
+                name: string;
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+            /** @description The single-package fee that became due on approval, as snapshotted from the hub's setting; null until then. Due, not collected. */
+            single_package_fee?: components["schemas"]["Money"] | null;
+        };
+        /**
+         * @description Persisted, never kept only in transient UI state (§35.7.2). **The wait is not reported**: how long the rider had waited at the door when it tried is derived, from
+         *     `attempted_at` and the stop's `arrived_at` (the arrival the server recorded), so a device cannot state a wait it did not keep.
+         */
         ContactAttempt: {
+            /**
+             * @description How the rider tried to reach the sender: a call, a text, or in person at the premises. The values are provisional (OB-S1-67); the feature text names a method and lists none.
+             * @enum {string}
+             */
+            method: "PHONE_CALL" | "SMS" | "IN_PERSON";
             /** Format: date-time */
             attempted_at: string;
             outcome: string;
+            /** @description Optional; held to the same screening as every note. */
+            note?: string;
         };
         CollectionRecordCreate: {
             /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). */
@@ -7475,20 +8613,6 @@ export interface components {
              */
             variance_reason_code?: string;
             variance_note?: string;
-            /**
-             * @description Direction is fixed by 21.4, MSC-DEC-114–115 and may not be reversed: registered vendors
-             *     enter a rider-displayed code; ad-hoc senders receive an SMS code the rider enters.
-             * @enum {string}
-             */
-            handshake_type: "VENDOR_ENTERED_RIDER_DISPLAYED" | "SENDER_SMS_RIDER_ENTERED";
-            /**
-             * @description Which rung of the fallback ladder verified the handshake. **Recorded
-             *     on every handshake, not only fallbacks** — the control is that persistent fallback
-             *     use becomes visible, and a ratio needs both terms.
-             * @default PORTAL
-             * @enum {string}
-             */
-            handshake_channel?: "PORTAL" | "SMS_FALLBACK" | "OPS_OVERRIDE";
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
             /**
@@ -7516,20 +8640,6 @@ export interface components {
              */
             variance_reason_code?: string;
             variance_note?: string;
-            /**
-             * @description Direction is fixed by 21.4, MSC-DEC-114–115 and may not be reversed: registered vendors
-             *     enter a rider-displayed code; ad-hoc senders receive an SMS code the rider enters.
-             * @enum {string}
-             */
-            handshake_type: "VENDOR_ENTERED_RIDER_DISPLAYED" | "SENDER_SMS_RIDER_ENTERED";
-            /**
-             * @description Which rung of the fallback ladder verified the handshake. **Recorded
-             *     on every handshake, not only fallbacks** — the control is that persistent fallback
-             *     use becomes visible, and a ratio needs both terms.
-             * @default PORTAL
-             * @enum {string}
-             */
-            handshake_channel?: "PORTAL" | "SMS_FALLBACK" | "OPS_OVERRIDE";
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
             /**
@@ -7556,6 +8666,210 @@ export interface components {
              */
             office_notified_at?: string | null;
         };
+        /**
+         * @description The booking estimate of MSC-DEC-211: indicative, never a quote, never a price. The inputs
+         *     (each component's hub, setting key, version and value) are what is preserved, so the figure
+         *     shown at booking can be reproduced and is visibly distinct from the frozen price.
+         */
+        IndicativeEstimate: {
+            /**
+             * @description UNAVAILABLE_OUTSIDE_SERVICE_AREA: the carrier's charge is unknown until itemization, and a number invented for it would be worse than none. UNAVAILABLE_SETTING_MISSING: the hub has no approved fee; the booking still proceeds, because an operational decision is never held hostage to missing commercial configuration (33.4 forbids borrowing another hub's value).
+             * @enum {string}
+             */
+            status: "AVAILABLE" | "UNAVAILABLE_OUTSIDE_SERVICE_AREA" | "UNAVAILABLE_SETTING_MISSING";
+            /** @constant */
+            provisional: true;
+            total?: components["schemas"]["Money"] | null;
+            /** @enum {string} */
+            assumes_size_class?: "SMALL";
+            excludes?: ("SIZE_SURCHARGE" | "HIGH_VALUE_SURCHARGE")[];
+            components?: components["schemas"]["EstimateComponent"][];
+        };
+        EstimateComponent: {
+            /** @enum {string} */
+            kind: "SERVICE_AREA_BASE_FEE" | "CORRIDOR_OFF_DAY_FEE" | "SINGLE_PACKAGE_PICKUP_FEE";
+            /** Format: uuid */
+            hub_id: string;
+            setting_key: string;
+            effective_version: string;
+            quantity: number;
+            amount: components["schemas"]["Money"];
+        };
+        /** @description What a rider is shown for a stop (approved by the Product Owner on 2 November 2026, `reference` included; OB-S1-21; rider-android.md): the pickup's reference, the vendor or sender as booked, the packages as declared, the place the rider is sent to, the pickup's note and the primary contact. It carries no payer, price, destination or recipient, and nothing of any other request; the database holds the set (a check on the stop), so no writer can add a member. */
+        PickupStopSummary: {
+            /** @description The pickup's reference: the request's code, the one the sender is texted. It is how the rider and Ops name the same pickup, and what a cancelled pickup is announced by (rider-android.md). */
+            reference: string;
+            sender_display_name: string;
+            /** @description The packages as the booking declared them. The screen labels the figure declared; the count that counts is the rider's at the door. */
+            declared_package_count: number;
+            resolved_pickup_location: components["schemas"]["Location"];
+            /** @description The pickup's note for the rider. Null until a pickup-instructions field is defined on the request; it is never made from the landmark or from a location override, and its absence does not stop a dispatch. */
+            location_note: string | null;
+            /** @description The primary contact of the pickup. The secondary contact is not shown. */
+            contact_phone: string | null;
+        };
+        OnePackageExceptionRequest: {
+            /** @description Mandatory (blank is REASON_REQUIRED); there is no reason catalogue for the exception (D-05). */
+            note: string;
+            /** @description Mandatory for a one-package request (21.1); the delivery address makes the estimate exact. */
+            recipient: {
+                name: string;
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+        };
+        /** @description Intent only. The server resolves it into actual pesewa portions once the price is known (23.5); the client never sends a portion of a price it has not seen. */
+        PayerAllocationInput: {
+            /** @enum {string} */
+            payer_intent: "RECIPIENT_PAYS" | "SENDER_PAYS_FULL" | "SPLIT";
+            /** @enum {string} */
+            split_basis?: "FIXED_AMOUNT" | "PERCENTAGE";
+            split_sender_amount?: components["schemas"]["Money"];
+            split_sender_percentage?: number;
+        };
+        /** @description The resolved portions of the locked price. sender_minor equal to zero is the NO_VENDOR_CHARGE branch of the commercial gate, whatever the stated intent. */
+        PayerAllocation: {
+            sender_minor: number;
+            recipient_minor: number;
+        };
+        IntakeClose: {
+            /** @description Present only to close without parity (23.10, 35.5.5). The caller must hold hub.intake.close_exception; one who holds only hub.intake.close is refused INSUFFICIENT_AUTHORITY, because the key is held and the tier is not. */
+            parity_exception?: {
+                /** @description A substantive reason; blank is REASON_REQUIRED. */
+                note: string;
+            };
+        };
+        /** @description The receiver's recording of a condition (22.5), independent of the count: it may be recorded on a count that matches, and DAMAGED or TAMPERED routes the case to Senior Ops adjudication. */
+        IntakeConditionRecord: {
+            /** @enum {string} */
+            condition: "OK" | "DAMAGED" | "TAMPERED" | "OTHER";
+            note?: string;
+            /** @description Required for DAMAGED and TAMPERED (REASON_REQUIRED when absent); each id must name a STORED record (EVIDENCE_NOT_STORED otherwise). */
+            evidence_ids?: string[];
+        };
+        /** @description The vendor-facing intake-completed and order summary (22.9, 23.10) and nothing else: no blind count, no declaration, no discrepancy, evidence or adjudication. The omission is the guard. */
+        IntakeSummary: {
+            /** Format: uuid */
+            intake_id: string;
+            /** Format: uuid */
+            pickup_request_id: string;
+            /** Format: date-time */
+            closed_at: string;
+            orders: components["schemas"]["VendorOrderSummary"][];
+        };
+        VendorOrderSummary: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            recipient_name: string;
+            service_area: string;
+            /** @enum {string} */
+            size_class?: "SMALL" | "MEDIUM" | "LARGE";
+            locked_price?: components["schemas"]["Money"];
+            commercial_state: string;
+        };
+        PayerCorrectionRequest: {
+            proposed: components["schemas"]["PayerAllocationInput"];
+            /** @description A substantive reason; blank is REASON_REQUIRED. */
+            note: string;
+        };
+        PayerCorrectionDecision: {
+            /** @enum {string} */
+            decision: "APPROVE" | "REJECT";
+            note?: string;
+        };
+        /** @description The maker-checker record of a payer correction after the price froze (23.5, 35.6.7). The locked price is never rewritten; approval re-evaluates the commercial gate from the new allocation. */
+        PayerCorrection: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            order_id: string;
+            /** @enum {string} */
+            state: "REQUESTED" | "APPROVED" | "REJECTED";
+            /** Format: uuid */
+            requested_by: string;
+            /** Format: uuid */
+            approved_by?: string | null;
+            previous_allocation: components["schemas"]["PayerAllocation"];
+            proposed: components["schemas"]["PayerAllocationInput"];
+            /** @description The commercial state the re-run gate gave the order; null until approved. */
+            resulting_commercial_state?: string | null;
+            note?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string | null;
+        };
+        /** @description Amends a request before the price is frozen: its one origin (the origin zone is re-resolved once for the request and is no longer a pricing input) and its default payer arrangement, which applies to parcels not yet itemized. After itemization a payer change is a correction (requestPayerCorrection). Overrides never rewrite saved sender defaults (21.1). */
+        PickupRequestAmend: {
+            pickup_location?: components["schemas"]["Location"];
+            location_overrides?: components["schemas"]["Location"];
+            /** Format: uuid */
+            vendor_pickup_location_id?: string;
+            primary_phone?: string;
+            secondary_phone?: string;
+            payer?: components["schemas"]["PayerAllocationInput"];
+            note?: string;
+        };
+        CutoffExceptionResolution: {
+            /** @enum {string} */
+            decision: "APPROVE_SAME_DAY" | "RESCHEDULE_NEXT_DAY";
+            /** @description Mandatory (blank is REASON_REQUIRED). */
+            note: string;
+        };
+        ManifestCancel: {
+            /** @description Mandatory (blank is REASON_REQUIRED). */
+            note: string;
+        };
+        RunCustodyHandoverFail: {
+            /** @description Why the named receiver did not take custody; mandatory. */
+            note: string;
+        };
+        HandshakeResolve: {
+            /** @description How the collection was established by other means; mandatory. */
+            note: string;
+            evidence_ids?: string[];
+        };
+        /** @description The response to initiateHandshake: the handshake, plus the code once for the rider to display. */
+        HandshakeIssued: components["schemas"]["Handshake"] & {
+            /** @description The one-time code, present ONLY when direction is VENDOR_ENTERED_RIDER_DISPLAYED and ONLY in this response to the assigned rider, which shows it to the vendor. Never present for an ad-hoc sender's handshake (the code goes to the sender by SMS), never returned again, and never logged or audited. */
+            display_code?: string;
+        };
+        SmsFallbackRequest: {
+            /**
+             * @description Why the portal path is unusable. VENDOR_BUSY is named so the server can refuse it: a vendor too busy to read a code is not a technical failure (MSC-DEC-198, MSC-DEC-201) and is refused VALIDATION_FAILED with no SMS sent.
+             * @enum {string}
+             */
+            trigger: "NO_DATA" | "PORTAL_DOWN" | "VENDOR_BUSY";
+        };
+        CollectionDisputeCreate: {
+            /** @description What the vendor disputes; mandatory. */
+            note: string;
+        };
+        /** @description The reconciliation item of 21.4. A dispute never reverses physical completion: the stop stays as it closed and the manifest does not wait for the dispute. */
+        CollectionDispute: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** @enum {string} */
+            state: "OPEN" | "RESOLVED";
+            /** Format: uuid */
+            raised_by: string;
+            note?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description An individual sender known by verified phone (30.x). Platform-scoped; a Vendor or Rider never reads it. */
+        AdHocSender: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            phone: string;
+            /** @enum {string} */
+            state: "PROVISIONAL" | "REUSABLE";
+            blocked?: boolean;
+        };
         PickupStop: {
             /** Format: uuid */
             id: string;
@@ -7567,6 +8881,38 @@ export interface components {
             sequence: number;
             /** @enum {string} */
             state: "PENDING" | "ARRIVED" | "COLLECTED" | "PARTIALLY_COLLECTED" | "FAILED" | "SKIPPED";
+            /** Format: date-time */
+            arrived_at?: string | null;
+            /**
+             * @description The fixed category of a failed stop (§21.5). Set exactly when the state is FAILED.
+             * @enum {string|null}
+             */
+            failure_category?: "VENDOR_UNAVAILABLE" | "ACCESS_DENIED" | "PARCEL_NOT_READY" | "REFUSED_COLLECTION" | null;
+            /** @description The failure as reported (snapshot); null unless FAILED. */
+            failure?: {
+                reason_code?: string;
+                note?: string;
+                /** Format: date-time */
+                reported_at?: string;
+            } | null;
+            /**
+             * @description The skip as authorised (MSC-DEC-412); null unless SKIPPED. `reason_code` is a code of the
+             *     `PICKUP_STOP_SKIP` domain when Ops skipped the stop; `REQUEST_CANCELLED` (with no
+             *     `note`) when the stop was resolved by the cancellation of its request, which is the
+             *     rider's signal to show the pickup as cancelled and to offer no collection on it; and
+             *     `MANIFEST_CANCELLED` (with no `note`) when the cancellation of its manifest skipped it.
+             *     **`note` is Ops's own text of an authorised skip and is shown to staff only** (S1.23): the
+             *     assigned rider reads the code and the moment, as it never reads the note of a cancellation, so
+             *     its representation of the same stop has no `note`.
+             */
+            skipped?: {
+                reason_code?: string;
+                note?: string;
+                /** Format: date-time */
+                skipped_at?: string;
+            } | null;
+            /** @description What the rider needs at the door, projected from the request: the registry denies a rider any read of the request itself, so this is the only place the stop shows it. It is made once, by `dispatchManifest`, for each stop still to be worked at that moment, and kept on the stop: absent before the dispatch and on a stop already resolved by then (a cancelled request is never sent to a rider), and never changed after. */
+            pickup_summary?: components["schemas"]["PickupStopSummary"];
         };
         HubIntakeBase: {
             /** Format: uuid */
@@ -7687,12 +9033,14 @@ export interface components {
                 location: components["schemas"]["Location"];
             };
             /**
-             * @description Selected by the receiving officer, not derived. MSC-DEC-209 establishes no weight or
+             * @description Optional in the schema so that an omitted class reaches the rule and is refused with
+             *     `SIZE_CLASS_REQUIRED` (AC-SLICE-001-58) instead of a bare schema rejection; pricing
+             *     needs it. Selected by the receiving officer, not derived. MSC-DEC-209 establishes no weight or
              *     dimension thresholds, so no server rule can compute this. Surcharges apply only in
              *     MELARC_COVERED_THIRD_PARTY_DELIVERY; SMALL is always GH0.
              * @enum {string}
              */
-            size_class: "SMALL" | "MEDIUM" | "LARGE";
+            size_class?: "SMALL" | "MEDIUM" | "LARGE";
             /**
              * @description The third-party carrier's ACTUAL charge, transcribed from their waybill. Required
              *     exactly when commercial_mode is MELARC_COVERED_THIRD_PARTY_DELIVERY; rejected otherwise.
@@ -7709,8 +9057,38 @@ export interface components {
              * @enum {string}
              */
             commercial_mode?: "STATION_DROP" | "MELARC_COVERED_THIRD_PARTY_DELIVERY";
-            /** @description Parcel-level override of the request's default intent (§5.2). */
-            payer_override?: Record<string, never>;
+            /** @description Parcel-level override of the request's default intent (§5.2). Resolved into actual vendor and recipient portions by the server. */
+            payer_override?: components["schemas"]["PayerAllocationInput"];
+            /** @description Declared value of this parcel in pesewas (23.2). Auto-flags high value at the first tier of MELARC_HIGH_VALUE_TIERS; above `value_declaration_threshold` it must have been declared at booking (VALUE_DECLARATION_REQUIRED). */
+            declared_value_minor?: number;
+            /** @default false */
+            is_serialized_goods?: boolean;
+            /** @description Mandatory when is_serialized_goods is true (VALIDATION_FAILED otherwise, 23.2, 23.4). */
+            serial_imei?: string;
+            /**
+             * Format: date
+             * @description A sender or recipient requested date; it applies over the derived date (MSC-DEC-213).
+             */
+            requested_delivery_date?: string;
+            /**
+             * @description Version 1 has one level and no express service (23.7).
+             * @default STANDARD
+             * @enum {string}
+             */
+            service_level?: "STANDARD";
+            /** @description An explicit authorized selection, sent only when the server's resolution is silent or ambiguous (23.3). The order then records destination_zone_resolution EXPLICITLY_AUTHORIZED. The client never sends a zone otherwise. */
+            destination_zone_authorization?: {
+                /** Format: uuid */
+                zone_id: string;
+                note: string;
+            };
+            /** @description The verified itemization-time evidence a high-value parcel requires (23.4); absent on one that is flagged high value is REASON_REQUIRED. Each id must name a STORED record. */
+            evidence_ids?: string[];
+            /**
+             * Format: uuid
+             * @description The waybill photograph behind carrier_cost; required with it (CARRIER_COST_REQUIRED).
+             */
+            carrier_waybill_evidence_id?: string;
         };
         /**
          * @description Two orthogonal state fields, not one (domain-model §5.9). An order may be commercially
@@ -7743,8 +9121,12 @@ export interface components {
             };
             /** @enum {string} */
             size_class: "SMALL" | "MEDIUM" | "LARGE";
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Staff only. Absent for a vendor session.
+             */
             size_class_selected_by?: string | null;
+            /** @description Staff only. Absent for a vendor session, which sees the locked price and not its inputs. */
             carrier_cost?: components["schemas"]["Money"];
             /** Format: date */
             derived_delivery_date?: string | null;
@@ -7766,16 +9148,51 @@ export interface components {
                 [key: string]: unknown;
             };
             delivery_attempt_count?: number;
+            /** @description Staff only. Absent for a vendor session. */
+            recipient?: {
+                name?: string;
+                phone?: string;
+                location?: components["schemas"]["Location"];
+            };
+            declared_value_minor?: number | null;
+            is_serialized_goods?: boolean;
+            /** @description Staff only. Absent for a vendor session. */
+            serial_imei?: string | null;
+            /** Format: date */
+            requested_delivery_date?: string | null;
+            /** @enum {string} */
+            service_level?: "STANDARD";
+            /** @enum {string} */
+            destination_zone_resolution?: "SERVER_RESOLVED" | "EXPLICITLY_AUTHORIZED";
+            /** @description Ops-moved date with actor, reason and timestamp; null at itemization (the derived date stands). */
+            delivery_date_override?: Record<string, never> | null;
+            payer_allocation?: components["schemas"]["PayerAllocation"];
         };
         /**
          * @description No rider and no sequence at creation. Both are separate, separately permissioned steps
          *     because each carries its own rule — sequencing is manual, assignment closes vendor
-         *     cancellation.
+         *     cancellation. The stops take the order in which the requests are listed. `service_date`
+         *     is the day the run is to be worked, not the day any request was promised.
          */
         PickupManifestCreate: {
             pickup_request_ids: string[];
             /** Format: date */
             service_date: string;
+            /**
+             * @description The reason each overdue request is carried over: one entry for each request listed in
+             *     `pickup_request_ids` that was promised for an earlier day than `service_date`, and for
+             *     no other. Absent or empty where nothing is carried over.
+             */
+            carryover?: {
+                /** Format: uuid */
+                pickup_request_id: string;
+                /**
+                 * @description A code of the `PICKUP_CARRYOVER` reason domain. The reason's own metadata may make
+                 *     a note mandatory; omitting it returns `REASON_REQUIRED`.
+                 */
+                reason_code: string;
+                note?: string;
+            }[];
         };
         /**
          * @description **Hub-scoped, never vendor-scoped** (domain-model §4). A manifest spans vendors, so
@@ -7794,7 +9211,10 @@ export interface components {
              * @enum {string}
              */
             state: "DRAFT" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
-            /** Format: date */
+            /**
+             * Format: date
+             * @description The planned execution date: the day the run is to be worked, not the day any of its requests was promised, and not a guarantee that every event of the run falls on it. A request keeps its own `scheduled_service_date`; one promised for an earlier day is carried over and stays late against that promise (domain-model.md 6.3). A run that has started keeps this date if it goes on past midnight, and its actual moments keep their own; a run whose date has passed is not dispatched or started (the Product Owner, 2 November 2026).
+             */
             service_date: string;
             /** Format: uuid */
             responsible_hub_id: string;
@@ -7807,6 +9227,8 @@ export interface components {
             /** Format: date-time */
             started_at?: string | null;
             stops?: components["schemas"]["PickupStop"][];
+            /** Format: date-time */
+            completed_at?: string | null;
         };
         /**
          * @description The complete sequence, not a delta. Manual ordering only — Version 1 has no route
@@ -7859,10 +9281,18 @@ export interface components {
         Handshake: {
             /** Format: uuid */
             stop_id: string;
-            /** @enum {string} */
-            state: "PENDING" | "SENT" | "VERIFIED" | "EXPIRED" | "ATTEMPTS_EXHAUSTED" | "OVERRIDDEN" | "FAILED" | "CANCELLED";
+            /**
+             * @description The state machine's names (state-machines.md section 6). A verification by Ops override is `VERIFIED` with channel `OPS_OVERRIDE`.
+             * @enum {string}
+             */
+            state: "PENDING" | "CODE_GENERATED" | "CODE_DELIVERED" | "VERIFIED" | "EXPIRED" | "EXHAUSTED" | "MANUALLY_RESOLVED" | "DISPUTED";
+            /**
+             * @description Fixed by the sender type (21.4, MSC-DEC-114-115) and never configurable: a registered vendor enters a code the rider displays; an ad-hoc sender receives an SMS code the rider enters.
+             * @enum {string}
+             */
+            direction: "VENDOR_ENTERED_RIDER_DISPLAYED" | "SENDER_SMS_RIDER_ENTERED";
             /** @enum {string|null} */
-            channel?: "PORTAL" | "SMS" | "OPS_OVERRIDE" | null;
+            channel?: "PORTAL" | "SMS_FALLBACK" | "OPS_OVERRIDE" | null;
             attempts?: number;
             /** Format: date-time */
             expires_at?: string | null;
@@ -7874,7 +9304,6 @@ export interface components {
             code: string;
         };
         HandshakeOverride: {
-            reason_code: string;
             /** @description How Ops verified the vendor by other means. Mandatory. */
             verification_note: string;
         };
@@ -7902,8 +9331,8 @@ export interface components {
              *     other evidence-accepting operation carries.
              */
             evidence_ids?: string[];
-            reason_code: string;
-            note?: string;
+            /** @description Mandatory (blank is REASON_REQUIRED); there is no reason catalogue for an OS&D adjudication (D-05). */
+            note: string;
         };
         StaffSignIn: {
             /**
@@ -8198,8 +9627,8 @@ export interface components {
          *     behind a runtime branch instead of behind a separate permissioned call.
          */
         PickupEscalation: {
-            reason_code: string;
-            note?: string;
+            /** @description Mandatory (blank is REASON_REQUIRED); there is no reason catalogue for an escalation (D-05). Also carries the assisted review of AC-SLICE-001-35: what the vendor's support contact asked and what Ops decided, audited with the reviewer and the time. A review never reverses a physical failure. */
+            note: string;
         };
         /**
          * @description **No `new_ceiling` field.** The extension is granted for this request, once; it is not a
@@ -8215,8 +9644,8 @@ export interface components {
          *     A partial waiver would be a repricing of a snapshotted charge, which 3.7 forbids.
          */
         CancellationChargeWaiver: {
-            reason_code: string;
-            note?: string;
+            /** @description Mandatory (blank is REASON_REQUIRED); there is no reason catalogue for a waiver (D-05). The waiver's frequency and its notes are what make the discretion observable (MSC-DEC-197). */
+            note: string;
         };
         /**
          * @description **Exactly one of `to_rider_id` and `to_hub_id` is set**, and the schema carries no field for the
@@ -8229,8 +9658,8 @@ export interface components {
             to_rider_id?: string;
             /** Format: uuid */
             to_hub_id?: string;
-            reason_code: string;
-            note?: string;
+            /** @description Mandatory (blank is REASON_REQUIRED); there is no reason catalogue for a custody handover (D-05). */
+            note: string;
         };
         RunCustodyHandoverAccept: {
             /**
@@ -8239,24 +9668,35 @@ export interface components {
              */
             parcel_count_taken: number;
         };
+        /**
+         * @description Carries no note: the note of opening or failing a handover is Ops's own text, in the audit
+         *     trail, and a rider party to the handover is not shown it.
+         */
         RunCustodyHandover: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            manifest_id?: string;
+            manifest_id: string;
+            /**
+             * Format: uuid
+             * @description The rider who held custody when the handover was opened. Never overwritten, and never the assigned rider's id rewritten: completed-stop attribution depends on it.
+             */
+            from_rider_id: string;
             /** Format: uuid */
-            from_rider_id?: string;
+            to_rider_id: string | null;
             /** Format: uuid */
-            to_rider_id?: string | null;
-            /** Format: uuid */
-            to_hub_id?: string | null;
+            to_hub_id: string | null;
             /** @enum {string} */
-            state?: "PENDING" | "COMPLETED" | "FAILED";
-            parcel_count_taken?: number | null;
+            state: "PENDING" | "COMPLETED" | "FAILED";
+            /** @description Set exactly when the handover is COMPLETED. A custody record, never a count the hub is given to match. */
+            parcel_count_taken: number | null;
             /** Format: date-time */
-            initiated_at?: string;
-            /** Format: date-time */
-            resolved_at?: string | null;
+            initiated_at: string;
+            /**
+             * Format: date-time
+             * @description Set exactly when the handover is COMPLETED or FAILED.
+             */
+            resolved_at: string | null;
         };
         /**
          * @description **No destination field exists on this schema, and that is the guard.** A recovery request
@@ -11198,11 +12638,49 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listNotifications: {
+        parameters: {
+            query?: {
+                state?: "QUEUED" | "LEASED" | "RETRYABLE" | "SENT" | "DELIVERED" | "FAILED" | "SUPPRESSED" | "EXPIRED";
+                audience?: "AD_HOC_SENDER" | "VENDOR_NUMBER" | "RIDER" | "RECIPIENT" | "VENDOR_FEED" | "OPS_FEED";
+                channel?: "SMS" | "FEED";
+                /** @description Only the messages raised about this record (the pickup request they announce). Authorization-checked like every filter: an id outside the caller's hubs matches nothing. */
+                subject_id?: string;
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["NotificationLogEntry"][];
+                        next_page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listPickupRequests: {
         parameters: {
             query?: {
                 state?: string;
                 service_date?: string;
+                /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop, a Rider no request) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
+                manifested?: boolean;
+                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). Authorization-checked like every filter. */
+                one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
@@ -11224,7 +12702,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createPickupRequest: {
@@ -11286,6 +12766,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     getPickupRequest: {
@@ -11310,6 +12791,7 @@ export interface operations {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11343,10 +12825,13 @@ export interface operations {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelPickupRequest: {
@@ -11439,12 +12924,14 @@ export interface operations {
             /** @description Cancelled */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             /**
              * @description `SELF_CANCEL_NOT_PERMITTED_AFTER_ASSIGNMENT` for a vendor after assignment, or
@@ -11534,6 +13021,147 @@ export interface operations {
             422: components["responses"]["RuleViolation"];
         };
     };
+    resolveCutoffException: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CutoffExceptionResolution"];
+            };
+        };
+        responses: {
+            /** @description Resolved */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupRequest"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+        };
+    };
+    amendPickupRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PickupRequestAmend"];
+            };
+        };
+        responses: {
+            /** @description Amended */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupRequest"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     escalatePickupRequest: {
         parameters: {
             query?: never;
@@ -11590,14 +13218,17 @@ export interface operations {
             /** @description Escalated */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11658,14 +13289,17 @@ export interface operations {
             /** @description Ceiling extended for this request */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -11695,14 +13329,18 @@ export interface operations {
             /** @description Charge waived */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupRequest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -11718,10 +13356,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    reason_code: string;
-                    note?: string;
-                };
+                "application/json": components["schemas"]["OnePackageExceptionRequest"];
             };
         };
         responses: {
@@ -11737,6 +13372,9 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     approveOnePackageException: {
@@ -11760,9 +13398,40 @@ export interface operations {
                     "application/json": components["schemas"]["Approval"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+        };
+    };
+    getPickupStop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupStop"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     arriveAtPickupStop: {
@@ -11812,15 +13481,18 @@ export interface operations {
             /** @description Stop ARRIVED */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupStop"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     recordCollection: {
@@ -11885,6 +13557,7 @@ export interface operations {
                     "application/json": components["schemas"]["CollectionRecord"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -11941,6 +13614,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /**
+                     * @description The fixed category (§21.5), mandatory and not configurable: the escalation-only rule for REFUSED_COLLECTION (§21.6) points at it.
+                     * @enum {string}
+                     */
+                    category: "VENDOR_UNAVAILABLE" | "ACCESS_DENIED" | "PARCEL_NOT_READY" | "REFUSED_COLLECTION";
                     reason_code: string;
                     note?: string;
                     /**
@@ -11957,6 +13635,7 @@ export interface operations {
             /** @description Failure recorded */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12031,17 +13710,20 @@ export interface operations {
             /** @description Stop is SKIPPED. The run may now reach COMPLETED if no other stop is open */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupStop"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listHubIntakes: {
@@ -12183,6 +13865,7 @@ export interface operations {
             /** @description Counted; comparison revealed */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12202,6 +13885,102 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    recordIntakeCondition: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntakeConditionRecord"];
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubIntakePostCount"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+        };
+    };
+    getIntakeSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSummary"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     itemizeOrder: {
@@ -12266,6 +14045,7 @@ export interface operations {
                     "application/json": components["schemas"]["Order"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -12283,6 +14063,173 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    requestPayerCorrection: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayerCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Requested */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerCorrection"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+        };
+    };
+    approvePayerCorrection: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayerCorrectionDecision"];
+            };
+        };
+        responses: {
+            /** @description Decided */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerCorrection"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     closeHubIntake: {
@@ -12332,17 +14279,23 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IntakeClose"];
+            };
+        };
         responses: {
             /** @description Closed */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["HubIntakePostCount"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -12354,6 +14307,10 @@ export interface operations {
             query?: {
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
+                /** @description Only the manifests in this state. */
+                state?: "DRAFT" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+                /** @description Only the manifests worked on this day: their `service_date`, a day of the hub's calendar (`YYYY-MM-DD`). */
+                service_date?: string;
             };
             header?: never;
             path?: never;
@@ -12373,7 +14330,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createPickupManifest: {
@@ -12424,6 +14383,7 @@ export interface operations {
             /** @description Manifest created in DRAFT */
             201: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12452,15 +14412,88 @@ export interface operations {
             /** @description Manifest */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    cancelPickupManifest: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManifestCancel"];
+            };
+        };
+        responses: {
+            /** @description Cancelled */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupManifest"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     setManifestStopOrder: {
@@ -12519,6 +14552,7 @@ export interface operations {
             /** @description Sequence set */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12528,8 +14562,8 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            422: components["responses"]["RuleViolation"];
         };
     };
     assignRider: {
@@ -12557,14 +14591,17 @@ export interface operations {
             /** @description Rider assigned */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -12590,16 +14627,20 @@ export interface operations {
             /** @description Dispatched */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     startRun: {
@@ -12623,12 +14664,14 @@ export interface operations {
             /** @description Run started */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PickupManifest"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
@@ -12660,6 +14703,7 @@ export interface operations {
             /** @description Handover opened, PENDING */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12669,6 +14713,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -12729,6 +14774,7 @@ export interface operations {
             /** @description Custody transferred */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -12738,6 +14784,78 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+        };
+    };
+    failRunCustodyHandover: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCustodyHandoverFail"];
+            };
+        };
+        responses: {
+            /** @description Failed */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCustodyHandover"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -12747,6 +14865,10 @@ export interface operations {
             query?: {
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
+                /** @description Only the handovers of this run. */
+                manifest_id?: string;
+                /** @description Only the handovers in this state. */
+                state?: "PENDING" | "COMPLETED" | "FAILED";
             };
             header?: never;
             path?: never;
@@ -12766,8 +14888,167 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getRunCustodyHandover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The handover */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCustodyHandover"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    resolveHandshake: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandshakeResolve"];
+            };
+        };
+        responses: {
+            /** @description Resolved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Handshake"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+        };
+    };
+    disputeCollection: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionDisputeCreate"];
+            };
+        };
+        responses: {
+            /** @description Dispute raised */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionDispute"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     submitHubHandover: {
@@ -12889,13 +15170,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Handshake"];
+                    "application/json": components["schemas"]["HandshakeIssued"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     verifyHandshake: {
@@ -12923,9 +15206,11 @@ export interface operations {
                     "application/json": components["schemas"]["Handshake"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
     };
@@ -12971,7 +15256,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmsFallbackRequest"];
+            };
+        };
         responses: {
             /** @description Code sent to the registered number */
             202: {
@@ -12982,10 +15271,12 @@ export interface operations {
                     "application/json": components["schemas"]["Handshake"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     authoriseHandshakeOverride: {
@@ -13045,8 +15336,10 @@ export interface operations {
                     "application/json": components["schemas"]["Handshake"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
         };
@@ -13076,6 +15369,7 @@ export interface operations {
             /** @description Adjudicated */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -14327,6 +16621,7 @@ export interface operations {
             /** @description Record created PENDING_UPLOAD, with upload instructions */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -18265,6 +20560,63 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+        };
+    };
+    findAdHocSender: {
+        parameters: {
+            query: {
+                /** @description E.164 or as entered; normalised server-side. */
+                phone: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["AdHocSender"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listVendorPickupLocations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["VendorPickupLocation"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createVendorPickupLocation: {

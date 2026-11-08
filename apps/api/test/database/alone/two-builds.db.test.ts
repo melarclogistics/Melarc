@@ -15,7 +15,7 @@ import { API_RUNTIME_ROLE, loadConfig } from '../../../src/platform/config/load-
 import { validEnv } from '../../../src/test-support/config-env.js';
 import { TestClient, type TestResponse } from '../../../src/test-support/test-client.js';
 import { MIGRATION_ROLE } from '../../../src/tools/database/safety.js';
-import { BUNDLE_IDS } from '../../../src/tools/seed/bundles.js';
+import { BUNDLE_IDS, GRANTS } from '../../../src/tools/seed/bundles.js';
 import {
   DEADLINES,
   freePort,
@@ -23,7 +23,14 @@ import {
   start,
   type RunningProcess,
 } from '../../support/api-process.js';
-import { buildRelease, RELEASE_2, RELEASE_2_REVISION } from '../../support/policy-release.js';
+import {
+  buildRelease,
+  CURRENT_REVISION,
+  declaring,
+  NEXT_RELEASE,
+  NEXT_REVISION,
+} from '../../support/policy-release.js';
+import { applyMigration, seedEarlierContent } from '../support/earlier-seed.js';
 import { signChallenge } from '../support/rider-sign-in.js';
 import { insertSessionRow, sessionRow } from '../support/identities.js';
 import { insertRider, insertRiderDevice, riderRow } from '../support/riders.js';
@@ -34,17 +41,19 @@ import { insertDevice, insertVendor, vendorRow } from '../support/vendors.js';
 /**
  * The fixed-policy rule run as it is deployed (S0.63; SECURITY_DESIGN.md section 13.10 and section 13.10a, obligation 13; the compiled-policy
  * clause of AC-SLICE-000-05; `GBT-C11` and `GBT-D12`): **two real
- * builds of the API** on one database, both as the runtime login. The current build is this tree, compiled revision 1 for the Vendor and the
- * Rider. The newer build is the same source compiled with the changes of a release (`test/support/policy-release.ts`): revision 2 for both,
- * a Rider ownership predicate that admits a Rider holding `settings.reason.read` to `listReasonDefinitions`, and the same operation served
- * to a Vendor whose snapshot holds that key. The database is told of the release the only way it can be, by the migration login through
+ * builds of the API** on one database, both as the runtime login. The current build is this tree, compiled at the revisions it declares
+ * (`CURRENT_REVISION`, read from `app.module.ts`: 2 since S1.8, the release that gave the Vendor and the Rider the keys of SLICE-001).
+ * The newer build is the same source compiled with the changes of the next release (`test/support/policy-release.ts`): one revision
+ * above for both, a Rider ownership predicate that admits a Rider holding `settings.reason.read` to `listReasonDefinitions`, and the same
+ * operation served to a Vendor whose snapshot holds that key. The database starts where migration 0043 leaves a seeded database, at the
+ * current build's revision with the floor at 1, and is told of the release the only way it can be, by the migration login through
  * `melarc.change_fixed_policy` (and, for the Vendor's new key, `melarc.change_role_bundle`), never by a direct write.
  *
  * The release is rolled out twice, each time on a fresh database: once declared an **addition**, which is honest (both changes widen),
  * leaving the floor at 1 so that the two builds serve side by side; and once declared a **reduction**, which is always allowed (a reduction
- * can only end more sessions), raising the floor to 2 so that the older build is below it. Sessions are issued by the real sign-ins of the
- * two builds, never written; the one exception is the session the reduction's scan "missed", which the lock protocol makes impossible to
- * produce and which is therefore arranged as a row, saying so.
+ * can only end more sessions), raising the floor to the newer build's revision so that the older build is below it. Sessions are issued by
+ * the real sign-ins of the two builds, never written; the one exception is the session the reduction's scan "missed", which the lock
+ * protocol makes impossible to produce and which is therefore arranged as a row, saying so.
  */
 
 const VENDOR_ORIGIN = 'http://127.0.0.1:5174';
@@ -112,7 +121,7 @@ beforeAll(() => {
   currentMain = buildRelease('current', []);
 });
 beforeAll(() => {
-  releaseMain = buildRelease('release-2', RELEASE_2);
+  releaseMain = buildRelease('next-release', NEXT_RELEASE);
 });
 afterAll(killAll);
 
@@ -325,7 +334,10 @@ async function readiness(
   }
 }
 
-/** The release, as the migration login applies it: the Vendor's fixed bundle gains `settings.reason.read`, then both compiled policies move. */
+/**
+ * The release, as the migration login applies it: the Vendor's fixed bundle gains `settings.reason.read` on top of what it holds (so the
+ * change of the bundle is an addition, as it is for a Vendor that already holds the keys of SLICE-001), then both compiled policies move.
+ */
 async function release(
   migration: pg.Client,
   reduction: boolean,
@@ -333,6 +345,7 @@ async function release(
   await changeRoleBundle(migration, {
     bundleId: BUNDLE_IDS.vendor,
     grants: [
+      ...GRANTS.filter((grant) => grant.bundleId === BUNDLE_IDS.vendor),
       {
         permissionKey: 'settings.reason.read',
         hubScope: 'none',
@@ -340,23 +353,27 @@ async function release(
         tier: null,
       },
     ],
-    correlationId: 'release-2:bundle',
+    correlationId: 'next-release:bundle',
   });
   return {
     VENDOR: await changeFixedPolicy(migration, {
       principalType: 'VENDOR',
       reduction,
-      correlationId: 'release-2',
+      correlationId: 'next-release',
     }),
     RIDER: await changeFixedPolicy(migration, {
       principalType: 'RIDER',
       reduction,
-      correlationId: 'release-2',
+      correlationId: 'next-release',
     }),
   };
 }
 
-/** A fresh database with the reference seed, and the current build serving it; the newer build starts once the database knows the release. */
+/**
+ * A fresh database with the reference seed, and the current build serving it; the newer build starts once the database knows the next
+ * release. **Nothing is done to bring the stored policy up to the build**: a new database starts at the revision of the build that seeds it
+ * (migration 0046), and a reduction on it must end the sessions of that build, which is what the scenarios below prove.
+ */
 async function openWorld(): Promise<Omit<World, 'newer'>> {
   const database = await createTestDatabase();
   const admin = clientFor(database.urlFor('postgres'));
@@ -417,7 +434,7 @@ describe('the release declared an addition: the floor stays at 1 and the two bui
     for (const audience of ['VENDOR', 'RIDER'] as const) {
       expect(changes[audience]).toMatchObject({
         kind: 'ADDITION',
-        revision: 2,
+        revision: NEXT_REVISION[audience],
         floor: 1,
         endedSessionIds: [],
       });
@@ -437,14 +454,18 @@ describe('the release declared an addition: the floor stays at 1 and the two bui
       // The Rider's snapshot holds the key and the newer build's predicate admits it; the Vendor's was copied before its bundle gained the key.
       expect((await client.get(REASONS)).status).toBe(audience === 'RIDER' ? 200 : 403);
       if (audience === 'VENDOR') expect((await client.get(DEVICES)).status).toBe(200);
-      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(1);
+      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(
+        CURRENT_REVISION[audience],
+      );
     });
 
     // Break caught: two builds that differ in a revision number and in nothing they enforce; or an older build that reads a key its own
     // policy gives this audience nothing for as a grant (deny by default, SECURITY_DESIGN.md section 13.10).
     it('a session holding what the release grants is denied on the current build and served on the newer one: the predicate differs', async () => {
       const held = await signedIn(principals[audience], world.current);
-      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(1);
+      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(
+        CURRENT_REVISION[audience],
+      );
       const snapshot = await world.admin.query<{ keys: string[] }>(
         `select array(select g->>'permission' from jsonb_array_elements(bundle_snapshot->'grants') g) as keys from session where id = $1`,
         [held.sessionId],
@@ -462,7 +483,7 @@ describe('the release declared an addition: the floor stays at 1 and the two bui
     it('the current build refuses every request of a session the newer build issued, writes nothing, and the newer build then serves it', async () => {
       const held = await signedIn(principals[audience], world.newer);
       expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(
-        RELEASE_2_REVISION[audience],
+        NEXT_REVISION[audience],
       );
 
       await expectRefusedUntouched(world, held);
@@ -472,7 +493,7 @@ describe('the release declared an addition: the floor stays at 1 and the two bui
   });
 });
 
-describe('the release declared a reduction: the floor rises to 2 and the current build is below it', () => {
+describe('the release declared a reduction: the floor rises to the newer build’s revision and the current build is below it', () => {
   let world: World;
   let opened: Omit<World, 'newer'> | undefined;
   const principals = {} as Record<Audience, Principal>;
@@ -496,7 +517,11 @@ describe('the release declared a reduction: the floor rises to 2 and the current
 
   it('raises the floor to the newer build’s revision, and only the newer build is ready', async () => {
     for (const audience of ['VENDOR', 'RIDER'] as const) {
-      expect(changes[audience]).toMatchObject({ kind: 'REDUCTION', revision: 2, floor: 2 });
+      expect(changes[audience]).toMatchObject({
+        kind: 'REDUCTION',
+        revision: NEXT_REVISION[audience],
+        floor: NEXT_REVISION[audience],
+      });
     }
     expect(await readiness(world.current)).toEqual({
       status: 503,
@@ -513,13 +538,13 @@ describe('the release declared a reduction: the floor rises to 2 and the current
       expect(await sessionState(world.admin, sessionId)).toEqual({
         terminated: true,
         reason: 'AUTHORITY_CHANGED',
-        policy_revision: 1,
+        policy_revision: CURRENT_REVISION[audience],
       });
       expect(await revocationsOf(world.admin, sessionId)).toEqual([
         {
-          correlation_id: 'release-2',
+          correlation_id: 'next-release',
           actor_type: 'SYSTEM',
-          related_ids: { principal_type: audience, minimum_revision: 2 },
+          related_ids: { principal_type: audience, minimum_revision: NEXT_REVISION[audience] },
         },
       ]);
     });
@@ -568,7 +593,7 @@ describe('the release declared a reduction: the floor rises to 2 and the current
           snapshot: facts.bundle_snapshot,
           bundleId: facts.bundle_id,
           bundleRevision: facts.bundle_revision,
-          policyRevision: 1,
+          policyRevision: CURRENT_REVISION[audience],
           authorizedHubIds: facts.authorized_hub_ids,
           registeredDeviceId: facts.registered_device_id,
           tokenHash: Buffer.from(credential.hash),
@@ -594,7 +619,7 @@ describe('the release declared a reduction: the floor rises to 2 and the current
       expect(await sessionState(world.admin, missed.id)).toEqual({
         terminated: true,
         reason: 'AUTHORITY_CHANGED',
-        policy_revision: 1,
+        policy_revision: CURRENT_REVISION[audience],
       });
       expect(await revocationsOf(world.admin, missed.id)).toHaveLength(1);
     });
@@ -603,12 +628,106 @@ describe('the release declared a reduction: the floor rises to 2 and the current
     // records activity; and a session left unusable by that refusal instead of being served by the next, suitable, instance.
     it('the current build refuses every request of a session the newer build issued, writes nothing, and the newer build serves it', async () => {
       const held = await signedIn(principals[audience], world.newer);
-      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(2);
+      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(
+        NEXT_REVISION[audience],
+      );
 
       await expectRefusedUntouched(world, held);
       const client = held.on(world.newer);
       expect((await client.get(SESSION)).status).toBe(200);
       expect((await client.get(REASONS)).status).toBe(200);
+    });
+  });
+});
+
+/** The keys of the snapshot a session was issued with: what its holder may do, whatever the bundle holds today. */
+async function snapshotKeys(admin: pg.Client, sessionId: string): Promise<string[]> {
+  const { rows } = await admin.query<{ keys: string[] }>(
+    `select array(select g->>'permission' from jsonb_array_elements(bundle_snapshot->'grants') g) as keys from session where id = $1`,
+    [sessionId],
+  );
+  return rows[0]?.keys ?? [];
+}
+
+describe('the release of SLICE-001 itself: migration 0043 on a database seeded before it (S1.8, Gate 1)', () => {
+  // The build before the slice declares what the seed wrote (revision 1) and the one that carries it declares revision 2: each is this
+  // tree compiled with its revision set (`declaring`), so what differs between them is the number the database is told of. The
+  // database is told by the migration itself, applied as the migration login to a database seeded with the SLICE-000 keys.
+  const BEFORE = 1;
+  const AFTER = 2;
+  const KEY_OF_SLICE = { VENDOR: 'pickup.request.create', RIDER: 'pickup.run.execute' } as const;
+  let world: World;
+  let opened: Omit<World, 'newer' | 'current'> | undefined;
+  const principals = {} as Record<Audience, Principal>;
+  const issuedBefore = {} as Record<Audience, Held>;
+
+  beforeAll(async () => {
+    const beforeMain = buildRelease('before-slice-001', declaring(BEFORE));
+    const afterMain = buildRelease('with-slice-001', declaring(AFTER));
+    const database = await createTestDatabase();
+    const admin = clientFor(database.urlFor('postgres'));
+    const migration = clientFor(database.urlFor(MIGRATION_ROLE));
+    opened = { database, admin, migration };
+    await admin.connect();
+    await migration.connect();
+    await seedEarlierContent(database);
+    const current = await launch('before-slice-001', beforeMain, database);
+    principals.VENDOR = await vendor(admin);
+    principals.RIDER = await rider(admin);
+    for (const audience of ['VENDOR', 'RIDER'] as const) {
+      issuedBefore[audience] = await signedIn(principals[audience], current);
+    }
+    await applyMigration(migration, '0043_slice_001_grants.sql');
+    world = {
+      database,
+      admin,
+      migration,
+      current,
+      newer: await launch('with-slice-001', afterMain, database),
+    };
+  });
+  afterAll(() => closeWorld(opened));
+
+  it('tells the database revision 2 for both audiences as an addition: the floor stays 1, no session ends, both builds are ready', async () => {
+    const { rows } = await world.admin.query<{
+      principal_type: string;
+      revision: number;
+      minimum_revision: number;
+    }>(
+      `select principal_type, revision, minimum_revision from fixed_permission_policy order by principal_type`,
+    );
+    expect(rows).toEqual([
+      { principal_type: 'RIDER', revision: AFTER, minimum_revision: 1 },
+      { principal_type: 'VENDOR', revision: AFTER, minimum_revision: 1 },
+    ]);
+    for (const audience of ['VENDOR', 'RIDER'] as const) {
+      expect((await sessionState(world.admin, issuedBefore[audience].sessionId))?.terminated).toBe(
+        false,
+      );
+    }
+    expect(await readiness(world.current)).toEqual({ status: 200, body: { status: 'ready' } });
+    expect(await readiness(world.newer)).toEqual({ status: 200, body: { status: 'ready' } });
+  });
+
+  describe.each(['VENDOR', 'RIDER'] as const)('%s', (audience) => {
+    // Break caught: the build that carries the slice refusing a session the older build issued while the floor still admits it, or
+    // serving it on the bundle as it is now (the slice's keys) instead of the snapshot it was issued with.
+    it('the build that carries the slice serves a session issued before it, on the snapshot it was issued with, which holds none of its keys', async () => {
+      const held = issuedBefore[audience];
+      expect((await held.on(world.newer).get(SESSION)).status).toBe(200);
+      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(BEFORE);
+      expect(await snapshotKeys(world.admin, held.sessionId)).not.toContain(KEY_OF_SLICE[audience]);
+    });
+
+    // Break caught: a sign-in after the migration that does not carry the slice's keys, or a build before the slice that serves (and applies
+    // its own rules to) a session issued under a policy it does not know.
+    it('a sign-in on the build that carries the slice holds the slice’s keys at revision 2; the build before it refuses that session, writes nothing, and the newer one then serves it', async () => {
+      const held = await signedIn(principals[audience], world.newer);
+      expect((await sessionState(world.admin, held.sessionId))?.policy_revision).toBe(AFTER);
+      expect(await snapshotKeys(world.admin, held.sessionId)).toContain(KEY_OF_SLICE[audience]);
+
+      await expectRefusedUntouched(world, held);
+      expect((await held.on(world.newer).get(SESSION)).status).toBe(200);
     });
   });
 });
