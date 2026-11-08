@@ -1,0 +1,105 @@
+/*
+ * TaskForm (design/COMPONENT_PATTERNS.md, *TaskForm*; PRODUCT_DESIGN_DIRECTION section 6.3): the sections in one column, each a grid of two columns on a desk and one at 768px and
+ * below (`48rem`, which enlarged text reaches sooner), the summary rail beside them from 80rem up (it is sticky there and follows the sections below that), and the form's actions
+ * at the foot of the sections, wrapping so that nothing is clipped at 320px or at 200% text. Every size is a token or a rem.
+ */
+.ui-task-form {
+  min-width: 0;
+}
+
+.ui-task-form__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 80rem) {
+  .ui-task-form[data-rail] .ui-task-form__layout {
+    grid-template-columns: minmax(0, 1fr) 22rem;
+  }
+}
+
+.ui-task-form__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  max-width: 52rem;
+}
+
+.ui-task-form__sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ui-task-form__sections[hidden] {
+  display: none;
+}
+
+.ui-task-form__section,
+.ui-task-form__review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ui-task-form__section-title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+/* The one-line rule that changes a choice, beside the choice. */
+.ui-task-form__section-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The field grid: two columns where there is room, each field as wide as its content needs; a wide field takes the row. */
+.ui-task-form__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4) var(--space-5);
+}
+
+@media (min-width: 48.0625rem) {
+  .ui-task-form__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ui-task-form__wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.ui-task-form__review-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ui-task-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+/* The rail stays in view while the sections scroll beside it (from 80rem, which leaves the form 36rem beside the shell’s sidebar; below that it follows them). */
+.ui-task-form__rail {
+  min-width: 0;
+}
+
+@media (min-width: 80rem) {
+  .ui-task-form__rail {
+    position: sticky;
+    top: var(--space-4);
+  }
+}

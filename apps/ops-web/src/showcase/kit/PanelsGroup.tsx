@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { PICKUP_STATE_MAP, serviceDateText } from '../../app/pages/pickup/pickup-presentation';
-import { ActionMenu } from '../../components/ui/action-menu/ActionMenu';
+import { ActionMenu, type ActionMenuItem } from '../../components/ui/action-menu/ActionMenu';
 import { Button } from '../../components/ui/button/Button';
 import { DescriptionList } from '../../components/ui/description-list/DescriptionList';
 import { Panel } from '../../components/ui/panel/Panel';
@@ -20,33 +20,33 @@ export const REQUEST_STAGES = [
   { id: 'collected', label: 'Collected' },
 ] as const;
 
-/** The menu of the rarer acts of a request, in the words of the portal. One act is not available, and says why; one is destructive, and is confirmed. */
+/** The acts of the menu of a request, in the words of the portal. One act is not available, and says why; one is destructive, and is confirmed. */
+export function requestMenuItems(code: string): readonly ActionMenuItem[] {
+  return [
+    { id: 'hub', label: 'Change the hub', icon: 'pickup-requests', onSelect: () => undefined },
+    {
+      id: 'escalate',
+      label: 'Escalate',
+      disabled: { reason: 'An approver decides this.' },
+      onSelect: () => undefined,
+    },
+    {
+      id: 'cancel',
+      label: 'Cancel request',
+      destructive: true,
+      confirm: {
+        title: `Cancel request ${code}?`,
+        description: 'The vendor is told. A cancellation charge may apply.',
+        confirmLabel: 'Cancel the request',
+      },
+      onSelect: () => undefined,
+    },
+  ];
+}
+
+/** The menu of the rarer acts of a request (see `requestMenuItems`). */
 export function RequestMenu({ code }: { readonly code: string }) {
-  return (
-    <ActionMenu
-      label={`More actions for ${code}`}
-      items={[
-        { id: 'hub', label: 'Change the hub', icon: 'pickup-requests', onSelect: () => undefined },
-        {
-          id: 'escalate',
-          label: 'Escalate',
-          disabled: { reason: 'An approver decides this.' },
-          onSelect: () => undefined,
-        },
-        {
-          id: 'cancel',
-          label: 'Cancel request',
-          destructive: true,
-          confirm: {
-            title: `Cancel request ${code}?`,
-            description: 'The vendor is told. A cancellation charge may apply.',
-            confirmLabel: 'Cancel the request',
-          },
-          onSelect: () => undefined,
-        },
-      ]}
-    />
-  );
+  return <ActionMenu label={`More actions for ${code}`} items={requestMenuItems(code)} />;
 }
 
 /**

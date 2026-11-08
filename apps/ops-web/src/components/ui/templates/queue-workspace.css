@@ -1,0 +1,51 @@
+/*
+ * QueueWorkspace (design/COMPONENT_PATTERNS.md, *QueueWorkspace*; PRODUCT_DESIGN_DIRECTION section 6.1): the queue's page. The page header, then one page card (16px) that holds
+ * the views, the filter row and the table, which runs to the card's edges; the record that is open stands in a column of its own beside the card. The panel's column exists
+ * only while the panel is open, so the table has the whole width otherwise, and it is the table's own box (its container) that the column priorities and the cards are read
+ * from: opening the panel narrows it, and the table drops the columns the page marked lesser instead of scrolling sideways. Every size is a token or a rem.
+ */
+.ui-queue-workspace {
+  min-width: 0;
+}
+
+.ui-queue-workspace__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+/* The panel's column, drawn only while the panel is open (a closed panel leaves no gap). At 768px and below the panel is a full-screen sheet and has no column. */
+@media (min-width: 48.0625rem) {
+  .ui-queue-workspace__split[data-panel='open'] {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--space-4);
+  }
+}
+
+.ui-queue-workspace__main {
+  min-width: 0;
+}
+
+/* The panel stays in view while the queue scrolls beside it: it scrolls inside itself (its own height is bounded by the viewport). */
+.ui-queue-workspace__aside {
+  position: sticky;
+  top: var(--space-4);
+}
+
+/* The views sit inside the page card with its padding; the table beneath them runs to the card's edges. */
+.ui-queue-workspace .ui-view-tabs__scroll {
+  padding-inline: var(--space-4);
+}
+
+.ui-queue-workspace__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-block-start: var(--space-4);
+}
+
+.ui-queue-workspace__filters,
+.ui-queue-workspace__notice {
+  padding-inline: var(--space-4);
+}

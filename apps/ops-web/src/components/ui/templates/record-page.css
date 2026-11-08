@@ -1,0 +1,53 @@
+/*
+ * RecordPage (design/COMPONENT_PATTERNS.md, *RecordPage*; PRODUCT_DESIGN_DIRECTION section 6.2): the header in a page card, then a main column (two thirds) for the work and the
+ * activity and a side column (one third) for facts and people. Under 80rem (the window is the measure here: the shell’s sidebar takes 15.5rem of it) the columns become one and the side follows the
+ * work. Inside a side panel the same pieces stack in one column, and the lead (the sentence, the stages, the acts) stands where the header was. Every size is a token or a rem.
+ */
+.ui-record-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.ui-record-page__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (min-width: 80rem) {
+  .ui-record-page__columns[data-side] {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.ui-record-page__main,
+.ui-record-page__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* In a side panel: the sentence, the stages and the acts, above the record's own panels. */
+.ui-record-page__lead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ui-record-page__sentence {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-record-page__acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

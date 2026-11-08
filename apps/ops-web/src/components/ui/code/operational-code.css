@@ -17,6 +17,7 @@
  * everywhere else, it stays on one line.
  */
 .ui-record-header__heading .ui-code,
+.ui-record-header .page-heading .ui-code,
 .ui-description-list__value .ui-code,
 .ui-reorder__content .ui-code {
   display: inline-block;

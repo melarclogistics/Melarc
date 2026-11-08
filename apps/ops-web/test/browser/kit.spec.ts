@@ -109,6 +109,8 @@ const GROUPS = [
   'overlays',
   'example-queue',
   'example-record',
+  'example-form',
+  'example-builder',
   'example-count',
 ] as const;
 
@@ -1413,7 +1415,7 @@ test.describe('the composed examples in a browser', () => {
     const panel = page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
     await expect(panel).toBeVisible();
     // Beside the table, not over it: the panel is to the right of the table's card (the table scrolls inside the card, so the card is the box to compare).
-    const card = page.locator('.showcase-kit-card');
+    const card = page.locator('.ui-queue-workspace__main');
     expect((await box(panel)).x).toBeGreaterThanOrEqual(
       (await box(card)).x + (await box(card)).width - 1,
     );
@@ -1423,12 +1425,12 @@ test.describe('the composed examples in a browser', () => {
   });
 
   // Break caught: a table whose square corners are drawn over the rounded corners of its card (the card does not cut what runs to its edges), or whose cells
-  // wrap into a taller row when a panel beside it narrows the room (a row is one line, or a code over a name; what does not fit is scrolled to).
-  test('the queue cuts its table to the corners of its card and keeps a cell on one line when the room narrows', async ({
+  // wrap into a taller row (a row is one line, or a code over a name; what does not fit is scrolled to).
+  test('the queue cuts its table to the corners of its card and keeps a cell on one line', async ({
     page,
   }) => {
     await openKit(page, 'example-queue', { width: 1440 });
-    const card = page.locator('.showcase-kit-card [data-slot="card"]');
+    const card = page.locator('.ui-queue-workspace__main [data-slot="card"]');
     // `clip`, not `hidden`: a box that is `hidden` is a scroll container, which pins a sticky bar inside it to a box that never scrolls (task R5.2, M12).
     expect(await card.evaluate((element) => getComputedStyle(element).overflow)).toBe('clip');
     // What the card cuts must not be the focus ring of the box that scrolls (it takes focus, so that the rows off to the side can be reached): the ring is drawn
@@ -1438,11 +1440,6 @@ test.describe('the composed examples in a browser', () => {
     expect(await px(scroller, 'outline-width')).toBe(2);
     expect(await px(scroller, 'outline-offset')).toBe(-2);
 
-    await page
-      .getByRole('table', { name: 'Pickup requests' })
-      .getByRole('button', { name: /^Open ACC-PR-7KQ2MZ/ })
-      .click();
-    await expect(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
     // The cells of a row, after the box that chooses it and the state: the service date.
     const date = page
       .getByRole('table', { name: 'Pickup requests' })
@@ -1460,6 +1457,32 @@ test.describe('the composed examples in a browser', () => {
     ).toBe(1);
   });
 
+  // Break caught: a panel that narrows the table below 40rem and leaves it a table that scrolls (the template draws cards then), or a record that is opened from a card and does
+  // not give focus back to the row's button once the panel closes and the table is drawn again (the button that was pressed is gone with the layout it was in).
+  test('the queue becomes cards when the panel narrows the room, and gives focus back to the row when the panel closes', async ({
+    page,
+  }) => {
+    await openKit(page, 'example-queue', { width: 1440 });
+    await page
+      .getByRole('table', { name: 'Pickup requests' })
+      .getByRole('button', { name: /^Open ACC-PR-7KQ2MZ/ })
+      .click();
+    await expect(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+    // The showcase's page is 66rem wide, so the table's own box is under 40rem beside the panel: the rows are cards, with the same button each.
+    await expect(page.getByRole('table', { name: 'Pickup requests' })).toHaveCount(0);
+    await expect(page.locator('.ui-queue-workspace [data-row-id]').first()).toBeVisible();
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeHidden();
+    await expect(page.getByRole('table', { name: 'Pickup requests' })).toBeVisible();
+    await expect(
+      page
+        .getByRole('table', { name: 'Pickup requests' })
+        .getByRole('button', { name: /^Open ACC-PR-7KQ2MZ/ }),
+    ).toBeFocused();
+  });
+
   // Break caught: a queue workspace that makes the page of a tablet or a phone scroll sideways, because its table does not scroll inside its own box.
   test('the queue fits 1440, 768 and 390px with the table scrolling inside its box', async ({
     page,
@@ -1473,15 +1496,76 @@ test.describe('the composed examples in a browser', () => {
   // Break caught: a record page whose two columns do not become one on a narrow screen.
   test('the record page keeps its two columns at 1440px and one at 390px', async ({ page }) => {
     await openKit(page, 'example-record', { width: 1440 });
-    const main = await box(page.getByRole('heading', { level: 3, name: 'Pickup' }));
-    const side = await box(page.getByRole('heading', { level: 3, name: 'Sender' }));
+    const main = await box(page.getByRole('heading', { level: 2, name: 'Pickup' }));
+    const side = await box(page.getByRole('heading', { level: 2, name: 'Sender' }));
     expect(side.x).toBeGreaterThan(main.x + 200);
 
     await openKit(page, 'example-record', { width: 390 });
     expect(await overflow(page)).toBeLessThanOrEqual(0);
-    const narrowMain = await box(page.getByRole('heading', { level: 3, name: 'Pickup' }));
-    const narrowSide = await box(page.getByRole('heading', { level: 3, name: 'Sender' }));
+    const narrowMain = await box(page.getByRole('heading', { level: 2, name: 'Pickup' }));
+    const narrowSide = await box(page.getByRole('heading', { level: 2, name: 'Sender' }));
     expect(narrowSide.y).toBeGreaterThan(narrowMain.y);
+  });
+
+  // Break caught: a form that checks nothing in place, sends without the review, loses what was typed when the review is looked at, or has a success that is only words.
+  test('the task form tells each field’s error in place, reviews before it sends and says Open and Book another', async ({
+    page,
+  }) => {
+    await openKit(page, 'example-form', { width: 1440 });
+    const name = page.getByRole('textbox', { name: /^Name/ });
+    await page.getByRole('button', { name: 'Review the booking' }).click();
+    await expect(page.getByText('Enter the sender’s name.')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Review' })).toHaveCount(0);
+
+    await name.fill('Ama Mensah');
+    await page.getByRole('textbox', { name: /^Phone/ }).fill('+233200000000');
+    await page.getByRole('textbox', { name: /^Packages/ }).fill('3');
+    await page.getByRole('button', { name: 'Review the booking' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Review' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'The sender' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Book the pickup' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Go back and change' }).click();
+    await expect(name).toHaveValue('Ama Mensah');
+    await page.getByRole('button', { name: 'Review the booking' }).click();
+    await page.getByRole('button', { name: 'Book the pickup' }).click();
+
+    const toast = page.locator('.ui-toast', { hasText: 'Sample pickup booked.' });
+    await expect(toast.getByRole('button', { name: 'Open' })).toBeVisible();
+    await toast.getByRole('button', { name: 'Book another' }).click();
+    await expect(name).toHaveValue('');
+  });
+
+  // Break caught: a refusal drawn away from its row, a stale row dropped, a total that was not stated drawn as 0, or a tablet layout with no way to reach the run.
+  test('the builder puts a refusal and a stale flag on their rows, keeps the rows, and reaches the run on a tablet', async ({
+    page,
+  }) => {
+    await openKit(page, 'example-builder', { width: 1440 });
+    // In the showcase the pool's own box is under 40rem beside the run, so its rows are cards: the boxes are the same ones.
+    const pool = page.locator('.ui-builder__pool');
+    await pool.getByRole('checkbox', { name: 'Choose ACC-PR-7KQ2MZ' }).check();
+    await pool.getByRole('checkbox', { name: 'Choose ACC-PR-3NP6VB' }).check();
+    const run = page.getByRole('list', { name: 'The requests chosen, in order' });
+    await expect(run.getByRole('listitem')).toHaveCount(2);
+    const stale = run.getByRole('listitem').filter({ hasText: 'ACC-PR-3NP6VB' });
+    await expect(stale.getByText('It is no longer waiting for a manifest.')).toBeVisible();
+    await expect(page.getByText('Not recorded')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Create the manifest' }).click();
+    const refused = run.getByRole('listitem').filter({ hasText: 'ACC-PR-7KQ2MZ' });
+    await expect(refused.getByText('Another manifest holds this request.')).toBeVisible();
+    await expect(run.getByRole('listitem')).toHaveCount(2);
+    // At 1440px the run is beside the pool, so there is nothing to jump to.
+    await expect(page.getByRole('button', { name: /^Go to the run/ })).toBeHidden();
+
+    await page.getByRole('button', { name: 'Remove ACC-PR-7KQ2MZ from the choice' }).click();
+    await expect(run.getByRole('listitem')).toHaveCount(1);
+    await expect(page.getByText('Another manifest holds this request.')).toHaveCount(0);
+
+    await openKit(page, 'example-builder', { width: 768 });
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    await page.getByRole('button', { name: /^Go to the run/ }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'The run' })).toBeFocused();
   });
 
   // Break caught: a hub-floor task whose targets are smaller than 56px on the tablet, or one that shows the sender's declared count before the count is sent.

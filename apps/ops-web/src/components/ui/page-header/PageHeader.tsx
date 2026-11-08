@@ -1,23 +1,12 @@
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { PageHeading } from '../../PageHeading';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbSeparator,
-} from '../../primitives/breadcrumb';
 import { Button } from '../../primitives/button';
-import { Link } from '../link/Link';
 import { VisuallyHidden } from '../visually-hidden/VisuallyHidden';
+import { BreadcrumbTrail, type BreadcrumbEntry } from './BreadcrumbTrail';
 import './page-header.css';
 
-/** A page above the current one, from the top of the trail down: where the link goes and what it is called. */
-export interface BreadcrumbEntry {
-  readonly label: string;
-  readonly to: string;
-}
+export type { BreadcrumbEntry };
 
 /** How many the server stated, and what they are ("pickup requests"): the words go with the number for whoever hears the page. */
 export interface PageCount {
@@ -100,23 +89,7 @@ export function PageHeader({
 }: PageHeaderProps) {
   return (
     <div className="ui-page-head">
-      {breadcrumb === undefined || breadcrumb.length === 0 ? null : (
-        <Breadcrumb aria-label="Breadcrumb" className="ui-page-head__trail">
-          <BreadcrumbList>
-            {breadcrumb.map((entry, index) => (
-              // A trail is in a fixed order, and two steps may share an address (a list and its filtered view): the place in the trail and the words tell them apart.
-              <Fragment key={`${String(index)}:${entry.label}`}>
-                {index === 0 ? null : <BreadcrumbSeparator />}
-                <BreadcrumbItem>
-                  <BreadcrumbLink asChild>
-                    <Link to={entry.to}>{entry.label}</Link>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-              </Fragment>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-      )}
+      {breadcrumb === undefined ? null : <BreadcrumbTrail breadcrumb={breadcrumb} />}
       <div className="ui-page-head__row">
         <div className="ui-page-head__text">
           <div className="ui-page-head__titleline">

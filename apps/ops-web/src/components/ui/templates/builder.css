@@ -1,0 +1,174 @@
+/*
+ * Builder (design/COMPONENT_PATTERNS.md, *Builder*; PRODUCT_DESIGN_DIRECTION section 6.4): the run's own fields above two panes, the pool and the run. From 80rem the panes are side by
+ * side and the run (24rem) stays in view beside the pool; below that (the hub-floor tablet at 768px among it) they are one column, the pool first, with a button in the pool's header
+ * that goes to the run. A refusal and a stale flag are on the row they name, in words with an icon, never by colour alone. Every size is a token or a rem.
+ */
+.ui-builder {
+  min-width: 0;
+}
+
+.ui-builder__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.ui-builder__setup {
+  max-width: 40rem;
+}
+
+.ui-builder__note {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (min-width: 80rem) {
+  .ui-builder__panes {
+    grid-template-columns: minmax(0, 1fr) 24rem;
+  }
+
+  .ui-builder__run {
+    position: sticky;
+    top: var(--space-4);
+  }
+
+  /* Beside the pool the run is in view: the way to jump to it is only for the one-column layout. */
+  .ui-builder__to-run {
+    display: none;
+  }
+}
+
+/* The way to the run, above the pool's rows. Its words are the page's and may be long: they wrap. */
+.ui-builder__to-run {
+  margin: 0 0 var(--space-3);
+}
+
+.ui-builder__to-run button {
+  height: auto;
+  min-height: var(--control-height-md);
+  text-align: start;
+  white-space: normal;
+}
+
+.ui-builder__pool,
+.ui-builder__run {
+  min-width: 0;
+}
+
+.ui-builder__rule {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__toolbar {
+  margin-bottom: var(--space-3);
+}
+
+.ui-builder__run-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.ui-builder__run-title:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+}
+
+.ui-builder__summary {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__empty {
+  margin: var(--space-3) 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__run-list {
+  display: flex;
+  flex-direction: column;
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-builder__run-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--color-border-subtle);
+}
+
+.ui-builder__run-row:first-child {
+  border-block-start: 0;
+}
+
+.ui-builder__run-text {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ui-builder__run-detail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__run-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* The note names its row: an icon and the words (a refusal in the danger colour, a stale row in the warning one), and the row's rule is the same colour. */
+.ui-builder__run-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__run-note[data-kind='refusal'] {
+  color: var(--color-status-danger-foreground);
+}
+
+.ui-builder__run-note[data-kind='stale'] {
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-builder__run-row[data-refused='true'] {
+  border-inline-start: 2px solid var(--color-status-danger-border);
+  padding-inline-start: var(--space-3);
+}
+
+.ui-builder__run-row[data-stale='true']:not([data-refused='true']) {
+  border-inline-start: 2px solid var(--color-status-warning-border);
+  padding-inline-start: var(--space-3);
+}
+
+.ui-builder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  margin-top: var(--space-4);
+}

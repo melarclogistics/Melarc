@@ -5,7 +5,7 @@ import { PageHeading } from '../../components/PageHeading';
 import { Toaster } from '../../components/ui/toast/Toast';
 import { BadgesGroup } from './BadgesGroup';
 import { DataGroup } from './DataGroup';
-import { BlindCountExample, QueueWorkspaceExample, RecordPageExample } from './Examples';
+import { BlindCountExample } from './Examples';
 import { FormsGroup } from './FormsGroup';
 import { HeaderGroup } from './HeaderGroup';
 import { ListsGroup } from './ListsGroup';
@@ -13,6 +13,12 @@ import { MenusGroup } from './MenusGroup';
 import { OverlaysGroup } from './OverlaysGroup';
 import { PanelsGroup } from './PanelsGroup';
 import { StatesGroup } from './StatesGroup';
+import {
+  BuilderExample,
+  QueueWorkspaceExample,
+  RecordPageExample,
+  TaskFormExample,
+} from './TemplateExamples';
 import './kit.css';
 
 /**
@@ -70,15 +76,28 @@ export const KIT_GROUPS: readonly Group[] = [
   },
   {
     id: 'example-queue',
-    title: 'Example: the queue workspace',
-    summary: 'PageHeader, ViewTabs, FilterBar, DataTable and SidePanel together',
+    title: 'Template: the queue workspace',
+    summary:
+      'QueueWorkspace: header, views, filters, table and the record beside it, with every state',
     page: () => <QueueWorkspaceExample />,
   },
   {
     id: 'example-record',
-    title: 'Example: the record page',
-    summary: 'RecordHeader, StageTracker, two columns and a timeline',
+    title: 'Template: the record page',
+    summary: 'RecordPage: header with stages and acts, two columns, a timeline and a stale version',
     page: () => <RecordPageExample />,
+  },
+  {
+    id: 'example-form',
+    title: 'Template: the task form',
+    summary: 'TaskForm: sections, a field grid, a sticky summary, a review and a success toast',
+    page: () => <TaskFormExample />,
+  },
+  {
+    id: 'example-builder',
+    title: 'Template: the builder',
+    summary: 'Builder: the pool and the run, with a refusal and a stale row on the rows they name',
+    page: () => <BuilderExample />,
   },
   {
     id: 'example-count',
