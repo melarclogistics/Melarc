@@ -145,6 +145,21 @@ const reduceFixedPolicy = (type: 'VENDOR' | 'RIDER') =>
     [type],
   );
 
+/**
+ * The revision the stored policy of an audience holds now. A test takes its numbers from here and from the floor, and not from a
+ * number written in the test: the revision the seed holds is the build's (`BUILD_FIXED_POLICY`), it moved from 1 to 2 with the pickup
+ * permissions, and a number written here would be the seed of one day.
+ */
+const revisionOf = async (type: 'VENDOR' | 'RIDER'): Promise<number> =>
+  Number(
+    (
+      await admin.query<{ revision: number }>(
+        `select revision from fixed_permission_policy where principal_type = $1`,
+        [type],
+      )
+    ).rows[0]?.revision,
+  );
+
 /** A Vendor or Rider session row issued under a compiled revision. */
 async function fixedSession(
   principalType: 'VENDOR' | 'RIDER',
@@ -273,12 +288,14 @@ describe('a Vendor or a Rider session and the fixed policy (SECURITY_DESIGN.md s
   // Break caught: a session issued under a revision below the floor served by an instance that is qualified to judge it, or ended
   // by one that is not.
   it('is served while at or above the floor, and 401 and ended by a current instance once below it', async () => {
-    const current = await startInstance({ VENDOR: 2, RIDER: 2 });
-    const vendor = await fixedSession('VENDOR', 1);
-    const rider = await fixedSession('RIDER', 1);
+    const vendorHeld = await revisionOf('VENDOR');
+    const riderHeld = await revisionOf('RIDER');
+    const current = await startInstance({ VENDOR: vendorHeld + 1, RIDER: riderHeld + 1 });
+    const vendor = await fixedSession('VENDOR', vendorHeld);
+    const rider = await fixedSession('RIDER', riderHeld);
     await reduceFixedPolicy('VENDOR');
     await reduceFixedPolicy('RIDER');
-    const newer = await fixedSession('VENDOR', 2);
+    const newer = await fixedSession('VENDOR', vendorHeld + 1);
 
     const vendorAnswer = await call(current, 'GET', vendor.headers);
     const riderAnswer = await call(current, 'GET', rider.headers);
@@ -292,7 +309,7 @@ describe('a Vendor or a Rider session and the fixed policy (SECURITY_DESIGN.md s
     expect(await sessionState(rider.id)).toMatchObject({ termination_reason: 'AUTHORITY_CHANGED' });
     expect((await revocations(vendor.id))[0]?.related_ids).toEqual({
       principal_type: 'VENDOR',
-      minimum_revision: 2,
+      minimum_revision: vendorHeld + 1,
     });
     expect((await call(current, 'GET', newer.headers)).status).toBe(200);
   });
@@ -300,11 +317,12 @@ describe('a Vendor or a Rider session and the fixed policy (SECURITY_DESIGN.md s
   // Break caught: an obsolete instance (one below the floor) ending the session it cannot judge, or answering 401: the session is
   // valid and the instance is the wrong one. Nothing is ended and the next request, reaching a suitable instance, succeeds.
   it('is 503, with nothing ended, from an instance below the floor; and a current instance then serves it', async () => {
-    const [vendorFixedRevision] = [3];
     await reduceFixedPolicy('VENDOR');
-    const obsolete = await startInstance({ VENDOR: 2, RIDER: 2 });
-    const current = await startInstance({ VENDOR: vendorFixedRevision, RIDER: 3 });
-    const session = await fixedSession('VENDOR', 3);
+    const floor = await currentFloor('VENDOR');
+    const riderFloor = await currentFloor('RIDER');
+    const obsolete = await startInstance({ VENDOR: floor - 1, RIDER: riderFloor });
+    const current = await startInstance({ VENDOR: floor, RIDER: riderFloor });
+    const session = await fixedSession('VENDOR', floor);
 
     const refused = await call(obsolete, 'GET', session.headers);
 
@@ -321,10 +339,12 @@ describe('a Vendor or a Rider session and the fixed policy (SECURITY_DESIGN.md s
   // Break caught: an instance older than the session serving it on a policy it does not know.
   it('is 503 from an instance older than the revision the session was issued under, and ends nothing', async () => {
     await reduceFixedPolicy('RIDER');
-    const older = await startInstance({ VENDOR: 3, RIDER: 3 });
-    const session = await fixedSession('RIDER', 4);
+    const floor = await currentFloor('RIDER');
+    const older = await startInstance({ VENDOR: await currentFloor('VENDOR'), RIDER: floor });
+    const session = await fixedSession('RIDER', floor + 1);
     await reduceFixedPolicy('RIDER');
-    // The floor is now 5; the session at 4 is below it for a current instance and the instance at 3 is below the floor itself.
+    // The floor is now one past the instance's revision, and the session was issued under that revision: the session is at the floor,
+    // not below it, and the instance is older than the session and below the floor itself. It cannot judge either way.
     const answer = await call(older, 'GET', session.headers);
 
     expect(answer.status).toBe(503);
@@ -387,6 +407,37 @@ describe('a Vendor or a Rider session and the fixed policy (SECURITY_DESIGN.md s
 
     expect(answer.status).toBe(503);
     expect(await sessionState(session.id)).toMatchObject({ terminated_at: null });
+  });
+
+  // Break caught: a policy the seed has not written read as "no floor", so that an instance serves, or ends, a session whose audience's
+  // policy it cannot see. The instance is not the wrong one and the session is not the wrong one: the store is, and nothing is ended.
+  it('is 503 when the seed has not written the policy of the audience, and ends nothing', async () => {
+    const instance = await startInstance({
+      VENDOR: await revisionOf('VENDOR'),
+      RIDER: await revisionOf('RIDER'),
+    });
+    const session = await fixedSession('RIDER', await revisionOf('RIDER'));
+    const removed = await admin.query<{ revision: number; minimum_revision: number }>(
+      `delete from fixed_permission_policy where principal_type = 'RIDER' returning revision, minimum_revision`,
+    );
+    try {
+      expect(removed.rows).toHaveLength(1);
+
+      const answer = await call(instance, 'GET', session.headers);
+
+      expect(answer.status).toBe(503);
+      expect(await sessionState(session.id)).toMatchObject({ terminated_at: null });
+      expect(await revocations(session.id)).toEqual([]);
+    } finally {
+      // The rest of the file reads the row: it goes back as it was.
+      for (const row of removed.rows) {
+        await admin.query(
+          `insert into fixed_permission_policy (principal_type, revision, minimum_revision) values ('RIDER', $1, $2)`,
+          [row.revision, row.minimum_revision],
+        );
+      }
+    }
+    expect((await call(instance, 'GET', session.headers)).status).toBe(200);
   });
 
   // Break caught: the staff path consulting the fixed policy, so that an instance with nothing declared refuses staff.

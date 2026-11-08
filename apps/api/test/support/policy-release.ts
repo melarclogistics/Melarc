@@ -10,7 +10,8 @@ import ts from 'typescript';
  * moves the compiled Vendor and Rider policy to revision 2. Nothing in it is a test double: the changes are made to the source text before
  * the compiler reads it, the program must type-check, and the output is a complete application started with `node main.js` like `dist`.
  *
- * **The release it compiles** (`RELEASE_2`) raises the compiled revision of both audiences and changes an actual predicate for each:
+ * **The release it compiles** (`NEXT_RELEASE`) raises the compiled revision of both audiences, one above the tree's own (`CURRENT_REVISION`,
+ * read from `app.module.ts` so that the proof still compiles after the next bump of it), and changes an actual predicate for each:
  *
  * - **Rider, an ownership predicate.** `riderHoldsAssignedWork` answers true, so a Rider who holds `settings.reason.read` passes the
  *   use case's assignment check of `listReasonDefinitions`, which the current build refuses with `403` (there is no assigned work yet).
@@ -44,14 +45,53 @@ export interface SourceChange {
   readonly to: string;
 }
 
-/** The compiled revisions of the release, as the second build declares them. */
-export const RELEASE_2_REVISION = { VENDOR: 2, RIDER: 2 } as const;
+/** The file that declares the compiled revisions (`BUILD_FIXED_POLICY`), relative to `src/`. */
+const POLICY_FILE = 'platform/auth/sessions/build-fixed-policy.ts';
 
-export const RELEASE_2: readonly SourceChange[] = [
+/** The compiled revisions this tree declares (`BUILD_FIXED_POLICY`), read from the source text. */
+function declaredRevisions(): { readonly VENDOR: number; readonly RIDER: number } {
+  const source = readFileSync(join(SOURCE_ROOT, POLICY_FILE), 'utf8');
+  const match = /Object\.freeze\(\{ VENDOR: (\d+), RIDER: (\d+) \}\)/.exec(source);
+  if (match === null) {
+    throw new Error(
+      `BUILD_FIXED_POLICY is not declared as { VENDOR: n, RIDER: n } in ${POLICY_FILE}`,
+    );
+  }
+  return { VENDOR: Number(match[1]), RIDER: Number(match[2]) };
+}
+
+/** The revisions of the current build: the tree as it stands. */
+export const CURRENT_REVISION = declaredRevisions();
+
+/** The compiled revisions of the release, as the second build declares them: one above the current build's. */
+export const NEXT_REVISION = {
+  VENDOR: CURRENT_REVISION.VENDOR + 1,
+  RIDER: CURRENT_REVISION.RIDER + 1,
+} as const;
+
+const policyLine = (revision: { readonly VENDOR: number; readonly RIDER: number }): string =>
+  `export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: ${String(revision.VENDOR)}, RIDER: ${String(revision.RIDER)} });`;
+
+/**
+ * The tree compiled as a build that declares `revision` for both audiences and changes nothing else: the build of a release in history,
+ * whatever the tree declares now. The proof of the release of SLICE-001 itself compares the build before it (revision 1, what the seed
+ * wrote) with the one that carries it (revision 2).
+ */
+export function declaring(revision: number): readonly SourceChange[] {
+  return [
+    {
+      file: POLICY_FILE,
+      from: policyLine(CURRENT_REVISION),
+      to: policyLine({ VENDOR: revision, RIDER: revision }),
+    },
+  ];
+}
+
+export const NEXT_RELEASE: readonly SourceChange[] = [
   {
-    file: 'app.module.ts',
-    from: 'export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: 1, RIDER: 1 });',
-    to: `export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: ${String(RELEASE_2_REVISION.VENDOR)}, RIDER: ${String(RELEASE_2_REVISION.RIDER)} });`,
+    file: POLICY_FILE,
+    from: `export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: ${String(CURRENT_REVISION.VENDOR)}, RIDER: ${String(CURRENT_REVISION.RIDER)} });`,
+    to: `export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: ${String(NEXT_REVISION.VENDOR)}, RIDER: ${String(NEXT_REVISION.RIDER)} });`,
   },
   {
     file: 'settings/rider-assigned-work.ts',

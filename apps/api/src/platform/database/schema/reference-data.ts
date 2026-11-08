@@ -69,12 +69,22 @@ export const SETTING_VALUE_TYPES = [
   'object',
 ] as const;
 
-/** The workflow domains of the reason catalogue, then the six identity domains (domain-model.md §3.9). */
+/**
+ * The workflow domains of the reason catalogue, then the six identity domains (domain-model.md §3.9). The last three workflow domains
+ * were admitted for SLICE-001 on 29 October 2026 (D-05): their codes are the Product Owner's and none is seeded yet, so an operation
+ * that takes a reason of one of them refuses every code until they are (`REASON_NOT_ACTIVE`). `PICKUP_CARRYOVER` was admitted on
+ * 2 November 2026 (the S1.20 closeout) for the reason a manifest gives for each overdue request it carries over; its codes are the
+ * Product Owner's and none is seeded, so a manifest holding an overdue request cannot be made until they are.
+ */
 export const WORKFLOW_REASON_DOMAINS = [
   'DELIVERY_FAILURE',
   'RECIPIENT_CONTACT',
   'PICKUP_STOP_SKIP',
   'HANDOFF_FAILURE',
+  'PICKUP_CANCELLATION',
+  'PICKUP_FAILURE',
+  'PICKUP_SHORT_COUNT',
+  'PICKUP_CARRYOVER',
 ] as const;
 export const IDENTITY_REASON_DOMAINS = [
   'SESSION_REVOCATION',

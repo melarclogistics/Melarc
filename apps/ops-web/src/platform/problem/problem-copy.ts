@@ -3,6 +3,9 @@ import { ApiError } from '@melarc/api-client/browser';
 import type { ForbiddenKind } from '../../components/ui/forbidden-state/ForbiddenState';
 import { OperationFailure, type Violation } from '../api/api-response';
 import { StaleSessionError } from '../session/session-boundary';
+import { MANIFEST_COPY } from './manifest-copy';
+import { NOTIFICATION_COPY } from './notification-copy';
+import { PICKUP_COPY } from './pickup-copy';
 import { RIDER_COPY } from './rider-copy';
 import { STAFF_COPY } from './staff-copy';
 import { VENDOR_COPY } from './vendor-copy';
@@ -46,6 +49,10 @@ export interface Problem {
   readonly reference?: string;
   /** Where a request was refused (place and rule, never a value), when the API said. */
   readonly violations?: readonly Violation[];
+  /** The rule a refusal declares (`details.rule`: `service_date_passed`), a machine name the screen words itself. */
+  readonly rule?: string;
+  /** The stops a refusal names (`details.stops`), as identifiers. */
+  readonly stops?: readonly string[];
 }
 
 /** Where a call was made, so that the words can be the right ones for it. */
@@ -255,6 +262,9 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   ...STAFF_COPY,
   ...VENDOR_COPY,
   ...RIDER_COPY,
+  ...PICKUP_COPY,
+  ...MANIFEST_COPY,
+  ...NOTIFICATION_COPY,
 ];
 
 const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string>> = {
@@ -370,8 +380,14 @@ export function problemOf(error: unknown, place: ProblemPlace = {}): Problem {
   } else kind = 'refused';
 
   const general = kind === 'unavailable' || kind === 'refused';
+  // A refusal that declares the rule it broke (`details.rule`) is worded by the rule when the page gave no context of its own: the table keeps
+  // a rule's words under the operation, the rule as context and the code, and a rule it has no words for falls back to the operation's own.
+  const ruled =
+    error instanceof OperationFailure && error.rule !== undefined && place.context === undefined
+      ? { ...place, context: error.rule }
+      : place;
   const worded = copyFor(
-    { ...place, ...(code === undefined ? {} : { code }) },
+    { ...ruled, ...(code === undefined ? {} : { code }) },
     { codeOnly: !general },
   );
   const message =
@@ -389,5 +405,7 @@ export function problemOf(error: unknown, place: ProblemPlace = {}): Problem {
     ...(error instanceof OperationFailure && error.violations.length > 0
       ? { violations: error.violations }
       : {}),
+    ...(error instanceof OperationFailure && error.rule !== undefined ? { rule: error.rule } : {}),
+    ...(error instanceof OperationFailure && error.stops.length > 0 ? { stops: error.stops } : {}),
   };
 }

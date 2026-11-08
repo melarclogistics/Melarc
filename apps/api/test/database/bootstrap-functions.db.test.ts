@@ -268,6 +268,19 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.rider_pin_hash',
       'melarc.rider_active_device',
       'melarc.rider_locked_facts',
+      // S1.26 (migration 0068): the two narrow operations of the rider's count.
+      'melarc.collection_handshake_type',
+      'melarc.promote_collected_sender',
+      // S1.27 (migration 0070): the five operations of the collection handshake.
+      'melarc.handshake_issue',
+      'melarc.handshake_verify',
+      'melarc.handshake_sms_fallback',
+      'melarc.handshake_override',
+      'melarc.handshake_resolve',
+      // S1.29 (migration 0071): the vendor's dispute of a collection.
+      'melarc.dispute_collection',
+      // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
+      'melarc.rider_door_wait_minutes',
     ]);
   });
 

@@ -26,6 +26,8 @@ import type {
   SecretCipher,
   SessionStore,
   StoredSession,
+  TextMessageSender,
+  TextStatus,
   TokenService,
   TotpVerdict,
   TotpVerifier,
@@ -250,6 +252,15 @@ export class DescribeDeliveryProvider extends DescribeAdapter implements Deliver
   }
 }
 
+export class DescribeTextMessageSender extends DescribeAdapter implements TextMessageSender {
+  send(): Promise<DeliveryOutcome> {
+    return refuse('TextMessageSender', 'send');
+  }
+  status(): Promise<TextStatus> {
+    return refuse('TextMessageSender', 'status');
+  }
+}
+
 export class DescribeAttestationVerifier extends DescribeAdapter implements AttestationVerifier {
   verify(): Promise<AttestationVerdict> {
     return refuse('AttestationVerifier', 'verify');
@@ -281,6 +292,7 @@ export const DESCRIBE_PORT_BINDINGS: PortBindings = {
   unitOfWork: { useClass: DescribeUnitOfWork },
   deliveryQueue: { useClass: DescribeDeliveryQueue },
   deliveryProvider: { useClass: DescribeDeliveryProvider },
+  textMessageSender: { useClass: DescribeTextMessageSender },
   attestationVerifier: { useClass: DescribeAttestationVerifier },
   metrics: { useClass: DescribeMetrics },
 };

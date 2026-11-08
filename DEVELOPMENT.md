@@ -131,7 +131,7 @@ pnpm --filter @melarc/api run db:migrate
 ```
 
 The database tools run from the build, so build first. `db:bootstrap` creates the roles (the owner, the migration, API
-runtime, worker and provisioning identities, and the worker's capability role) and the `melarc_dev` database. The worker
+runtime, worker and provisioning identities, and the worker's two capability roles, for the credential delivery and for the notification lane) and the `melarc_dev` database. The worker
 and provisioning logins take passwords derived from the administrator password, which is for this machine's cluster only,
 so they need no setting of their own. `db:migrate` applies the migrations in `apps/api/migrations` as the migration
 identity. Both are safe to repeat; run `db:bootstrap` before `db:migrate` after updating, because a migration grants to
@@ -143,9 +143,9 @@ pnpm --filter @melarc/api run db:seed
 
 `db:seed` fills the migrated, empty `melarc_dev` with the reference data (the permission catalogue, the confirmed role
 bundles and their grants, the two fixed Vendor and Rider policies, the settings with an approved value, the hub and the
-twelve identity reasons) as the provisioning login, in one transaction, by a database function that only that login may run
+twelve identity reasons, and the launch hub's service zones and settings) as the provisioning login, in one transaction, by a database function that only that login may run
 (the login holds no privilege on those tables, so nothing else of it can add to them). The database, not the command, refuses
-to run it twice: it refuses a database that already holds any of it, and changes nothing. `db:seed --fixtures` adds the test-only fixtures and refuses in production.
+to run it twice: it refuses a database that already holds any of it, and changes nothing. `db:seed --hub-configuration` writes the launch hub's service zones and settings alone, into a database that was seeded before migration 0042 (it refuses one that already has any of them; it is reference data, so production may run it). `db:seed --fixtures` adds the test-only fixtures and refuses in production.
 For another database set `DATABASE_SEED_URL` (the provisioning login) and `APP_ENV`; the API refuses to start with either
 `DATABASE_SEED_URL` or `DATABASE_MIGRATION_URL` in its environment. `db:reset` (section 8) returns the database to migrated and empty, which allows a new seed.
 
@@ -228,9 +228,56 @@ It reads the same `apps/api/.env` and connects as `melarc_worker_runtime`; a loc
 the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays unset (the API refuses to start with it
 set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
 yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
-by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
+by hand. The worker refuses a folder inside the checkout and refuses to select a real provider for these credential
+messages in a local run (the decision of 11 October 2026 stands for them).
 It reads the standing of a setup grant (SLICE-000 S0.29) or of a recovery request (S0.50) before each send, and sends nothing
 for a record it cannot confirm. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+
+The same process runs the **notification lane** (SLICE-001, S1.12). When an operation of the API records an event the
+product tells people about (today, Ops confirming a pickup request), the lane relays it and texts the people it concerns:
+the ad-hoc sender of a request gets a text, and a registered vendor gets an entry in its feed. By default the texts go to the
+capture folder too, one `<id>.json` file for each (the number and the words, in clear, for you to read); the message log of
+the database keeps a masked hint of the number and never the words. The wording of the messages is a draft until you approve
+it ([the plan](delivery/planning/SLICE-001-IMPLEMENTATION-PLAN.md), S1.12b).
+
+Ops reads what became of each message in the Ops Portal at **Messages** (`/messages`, the key `notification.read`, which Ops Staff,
+Senior Ops and Platform Admin hold at their hub): when it was made, who it was for, and whether it was sent, delivered, held back
+(and why) or failed, with the number masked and never the words or a code. Migration `0057` grants the key to a database seeded
+before it; a session already open keeps the keys it was issued with, so **sign out and in again** to see the new menu entry.
+
+#### Real text messages: the controlled window (S1.12d)
+
+The lane can send real text messages through Hubtel, on this machine, only inside a window you open and that closes by itself
+(DEPLOYMENT_AND_ENVIRONMENTS.md §4.1, your decision of 29 October 2026). Nothing is sent for real until you do the following,
+and nobody else can do it for you:
+
+1. Copy `apps/api/.env.sms.example` to `apps/api/.env.sms` (git-ignored; the API never loads it) and fill it in yourself: your
+   Hubtel client id and secret, the sender ID, the numbers you control (`DELIVERY_PROVIDER_ALLOWLIST`, in the form
+   `+233XXXXXXXXX`), the most messages the window may send, the moment it ends (UTC, within 14 days of the worker's start) and an
+   approval reference. **Never paste a credential in a chat, a log or a commit.** Renew a window with a new approval reference.
+2. Run `pnpm run build`, then `pnpm --filter @melarc/api run db:bootstrap` and `db:migrate` (the lane has a capability role of
+   its own, and the migration grants to it).
+3. Send yourself one message and read what happened:
+
+   ```text
+   pnpm --filter @melarc/api run sms:smoke -- --to +233XXXXXXXXX
+   ```
+
+   It reads the settings as the worker does, refuses what the worker would refuse (an incomplete window, a number off the
+   allow-list, a window that has ended, a spent cap), sends your number one test text through the guards, and waits up to a
+   minute for the network's word. It prints what happened in words, a masked form of the number, and never a credential. With
+   `NOTIFICATION_SMS_ADAPTER` unset it is a dry run into the capture folder.
+
+4. Start the worker with `start:worker:local` (it loads `.env.sms` after `.env`). The lane then sends a real text for an
+   event only if the number is on the allow-list, the window is open and has a free place, the day's limits allow it (10 for a
+   number and 500 in all, settings you can change) and **the wording of that message is approved**. You approved the two
+   wordings built so far (the confirmation text and the vendor's feed entry) on 30 October 2026, for exactly those words; the
+   wording of every later message is a draft until you approve it in `apps/api/src/platform/notifications/templates.ts`, and the
+   lane holds its real messages back as `WORDING_NOT_APPROVED` (the capture folder still gets them). The worker says at its start
+   which mode it composed (`notification lane composed`: the sender, and whether the wording gate stands in front of it).
+
+Hubtel's request and answer forms are built from what is known of its API and marked unverified in
+`hubtel-sms-client.ts`; the first message you send confirms them or shows what to correct.
 
 #### The private metrics endpoints
 
@@ -251,7 +298,7 @@ that run all of them once, are in [The development loop and the gate](#the-devel
 
 | Command                                                        | Needs                           | Proves                                                                                                                                                                                               |
 | -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint, strict types                                                                                                                                                                       |
+| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint (ESLint runs with a 6 GB heap: the type-aware lint of the whole repository needs about 5 GB, more than Node's default 4 GB), strict types                                           |
 | `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                                             |
 | `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                                            |
 | `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment and the alert rehearsal against the real verifier service (built on its first run) |

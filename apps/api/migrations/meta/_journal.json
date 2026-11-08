@@ -295,6 +295,230 @@
       "when": 1793066061497,
       "tag": "0041_rider_sign_in_challenge",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793237071296,
+      "tag": "0042_hub_configuration",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793238655191,
+      "tag": "0043_slice_001_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793240324910,
+      "tag": "0044_pickup_reason_domains",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793242314874,
+      "tag": "0045_pickup_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793242959217,
+      "tag": "0046_fixed_policy_seed_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793243893441,
+      "tag": "0047_audit_pickup_object_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793244991063,
+      "tag": "0048_audit_vendor_pickup_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793245524290,
+      "tag": "0049_vendor_organization_location_read",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793246824643,
+      "tag": "0050_pickup_request_cutoff_reschedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793249601278,
+      "tag": "0051_one_package_exception",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793251789607,
+      "tag": "0052_vendor_cancellation_reason_read",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793253129262,
+      "tag": "0053_pickup_attempt_extension",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793285307896,
+      "tag": "0054_pickup_reason_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1793313668718,
+      "tag": "0055_notification_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793313676481,
+      "tag": "0056_notification_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1793313680395,
+      "tag": "0057_notification_read_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793566900876,
+      "tag": "0058_pickup_manifests",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793580731890,
+      "tag": "0059_pickup_carryover_stop_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793584006494,
+      "tag": "0060_manifest_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1793600373957,
+      "tag": "0061_pickup_carryover_reasons",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1793600981490,
+      "tag": "0062_notification_manifest_aggregate",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1793604029977,
+      "tag": "0063_pickup_manifest_dispatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1793621267154,
+      "tag": "0064_current_rider_commitment",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1793632552808,
+      "tag": "0065_rider_run_execution",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1793665184097,
+      "tag": "0066_pickup_stop_skip_run_completion",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1793665773224,
+      "tag": "0067_run_custody_handover",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1793720551781,
+      "tag": "0068_collection_record",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793802105386,
+      "tag": "0069_collection_record_facts_and_count_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1793806335970,
+      "tag": "0070_collection_handshake",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1793812979612,
+      "tag": "0071_collection_dispute",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793814712545,
+      "tag": "0072_pickup_failure_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1793840773748,
+      "tag": "0073_review_closeout_handshake_ceiling_extension",
+      "breakpoints": true
     }
   ]
 }

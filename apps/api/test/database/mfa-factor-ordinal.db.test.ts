@@ -9,7 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uuidV7From } from '../../src/platform/auth/crypto/uuid-v7.js';
 import { MfaFactorStore } from '../../src/platform/auth/mfa/mfa-factor-store.js';
 import { PostgresUnitOfWork } from '../../src/platform/database/postgres.unit-of-work.adapter.js';
+import { runSeed } from '../../src/platform/database/seed/seed-helper.js';
+import { PROVISIONING_ROLE } from '../../src/platform/database/technical-roles.js';
 import { MIGRATIONS_FOLDER, runMigrations } from '../../src/tools/database/run-migrations.js';
+import { referenceSeedPlan } from '../../src/tools/seed/reference-seed.js';
+import { IDENTITY_REASONS, reasonCodeRow } from '../../src/tools/seed/reasons.js';
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
 import { ManualClock } from '../../src/test-support/manual-clock.js';
 import { factorRow, insertFactor } from './support/credentials.js';
@@ -236,6 +240,30 @@ describe('the migration that adds the ordinal', () => {
     return copy;
   }
 
+  /**
+   * The reference data this test needs of the seed, for a database that is at the history before migration 25: the hubs, the permissions, the bundles with their
+   * grants and the fixed policies, which the identities it makes refer to, and the identity reasons that history knew. The reason catalogue of that history is
+   * closed over the domains it knew (`reason_code_domain_closed`), and the seed has gained domains since (the workflow reasons), so the whole seed is refused by a
+   * database of that age. The function takes a payload only with rows for all seven tables, so the reasons are the identity ones and the rest is the seed's. (The test
+   * went on seeding all of it until the first workflow domain was added, and was not run again while the files a change selects did not include it: a test of an old
+   * history seeds what that history can hold.)
+   */
+  async function seedWhatTheOldHistoryCanHold(): Promise<void> {
+    const plan = referenceSeedPlan();
+    const { service, close } = buildService(target, { login: PROVISIONING_ROLE });
+    try {
+      await runSeed(service, {
+        ...plan,
+        payload: {
+          ...plan.payload,
+          reason_code: IDENTITY_REASONS.map((each) => reasonCodeRow(each)),
+        },
+      });
+    } finally {
+      await close();
+    }
+  }
+
   async function before(): Promise<pg.Client> {
     target = await createTestDatabase({ migrate: false });
     folder = historyBefore();
@@ -255,7 +283,7 @@ describe('the migration that adds the ordinal', () => {
   it('gives the one factor of each identity the place one, and the table holds nothing without a place', async () => {
     const client = await before();
     try {
-      await seedReferenceData(target);
+      await seedWhatTheOldHistoryCanHold();
       const row = await insertStaff(client, staffRow());
       const revoked = await insertFactor(client, factorRow(row.id));
       await client.query(
@@ -285,7 +313,7 @@ describe('the migration that adds the ordinal', () => {
   it('refuses to invent an order for an identity that already holds several factors, and changes nothing', async () => {
     const client = await before();
     try {
-      await seedReferenceData(target);
+      await seedWhatTheOldHistoryCanHold();
       const row = await insertStaff(client, staffRow());
       await insertFactor(client, factorRow(row.id));
       await insertFactor(client, factorRow(row.id));

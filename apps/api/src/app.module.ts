@@ -35,10 +35,14 @@ import {
 import { PostgresRateLimiter } from './platform/limiter/postgres.rate-limiter.adapter.js';
 import { BoundedMetrics } from './platform/metrics/bounded.metrics.adapter.js';
 import { labelPolicyFor } from './platform/metrics/metric-catalogue.js';
-import type { CompiledFixedPolicy } from './platform/auth/sessions/session-authority.js';
 import { PlatformModule, type PlatformModuleOptions } from './platform/platform.module.js';
 import { SettingsReader } from './platform/settings/settings-reader.js';
+import { BUILD_FIXED_POLICY } from './platform/auth/sessions/build-fixed-policy.js';
 import { DispatchModule } from './dispatch/dispatch.module.js';
+import { DomainPortsModule } from './domain-ports.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
+import { FleetModule } from './fleet/fleet.module.js';
+import { PickupModule } from './pickup/pickup.module.js';
 import { PermissionModule } from './permission/permission.module.js';
 import { PostgresRiderIdentityDirectory } from './staff/postgres.rider-identity-directory.adapter.js';
 import { PostgresStaffIdentityDirectory } from './staff/postgres.staff-identity-directory.adapter.js';
@@ -214,13 +218,8 @@ function runtimePortBindings(config: AppConfig): PortBindings {
   };
 }
 
-/**
- * The fixed-policy revision this build is compiled for, for each audience that has one (SECURITY_DESIGN.md section 13.10; the session-issue
- * protocol refuses an instance below the stored floor). S0.48 declares the Vendor's: revision 1, the fixed Vendor bundle the seed writes
- * (`tools/seed/bundles.ts`); S0.59 declares the Rider's, revision 1 of the fixed Rider bundle, with the sign-in that issues its sessions (what two
- * builds of different revisions do is proved by S0.63). A composition that gives its own (a test) replaces this.
- */
-export const BUILD_FIXED_POLICY: CompiledFixedPolicy = Object.freeze({ VENDOR: 1, RIDER: 1 });
+/** The fixed-policy revision this build is compiled for: declared in one place (`build-fixed-policy.ts`), which the seed reads too. */
+export { BUILD_FIXED_POLICY };
 
 /** `base` with every defined binding of `over` laid on it. An explicit `undefined` means no binding and replaces nothing. */
 function overlay(base: PortBindings, over: PortBindings = {}): PortBindings {
@@ -291,7 +290,17 @@ export class AppModule {
         }),
         ...(options.productRoutes === false
           ? []
-          : [DispatchModule, PermissionModule, SettingsModule, StaffModule, VendorModule]),
+          : [
+              DispatchModule,
+              DomainPortsModule,
+              FleetModule,
+              NotificationsModule,
+              PermissionModule,
+              PickupModule,
+              SettingsModule,
+              StaffModule,
+              VendorModule,
+            ]),
       ],
       providers: check === undefined ? bound : [...bound, check],
       exports: bound.map((provider) => provider.provide),

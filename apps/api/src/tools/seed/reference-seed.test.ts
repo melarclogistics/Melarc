@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { BUILD_FIXED_POLICY } from '../../platform/auth/sessions/build-fixed-policy.js';
 import { BUNDLES, FIXED_POLICIES, GRANTS } from './bundles.js';
 import { HUBS } from './hubs.js';
 import { PERMISSION_KEYS } from './permission-keys.js';
 import { IDENTITY_REASONS } from './reasons.js';
 import { referenceSeedPlan } from './reference-seed.js';
 import { SETTINGS } from './settings.js';
+import { WORKFLOW_REASONS } from './workflow-reasons.js';
 
 /**
  * The plan the reference seed hands to the helper (S0.9, corrected by F02): which tables, in which order, how many rows, which policy
@@ -49,24 +51,41 @@ describe('the reference seed plan', () => {
       role_bundle_grant: GRANTS.length,
       fixed_permission_policy: FIXED_POLICIES.length,
       setting: SETTINGS.length,
-      reason_code: IDENTITY_REASONS.length,
+      reason_code: IDENTITY_REASONS.length + WORKFLOW_REASONS.length,
     });
   });
 
-  // Break caught: a revision or a floor in the document, which the function ignores but a reader would take for what is written. The
-  // bundles and the fixed policies start at revision 1 and floor 1, the tables' own defaults.
-  it('names no revision and no floor: the tables’ defaults, 1 and 1, are what the seed starts at', () => {
-    for (const row of [
-      ...(plan.payload.role_bundle ?? []),
-      ...(plan.payload.fixed_permission_policy ?? []),
-    ]) {
-      expect(Object.keys(row)).not.toEqual(expect.arrayContaining(['revision']));
-      expect(Object.keys(row)).not.toEqual(expect.arrayContaining(['reduction_floor']));
-      expect(Object.keys(row)).not.toEqual(expect.arrayContaining(['minimum_revision']));
+  // Break caught: a floor in the document, which the function ignores but a reader would take for what is written; and a bundle that
+  // names a revision (a bundle starts at revision 1 and floor 1, the tables' own defaults).
+  it('names no floor, and no revision of a bundle: those start at the tables’ defaults, 1 and 1', () => {
+    for (const row of plan.payload.role_bundle ?? []) {
+      expect(Object.keys(row)).not.toContain('revision');
+      expect(Object.keys(row)).not.toContain('reduction_floor');
     }
-    for (const policy of FIXED_POLICIES) {
-      expect([policy.revision, policy.minimumRevision]).toEqual([1, 1]);
+    for (const row of plan.payload.fixed_permission_policy ?? []) {
+      expect(Object.keys(row)).not.toContain('minimum_revision');
+      expect(Object.keys(row)).not.toContain('reduction_floor');
     }
+  });
+
+  // Break caught (found by the release of SLICE-001): a new database whose fixed policy starts at 1 while its build declares more. The
+  // revision is "the latest released" (SECURITY_DESIGN.md section 13.10), and the next reduction raises the floor from the stored one, so a
+  // trailing revision makes a reduction end no session. The seed writes the revision of the build, and a floor of 1 (nothing reduced).
+  it('starts each fixed policy at the revision of the build, with the floor at 1', () => {
+    expect(
+      FIXED_POLICIES.map((policy) => [
+        policy.principalType,
+        policy.revision,
+        policy.minimumRevision,
+      ]),
+    ).toEqual([
+      ['VENDOR', BUILD_FIXED_POLICY.VENDOR, 1],
+      ['RIDER', BUILD_FIXED_POLICY.RIDER, 1],
+    ]);
+    expect(plan.payload.fixed_permission_policy).toEqual([
+      { principal_type: 'VENDOR', revision: BUILD_FIXED_POLICY.VENDOR },
+      { principal_type: 'RIDER', revision: BUILD_FIXED_POLICY.RIDER },
+    ]);
   });
 
   // Break caught: a column the function does not take (a typo in a key, a camelCase name), which the database would drop and
@@ -77,7 +96,7 @@ describe('the reference seed plan', () => {
       permission: ['key', 'domain'],
       role_bundle: ['id', 'name', 'audience', 'privileged'],
       role_bundle_grant: ['bundle_id', 'permission_key', 'hub_scope', 'ownership_scope', 'tier'],
-      fixed_permission_policy: ['principal_type'],
+      fixed_permission_policy: ['principal_type', 'revision'],
       setting: ['key', 'scope', 'value_type', 'value', 'unit', 'description'],
       reason_code: [
         'code',

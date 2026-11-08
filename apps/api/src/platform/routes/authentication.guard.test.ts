@@ -17,7 +17,7 @@ import type {
 import type { PresentedCredential } from '../auth/sessions/session-credentials.js';
 import { ApiException } from '../http/api-exception.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
-import { ACCESS_DECLARATION_KEY } from './access-declaration.js';
+import { ACCESS_DECLARATION_KEY, ACCESS_DETAIL_KEY } from './access-declaration.js';
 import { AuthenticationGuard } from './authentication.guard.js';
 
 /**
@@ -68,6 +68,10 @@ function fixtures(options: {
   outcome?: AuthenticationOutcome;
   authenticator?: 'absent';
   limiter?: 'absent' | 'refuses' | 'down';
+  /** The one counter the limiter refuses (the others admit); the whole limiter refuses when `limiter` is `refuses`. */
+  refusing?: string;
+  /** The counter the limiter cannot decide (the others admit). */
+  failing?: string;
 }) {
   const calls: Calls = { authenticated: [], admitted: [], order: [] };
   const authenticator = {
@@ -81,9 +85,11 @@ function fixtures(options: {
     admit: (bucket, key) => {
       calls.order.push('admit');
       calls.admitted.push({ bucket, key });
-      if (options.limiter === 'down') return Promise.reject(new LimiterUnavailableError());
+      if (options.limiter === 'down' || options.failing === bucket) {
+        return Promise.reject(new LimiterUnavailableError());
+      }
       return Promise.resolve(
-        options.limiter === 'refuses'
+        options.limiter === 'refuses' || options.refusing === bucket
           ? { allowed: false, retryAfterSeconds: 30 }
           : { allowed: true },
       );
@@ -97,10 +103,24 @@ function fixtures(options: {
   return { guard, calls };
 }
 
-function contextOf(declaration: string, headers: IncomingHttpHeaders) {
+function contextOf(declaration: string, headers: IncomingHttpHeaders, providerInitiating = false) {
   const controller = (): void => undefined;
   const handler = (): void => undefined;
   Reflect.defineMetadata(ACCESS_DECLARATION_KEY, declaration, handler);
+  if (providerInitiating) {
+    Reflect.defineMetadata(
+      ACCESS_DETAIL_KEY,
+      {
+        permission: 'pickup.request.confirm',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          providerInitiating: true,
+        },
+      },
+      handler,
+    );
+  }
   // The raw header lines of a request that sent each header once, which is what the fake client below does.
   const rawHeaders = Object.entries(headers).flatMap(([name, value]) => [name, String(value)]);
   const request = { headers, rawHeaders, method: 'GET' };
@@ -220,6 +240,71 @@ describe('the authenticated-API bucket', () => {
   it.each(['down', 'absent'] as const)('fails closed when the limiter is %s', async (limiter) => {
     const { guard } = fixtures({ limiter });
     const { context, request } = contextOf('permission', COOKIE);
+
+    const refusal = await refusalOf(guard.canActivate(context));
+
+    expect(refusal).toBeInstanceOf(LimiterUnavailableError);
+    expect(authenticatedSessionOf(request as never)).toBeUndefined();
+  });
+});
+
+describe('the sub-ceiling of the provider-initiating operations (settings.md 7.7; R76)', () => {
+  const CEILING = 'provider_initiating_operation_ceiling_per_minute';
+
+  // Break caught: the sub-ceiling asked before the bucket (a request the bucket refuses would have spent it), asked for a route that does not state it (every
+  // request would spend the allowance of the few that cause a text), or keyed on anything but the session the bucket is keyed on.
+  it('is asked after the bucket, by the same session, for a route that states it', async () => {
+    const { guard, calls } = fixtures({});
+
+    expect(await guard.canActivate(contextOf('permission', COOKIE, true).context)).toBe(true);
+
+    expect(calls.order).toEqual(['authenticate', 'admit', 'admit']);
+    expect(calls.admitted).toEqual([
+      { bucket: 'rate_limit_authenticated_api', key: SESSION.id },
+      { bucket: CEILING, key: SESSION.id },
+    ]);
+  });
+
+  it('is not asked for a route that does not state it', async () => {
+    const { guard, calls } = fixtures({});
+
+    expect(await guard.canActivate(contextOf('permission', COOKIE).context)).toBe(true);
+
+    expect(calls.admitted).toEqual([{ bucket: 'rate_limit_authenticated_api', key: SESSION.id }]);
+  });
+
+  // Break caught: a spent ceiling that serves the request, answers another code, or leaves the session for the slots after it.
+  it('refuses 429 RATE_LIMITED when it is spent, with the bucket having admitted, and keeps no session', async () => {
+    const { guard, calls } = fixtures({ refusing: CEILING });
+    const { context, request } = contextOf('permission', COOKIE, true);
+
+    const refusal = await refusalOf(guard.canActivate(context));
+
+    expect(refusal).toMatchObject({ code: 'RATE_LIMITED' });
+    expect((refusal as ApiException).getStatus()).toBe(429);
+    expect(calls.admitted.map((entry) => entry.bucket)).toEqual([
+      'rate_limit_authenticated_api',
+      CEILING,
+    ]);
+    expect(authenticatedSessionOf(request as never)).toBeUndefined();
+  });
+
+  // Break caught: the ceiling asked after the bucket refused (a request that never runs would spend a place of it).
+  it('is not asked when the bucket refuses first', async () => {
+    const { guard, calls } = fixtures({ refusing: 'rate_limit_authenticated_api' });
+
+    const refusal = await refusalOf(
+      guard.canActivate(contextOf('permission', COOKIE, true).context),
+    );
+
+    expect(refusal).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(calls.admitted.map((entry) => entry.bucket)).toEqual(['rate_limit_authenticated_api']);
+  });
+
+  // Break caught: a permissive fallback when the limiter cannot decide the ceiling.
+  it('fails closed when the limiter cannot decide it', async () => {
+    const { guard } = fixtures({ failing: CEILING });
+    const { context, request } = contextOf('permission', COOKIE, true);
 
     const refusal = await refusalOf(guard.canActivate(context));
 

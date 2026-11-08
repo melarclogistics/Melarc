@@ -1321,6 +1321,242 @@ recorded keyboard-only and screen-reader passes, as for every component, are not
 
 ---
 
+## 22b. RadioGroup
+
+> **Status:** IMPLEMENTING (S1.19, 29 October 2026: built, in the showcase and used by the pickup screens; ACTIVE when the Product Owner accepts the composed screens)  
+> **Code:** `apps/ops-web/src/components/ui/radio/`
+
+Mutually exclusive choices with the Field's rules (§6) applied to a group: a native `<fieldset>` named by its `<legend>`, of native radio
+buttons, each with a real `<label>` and an optional line of help.
+
+- **No default.** Nothing is checked until the person chooses: a choice the page made would be accepted unread, and a decision the contract
+  wants made explicitly (a cancellation charge) is never preselected.
+- The browser gives the keyboard: Tab enters the group at the checked choice, or the first, and leaves it in one stop; the arrows move and
+  choose.
+- Help and error are tied to every choice (`aria-describedby`). An error marks every choice invalid, so the form's focus goes to the group,
+  and draws a 2px danger rule at the group's start with the Field's icon, which forced colours keep.
+- A choice that exists and cannot be made here is `disabled`, and the group's help says why (the permission it needs): a greyed choice
+  explains nothing by itself.
+- Two choices with one value are a defect of the page and throw. What a choice means is the screen's.
+
+## 22c. Picker
+
+> **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
+> **Code:** `apps/ops-web/src/components/ui/picker/`
+
+A choice from what the server finds (the vendor of a booking, a returning sender by phone): a search field, the results as a list with a
+button for each, and once one is chosen, that choice with a button to choose another.
+
+- Native parts and no library: Enter in the field searches and never submits the form around it, Tab goes through the results in order,
+  and a choice is the press of a button named with the result (`Choose: Demo Fabrics Ltd`), never a side effect of moving through a list.
+- **The server searches.** The picker holds no list: the screen reads the server with the text and hands the read back, whose loading,
+  failure, refusal (naming the permission) and empty answer are `ReadState`'s (§33.3). More matches than were returned are told as a
+  reason to narrow the search, never shown as the whole.
+- It never fills the field or chooses for the person. Focus follows the person: to the choice once made, back to the field when they set
+  it aside. Required and error go on the search field, where the correction is made.
+
+## 22d. MoneyAmount
+
+> **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
+> **Code:** `apps/ops-web/src/components/ui/money/`
+
+An amount drawn from the integer of minor units the server sent (domain-model.md §3.2): `2550` GHS is `GH₵25.50`.
+
+- Made on the digits as text and never in floating point, so no amount is off by a pesewa: thousands grouped, two places always, a leading
+  minus for a negative amount. A value that is not a whole safe number is a defect and throws.
+- **It computes and names nothing.** What the amount is (an indicative estimate, a charge as applied, a fee that became due) is said by the
+  screen's words around it, and an amount the server did not give is never drawn (§24.1).
+- Figures of one width, so amounts in a column line up. `pesewasFromCedis` turns typed cedis into the contract's integer, or refuses them
+  (a third decimal place, a sign, letters), for a money input (§7.8).
+
+## 22e. Timeline
+
+> **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
+> **Code:** `apps/ops-web/src/components/ui/timeline/`
+
+Steps in the order they happened (the attempt chain of a pickup request), as an ordered list named by its label, so a screen reader says
+how many there are and where each one is.
+
+- The step the page is about is `aria-current="step"`, marked to the eye in words (`currentLabel`) and by a filled marker, never by colour
+  alone. The markers and the rule between them are decoration.
+- Static: it takes no focus of its own, and a link in a step is a stop in the list's order. The steps come oldest first and it sorts
+  nothing; what a step says is the caller's. Two steps with one key, or two current steps, are defects and throw.
+
+## 22f. QueueTable
+
+> **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
+> **Code:** `apps/ops-web/src/components/ui/queue-table/`
+
+A page of a queue the server pages by token (surfaces/ops-portal.md §4): the count of the page, the rows in a `Table` (§19) and a pager.
+`QueueFilters` is the named group of the screen's filters above it, in a row that wraps, so nothing is clipped at 320px or at enlarged text.
+
+- **It never claims a total it was not given**: the count is of the page ("Showing 20 requests on page 2."), followed by "More follow on
+  the next page." when the server gave a token, and no count is shown while loading.
+- `useQueuePaging` keeps the tokens of the pages visited **for the filter that produced them**: a change of filter starts again at the first
+  page, and no token is sent under another filter. Nothing is kept in the address or a storage. A screen that brings a person back to a queue
+  they left may say where to start (`from`, once, and only for the filter the tokens were kept for) and may send them to the first page on
+  purpose (`toFirstPage`); how long a place lasts, and whose it is, is the screen's (*Refresh and return to the queue*, below).
+- After a move to another page, focus goes to the results once they are drawn, because the button that was pressed is gone while the
+  page loads.
+- Loading, failure and the empty state are `ReadState`'s, and the empty state tells *none* from *filtered to nothing* (§16). The filters
+  filter nothing themselves; they stay in place while the queue loads, fails or is empty.
+- **Row selection (S1.25, 3 November 2026).** `QueueTable` takes an optional `selection` (`QueueSelection`): a native checkbox for each row, in a
+  column of its own at the start of the table headed "Select" and, in a queue given a `card`, at the head of each card with the word "Select"
+  beside it. The queue **holds no selection**: the screen keeps which rows are chosen, by their keys (`rowKey`), so that a choice survives a move
+  to another page of the queue, and the table draws the ones it shows and reports a tick or a clear (`onToggle`). Each box is named by the screen
+  (`rowLabel`: "Choose ACC-PR-7KQ2MZ"); a row that cannot be chosen now (a limit is reached) is drawn disabled (`isDisabled`) and the screen says
+  why in its own words, and a row that is ticked can always be cleared. The label around the box is the target, at least the height of a small
+  control. The table decides nothing about what may be chosen, offers no "select all" (a choice of the whole page is a decision the screen has
+  not been asked for) and draws nothing for a queue given no `selection`, which is drawn exactly as before. Because both drawings are in the
+  page, each row has two boxes of one choice, and the stylesheet's `display: none` takes the one not shown out of the accessibility tree.
+- **The manifest list (S1.25) adapts the queue's filters and keeps its place on the queue's terms.** It uses `QueueFilters` with the same `Field`, `Select` and `DatePicker`, the chosen values in the address (so a reload keeps them), a change of filter starting again at the first page, and the same empty states (*none* told from *filtered to nothing*, which names what was filtered). The filters are the server's (`state`, `service_date`, each exact and combined as "and"): a value in the address that is not one is no filter, and the screen sends only values the contract accepts. Its place (the pages visited, the position and the manifest opened) is the queue's memory (*Refresh and return to the queue*, below) with the same rules of what is kept, for whom and for how long: one mechanism (`queue-continuity*.ts`, `QueueContinuityScope`, `useQueueContinuity`) holding a place for each list apart from the other's, so that a place left in one is never offered to the other. A manifest's page, and its not-found and refusal pages, keep the link back.
+
+### Queue presentation (the pickup queue, 1 November 2026)
+
+The first queue drawn to [PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queues) (focused results, compact filters), from the
+owner's reference of that date (`design/reference/MELARC_PICKUP_QUEUE_REFERENCE_2026-11-01.html`, a design proposal and not code). It changes
+how a request is drawn and nothing the queue reads, asks, orders or allows. Code: `apps/ops-web/src/app/pages/pickup/` (`pickup-queue-view.tsx`).
+
+- **Header and filters.** One heading, one short sentence of scope, the permission-gated action beside the heading, and the screen's own
+  filters in one wrapping row. No totals, counts by status, charts or cards of figures.
+- **One panel** (`QueuePanel`, `queue-table/`). The filters, the count of the page, the rows (as a table or as cards) and the pager are one white
+  surface with one border (`radius.lg`, the subtle border token) and a hairline between each part, and not a box for each; what the rows
+  draw inside it gives up its own border and corners. Whatever stands in the place of the rows (the loading and its placeholder, an empty
+  state, a failure with its retry, a refusal) is inside the same panel, below the filters, inset from its edges by the filters' own space, and the
+  rows run to the border. A queue given no panel (the approvals, the message log) is drawn as it always was.
+- **The filters share a line.** Their fields align at the top, so that the State select and the date control are on one line whatever hangs
+  beneath one of them (the date's help text stays, beneath its control), and the button that clears the date is set down to the control's
+  line, not the help text's. A select in the filters takes no vertical padding of its own, because Safari's engine draws a native select 5px
+  taller than the portal's other controls and the two would sit on different baselines there; every engine then gives it the control's height.
+  They wrap, as before, where they cannot share a row (a phone).
+- **Six columns for nine facts**, each named for what it holds. *Request / sender*: the operational code, the row's header and the one link of
+  the request (the row is not a link), over the sender. *State*: the badge from the status mapping. *Service date*. *Pickup address / hub*: the
+  address the server resolved for the pickup, over the hub. *Packages / booking type*: the count, over what is booked. *Needs*: the queue's own
+  attention words, and for a request that needs nothing a dash that is read as "No additional note", which says nothing of blockers or of
+  whether the request may go ahead. A missing fact says "Not recorded"; nothing is a tooltip. A cell's second line is the quieter one.
+- **A fixed table.** The columns are percentages that add up to 100 and are tuned to the narrowest table drawn, so that the cells of a request
+  keep their places from page to page; a long address or note wraps in its own column and rows have no fixed height. Cells align to the top.
+- **Cards for a narrow room.** `QueueTable` takes an optional `card` for each row. The card is made from the same facts as the row, so that
+  neither tells less, in the order a person reads a request: the code (a heading, so that a screen reader can move from request to request)
+  with its state, the sender, then each fact under the name of its column. A term sits beside its value where there is room and over it where
+  there is not. A queue given no `card` is drawn exactly as before (the approvals and the message log).
+- **One drawing at a time.** Both are drawn and the stylesheet shows one, by a **container query on the results region** and not a media
+  query on the screen: the docked menu takes 16rem (4.5rem collapsed), so the same screen gives a queue more or less room as the menu opens and
+  shuts. The table is shown from 64rem (`breakpoint.lg`, written as a number because a query condition cannot read a token) and cards below it;
+  `rem` follows enlarged text, so enlarging it gives way to the cards before the columns break. The one not shown is `display: none`, out of the
+  accessibility tree and the Tab order, and the list says `role="list"` outright because Safari takes it from a list whose markers a style removes.
+  Cards are the default and the table the exception, so a browser that cannot evaluate the query shows the layout that works at every width.
+- **Not changed by the presentation.** The requests the screen sends, the server's order, the filters and their defaults (every state, every
+  date), the permission and its refusal, the loading, empty, failure and validation states, and the paging with its focus move.
+
+### Refresh and return to the queue (the pickup queue, 1 November 2026)
+
+Both approved by the owner on 1 November 2026 (sections 3 and 4 of the reference above) and built for the pickup queue; the return to the place is built for the manifest list (S1.25) on the same terms, as that list's bullet above says. They add no polling,
+no read on focus or reconnection, and no cursor in the address or in any storage, and they change nothing the queue asks of the server or the
+order it gets back. Code: `apps/ops-web/src/app/pages/pickup/` (`PickupRequestListPage.tsx`, `queue-return.ts`); the memory is
+`apps/ops-web/src/platform/pickup/queue-continuity*.ts` and `QueueContinuityScope.tsx`.
+
+- **Refresh page.** A button beside the filters, outside their group (`QueueFilters` takes an `aside`: at the end of the filters' row where
+  there is room, under them where there is not), with a line of text over it as a field has its label, so that the button sits on the controls'
+  line. It reads the page now shown **again, by the same query**: the same filters, the same cursor and the same page number. It never goes to
+  the first page; refreshing the first page is another act, and is the officer's.
+- **The time.** "Last checked 3 Nov, 14:30" is the moment this page's read was answered, by the browser's clock, in the portal's time format
+  (`formatInstant`: Accra, 24-hour, no seconds). It is not a server snapshot, and it says nothing of other pages or of the whole queue. A read
+  that found nothing counts: it was checked. Nothing is shown before the page's read has been answered, and a change of filter or of page
+  clears it until that query is answered (each filter and cursor is a query of its own). "Checking this page…" while a read is under way;
+  "Refresh failed. Last successful check: 3 Nov, 14:30" after a failure, and nothing at all for a page that was never read.
+- **One read at a time.** The button stays mounted and focusable and says it is busy (`aria-busy`, and it ignores a press) while any read of
+  the page is under way; a press that reaches the page then is given that read, and neither cancels it nor starts another.
+- **No old rows beside a new read.** While a page that was read is read again, the loading treatment takes the place of its rows, as for a
+  first read, and a failure takes their place if the read fails; rows are never drawn as the answer to a read that has not come. The region
+  carries no `aria-busy` of its own: the loading status inside it is what announces, and a busy region may hold its announcement back.
+- **Focus and words.** Focus stays on the button unless the officer moved it. The completion is said once, politely, in a status region of the
+  aside ("Page refreshed."), which is emptied when the next refresh starts, and **only of the visit the refresh was asked in**. A visit is the
+  filters and the cursor the officer is on, counted anew each time either changes: coming back to a filter or a page they were on is a new
+  visit, so the word is not said again over a read nobody asked for as a refresh, and an answer that arrives late, after the officer has gone
+  elsewhere and come back, is said of nothing, during the newer read or after it.
+- **Return to the place.** For a same-tab queue → request → queue visit the application remembers five facts and nothing else: the filters as
+  the address carries them, the cursors of the pages visited, how far down the page the officer was, the request they opened, and the filters'
+  signature. It keeps no row, code, name, address or state of any request, and no response. They are the state of `QueueContinuityScope`, a
+  layout route inside `RequireSession`, **in the application's memory only**: not the address, not `localStorage` or `sessionStorage`, not a
+  cookie, and of the history state only a flag that a link is a return. A full reload, a new tab or a typed address starts without it.
+- **Whose, and for how long.** It is bound to the session, the person and the hubs they act in (`bindingOf`), and grants nothing: the server
+  authorises the page it is asked for. It is let go of when the session ends or is replaced, when the hubs change, when the officer goes
+  anywhere but the queue, that request and its pages, when the filter changes, on an explicit return to the first page, and once the queue has
+  been shown again, whether it used the place or refused it.
+- **When it is used.** On the browser's Back (or Forward) to the queue, and on the request's own link back ("Back to pickup requests", which
+  names the queue's filters and says it is a return), the first time only: the arrival uses the place up, so Forward and Back again start at
+  the first page rather than at a page the officer may no longer be on. The menu's link, a typed address and the booking ask for the queue
+  anew and get the first page, as does a request opened in another tab (a click with a modifier, or a link that opens one, leaves no place).
+  A request the server says is not there (`NOT_FOUND`: it went between the reading of the queue and the opening of the request), or refuses the
+  officer (`HUB_SCOPE_VIOLATION`, `PERMISSION_DENIED`), keeps its way back like any other, because its page keeps the request's id for the
+  link; an address that is not an id, and a request reached with nothing left behind, have the plain queue. The link of a refusal is offered
+  only to a session that can read the queue, by the hints the menu and the route's guard go by (`pickup.read`): a session that cannot is given
+  the forbidden page as every one is, with no link to another refusal, and the menu is its way on. The link grants nothing and says nothing of
+  the request: it names the queue's filters, and the queue is read again under its own permission on arrival.
+- **A fresh read, not a frozen one.** The saved cursor is asked of the server again by the same query and under the same cache policy;
+  nothing is painted from memory, the rows are the server's current ones in its order, and a request may have moved or gone. It is continuity of
+  place, not of a result set.
+- **Position and focus.** Once the page is drawn the document is scrolled to the saved position (the browser clamps it to the content that is
+  there now), and focus goes to the request the officer opened if it is still on the page (in the drawing that is shown, table or cards), else
+  to the results, else to whatever stands in their place. The request is kept in view by the least scroll. Focus is given only where nobody
+  put it (nothing, the document, the main region, the page's heading): an officer who moved it during the read keeps it, and still gets their
+  position back.
+- **A later page that holds nothing.** It says "No requests on this page" and offers "Back to first page"; it does not say the queue is empty,
+  and it does not read the earlier pages on its own. A move to a page that comes back empty or failed puts focus on the message, once.
+- **A page the server will not open** (`400 VALIDATION_FAILED` naming `page_token`) says so in its own words, keeps the filters, offers no retry
+  (it would fail alike) and offers "Back to first page" (`ReadState`'s `recovery`). A refused filter keeps its own words and offers no such way.
+- **Not built:** the Overview dashboard (a later task, with the backend data it would need assessed first), and a refresh or a place for any
+  other queue than the manifest list (above: its place as the queue's, its *Refresh page* the button alone, without the completion word).
+
+**Proof of §22g and §22h, and of the row selection of §22f.** Each component's own test (`ReorderList.test.tsx`, `QueueTable.selection.test.tsx`, and the
+manifest page's tests for the rider picker, which need the API's reads), the development showcase, `test/browser/components.spec.ts` (the keyboard
+walks and the showcase-wide WCAG 2.2 sweep) and the manifest screens in `test/browser/manifests.spec.ts`, run in Chromium; Firefox and WebKit are
+left to the full run.
+
+**Proof of §22b to §22f.** Each component's own test (its keys and states, in jsdom), the development showcase, and
+`test/browser/components.spec.ts` (the keyboard walk, the focus rings, WCAG 2.2 at 320px and at 200% text, forced colours); the pickup screens
+that use them in `test/browser/pickup.spec.ts`. S1.19 ran both in Chromium; Firefox and WebKit are left to the full run. The recorded
+keyboard-only and screen-reader passes are not part of this. The refresh and the return are proved in
+`PickupRequestListPage.refresh.test.tsx`, `PickupRequestListPage.return.test.tsx`, `QueueContinuityScope.test.tsx`, `queue-continuity.test.ts`
+and `queue-return.test.ts`, and in the pickup spec (Chromium, Firefox and WebKit).
+
+## 22g. ReorderList
+
+> **Status:** IMPLEMENTING (S1.25, 3 November 2026: built, in the showcase and used by the manifest page; ACTIVE when the Product Owner accepts the composed screens)  
+> **Code:** `apps/ops-web/src/components/ui/reorder-list/`
+
+The stop-reordering control: an ordered list whose items each carry two buttons, to move the item up and to move it down, so the order is
+changed from the keyboard and with a pointer alike. It is **controlled**: it keeps no order of its own and gives the caller the complete order
+(every item once, as ids) after every move, because a sequence is sent whole and never as a change.
+
+- **Two buttons are the whole of the control.** Drag and drop is not offered: nothing is lost for want of a pointer gesture, and the buttons are
+  `IconButton`s (§22) named for the item and the act ("Move ACC-PR-7KQ2MZ up"), with their own focus ring and target.
+- **A move exchanges the item with the nearest item that can move that way**, stepping over any item the caller marks `fixed`, which has no
+  buttons, keeps its place and says why beside it (`fixedNote`), in words and not by colour alone. What may not be moved is the caller's to say;
+  the list judges no item and no order, and the server's refusal is the caller's to show.
+- **Focus follows the item.** After a move it stays on the button that was pressed, or on the item's other button when that end has been
+  reached (the pressed one is then disabled), so a keyboard user can press again without finding their place. The button at an end is disabled.
+- **Each move is announced** in a polite status region ("ACC-PR-7KQ2MZ moved to place 2 of 3."), and the place is written in the item as a number
+  before it, not only in the order of the list. The list is an `<ol>` named by its label. Two items with one id are a defect of the page and throw.
+
+## 22h. RiderPicker
+
+> **Status:** IMPLEMENTING (S1.25, 3 November 2026: built and used by the assignment and by the custody handover; ACTIVE when the Product Owner accepts the composed screens)  
+> **Code:** `apps/ops-web/src/app/pages/manifests/RiderPicker.tsx` (a composition of the Picker, §22c, for one purpose; not a generic component). The showcase draws the Picker over demo riders.
+
+The Picker (§22c) over the riders the server lists (`listRiders`, `dispatch.read`), **asked for the active riders of one hub as filters of the
+read, and not worked out in the browser**: the manifest's hub is the filter, because what the officer's grant reaches is not who may be given the
+run. It opens with the list already drawn, so the officer chooses from what there is and does not have to guess a name; typing narrows it by name
+or phone as the server matches them; more riders than the page returned are told as a reason to narrow the search, never shown as the whole.
+
+- Each rider is told by the facts the roster returns and nothing of their work: name, phone, and, only when it is missing, "no PIN set" and "no
+  registered device". These are facts and not a judgement of fitness; whether the server accepts the choice is its own answer
+  (`RIDER_UNAVAILABLE`), and a rider it refused is set aside so that the same one is not sent again.
+- It chooses nothing for the person and offers nothing by default: until a rider is chosen the dialog's confirmation asks for one.
+
+---
+
 ## 23. Component composition rules
 
 Prefer composition over large option-heavy component APIs.
@@ -1754,7 +1990,7 @@ It simply records patterns intentionally **not** built during the initial founda
 | Drawer | first real side-panel workflow |
 | Time of day, a range of dates | the first requirement for either (a single date is section 22a) |
 | QrCode (one-time credential display) | the rider device-enrolment screen: a small, reviewed, exactly pinned encoder drawing inline SVG under the content-security policy (no data URI), shown from memory only and cleared on navigation, expiry and completion, never rendered as text; proven by decoding the rendered output with an independent test-only decoder (`SECURITY_DESIGN.md` §13.6, `surfaces/ops-portal.md`) |
-| DataGrid | only if table requirements exceed a simpler table pattern |
+| DataGrid | only if a concrete screen's requirements exceed the table pattern, and a specialist grid has been weighed against them first (DESIGN_SYSTEM §23) |
 
 ---
 
@@ -1774,6 +2010,10 @@ CustodyConfirmation
 ```
 
 These should not be added until their domain behavior is implemented and understood.
+
+**Page patterns.** The Product Owner has approved design direction for four page patterns (queues, booking and tasks, records, account and
+security) in [PRODUCT_DESIGN_DIRECTION.md §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-patterns). It awaits screen-specific design and
+implementation: none is a pattern of this file until it is built (DESIGN_SYSTEM §35), and the screens built so far are not claimed to follow it.
 
 ---
 
@@ -1807,7 +2047,9 @@ Do not use this file to override a product contract.
 | NeutralFrame (`AppFrame`) | ACTIVE | Yes |
 | AuthenticatedOpsShell, SideMenu | ACTIVE | Identity implementation (S0.42; a side menu since 25 October 2026) |
 | Icon, IconButton | ACTIVE | 25 October 2026 |
-| DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); no screen uses it yet |
+| DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); the pickup screens use it since S1.19 (29 October 2026), and its look awaits the Product Owner |
+| RadioGroup, Picker, MoneyAmount, Timeline, QueueTable | IMPLEMENTING | Pickup intake (S1.19, 29 October 2026): built, in the showcase, used by the pickup screens (§22b to §22f) |
+| QueueTable row selection, ReorderList, RiderPicker | IMPLEMENTING | Manifests and runs (S1.25, 3 November 2026): built, in the showcase (the rider picker as the Picker over demo riders), used by the manifest screens (§22f, §22g, §22h) |
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |

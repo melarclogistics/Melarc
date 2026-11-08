@@ -11,6 +11,8 @@ import { IMPLEMENTED_OPERATIONS } from '../../src/tools/contract/implemented-sco
 import { BUNDLE_IDS, GRANTS } from '../../src/tools/seed/bundles.js';
 import { activateFactor, factorRow, insertFactor } from './support/credentials.js';
 import { arrangedFixedSession } from './support/http-sessions.js';
+import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
+import { insertPickupRequest, pickupRequestRow } from './support/pickups.js';
 import { insertRider, insertRiderDevice, riderRow } from './support/riders.js';
 import {
   API,
@@ -100,12 +102,24 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   revokeVendorDevice: ['VENDOR'],
 };
 
-/** The keys the Ops Staff bundle holds, as the seed grants them. */
-const OPS_STAFF_KEYS = new Set(
-  GRANTS.filter((grant) => grant.bundleId === BUNDLE_IDS.opsStaff).map(
-    (grant) => grant.permissionKey,
-  ),
-);
+/** The keys a bundle holds, as the seed grants them. */
+const keysOf = (bundleId: string): Set<string> =>
+  new Set(
+    GRANTS.filter((grant) => grant.bundleId === bundleId).map((grant) => grant.permissionKey),
+  );
+const OPS_STAFF_KEYS = keysOf(BUNDLE_IDS.opsStaff);
+/**
+ * A Vendor and a Rider are served the operations whose key their fixed bundle holds **and** whose security takes their kind of session
+ * (SLICE-001 gave the Vendor the keys of its own requests and locations, and the Rider the read of the stops it is assigned): the sweep
+ * refuses them every other keyed operation, and reads that set from the seed so that a key granted later joins it.
+ */
+const SERVED_BY_BUNDLE = {
+  VENDOR: { keys: keysOf(BUNDLE_IDS.vendor), scheme: 'browserSession' },
+  RIDER: { keys: keysOf(BUNDLE_IDS.rider), scheme: 'riderSession' },
+} as const;
+const isServedByBundle = (type: 'VENDOR' | 'RIDER', operation: Operation): boolean =>
+  SERVED_BY_BUNDLE[type].keys.has(operation.permission) &&
+  operation.schemes.has(SERVED_BY_BUNDLE[type].scheme);
 
 const VENDOR_ORIGIN = 'http://127.0.0.1:5174';
 const SAFE = new Set(['GET', 'HEAD']);
@@ -115,6 +129,8 @@ let opsStaff: Actor;
 let vendor: TestClient;
 let vendorCsrf: string | undefined;
 let rider: TestClient;
+/** Gives the vendor and the rider new sessions of the same principals: see where it is made. */
+let refreshSessions: () => Promise<void>;
 /** The officer, whose records are "theirs" to a Vendor or a Rider, and who may read them. */
 let officer: Actor;
 /** A Senior Ops of the first hub, who reads the riders there (`dispatch.read`, which the Platform Admin does not hold). */
@@ -135,6 +151,34 @@ beforeAll(async () => {
   const riderA = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
   const riderDeviceA = await insertRiderDevice(routes.admin, riderA.id);
   const riderB = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
+  // A third vendor of the first hub, with a request: "another party's" pickup request and saved locations, which the officer of that hub
+  // may read (the control of the existence rule) and a Vendor or a Rider may not.
+  const vendorC = await insertVendor(routes.admin, vendorRow({ hubId: HUB_A }));
+  const requestC = await insertPickupRequest(
+    routes.admin,
+    pickupRequestRow(vendorC.organizationId, HUB_A),
+  );
+  // Another rider's run, dispatched to it: "another party's" manifest, which the officer of that hub may read and neither a Vendor nor the
+  // other Rider may (S1.20; `GBT-C9`, `GBT-D1`).
+  const manifestB = await insertManifest(
+    routes.admin,
+    manifestRow(HUB_A, { state: 'DISPATCHED', assignedRiderId: riderB.id }),
+  );
+  // A stop of that run: "another party's" stop, which the rider of the sweep is told `NOT_ASSIGNED_RIDER` for when it acts on it, as for one
+  // that does not exist (S1.22; `arriveAtPickupStop`; `GBT-D2`, `GBT-D3`).
+  const stopB = await insertStop(routes.admin, stopRow(manifestB, requestC.id, 1));
+  // A run in progress and a custody handover opened on it by another party: "another party's" handover, which the officer of that hub may read and
+  // neither a Vendor nor an unrelated Rider may (S1.24; `getRunCustodyHandover`).
+  const riderD = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
+  const manifestD = await insertManifest(
+    routes.admin,
+    manifestRow(HUB_A, { state: 'IN_PROGRESS', assignedRiderId: riderB.id }),
+  );
+  const handoverD = await routes.admin.query<{ id: string }>(
+    `insert into run_custody_handover (id, manifest_id, responsible_hub_id, from_rider_id, to_rider_id, initiation_note, initiated_by)
+     values (gen_random_uuid(), $1, $2, $3, $4, 'Fixture handover', '5eed0000-0000-4000-8000-0000000000e1') returning id`,
+    [manifestD.id, HUB_A, riderB.id, riderD.id],
+  );
 
   const vendorSession = await arrangedFixedSession(routes.kit, routes.admin, 'VENDOR', {
     principalId: vendorA.accountId,
@@ -149,6 +193,30 @@ beforeAll(async () => {
     registeredDeviceId: riderDeviceA.id,
   });
   rider = new TestClient({ baseUrl: routes.kit.app.baseUrl }).bearer(riderSession.token);
+  // A session is allowed 120 requests a minute, and a refusal by the limiter is a code-less 500. The sweeps ask four times for each operation the
+  // application has, so a describe that asks for all of them takes sessions of its own (of the same principals), and the sweep does not depend on how
+  // many operations there are.
+  refreshSessions = async (): Promise<void> => {
+    // One live session for each vendor or rider (the table's unique index): the ones in use end, as a sign-out ends them.
+    await routes.admin.query(
+      `update session set terminated_at = clock_timestamp(), termination_reason = 'SIGNED_OUT'
+        where principal_id = any($1::uuid[]) and terminated_at is null`,
+      [[vendorA.accountId, riderA.id]],
+    );
+    const fresh = await arrangedFixedSession(routes.kit, routes.admin, 'VENDOR', {
+      principalId: vendorA.accountId,
+      registeredDeviceId: deviceA.id,
+    });
+    vendor = new TestClient({ baseUrl: routes.kit.app.baseUrl, origin: VENDOR_ORIGIN });
+    vendor.seed('melarc_vendor_device', deviceA.credential.token);
+    vendor.seed('melarc_session', fresh.token);
+    vendorCsrf = fresh.csrf;
+    const freshRider = await arrangedFixedSession(routes.kit, routes.admin, 'RIDER', {
+      principalId: riderA.id,
+      registeredDeviceId: riderDeviceA.id,
+    });
+    rider = new TestClient({ baseUrl: routes.kit.app.baseUrl }).bearer(freshRider.token);
+  };
 
   // A trusted browser of the officer: a real one, of the kind `revokeTrustedBrowser` is addressed by (a session id is not one).
   const factor = await insertFactor(routes.admin, factorRow(officer.identity.id));
@@ -169,6 +237,11 @@ beforeAll(async () => {
     device: deviceB.id,
     session: officer.sessionId,
     trustedBrowser: trusted.rows[0]?.id ?? '',
+    pickupRequest: requestC.id,
+    pickupManifest: manifestB.id,
+    pickupStop: stopB.id,
+    runCustodyHandover: handoverD.rows[0]?.id ?? '',
+    vendorOrganization: vendorC.organizationId,
   };
 });
 
@@ -183,6 +256,11 @@ function kindOf(operation: Operation): string {
   if (operation.path.startsWith('/auth/vendor/devices/')) return 'device';
   if (operation.path.startsWith('/auth/staff/trusted-browsers/')) return 'trustedBrowser';
   if (operation.path.startsWith('/auth/sessions/')) return 'session';
+  if (operation.path.startsWith('/pickup-requests/')) return 'pickupRequest';
+  if (operation.path.startsWith('/pickup-manifests/')) return 'pickupManifest';
+  if (operation.path.startsWith('/pickup-stops/')) return 'pickupStop';
+  if (operation.path.startsWith('/run-custody-handovers/')) return 'runCustodyHandover';
+  if (operation.path.startsWith('/vendor-organizations/')) return 'vendorOrganization';
   return 'staff';
 }
 
@@ -276,7 +354,7 @@ describe('a caller who presents no session (API surface)', () => {
 describe('a principal type the operation does not serve (API surface)', () => {
   const unservedTo = (type: 'STAFF' | 'VENDOR' | 'RIDER') =>
     [
-      ...keyed.filter(() => type !== 'STAFF'),
+      ...keyed.filter((operation) => type !== 'STAFF' && !isServedByBundle(type, operation)),
       ...selfOperations.filter((operation) => !(SELF_SERVES[operation.id] ?? []).includes(type)),
     ].map((operation) => [operation.id, operation] as const);
 
@@ -339,6 +417,11 @@ const TABLE_OF: Readonly<Record<string, string>> = {
   device: 'registered_device',
   session: 'session',
   trustedBrowser: 'trusted_browser',
+  pickupRequest: 'pickup_request',
+  pickupManifest: 'pickup_manifest',
+  pickupStop: 'pickup_stop',
+  runCustodyHandover: 'run_custody_handover',
+  vendorOrganization: 'vendor_organization',
 };
 
 describe('the existence rule is asked about records that are real (the control of the rule below)', () => {
@@ -358,23 +441,54 @@ describe('the existence rule is asked about records that are real (the control o
     expect(
       Object.fromEntries(addressed.map((operation) => [operation.id, kindOf(operation)])),
     ).toEqual({
+      approveOnePackageException: 'pickupRequest',
+      acceptRunCustodyHandover: 'pickupManifest',
       approveStaffIdentity: 'staff',
+      arriveAtPickupStop: 'pickupStop',
+      assignRider: 'pickupManifest',
+      authoriseHandshakeOverride: 'pickupStop',
+      cancelPickupManifest: 'pickupManifest',
+      cancelPickupRequest: 'pickupRequest',
+      confirmPickupRequest: 'pickupRequest',
+      dispatchManifest: 'pickupManifest',
+      disputeCollection: 'pickupStop',
+      escalatePickupRequest: 'pickupRequest',
+      extendPickupAttempts: 'pickupRequest',
+      failRunCustodyHandover: 'pickupManifest',
+      getPickupManifest: 'pickupManifest',
+      getPickupRequest: 'pickupRequest',
+      getPickupStop: 'pickupStop',
       getRider: 'rider',
+      getRunCustodyHandover: 'runCustodyHandover',
+      initiateRunCustodyHandover: 'pickupManifest',
       getStaffIdentity: 'staff',
       getVendorAccount: 'vendor',
+      initiateHandshake: 'pickupStop',
       listStaffTrustedBrowsers: 'staff',
+      listVendorPickupLocations: 'vendorOrganization',
       recoverStaffCredential: 'staff',
+      recordCollection: 'pickupStop',
       recoverVendorCredential: 'vendor',
       registerRiderDevice: 'rider',
+      reportPickupFailure: 'pickupStop',
       reissueStaffCredentialSetup: 'staff',
       reissueVendorCredentialSetup: 'vendor',
+      requestOnePackageException: 'pickupRequest',
+      requestSmsHandshakeFallback: 'pickupStop',
       reregisterRiderDevice: 'rider',
       resetStaffMfa: 'staff',
+      resolveCutoffException: 'pickupRequest',
+      resolveHandshake: 'pickupStop',
       revokeRiderDevice: 'rider',
       revokeSession: 'session',
       revokeStaffTrustedBrowsers: 'staff',
       revokeTrustedBrowser: 'trustedBrowser',
       revokeVendorDevice: 'device',
+      setManifestStopOrder: 'pickupManifest',
+      skipPickupStop: 'pickupStop',
+      startRun: 'pickupManifest',
+      verifyHandshake: 'pickupStop',
+      waiveCancellationCharge: 'pickupRequest',
     });
   });
 
@@ -387,7 +501,18 @@ describe('the existence rule is asked about records that are real (the control o
   )(
     '%s: a caller who may read the record finds it, and is told a missing one is missing',
     async (_id, operation) => {
-      const reader = operation.id === 'getRider' ? hubOps : officer;
+      // The officer of the first hub reads what a hub holds (the Platform Admin of the sweep has no primary hub, so its own-hub grants reach none).
+      const reader =
+        operation.id === 'getRider' ||
+        [
+          'pickupRequest',
+          'pickupManifest',
+          'pickupStop',
+          'runCustodyHandover',
+          'vendorOrganization',
+        ].includes(kindOf(operation))
+          ? hubOps
+          : officer;
       const found = await reader.client.get(pathOf(operation, theirs[kindOf(operation)] ?? ''));
       const missing = await reader.client.get(pathOf(operation));
       expect([found.status, missing.status]).toEqual([200, 404]);
@@ -396,6 +521,10 @@ describe('the existence rule is asked about records that are real (the control o
 });
 
 describe('the existence rule (a Vendor’s or Rider’s refusal tells nothing of whether the record exists)', () => {
+  beforeAll(async () => {
+    await refreshSessions();
+  });
+
   // Break caught: an operation that answers another party's record differently from a missing one (a status, a code, a message, a field
   // or a header), which would let a Vendor or a Rider enumerate records by trying identifiers (errors-and-enums.md section 4).
   it.each(addressed.map((operation) => [operation.id, operation]))(
@@ -485,6 +614,193 @@ describe('a Vendor or Rider context that forges a staff scope at the database (q
       expect(await visible(riderContext, forge, 'rider_identity', [riderA.id, riderB.id])).toEqual([
         riderA.id,
       ]);
+    }
+  });
+
+  // Break caught: a policy of the manifest or of its stop whose Vendor or Rider branch falls through to the staff branch under a forged scope
+  // (GBT-C9, GBT-D1, GBT-D3, GBT-D9, GBT-D10, GBT-D11), or that shows a rider a run it is not assigned, a run assigned to it that has not been
+  // dispatched, or the stop of a run it cannot read (the stop inherits the manifest's assignment, never the hub).
+  it('reads of the manifests and stops only the dispatched runs assigned to the rider, and a Vendor none, whatever scope it forges', async () => {
+    const owner = await insertVendor(routes.admin, vendorRow({ hubId: HUB_A }));
+    const riderA = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
+    const riderB = await insertRider(routes.admin, riderRow({ hubId: HUB_A }));
+    const dispatchedToA = await insertManifest(
+      routes.admin,
+      manifestRow(HUB_A, { state: 'DISPATCHED', assignedRiderId: riderA.id }),
+    );
+    const dispatchedToB = await insertManifest(
+      routes.admin,
+      manifestRow(HUB_A, { state: 'DISPATCHED', assignedRiderId: riderB.id }),
+    );
+    const draftForA = await insertManifest(
+      routes.admin,
+      manifestRow(HUB_A, { assignedRiderId: riderA.id }),
+    );
+    const cancelledForA = await insertManifest(
+      routes.admin,
+      manifestRow(HUB_A, { state: 'CANCELLED', assignedRiderId: riderA.id }),
+    );
+    const cancelledAfterDispatch = await insertManifest(
+      routes.admin,
+      manifestRow(HUB_A, {
+        state: 'CANCELLED',
+        assignedRiderId: riderA.id,
+        dispatchedBeforeCancel: true,
+      }),
+    );
+    const nobodys = await insertManifest(routes.admin, manifestRow(HUB_A));
+    const manifests = [
+      dispatchedToA,
+      dispatchedToB,
+      draftForA,
+      cancelledForA,
+      cancelledAfterDispatch,
+      nobodys,
+    ];
+    const stopIds: Record<string, string> = {};
+    for (const [at, manifest] of manifests.entries()) {
+      const request = await insertPickupRequest(
+        routes.admin,
+        pickupRequestRow(owner.organizationId, HUB_A, { state: 'CONFIRMED' }),
+      );
+      const stop = await insertStop(routes.admin, stopRow(manifest, request.id, at + 1));
+      stopIds[manifest.id] = stop.id;
+    }
+
+    const riderContext: SecurityContext = {
+      principalType: 'RIDER',
+      principalId: riderA.id,
+      sessionId: randomUUID(),
+      surface: 'RIDER_ANDROID',
+      riderId: riderA.id,
+      authorizationKey: 'pickup.read',
+      correlationId: 'negative-access-sweep',
+    };
+    const vendorContext: SecurityContext = {
+      principalType: 'VENDOR',
+      principalId: owner.accountId,
+      sessionId: randomUUID(),
+      surface: 'VENDOR_PWA',
+      vendorOrganizationId: owner.organizationId,
+      authorizationKey: 'pickup.read',
+      correlationId: 'negative-access-sweep',
+    };
+    const allIds = manifests.map((manifest) => manifest.id);
+    const allStops = Object.values(stopIds);
+    // Rider A reads its dispatched run, and the run it was assigned that was cancelled after it was dispatched: nothing else.
+    const expected = [dispatchedToA.id, cancelledAfterDispatch.id].toSorted();
+    const expectedStops = expected.map((manifestId) => stopIds[manifestId] ?? '').toSorted();
+    for (const forge of [undefined, FORGED_SCOPE]) {
+      expect(await visible(riderContext, forge, 'pickup_manifest', allIds)).toEqual(expected);
+      expect(await visible(riderContext, forge, 'pickup_stop', allStops)).toEqual(expectedStops);
+      expect(await visible(vendorContext, forge, 'pickup_manifest', allIds)).toEqual([]);
+      expect(await visible(vendorContext, forge, 'pickup_stop', allStops)).toEqual([]);
+    }
+    // A rider with no key of the pickup domain in its context reads no run at all.
+    const keyless: SecurityContext = { ...riderContext, authorizationKey: 'dispatch.read' };
+    expect(await visible(keyless, undefined, 'pickup_manifest', allIds)).toEqual([]);
+    expect(await visible(keyless, undefined, 'pickup_stop', allStops)).toEqual([]);
+
+    // GBT-D2: a rider who writes to another rider's run, or makes one, is refused. The runtime login holds no DELETE, UPDATE on six columns
+    // of a manifest (`state`, `assigned_rider_id`, `assigned_at`, the planning of S1.21, migration 0060; `dispatched_at`, the dispatch, 0063;
+    // `started_at`, the rider's start, 0065; `completed_at`, the system's completion of a run, 0066) and on seven of a stop (`state`, `resolved_at`, `skip_snapshot`, the cancellation of a request,
+    // migration 0059; `sequence`, `released_at`, the planning; `pickup_summary`, the dispatch; `arrived_at`, the rider's arrival, 0065). So it
+    // is the grant that refuses every other column and every delete (and the policy of the insert that refuses a run made by a rider): the
+    // denial is not a WITH CHECK, and this says so. A change of a granted column is allowed by the grant to any principal and is refused by
+    // the policy, which admits it to the keys of the act alone (staff for the planning, the dispatch and the cancelling; the rider for its
+    // own run, under the key that works one): the statement is not an error, it finds no row.
+    const refusedAs = (context: SecurityContext, text: string): Promise<string | undefined> =>
+      routes.built.service
+        .transactionWithContext(context, async (tx) => {
+          await tx.execute(sql.raw(text));
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => serverErrorIn(error)?.code,
+        );
+    const stopOfB = stopIds[dispatchedToB.id] ?? '';
+    for (const text of [
+      `update pickup_manifest set assigned_at = null, code = 'ACC-MF-ZZZZZZ' where id = '${dispatchedToB.id}'`,
+      `update pickup_manifest set service_date = '2026-12-31' where id = '${dispatchedToB.id}'`,
+      `update pickup_stop set version = 9 where id = '${stopOfB}'`,
+      `update pickup_stop set carryover_snapshot = '{"reason_code":"X"}'::jsonb where id = '${stopOfB}'`,
+      `delete from pickup_stop where pickup_manifest_id = '${dispatchedToB.id}'`,
+      `delete from pickup_manifest where id = '${dispatchedToB.id}'`,
+      `insert into pickup_manifest (id, code, responsible_hub_id, service_date, created_by)
+       values ('${randomUUID()}', 'ACC-MF-ZZZZZZ', '${HUB_A}', '2026-11-03', '${riderA.id}')`,
+    ]) {
+      expect(await refusedAs(riderContext, text), text).toBe('42501');
+    }
+    const changed = (context: SecurityContext, forge: string | undefined, text: string) =>
+      routes.built.service.transactionWithContext(context, async (tx) => {
+        if (forge !== undefined) await tx.execute(sql.raw(forge));
+        return (await tx.execute(sql.raw(text))).rows;
+      });
+    for (const forge of [undefined, FORGED_SCOPE]) {
+      for (const context of [riderContext, vendorContext]) {
+        for (const text of [
+          `update pickup_stop set state = 'SKIPPED', resolved_at = now() where id = '${stopOfB}' returning id`,
+          `update pickup_stop set sequence = 9 where id = '${stopOfB}' returning id`,
+          `update pickup_stop set released_at = now() where id = '${stopOfB}' returning id`,
+          `update pickup_manifest set state = 'CANCELLED' where id = '${dispatchedToB.id}' returning id`,
+          `update pickup_manifest set assigned_rider_id = '${riderA.id}' where id = '${dispatchedToB.id}' returning id`,
+          // The two columns the rider's acts write (S1.22), which the grant now allows: the policy finds no row of another rider's run.
+          `update pickup_manifest set state = 'IN_PROGRESS', started_at = now() where id = '${dispatchedToB.id}' returning id`,
+          // The moment of a completion (S1.23, the system's act under an officer's key): granted, and the policy finds no row for a rider or a vendor.
+          `update pickup_manifest set state = 'COMPLETED', completed_at = now() where id = '${dispatchedToB.id}' returning id`,
+          `update pickup_manifest set completed_at = now() where id = '${dispatchedToB.id}' returning id`,
+          `update pickup_stop set arrived_at = now() where id = '${stopOfB}' returning id`,
+          `update pickup_stop set state = 'ARRIVED', arrived_at = now() where id = '${stopOfB}' returning id`,
+        ]) {
+          expect(
+            await changed(context, forge, text),
+            `${context.principalType} ${forge === undefined ? 'as it is' : 'with a forged scope'}: ${text}`,
+          ).toEqual([]);
+        }
+      }
+    }
+    // The same with the key that works a run (the rider's own act, S1.22): a rider A that holds it still reaches nothing of rider B's run
+    // or stop, with its scope as it is or forged (GBT-D2, GBT-D3, GBT-D10): the assignment is the boundary, not the key.
+    const acting: SecurityContext = { ...riderContext, authorizationKey: 'pickup.run.execute' };
+    for (const forge of [undefined, FORGED_SCOPE]) {
+      for (const text of [
+        `update pickup_manifest set state = 'IN_PROGRESS', started_at = now() where id = '${dispatchedToB.id}' returning id`,
+        `update pickup_stop set state = 'ARRIVED', arrived_at = now() where id = '${stopOfB}' returning id`,
+      ]) {
+        expect(
+          await changed(acting, forge, text),
+          `an acting rider ${forge === undefined ? 'as it is' : 'with a forged scope'}: ${text}`,
+        ).toEqual([]);
+      }
+    }
+    // Nothing of the other rider's run changed.
+    const [stillThere] = await routes.rows<{ state: string; stops: number; stop: string }>(
+      `select m.state, (select count(*)::int from pickup_stop s where s.pickup_manifest_id = m.id) as stops,
+              (select s.state from pickup_stop s where s.pickup_manifest_id = m.id) as stop
+         from pickup_manifest m where m.id = $1`,
+      [dispatchedToB.id],
+    );
+    expect(stillThere).toEqual({ state: 'DISPATCHED', stops: 1, stop: 'PENDING' });
+
+    // The policy of the stop, on its own. The stop's rider arm asks for a manifest that is assigned to the rider and dispatched, and reads
+    // `pickup_manifest` under the manifest's policy, which already hides the same runs: weakening the stop's own conditions would pass
+    // every check above. The policies of a table are added together, so open the manifest's wide for this disposable database, show
+    // that it is open (the control: without it this proves nothing), and ask again. The stop must still refuse the stop of a run that
+    // is not dispatched, of another rider's run, and any vendor: the guard that keeps a stop from a rider before dispatch (OB-S1-21) must
+    // not depend on the manifest's policy staying as it is.
+    await routes.admin.query(
+      `create policy zz_open_for_test on pickup_manifest for select using (true)`,
+    );
+    try {
+      const everyRun = allIds.toSorted();
+      expect(await visible(riderContext, undefined, 'pickup_manifest', allIds)).toEqual(everyRun);
+      expect(await visible(vendorContext, undefined, 'pickup_manifest', allIds)).toEqual(everyRun);
+      expect(await visible(riderContext, undefined, 'pickup_stop', allStops)).toEqual(
+        expectedStops,
+      );
+      expect(await visible(vendorContext, undefined, 'pickup_stop', allStops)).toEqual([]);
+    } finally {
+      await routes.admin.query(`drop policy zz_open_for_test on pickup_manifest`);
     }
   });
 });

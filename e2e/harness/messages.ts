@@ -64,6 +64,55 @@ function messageOf(text: string): CapturedMessage | undefined {
   };
 }
 
+/**
+ * A text message the notification lane's capture adapter wrote (S1.12; the dispatch text to a rider is one): the destination, the text and the
+ * instant, with no link. The text is held where it prints as nothing, as a link is, because a text may carry what the recipient alone should read.
+ */
+export interface CapturedText {
+  readonly at: string;
+  readonly dedupeId: string;
+  readonly destination: string;
+  readonly text: SecretText;
+}
+
+function textOf(raw: string): CapturedText | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  const { at, dedupeId, destination, text } = parsed as Record<string, unknown>;
+  if (
+    typeof at !== 'string' ||
+    typeof dedupeId !== 'string' ||
+    typeof destination !== 'string' ||
+    typeof text !== 'string'
+  ) {
+    return undefined;
+  }
+  return { at, dedupeId, destination, text: new SecretText(text) };
+}
+
+/** Every finished text message in the sink, oldest first. The messages with a link, which share the folder, are not texts and are not here. */
+export function readTexts(directory: string): CapturedText[] {
+  if (!existsSync(directory)) return [];
+  const found: CapturedText[] = [];
+  for (const name of readdirSync(directory)) {
+    if (!MESSAGE_FILE.test(name)) continue;
+    let raw: string;
+    try {
+      raw = readFileSync(join(directory, name), 'utf8');
+    } catch {
+      continue;
+    }
+    const text = textOf(raw);
+    if (text !== undefined) found.push(text);
+  }
+  return found.toSorted((a, b) => a.at.localeCompare(b.at) || a.dedupeId.localeCompare(b.dedupeId));
+}
+
 /** Every finished message in the sink, oldest first. A folder that does not exist yet holds none; a temporary file is not a message. */
 export function readMessages(directory: string): CapturedMessage[] {
   if (!existsSync(directory)) return [];
@@ -135,6 +184,28 @@ export class Inbox {
         // How many there are, and nothing of them: not an address, a kind or a link.
         throw new Error(
           `There was no new message for that address within ${String(this.#timeoutMs)} ms (${String(messages.length)} message${messages.length === 1 ? '' : 's'} in the sink, ${String(this.#taken.size)} already taken).`,
+        );
+      }
+      await sleep(this.#pollMs);
+    }
+  }
+
+  /** The next text sent to that number (E.164, as the rider signs in with it), handed over once. */
+  async nextText(wanted: { readonly to: string }): Promise<CapturedText> {
+    const to = wanted.to.trim();
+    const deadline = Date.now() + this.#timeoutMs;
+    for (;;) {
+      const texts = readTexts(this.#directory);
+      const match = texts.find(
+        (text) => !this.#taken.has(text.dedupeId) && text.destination.trim() === to,
+      );
+      if (match !== undefined) {
+        this.#taken.add(match.dedupeId);
+        return match;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `There was no new text for that number within ${String(this.#timeoutMs)} ms (${String(texts.length)} text${texts.length === 1 ? '' : 's'} in the sink).`,
         );
       }
       await sleep(this.#pollMs);

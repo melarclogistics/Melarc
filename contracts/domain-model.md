@@ -157,7 +157,7 @@ A reason therefore drives validation. Selecting *damaged in transit* may make a 
 | Field| Type| Null| Notes|
 |---|---|---|---|
 | `code`| text| no| Stable; never reused after deactivation|
-| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE`** — the third added at `MSC-DEC-412`, closing `OQ-141`, and the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter. **Six identity domains follow, one per operation family** (below)|
+| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE` · `PICKUP_CANCELLATION` · `PICKUP_FAILURE` · `PICKUP_SHORT_COUNT` · `PICKUP_CARRYOVER`** — the third added at `MSC-DEC-412`, closing `OQ-141`, the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter, and the last on 2 November 2026 (`SLICE-001`, the S1.20 closeout), for the reason a manifest gives for each overdue request it carries over. **Six identity domains follow, one per operation family** (below)|
 | `valid_checkpoints`| enum set| **yes**| **The recipient-contact checkpoints this reason may be selected at** — any of `PRE_DISPATCH` · `NEXT_STOP` · `DOORSTEP`. **Mandatory and non-empty where `domain = RECIPIENT_CONTACT`; null for every other domain**, which has no checkpoints. Added at `MSC-DEC-407`, closing `OQ-138`'s engineering half: §6.12's `RecipientContactAttempt` invariant already said *"the catalogue carries the mapping"* and [errors-and-enums.md](errors-and-enums.md) §6 that *"a reason declares the checkpoints it is valid for"* — **and this table carried no such field**, so `REASON_NOT_VALID_FOR_CHECKPOINT` had nothing to read|
 | `label`| text| no| Snapshotted onto records at selection (§3.7)|
 | `requires_note`| bool| no||
@@ -172,6 +172,65 @@ A reason therefore drives validation. Selecting *damaged in transit* may make a 
 | `permitted_operations`| text[]| **yes**| **Identity domains only** (Product decision, 8 October 2026): the closed set of `operationId`s the reason may be used with, enforced by the reason validator. Null for the workflow domains above. Seeded and never editable through the reason-management operation. **For these domains that operation changes only `label` and `active`, and only for a Platform Admin who holds `settings.reason.manage` explicitly**; Senior Ops cannot create, alter or globally deactivate them, and each change is audited (`settings.reason.catalog_changed`, enhanced)|
 
 Any workflow that hardcodes "this reason needs a photo" contradicts §35.9.2. The requirement is read from the reason. **The same holds for checkpoint validity**: a workflow that hardcodes *this reason belongs at the door* contradicts §6.12's invariant, which puts the mapping in the catalogue.
+
+**Three pickup domains were decided on 29 October 2026 (`SLICE-001`, D-05), and their 25 codes were approved by the Product Owner the same day; they are seeded.** `PICKUP_CANCELLATION` (every code carries a mandatory `attribution`, which decides the cancellation charge — `MSC-DEC-388`), `PICKUP_FAILURE` (the reasons within the four fixed failure categories; their `requires_note`, `requires_contact_attempt` and `requires_photo` drive what else is mandatory, §35.9.2) and `PICKUP_SHORT_COUNT` (the variance reason of a short collection). Each was admitted on `MSC-DEC-252`'s routing test: behaviour depends on the code. **The remaining reasons of the slice are not a catalogue**: a one-package exception, an escalation, an attempt extension, a cancellation-charge waiver, a handshake override or hand resolution, an OS&D adjudication, a custody handover and its failure, and a manifest cancellation each carry a **mandatory free-text note** (`REASON_REQUIRED` when blank) and no `reason_code`. The four `PICKUP_STOP_SKIP` codes below are specified and seeded. The domain set is closed by a `CHECK`. A new database gets the codes below from the seed and a database seeded earlier from migration `0054`; a reason of the three carries no checkpoints, no permitted operations, no approval, no Ops review and no escalation and consumes no delivery attempt, and its label is the code in sentence case until the Product Owner rewords it. No operation or screen edits them yet, so a change to one is a migration.
+
+**`PICKUP_CARRYOVER` was admitted on 2 November 2026 (`SLICE-001`, the S1.20 closeout; the Product Owner's decision, on the reviewer's recommendation), and its eight codes were decided the same day (the reviewer's recommendation, applied on the Product Owner's instruction; the table below).** It is the reason `createPickupManifest` asks for, per request, when the manifest carries over a request promised for an earlier day ([pickup-manifest.md](../features/pickup/pickup-manifest.md) §4): old work is never refused for its age, and never carried over without a reason. It passes `MSC-DEC-252`'s routing test (the report counts the carry-over by the code, and the code can make a note mandatory), carries no checkpoints, no permitted operations and none of the other flags, and is closed with the set by the `CHECK` (migration `0059`). **A reason explains a carry-over and does nothing else:** its attribution says whom the delay is owed to, for the report, and it never creates a charge, consumes a pickup attempt, resets the promise it explains or decides who pays.
+
+**The `PICKUP_CANCELLATION` contents are seeded**, twelve codes. The attribution decides the charge: a cancellation attributed to Melarc is never charged (`EXEMPT`), and `CUSTOMER` and `EXTERNAL` leave Ops its discretion (`MSC-DEC-197`, `MSC-DEC-388`):
+
+| `code`| `attribution`| `requires_note`|
+|---|---|---|
+| `VENDOR_NO_LONGER_NEEDS_PICKUP`| `CUSTOMER`| no|
+| `VENDOR_PARCELS_NOT_READY`| `CUSTOMER`| no|
+| `VENDOR_WRONG_DETAILS`| `CUSTOMER`| no|
+| `DUPLICATE_REQUEST`| `CUSTOMER`| no|
+| `OTHER_CUSTOMER_REASON`| `CUSTOMER`| **yes**|
+| `NO_RIDER_AVAILABLE`| `MELARC`| no|
+| `HUB_SYSTEM_FAULT`| `MELARC`| no|
+| `INTERNAL_ROUTING_ERROR`| `MELARC`| no|
+| `OTHER_MELARC_REASON`| `MELARC`| **yes**|
+| `ROAD_OR_WEATHER_DISRUPTION`| `EXTERNAL`| no|
+| `GENUINE_EMERGENCY`| `EXTERNAL`| **yes**|
+| `OTHER_EXTERNAL_REASON`| `EXTERNAL`| **yes**|
+
+**The `PICKUP_FAILURE` contents are seeded**, eight codes, two under each of the four fixed categories. The screens group them by category; the table does not bind a reason to a category and the API does not check the pairing. Every failure needs a note, and a requirement is read from the reason (§35.9.2):
+
+| `code`| `attribution`| `requires_note`| `requires_contact_attempt`| `requires_photo`|
+|---|---|---|---|---|
+| `VENDOR_NOT_AT_LOCATION`| `CUSTOMER`| **yes**| **yes**| no|
+| `VENDOR_UNREACHABLE_BY_PHONE`| `CUSTOMER`| **yes**| **yes**| no|
+| `ENTRY_REFUSED_BY_SECURITY`| `EXTERNAL`| **yes**| no| **yes**|
+| `LOCATION_CLOSED`| `EXTERNAL`| **yes**| no| **yes**|
+| `PARCELS_NOT_PACKED`| `CUSTOMER`| **yes**| no| no|
+| `VENDOR_ASKED_TO_COME_BACK_LATER`| `CUSTOMER`| **yes**| no| no|
+| `VENDOR_REFUSED_HANDOVER`| `CUSTOMER`| **yes**| no| no|
+| `PARCEL_NOT_ACCEPTABLE`| `CUSTOMER`| **yes**| no| no|
+
+**The `PICKUP_SHORT_COUNT` contents are seeded**, five codes, the variance reason of a short collection (the office is flagged when one is recorded):
+
+| `code`| `attribution`| `requires_note`| `requires_photo`|
+|---|---|---|---|
+| `SOME_PARCELS_NOT_READY`| `CUSTOMER`| no| no|
+| `VENDOR_HELD_BACK_PARCELS`| `CUSTOMER`| **yes**| no|
+| `PARCEL_DAMAGED_OR_UNSAFE`| `CUSTOMER`| no| **yes**|
+| `BOOKED_COUNT_WRONG`| `CUSTOMER`| no| no|
+| `VENDOR_DISPUTES_COUNT`| `CUSTOMER`| **yes**| no|
+
+**The `PICKUP_CARRYOVER` contents are seeded**, eight codes (decided on 2 November 2026: the reviewer's recommendation, applied on the Product Owner's instruction), in the attribution model of the cancellation catalogue. A new database gets them from the seed and a database seeded earlier from migration `0061`. **A code is the table's primary key and belongs to one domain**, so five of the approved names, which `PICKUP_CANCELLATION` already holds (`ROAD_OR_WEATHER_DISRUPTION`, `NO_RIDER_AVAILABLE`, `OTHER_CUSTOMER_REASON`, `OTHER_MELARC_REASON` and `OTHER_EXTERNAL_REASON`), carry the prefix `CARRYOVER_` here. **These names are approved as written** (the Product Owner, 2 November 2026; OB-S1-36): the prefix keeps a code from colliding with a code of the cancellation catalogue, and the primary key of `reason_code` is not redesigned for it. The label is the approved words, and `ROAD_OR_WEATHER_DISRUPTION` asks for a note here where it does not under cancellation:
+
+| `code`| `attribution`| `requires_note`| `label`|
+|---|---|---|---|
+| `CARRYOVER_ROAD_OR_WEATHER_DISRUPTION`| `EXTERNAL`| **yes**| Road or weather disruption|
+| `CARRYOVER_NO_RIDER_AVAILABLE`| `MELARC`| no| No rider available|
+| `RUN_FULL_OR_OUT_OF_TIME`| `MELARC`| **yes**| Run full or out of time|
+| `VENDOR_ASKED_FOR_LATER_PICKUP`| `CUSTOMER`| **yes**| Vendor asked for a later pickup|
+| `HUB_OR_SYSTEM_FAULT`| `MELARC`| **yes**| Hub or system fault|
+| `CARRYOVER_OTHER_CUSTOMER_REASON`| `CUSTOMER`| **yes**| Other customer reason|
+| `CARRYOVER_OTHER_MELARC_REASON`| `MELARC`| **yes**| Other Melarc reason|
+| `CARRYOVER_OTHER_EXTERNAL_REASON`| `EXTERNAL`| **yes**| Other external reason|
+
+**What a carry-over reason is and is not.** It explains why an overdue request is on a manifest for a later day than the one it was promised. It does not create a charge, consume a pickup attempt, reset or rewrite the original promise (`scheduled_service_date` is never changed) or decide who pays; its attribution is for the report ([reporting-data-dictionary.md](../features/reporting/reporting-data-dictionary.md)). `VENDOR_ASKED_FOR_LATER_PICKUP` is a statement about what a vendor said: its note records the request, what was said, when and through which channel, and is never an assumption. The seed carries no checkpoints, no permitted operations, no approval, no Ops review and no escalation, and consumes no delivery attempt.
 
 **The `RECIPIENT_CONTACT` contents are seeded** by `MSC-DEC-409`, 25 September 2026, closing `OQ-142`. Each was admitted on `MSC-DEC-252`'s routing test — **a category that does not change what Ops does next is a note, not a reason** — and they are **seeded defaults in a controlled catalogue, not a closed enum**.
 
@@ -384,6 +443,9 @@ Governed by §21, §34.3, §36.2. States: `PENDING`, `CONFIRMED`, `DECLINED`, `C
 | `primary_phone` / `secondary_phone`| text| no / yes| §21.1 requires a primary and permits an optional secondary. E.164 plus as-entered, per §3.4|
 | `item_description`| text| no| §21.1's required request information. Per-package description override is optional. **Its source differs by intent** (Gate C R1.2): captured per request for `ADHOC_SENDER`, satisfied by the Vendor's business goods profile for `OWN_PACKAGES`, and carried by `collection_item` for `COLLECT_FOR_VENDOR` — see the intent table below|
 | `cutoff_exception_state`| enum| yes| `PENDING_OPS_REVIEW`, `SAME_DAY_APPROVED`, `RESCHEDULED`. Set when a request is confirmed past the hub cutoff — **not a rejection** (§21.1, `CONFLICT-024`)|
+| `vendor_pickup_location_id`| uuid| yes| The saved location an `OWN_PACKAGES` request selected; null where the vendor's default was used. Another vendor's location is answered as one that does not exist|
+| `estimate_snapshot`| embedded| yes| **The inputs of the booking estimate, never a price** (`MSC-DEC-211`): each component's hub, setting key, effective version and value, the package count and the assumed size class, written when the estimate is computed. The amount the response shows is derived from it. Null where the estimate was unavailable (outside the service area, or no approved fee). Not read by pricing, and the locked price never inherits it|
+| `replacement_request_id`| uuid| yes| The clone created when this request was rescheduled (the clone carries `replaces_request_id`)|
 | `location_overrides`| embedded| yes| Request-level values that must not rewrite saved defaults (§34.3)|
 | `scheduled_service_date`| date| no| Monday–Saturday only. §21.1 and §21.1, `MSC-DEC-149`: "every zone operates the same Monday–Saturday calendar"|
 | `default_payer_intent`| enum| no| `RECIPIENT_PAYS`, `SENDER_PAYS_FULL`, `SPLIT`|
@@ -392,11 +454,13 @@ Governed by §21, §34.3, §36.2. States: `PENDING`, `CONFIRMED`, `DECLINED`, `C
 | `split_sender_percentage`| numeric| yes| Set when `PERCENTAGE`|
 | `replaces_request_id`| uuid| yes| Attempt chain (§5.7)|
 | `attempt_number`| int| no| Position in the chain. Capped by `MELARC_MAX_PICKUP_ATTEMPTS` = 3 (§35.4.5)|
-| `attempt_extension_id`| uuid| yes| A hub Senior Ops force-extension past the cap (§21.6, `MSC-DEC-116`)|
+| `attempt_extension_id`| uuid| yes| A hub Senior Ops force-extension past the cap (§21.6, `MSC-DEC-116`): the record below, which the request carries and its replacement inherits|
+| `rider_assigned`| bool| no| **Whether the request is committed to a rider now: a stop that has not released its claim holds it on a manifest that has a rider (`assigned_rider_id` is not null), and at no other time** (the Product Owner, 2 November 2026; OB-S1-35). `false` until `assignRider` raises it on the confirmed requests the manifest holds (S1.21); **it falls with the claim**: `cancelPickupManifest` lowers it, in the transaction that releases the claims, on the requests that are still confirmed, so a request returned to the pool is not committed and a rider who was once assigned establishes nothing. Giving a draft another rider keeps it (the claim is the same and the manifest still has a rider). A request that is cancelled is frozen, mark and charge decision together: it keeps the value its cancellation was decided on, and the cancellation of its manifest changes neither. The database holds the rule for every writer (migration `0064`): the mark is raised only on a held claim of a manifest with a rider, and lowered only once the claim is released and no stop holds the request. It is the moment a vendor's own cancellation closes (dormant in Version 1, `MSC-DEC-196`) and an Ops cancellation becomes a chargeable decision ([pickup-request.md](../features/pickup/pickup-request.md) §5.3). **It is kept on the request and not derived when it is read**, because a vendor reads no stop or manifest and an officer of another hub reads none: a read that row-level security can hide is never proof that no rider holds the request|
+| `escalated_at`| timestamptz| yes| When Ops judged a failed request out of its own hands (`escalatePickupRequest`, S1.18). Set once and never taken back; only a request that was confirmed has one. The actor, the trigger and the note are in the audit event|
 | `cancellation_reason_snapshot`| embedded| yes| Reason label at time of selection (§3.7)|
 | `cancelled_by_actor_type`| enum| yes| `VENDOR` or `OPS`. In V1 `VENDOR` occurs only from `PENDING`|
 | `cancellation_charge_outcome`| enum| yes| `APPLIED`, `WAIVED`, `NOT_APPLIED`, `UNAVAILABLE`, `EXEMPT`. **All five are recorded outcomes** — the charge is discretionary, so its absence is a decision, never a null. **`EXEMPT` is not a discretionary outcome**: it records that the selected reason's `attribution` is `MELARC`, so no charge was permitted. Distinguishing it from `NOT_APPLIED` is the same argument that separates `UNAVAILABLE` from it — *Ops chose not to charge* and *the rule forbade charging* are different facts, and only one of them measures how often Melarc cancels on its own failure|
-| `cancellation_charge_snapshot`| embedded| yes| Value, setting key and effective version, per §3.7. Set only when outcome is `APPLIED`|
+| `cancellation_charge_snapshot`| embedded| yes| Value, setting key and effective version, per §3.7. Set when the outcome is `APPLIED` and **kept after `WAIVED`**: a waiver relieves the charge in full and the snapshotted amount and version stay readable (AC-SLICE-001-64)|
 | `cancellation_charge_reason_snapshot`| embedded| yes| **Mandatory whenever a post-assignment cancellation occurs**, whichever way the charge decision went|
 | `cancellation_charge_waived_by`| uuid| yes| Senior Ops actor. Set only when outcome is `WAIVED`|
 | `declared_value_minor`| int| yes| **Declared at booking** when the sender's item exceeds `value_declaration_threshold` (§23.4, `MSC-DEC-212`). Distinct from `Order.declared_value_minor`, which is §23.2's required capture at **itemization** — the two record the same fact at two moments, and the booking one is the moment the customer is told about the cap|
@@ -411,14 +475,18 @@ Governed by §21, §34.3, §36.2. States: `PENDING`, `CONFIRMED`, `DECLINED`, `C
 - `declared_package_count ≥ 2` unless `one_package_exception_id` is present. That exception requires **maker-checker** and is **unavailable through ordinary vendor self-service** (§35.2.4) — a rule about who may take the path, not only about approval.
 - Payer intent is *intent only*. It carries no monetary amount, because §5.2.1 confirms a standard request "does not yet contain parcel destinations or authoritative prices." Any model that **stores** a price here contradicts §5.2.1. `MSC-DEC-211` added an indicative estimate to the booking *response*; it is computed, not persisted, so this invariant survives the supersession of §23.6, `MSC-DEC-175` intact.
 - `attempt_number` may not exceed 3 without an `attempt_extension_id`. Force-extension is hub Senior Ops, direct, reasoned and audited (§35.4.5, `MSC-DEC-116`).
-- **A replacement request may not be simultaneously active with its source** (§35.4.3–4). Rescheduling creates a traceable chain rather than overwriting the failed attempt.
+- **A replacement request may not be simultaneously active with its source** (§35.4.3–4). Rescheduling creates a traceable chain rather than overwriting the failed attempt. **The database holds it where the transaction ends** (a deferred constraint trigger, migration `0053`): a reschedule inserts the replacement and cancels its source in one transaction, and a replacement that is active while its source is not cancelled cannot be committed.
+- **The reschedule of a failed attempt** (`cancelPickupRequest` with `create_replacement`, S1.18) is Ops's and of a `CONFIRMED` request: the replacement is the same booking at `attempt_number + 1` for the next operating day after the later of the source's day and today (provisional: the contract names a day only for a late booking), and carries the one-package approval and the extension of its source. The next attempt past the cap and the request's extension is `PICKUP_ATTEMPT_LIMIT_REACHED`; a cap that is unset or invalid blocks nothing.
+- **An attempt extension is a record of its own and permits exactly one further attempt** (S1.18, migration `0053`, corrected by `0073`; registry: `PickupAttemptExtension`): `id`, `pickup_request_id` (the request it was raised for, once), `ceiling_before` and `ceiling_after` (the ceiling in force and the attempt after the request’s own; **both null where the extension lifted no ceiling**, because the request was not at one), `releases_refused_collection` (true where the extension is what opens a refused collection for that attempt), `extended_by`, `extended_at` and a mandatory `reason`; a check holds that it does at least one of the two. It is never changed or removed. A request needs one to be rescheduled, or confirmed, past the cap, **and a refused collection (`AC-SLICE-001-33`) needs one to be rescheduled at all**; the replacement carries it so that its attempt can be confirmed, and a further reschedule needs a further extension. **The release is the request’s own**: a replacement that carries the source’s extension is not itself released, and the audit event says exactly what the extension did (the ceiling lifted, with its before and after; the restriction released) and not the request’s own attempt number as a ceiling that was in force. **The reach is provisional** (plan `OB-S1-68`): the contract leaves "exact extension ceilings" to domain design, and this is the narrowest reading of "permits a further attempt".
+- **An escalation is a marker and a judgement, not a state** (S1.18): `escalated_at` is set once on a `CONFIRMED` request under a mandatory note, and changes nothing else (the request can still be cancelled, and a Senior Ops extension still opens a further attempt). A failure can be recorded since S1.28 (`reportPickupFailure`), but the narrowing of the escalation to a request whose stop failed is not built (plan `OB-S1-66`): a request need not have failed to be escalated.
 - Per-request contact and location edits are **transaction overrides** and never update saved sender defaults (§35.2.6, §21.1).
 - **A one-package exception makes recipient name, phone and delivery address mandatory** (§21.1). **This no longer explains anything about pricing** — `MSC-DEC-211` says the distinction `MSC-DEC-178` drew *"disappears"* because **every** booking now shows an indicative estimate. The mandatory capture stands on §21.1 alone.
+- **The exception is a record of its own, and its approval travels with the booking** (`SLICE-001`, S1.16, migration `0051`; registry: `OnePackageException`). `id`, `pickup_request_id` (the request it was raised for), `state` (`REQUESTED` · `APPROVED` · `REJECTED`; no operation of the slice refuses one), `requested_by`, `requested_at`, `approved_by` and `decided_at` (set together, with the decision), `note`, the recipient (`name`, `phone` in its normal form, `location`) and `single_package_fee_snapshot` (the amount, setting key and version of `single_package_pickup_fee` as the approval read it: **due, not collected**; absent where the setting could not be read, which never blocks an approval). **At most one live exception per request** (requested or approved). `PickupRequest.one_package_exception_id` is set at approval, which is what makes the request confirmable, and a clone of the request (the reschedule of a late booking, of a failed attempt) carries it, so the same booking needs no second approval and owes no second fee; a trigger holds that a request names only an **approved** exception raised for it, or the one the request it replaces carries. A request shows the exception it carries, or the latest one raised for it, so the approver's queue is the list filtered by that exception's state. **The checker is never the maker unless the maker holds `pickup.exception.approve` at tier `P`** ([permissions.md](permissions.md) §6), judged by the application from the grant that authorizes the approval and backed by a trigger.
 - **A declaration above `value_declaration_threshold` requires an acknowledgement, and the acknowledgement snapshots the cap** (§23.4, `MSC-DEC-212`, `MSC-DEC-220`). Storing only a flag would leave the customer agreeing to whatever the cap becomes later, which is the outcome `MSC-DEC-220` exists to prevent — it names the acknowledgement as mattering *more than evidence would*, precisely because the cap's weakness was a customer discovering the limit **after** a loss.
 - **A suspended vendor's non-terminal requests go on controlled hold**, not to `CANCELLED` (§21.1). The hold preserves the record and its custody links.
 - **Past the hub booking cutoff is not a rejection.** The request confirms and `cutoff_exception_state` queues it for Ops review (§21.1, `CONFLICT-024`).
 - **In V1 a vendor may cancel only its own `PENDING` request**. Self-confirm and self-cancel-when-confirmed are deferred, not deleted — `MSC-DEC-195`'s assignment cutoff is dormant and governs the path when self-service returns.
-- The request is **never terminally uncancellable.** Office cancellation remains available at every point.
+- The request is **never terminally uncancellable.** Office cancellation remains available at every point, **and takes effect at once on the stop that holds the request**, on a draft manifest and on a dispatched one: the stop is resolved in the same transaction (§6.4).
 - **A `MELARC`-attributed cancellation reason permits no charge**. The outcome is `EXEMPT`, set by the server from the reason's own `attribution` (§3.9) whatever the caller submitted, and the cancellation proceeds — the same principle as the missing-amount rule below: an operational decision is never blocked, and the commercial consequence is recorded rather than negotiated. `CUSTOMER` and `EXTERNAL` attribution leave Ops discretion exactly as `MSC-DEC-197` set it.
 - **`cancellation_charge_outcome` is non-null for every post-assignment cancellation.** `UNAVAILABLE` covers a missing amount — **Accra is set at GH₵20, so this now covers a new hub rather than every hub**: the cancellation still proceeds and the absence is recorded. A null here would be indistinguishable from an unrecorded decision, which is the failure mode `MSC-DEC-197` exists to prevent.
 
@@ -429,11 +497,11 @@ Governed by §34.3, §36.3. States: `DRAFT`, `DISPATCHED`, `IN_PROGRESS`, `COMPL
 | Field| Type| Null| Notes|
 |---|---|---|---|
 | `id` / `code`| uuid / text| no||
-| `hub_id`| uuid| no| Hub-scoped, **never** vendor-owned (§4)|
-| `assigned_rider_id`| uuid| **yes**| Null while `DRAFT`. **Setting it closes vendor self-cancellation on every request this manifest carries**|
-| `assigned_at`| timestamptz| yes| The cutoff moment. Recorded, never inferred from manifest creation|
+| `hub_id`| uuid| no| Hub-scoped, **never** vendor-owned (§4). Named `responsible_hub_id` in the contract and the table, as on the request|
+| `assigned_rider_id`| uuid| **yes**| Null until a rider is assigned, which `assignRider` does to a `DRAFT` manifest (S1.21), naming an `ACTIVE` rider who belongs to the manifest's hub (the rider's primary hub: the reach of the officer's grant is not eligibility, no temporary assignment exists, and the database holds the rule for every writer; the Product Owner, 2 November 2026). **Setting it closes vendor self-cancellation on every request this manifest carries**, and marks each confirmed request as committed to a rider (`rider_assigned`, §6.2), which is what makes a cancellation by the office a chargeable decision for as long as the claim is held. Reassigning a draft to another rider changes the rider and the moment and leaves the requests marked; **cancelling the manifest releases the claims and ends the commitment of the requests that are still confirmed**|
+| `assigned_at`| timestamptz| yes| The cutoff moment. Recorded, never inferred from manifest creation. Set by the assignment, from the database's clock|
 | `state`| enum| no||
-| `service_date`| date| no||
+| `service_date`| date| no| **The day the run is to be worked, not the day any request was promised.** A day the hub operates (Monday to Saturday) that has not passed on the hub's clock when the manifest is made. A request keeps its own `scheduled_service_date` (§6.2), the promise, which a manifest never changes: it may go on a manifest for that day or a later one, which carries it over and leaves it late against its promise (derived from the two dates, not stored), and never on one for an earlier day. A request that is to be promised another day is cancelled and rebooked, or rescheduled, and so has a new promise. The two meanings are already two fields, so there is no third (the Product Owner, 1 November 2026, on the reviewer's recommendation). **It is the planned execution date** (2 November 2026): not a guarantee that every event of the run falls on it. A run that has started keeps it, and its actual moments, if it goes on past midnight; the system does not cancel, complete or redate a run at midnight; a run whose date has passed is neither dispatched nor started, a manifest for a later day may be dispatched in advance (publication to its rider), and a run is started on its day and not before it ([state-machines.md](state-machines.md) §4)|
 | `dispatched_at` / `started_at` / `completed_at`| timestamptz| mixed| Dispatch and rider-start are distinct actors and distinct events (§36.3). **`completed_at` is set by the hub handover, or by System when nothing was collected**|
 
 ### 6.4 `PickupStop`
@@ -445,10 +513,17 @@ Governed by §34.3, §36.4. States: `PENDING`, `ARRIVED`, `COLLECTED`, `PARTIALL
 | `id`| uuid| no||
 | `pickup_manifest_id`| uuid| no||
 | `pickup_request_id`| uuid| no||
-| `sequence`| int| no| Manual stop ordering (§7.6 — no route optimisation)|
+| `sequence`| int| no| Manual stop ordering (§7.6 — no route optimisation). At creation the stops take the order in which Ops listed the requests; the ordering operation then replaces it|
 | `state`| enum| no||
 | `arrived_at` / `resolved_at`| timestamptz| yes||
-| `failure_reason_snapshot`| embedded| yes||
+| `failure_reason_snapshot`| embedded| yes| **As built (S1.28; migration `0072`):** the reason as the catalogue held it when the rider reported (`reason_code`, `label`, `attribution`), the rider's `note` where there is one, the `contact_attempts` (at most ten, each a `method` — `PHONE_CALL`, `SMS` or `IN_PERSON` —, an instant in UTC to the millisecond, `attempted_at`, what came of it, `outcome`, and a `note` where the rider gives one; migration `0073`) where there are any, and `reported_at`, the database's own moment (the stop's `resolved_at`). Only the code, the note and the moment are on the wire (`failure`). The guard of the stop holds it to the catalogue for every writer, and it is frozen once written|
+| `failure_category`| enum| yes| `VENDOR_UNAVAILABLE`, `ACCESS_DENIED`, `PARCEL_NOT_READY` or `REFUSED_COLLECTION` (§21.5): fixed, mandatory, set exactly when `state = FAILED`. The escalation-only rule of §21.6 points at it|
+| `skip_snapshot`| embedded| yes| The reason code, note and time of a skip; set exactly when `state = SKIPPED`. **Three acts write it.** An authorised skip by Ops (`MSC-DEC-412`, `skipPickupStop`, S1.23) gives a code of the `PICKUP_STOP_SKIP` domain and its note. **The cancellation of the stop's request (S1.20 closeout, 2 November 2026) gives the system's code `REQUEST_CANCELLED`**, with the label it had and the time, and no note: the code is not a reason of the catalogue (nobody chose it), and the cancellation's own reason, note and charge stay on the request. **The cancellation of the stop's manifest (S1.21) gives the system's `MANIFEST_CANCELLED`** in the same way, and its note stays with the act|
+| `carryover_snapshot`| embedded| yes| **Why this request was carried over** (S1.20 closeout, 2 November 2026): the code of the `PICKUP_CARRYOVER` reason and its label as the actor saw them, and the note (or null), for a request promised for an earlier day than its manifest's. Null for a request on its own day. Written when the stop is made and **never changed** (the stop's guard holds it); the request's promise is not rewritten (§6.2), and the lateness measured from it is the reporting dictionary's ([reporting-data-dictionary.md](../features/reporting/reporting-data-dictionary.md))|
+| `pickup_summary`| embedded| yes| **What the rider is shown for this stop** (S1.21; the Product Owner's decision of 2 November 2026): the request's code as the reference, the sender's name as booked, the packages as declared, the resolved place, a note (null: the request has no pickup-instructions field) and the primary contact. Made **once, by `dispatchManifest`, from the request**, for each stop still to be worked at that moment, and never changed (the stop's guard holds it); null before the dispatch and for a stop already resolved by then (a cancelled request is never sent to a rider). The set of its members is closed and the table holds it, so no payer, price, destination or recipient can be kept in it. The registry denies a rider any read of the request, so this is the only place the stop shows it ([pickup-manifest.md](../features/pickup/pickup-manifest.md) §5.4)|
+| `released_at`| timestamptz| yes| **When the stop's claim on its request was explicitly released**; null while it holds the claim. A request is on a manifest while a stop with no `released_at` names it, and **at most one such stop names a request**. Set only by an explicit, authorized transition, once, and never changed or cleared: the cancellation of the stop's manifest, and a recovery transition that no document specifies yet. **A skip, a failure and a collection do not release it** (the Product Owner, 1 November 2026; [state-machines.md](state-machines.md) §5)|
+
+**The cancellation of a request resolves the stop that holds it, at once** (the Product Owner's decision of 2 November 2026, on the reviewer's recommendation). The office may cancel, or reschedule, a request that a stop holds, on a draft manifest and on a dispatched one, and the rider's acknowledgement decides nothing. In the transaction that cancels the request, a stop that is still to be worked (`PENDING` or `ARRIVED`) becomes `SKIPPED` with the system's reason `REQUEST_CANCELLED`; it keeps its place in the order, the arrival it recorded, and **its claim** (the request is cancelled, so it must not return to the pool; only an explicit, authorized transition releases a claim). A stop already `COLLECTED`, `PARTIALLY_COLLECTED`, `FAILED` or `SKIPPED` is left as it is: a cancellation erases no custody and turns no collected stop into a skip, and what a cancellation after a collection means for the parcels is the collection's and the custody's to decide, not this act's. Whoever else changes the stop meets the cancellation on the stop's own state, so only a valid outcome commits ([state-machines.md](state-machines.md) §5). Dispatch's check that none of its requests is cancelled stays as a second safeguard ([state-machines.md](state-machines.md) §4).
 
 ### 6.5 `CollectionRecord`
 
@@ -464,7 +539,7 @@ Governed by §34.3, §36.4, §36.5. One per stop that reached the door.
 | `variance_reason_snapshot`| embedded| yes| Mandatory when `variance = SHORT`. Label snapshotted per §3.7|
 | `office_notified_at`| timestamptz| yes| Set when the shortfall flag is raised (`MSC-DEC-194` part 2)|
 | `handshake_type`| enum| no| `VENDOR_ENTERED_RIDER_DISPLAYED` or `SENDER_SMS_RIDER_ENTERED` (§34.3)|
-| `handshake_channel`| enum| no| `PORTAL`, `SMS_FALLBACK`, `OPS_OVERRIDE`. **Recorded on every handshake, not only fallbacks** — persistent fallback use is only visible as data if the primary path is logged too|
+| `handshake_channel`| enum| yes| `PORTAL`, `SMS_FALLBACK`, `OPS_OVERRIDE`. **Null until the handshake verifies**: count, then confirm (29 October 2026) — the record is created at the count and the channel is set by the handshake, never sent by the rider. **Recorded on every handshake, not only fallbacks** — persistent fallback use is only visible as data if the primary path is logged too|
 | `handshake_override_by`| uuid| yes| Ops actor. Set only for `OPS_OVERRIDE`|
 | `handshake_confirmed_at`| timestamptz| yes||
 | `contact_captured`| embedded| yes| Per §3.4|
@@ -472,6 +547,30 @@ Governed by §34.3, §36.4, §36.5. One per stop that reached the door.
 **Partial collection is permitted**. Variance lives here rather than on `PickupStop` because boundary decision §5.3 already assigns physical results to this record and run-level facts to the stop; declared and collected counts were here already.
 
 **This variance does not substitute for the hub blind count.** `MSC-DEC-194` part 3 makes them two independent checks. `PickupIntake.rider_declared_count` is what the rider hands over — it is **not** seeded from, reconciled against, or short-circuited by `collected_count`, and a partially-collected consignment is counted blind at intake exactly like any other. A package lost between the door and the hub is visible only in the second check. Collapsing them destroys the guarantee §35.5 exists to provide.
+
+**As built (S1.26; migration `0068`, `src/pickup/collection-record.schema.ts`).** Made at the count, once per stop (a unique key), never empty (`collected_count >= 1`), with the stop's hub carried by a composite key. The columns beyond the table above: `recorded_by` (the rider who counted), `captured_at` (the device's moment, as sent), `recorded_at` and `version` (the ETag source). `declared_count` is the stop's dispatch-time summary's count, the one request fact the rider's context reads as itself (the kind of sender, which fixes `handshake_type`, is put to the database as a question: the rider's context reads no request; the record's guard asks the same question and refuses the other direction). `variance_reason_snapshot` holds `reason_code`, `label`, `attribution` and the note, and no other member; it and `office_notified_at` are present exactly when the variance is `SHORT`, and a clean count has neither. **The database holds what they say** (migration `0069`, OB-S1-60, the Product Owner's approval of 4 November 2026): the snapshot is an active reason of the `PICKUP_SHORT_COUNT` catalogue with the label and the attribution the catalogue holds at the insert, a note where the reason asks for one, and no photo asked for (no evidence can be stored before S1.28); it is the reason as it was at the count, and a later edit of the catalogue never reaches it. `recorded_at` and `office_notified_at` are the database's own instants, taken once the stop's lock is held (the flag of a short count is raised at the recording, whatever a writer gave), and `captured_at` is the device's moment, kept apart from them. `handshake_type` is fixed at the count by the kind of sender (a registered vendor: `VENDOR_ENTERED_RIDER_DISPLAYED`; an individual sender: `SENDER_SMS_RIDER_ENTERED`); the channel, the override and the confirmation are null and are set once by the handshake task. After insert the record is frozen but for those three columns. `contact_captured` is not stored by this task. The rider reads only the records it made; staff the records of their hubs under the keys of the pickup and fleet domains; a vendor none.
+
+**`CollectionHandshake` (S1.27; migration `0070`, `src/pickup/collection-handshake.schema.ts`): the two-party proof that closes a counted stop.** One row per counted stop (a unique key), made when the rider asks for the code (or when Ops establishes the collection without one) and kept after the stop closes, because the channel that closed it is what a fallback ratio is read from. Written only by the five operations of the database; the runtime login reads the columns that say where it stands and none of the secret ones.
+
+| Field| Type| Null| Notes|
+|---|---|---|---|
+| `id`| uuid| no||
+| `pickup_stop_id`| uuid| no| Unique. The stop's hub is carried by a composite key, so a handshake never names another hub than its stop's|
+| `pickup_request_id`| uuid| no| The request the stop holds, so the notification lane finds the one handshake its envelope names|
+| `direction`| enum| no| Copied from the record; never changed (§34.3)|
+| `state`| enum| no| [state-machines.md §6](state-machines.md#6-collectionhandshake). No row is ever `PENDING`|
+| `code_generation`| int| no| 1 for the first code, plus one for each SMS fallback. The code is derived from the stop and the generation|
+| `code_digest`| bytea| yes| The keyed digest (HMAC-SHA-256, 32 bytes) of the live code, **never the code**. Null once the code ends. No login reads it|
+| `code_key_version`| int| yes| The version of the key the live code was made under, so a rotation does not strand a code in flight|
+| `code_length`| smallint| no| The number of digits of the code, **kept with the code** (4 to 8; `handshake_code_length` on the day the code was made; 4 for a handshake that was established with no code). Fixed with the generation by the guard: a setting changed after a code was made, sent or queued applies to the next code and cannot change the length of one that is out. Back-filled for the handshakes that existed at migration `0073`, with the setting then in force (4 where it could not be used)|
+| `code_generated_at`, `expires_at`| timestamptz| yes| `handshake_code_ttl_minutes` on the database's clock|
+| `attempts`| int| no| The wrong codes of the handshake; only grows; ends it at `handshake_max_wrong_attempts`|
+| `fallback_sends`, `last_fallback_at`| int, timestamptz| no, yes| The cap and the cooldown of the SMS fallback, for every process|
+| `channel`| enum| yes| `PORTAL`, `SMS_FALLBACK` or `OPS_OVERRIDE`. Set when the handshake ends well, on every path|
+| `confirmed_at`, `confirmed_by_type`, `confirmed_by_id`| timestamptz, enum, uuid| yes| Who ended it, and when|
+| `authorised_by`| uuid| yes| The officer of an override or a manual resolution|
+| `note`| text| yes| The officer's note. No login reads it|
+| `created_at`, `version`| timestamptz, int| no| `version` is the guard's own|
 
 ### 6.6 `PickupIntake`
 
@@ -542,7 +641,7 @@ Transitions, guards and terminal rules are in [state-machines.md](state-machines
 | `carrier_cost_minor`| int| yes| The third-party carrier's **actual** charge, entered at itemization from the carrier's own waybill. Non-null exactly when `commercial_mode = MELARC_COVERED_THIRD_PARTY_DELIVERY`. **An observed fact with a receipt behind it, not a quoted price** — which is why the client may submit it without breaching the server-calculates-price guard|
 | `derived_delivery_date`| date| yes| Next working day after pickup, skipping Sunday, so a Saturday pickup delivers Monday. Corridor batch days override the derivation|
 | `delivery_date_override`| embedded| yes| Ops-moved date with actor, reason and timestamp. Its absence means the derived date stands — the two fields together are what make the next-day promise checkable rather than remembered|
-| `is_high_value`| bool| no| Auto-flagged from `declared_value_minor`, **or manually flagged by Ops on a lower-value parcel** (§23.4). Requires verified itemization-time evidence. **The "no liability promise" clause of `MSC-DEC-156–157` is superseded by `MSC-DEC-212`**, which caps liability at `liability_cap_amount` and requires declaration above `value_declaration_threshold`. Whether the high-value *surcharge* still has a purpose under a cap is `OQ-062` — **do not implement a surcharge against this flag until that closes**|
+| `is_high_value`| bool| no| Auto-flagged from `declared_value_minor`, **or manually flagged by Ops on a lower-value parcel** (§23.4). Requires verified itemization-time evidence. **The "no liability promise" clause of `MSC-DEC-156–157` is superseded by `MSC-DEC-212`**, which caps liability at `liability_cap_amount` and requires declaration above `value_declaration_threshold`. `OQ-062` closed on 20 August: `MSC-DEC-219` retained the tiered surcharge (`MELARC_HIGH_VALUE_TIERS`, settings.md §7.2). **How the surcharge enters the locked price is decided in `SLICE-001`'s pricing task; do not implement it against this flag before that decision is recorded**|
 | `destination_zone_resolution`| enum| no| `SERVER_RESOLVED` or `EXPLICITLY_AUTHORIZED`. §35.6.6: "free-text address alone is not authoritative"|
 | `reprice_history`| embedded[]| yes| Post-freeze zone-crossing corrections (§35.6.8) — see invariants|
 | `lane`| enum| no| `DOORSTEP` or `THIRD_PARTY_HANDOFF` (§5.4)|
@@ -927,9 +1026,11 @@ Written by `MSC-DEC-246` for `CONFLICT-034`. §36.14, §43.4.
 | `to_hub_id`| uuid| yes| Set where the destination is the hub — §43.4's *“unsafe field handover routes work through the hub”*|
 | `state`| enum| no| `PENDING`, `COMPLETED`, `FAILED` — [state-machines.md](state-machines.md) §4.1|
 | `parcel_count_taken`| int| yes| Recorded by the receiver at acceptance. **A custody record, not an authoritative count** — the hub blind count still runs independently at intake|
-| `reason_snapshot`| embedded| no| Why custody moved, per §3.7|
-| `initiated_by` / `accepted_by`| uuid| no / yes||
-| `initiated_at` / `resolved_at`| timestamptz| no / yes||
+| `responsible_hub_id`| uuid| no| The run's hub, carried from the manifest by a composite key, so that a handover can never name another hub than its run's (S1.24). `to_hub_id`, when set, is this hub|
+| `initiation_note` / `failure_note`| text| no / yes| Ops's own text: why custody moved, and why the receiver did not take it. A custody handover and its failure carry a mandatory note and **no reason code** (decision D-05, which replaces the `reason_snapshot` of the first draft); a rider does not read either|
+| `initiated_by` / `accepted_by` / `failed_by`| uuid| no / yes / yes| The officer who opened it; who accepted it (the receiving rider, or the officer for the hub); the officer who failed it. Not foreign keys: a person of either kind|
+| `initiated_at` / `resolved_at`| timestamptz| no / yes| `resolved_at` is set exactly when the handover is no longer pending|
+| `version`| int| no| The record's ETag source (S1.24)|
 
 **Invariants.**
 
@@ -938,6 +1039,7 @@ Written by `MSC-DEC-246` for `CONFLICT-034`. §36.14, §43.4.
 - **Custody is continuous.** Opening a handover moves nothing; custody transfers **only** on `COMPLETED`, and a `FAILED` handover leaves it with the original rider. There is no window in which nobody holds the parcels.
 - **Completion authority follows custody.** Only the current holder may complete the run or submit the hub handover, which makes closing a run whose parcels nobody accepted **structurally impossible** rather than merely forbidden.
 - **`parcel_count_taken` never seeds the hub count.** Giving the receiving hub a figure to match is the failure `HubIntakePreCount` omits a field to prevent.
+- **One open handover per run** (S1.24: an index), and **the holder is read, not stored**: `melarc.run_custody_holder` is the receiver of the latest completed handover (none, when that was to the hub), else the assigned rider. The origin of a new handover is always the holder.
 
 ### 6.9 Remaining entities
 
@@ -2374,6 +2476,27 @@ default"*. A rule stated four times and modelled nowhere is not a rule a build c
   obligation for a flag.
 - **Scope class `VENDOR`, `global (master)`** — [data-scope-registry.md](data-scope-registry.md)
   §4.3: a pickup address is what an Ops user needs to associate a booking.
+
+### 6.19 `CollectionDispute` and `PayerCorrection` (`SLICE-001`)
+
+Both are maker-checker or reconciliation records that the slice's criteria need and no other section fielded.
+
+**`CollectionDispute`** — the reconciliation item of §21.4. `id`, `pickup_stop_id` (unique per open dispute), `raised_by` (the vendor principal), `note` (mandatory), `state` (`OPEN` · `RESOLVED`), `created_at`. Hub-scoped through the stop. **It never reverses physical completion**: the stop stays as it closed and the manifest does not wait. Raising one sets the handshake `DISPUTED`. Its resolution is the detailed Ops reconciliation workflow that §21.8 leaves to downstream design, and no operation resolves it in `SLICE-001`.
+
+**As built (S1.29; migration `0071`, `src/pickup/collection-dispute.schema.ts`).** One row per dispute: `id`, `pickup_stop_id` and the stop's hub (a composite key, so an item never names another hub than its stop's), `vendor_organization_id` (the organisation whose pickup it is: the vendor reads its own items by it), `raised_by` (the vendor account), `note` (mandatory, at most 1,000 characters), `state` (`OPEN` or `RESOLVED`; a resolved item has its `resolved_at`), `created_at` and `version`. **One open dispute per stop** (a partial unique key). Written only by `melarc.dispute_collection`, a `SECURITY DEFINER` function of the owner that only the API's runtime executes; the table's guard makes an item only for a collection that has closed whose handshake is already `DISPUTED`, by the organisation whose pickup it is, and lets it change in one way only, `OPEN` to `RESOLVED` with its moment, which no operation performs in `SLICE-001`. The `DISPUTED` state of the handshake is terminal, so a collection is disputed once.
+
+**`PayerCorrection`** — the maker-checker record of a payer change after the price froze (§23.5, §35.6.7; state-machines.md section 8, *payer correction*). `id`, `order_id`, `state` (`REQUESTED` · `APPROVED` · `REJECTED`), `requested_by`, `approved_by` (not the requester unless a Platform Admin), `previous_allocation` and `proposed` (the payer intent), `resulting_commercial_state` (set on approval), `note`, `created_at`, `decided_at`. At most one `REQUESTED` per order. Approval re-evaluates the commercial gate from the new allocation, zero branch first; **the locked price is never rewritten**. Controlled repricing for a change of service area or commercial mode (`pricing.reprice.*`) is **not built in `SLICE-001`**.
+
+### 6.20 Hub configuration — the launch-fee seed (`SLICE-001`, D-02 of 29 October 2026)
+
+The Product Owner authorized a **bounded launch-fee seed** (Implementation Plan §4a). Three immutable, hub-scoped tables carry it, and `SLICE-014` later adds proposals and approvals on the same tables without changing them.
+
+- **`ServiceZone`** (`service_zone`): `id`, `hub_id`, `code`, `name`, `service_area` (`ACCRA_TEMA` · `AMASAMAN_ENVIRONS` · `KASOA_CORRIDOR`), `active`, `created_at`. The launch hub's seven zones (settings.md section 7.2); the zone answers serviceability, which service area and which days — **never a price**.
+- **`ServiceZoneAlias`** (`service_zone_alias`): `id`, `hub_id`, `zone_id`, `alias` (normalised: trimmed, case-folded, single-spaced), `kind` (`LANDMARK` · `AREA`), `created_at`; unique per `(hub_id, alias)`. The address-to-zone rule (§23.3: *a free-text address is never authoritative*): the server resolves an address by exact normalised match of a token sequence against the aliases of the responsible hub, and where the table is silent or ambiguous the resolution is **refused**, and an authorized Ops selection is recorded as `EXPLICITLY_AUTHORIZED`. There is no geocoding. **The alias data is the Product Owner's to supply; none is invented, and none is seeded.**
+- **`HubSetting`** (`hub_setting`): `id`, `hub_id`, `setting_key`, `scope_ref` (`''` for a hub-wide value, a service-area code for a per-service-area value), `version` (per `(hub_id, setting_key, scope_ref)`, starting at 1), `value` (jsonb, validated per key), `effective_from`, `created_at`, `created_by`. **Rows are never updated**: a new version is a new row, and the value in force at an instant is the row with the greatest `effective_from` not after it. Reading a value for a charge snapshots its **hub, key, scope, version and value** (§3.7). A missing value is `SETTING_MISSING` in a pricing path and an absence in an operational path (settings.md section 2); another hub's value is never used.
+
+The launch values are seeded from [settings.md](settings.md) section 7.2 by `db:seed`; the seed writes them as `SYSTEM` under an explicit seed capability, version 1, effective from the seed time. A second hub takes no bookings until its own values are entered — which no operation can do until `SLICE-014`.
+
 
 ---
 

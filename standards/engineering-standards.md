@@ -119,7 +119,7 @@ Derived from §37.1, §42.2 and §45.7. Each is a defect regardless of any other
 
 ## 8. Read the governing requirements
 
-For each bounded task, read its governing operational sections, owning contracts, relevant feature criteria and surface behavior. Identify every governing section the task actually touches. Reconcile conflicts before implementing the affected behavior; avoid loading unrelated specification history.
+For each bounded task, read its governing operational sections, owning contracts, relevant feature criteria and surface behavior. Identify every governing section the task actually touches. Reconcile conflicts before implementing the affected behavior; avoid loading unrelated specification history. For interface work the governing sources include the design documents, starting with [PRODUCT_DESIGN_DIRECTION.md](../design/PRODUCT_DESIGN_DIRECTION.md).
 
 ## 9. Unresolved requirements
 

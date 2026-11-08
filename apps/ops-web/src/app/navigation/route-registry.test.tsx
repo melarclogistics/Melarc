@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { isValidElement } from 'react';
 import { matchRoutes } from 'react-router';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
 import { ICON_NAMES } from '../../components/ui/icon/icons';
+import { QueueContinuityScope } from '../../platform/pickup/QueueContinuityScope';
 import { BUNDLE_KEY_SETS, type BundleName } from '../../test-support/bundle-key-sets';
 import { createAppRoutes } from '../routes';
 import {
@@ -216,22 +218,94 @@ describe('the places to go from the landing', () => {
 });
 
 describe('the real registry', () => {
+  /**
+   * The keys of the pickup screens (S1.19). The seed grants none of them to a bundle yet (its grants follow with the API of the slice, and
+   * `BUNDLE_KEY_SETS` is held to the seed), so they are named here, beside the bundles' keys, for the questions that need every key held.
+   */
+  const PICKUP_KEYS = [
+    'pickup.read',
+    'pickup.manifest.create',
+    'pickup.request.create',
+    'pickup.request.confirm',
+    'pickup.request.cancel',
+    'pickup.exception.request',
+    'pickup.exception.approve',
+  ];
+
   // Break caught: an entry for a feature that is not built (surfaces/ops-portal.md section 4: "a permission that exists in the catalogue
   // exposes no entry for a feature that is not built"). Every key of every bundle, held at once, shows the screens that exist and no more:
   // the keys of the catalogue that have no screen yet (a vendor's, a rider's, the recovery of a credential) add nothing.
   it('offers the screens that exist, and no more, to a person who holds every key of every bundle', () => {
-    const everyKey = Object.values(BUNDLE_KEY_SETS).flat();
+    const everyKey = [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS];
 
     expect(entriesFor(everyKey).map((item) => item.to)).toEqual(
       SIGNED_IN_ROUTES.filter((route) => route.menu !== null).map((route) => route.path),
     );
     expect(entriesFor(everyKey).map((item) => item.to)).toEqual([
       '/',
+      '/pickup-requests',
+      '/pickup-requests/new',
+      '/approvals',
+      '/messages',
+      '/manifests',
+      '/manifests/new',
       '/admin/staff',
       '/admin/staff/new',
       '/admin/sessions',
       '/admin/vendors',
       '/admin/riders',
+      '/account/trusted-browsers',
+    ]);
+  });
+
+  // Break caught: the pickup entries offered to a session without their keys, or the booking offered to one that may only read the queue.
+  it('offers the pickup queue to a holder of pickup.read and the booking to a holder of pickup.request.create', () => {
+    expect(entriesFor(['pickup.read']).map((item) => item.to)).toEqual([
+      '/',
+      '/pickup-requests',
+      '/manifests',
+      '/account/trusted-browsers',
+    ]);
+    expect(entriesFor(['pickup.read', 'pickup.request.create']).map((item) => item.label)).toEqual([
+      'Overview',
+      'Pickup requests',
+      'Book a pickup',
+      'Manifests',
+      'Trusted browsers',
+    ]);
+  });
+
+  // Break caught: the approver's queue offered to a session that cannot approve, or hidden from one that can (ops-portal.md section 7).
+  it('offers the exceptions to approve to a holder of pickup.exception.approve, and to no one else', () => {
+    expect(entriesFor(['pickup.read']).map((item) => item.to)).not.toContain('/approvals');
+    expect(
+      entriesFor(['pickup.read', 'pickup.exception.request']).map((item) => item.to),
+    ).not.toContain('/approvals');
+    expect(
+      entriesFor(['pickup.read', 'pickup.exception.approve']).map((item) => item.label),
+    ).toEqual([
+      'Overview',
+      'Pickup requests',
+      'Exceptions to approve',
+      'Manifests',
+      'Trusted browsers',
+    ]);
+  });
+
+  // Break caught (ops-portal.md section 7, `/messages`): the message log offered to a session without notification.read, or withheld from one
+  // that holds it, or gated by a pickup key because it is about pickups. Its menu entry is the key's alone.
+  it('offers the message log to a holder of notification.read, and to no one else', () => {
+    expect(entriesFor(['pickup.read']).map((item) => item.to)).not.toContain('/messages');
+    expect(
+      entriesFor(['pickup.read', 'pickup.request.create', 'staff.read']).map((item) => item.to),
+    ).not.toContain('/messages');
+    expect(entriesFor(['notification.read'])).toEqual([
+      { to: '/', label: 'Overview', icon: 'overview' },
+      { to: '/messages', label: 'Messages', icon: 'messages' },
+      { to: '/account/trusted-browsers', label: 'Trusted browsers', icon: 'trusted-browsers' },
+    ]);
+    expect(destinationsFor(['notification.read']).map((item) => item.to)).toEqual([
+      '/messages',
       '/account/trusted-browsers',
     ]);
   });
@@ -242,11 +316,36 @@ describe('the real registry', () => {
     // one's own, and the page says plainly that a role that signs in without an authenticator has none.
     // The vendor accounts are every holder of `vendor.read`'s (S0.52b): Ops Staff, Senior Ops, Platform Admin and Finance.
     // The riders are every holder of `dispatch.read`'s (S0.60): Ops Staff, Senior Ops and Platform Admin, and not Finance.
-    ['Ops Staff', ['Overview', 'Add a staff profile', 'Vendors', 'Riders', 'Trusted browsers']],
+    // The three pickup entries (S1.19) are those of `pickup.read`, `pickup.request.create` and `pickup.exception.approve`, which the three
+    // staff bundles hold (S1.8; the approval is every Ops Staff member's, the Product Owner's decision of 29 October 2026) and Finance does not.
+    // The message log (S1.12e) is `notification.read`'s, which the same three hold ("A S P · own hub") and Finance does not.
+    // The two manifest entries (S1.25) are those of `pickup.read` and `pickup.manifest.create`, which the same three hold and Finance does not.
+    [
+      'Ops Staff',
+      [
+        'Overview',
+        'Pickup requests',
+        'Book a pickup',
+        'Exceptions to approve',
+        'Messages',
+        'Manifests',
+        'Build a manifest',
+        'Add a staff profile',
+        'Vendors',
+        'Riders',
+        'Trusted browsers',
+      ],
+    ],
     [
       'Senior Ops',
       [
         'Overview',
+        'Pickup requests',
+        'Book a pickup',
+        'Exceptions to approve',
+        'Messages',
+        'Manifests',
+        'Build a manifest',
         'Staff',
         'Add a staff profile',
         'Sessions',
@@ -259,6 +358,12 @@ describe('the real registry', () => {
       'Platform Admin',
       [
         'Overview',
+        'Pickup requests',
+        'Book a pickup',
+        'Exceptions to approve',
+        'Messages',
+        'Manifests',
+        'Build a manifest',
         'Staff',
         'Add a staff profile',
         'Sessions',
@@ -285,6 +390,20 @@ describe('the real registry', () => {
     ['/admin/riders/:id/device/register', 'registerRiderDevice'],
     // The page that revokes and replaces opens for the key of the first act; the second is offered inside it to a session that holds its own.
     ['/admin/riders/:id/device', 'revokeRiderDevice'],
+    ['/pickup-requests', 'listPickupRequests'],
+    ['/pickup-requests/new', 'createPickupRequest'],
+    // The page of one request opens for its read; each act on it is offered to a session that holds that act's own key.
+    ['/pickup-requests/:id', 'getPickupRequest'],
+    ['/pickup-requests/:id/exception', 'requestOnePackageException'],
+    // The approver's queue opens for the key of its one act; the queue itself is read with `pickup.read`, which the page names if it is missing.
+    ['/approvals', 'approveOnePackageException'],
+    // The message log opens for the key of the one read it is: not a pickup key, although what it lists is about pickups.
+    ['/messages', 'listNotifications'],
+    // The runs (S1.25): the list and one run open for the read, the builder for the key that makes a manifest, the skip for the key of the act.
+    ['/manifests', 'listPickupManifests'],
+    ['/manifests/new', 'createPickupManifest'],
+    ['/manifests/:id', 'getPickupManifest'],
+    ['/manifests/:id/stops/:stopId/skip', 'skipPickupStop'],
   ])('guards %s with the key of %s in the contract', (path, operationId) => {
     const contract = parse(
       readFileSync(resolve(import.meta.dirname, '../../../../../contracts/openapi.yaml'), 'utf8'),
@@ -297,7 +416,27 @@ describe('the real registry', () => {
     const route = SIGNED_IN_ROUTES.find((candidate) => candidate.path === path);
 
     expect(operation?.['x-permission']).toBeDefined();
-    expect(route?.access).toEqual({ permission: operation?.['x-permission'] });
+    expect(route?.access).toMatchObject({ permission: operation?.['x-permission'] });
+  });
+
+  // ops-portal.md section 7: the exception is decided by a holder of `pickup.exception.approve`, and a session that may not ask for one is told so.
+  it('names the key that decides a one-package exception, as the contract has it', () => {
+    const contract = parse(
+      readFileSync(resolve(import.meta.dirname, '../../../../../contracts/openapi.yaml'), 'utf8'),
+    ) as {
+      paths: Record<string, Record<string, { operationId?: string; 'x-permission'?: string }>>;
+    };
+    const approve = Object.values(contract.paths)
+      .flatMap((item) => Object.values(item))
+      .find((candidate) => candidate.operationId === 'approveOnePackageException');
+    const route = SIGNED_IN_ROUTES.find(
+      (candidate) => candidate.path === '/pickup-requests/:id/exception',
+    );
+
+    expect(route?.access).toEqual({
+      permission: 'pickup.exception.request',
+      decidedBy: approve?.['x-permission'],
+    });
   });
 
   it('has the landing, for any signed-in session', () => {
@@ -365,13 +504,19 @@ describe('a route and its menu entry cannot disagree', () => {
     );
   });
 
-  it('puts every one of them under the session guard and the shell, and nothing else there', () => {
+  // The pickup queue's scope of memory is a layout with no address of its own, between the guard and the shell: it exists for a signed-in
+  // session only, and is gone with it.
+  it('puts every one of them under the session guard, the queue’s scope of memory and the shell, and nothing else there', () => {
     const tree = createAppRoutes([], FIXTURE_ROUTES);
     const pages = tree[0]?.children?.[0]?.children;
     const guard = pages?.[0];
-    const shell = guard?.children?.[0];
+    const scope = guard?.children?.[0];
+    const shell = scope?.children?.[0];
 
     expect(guard?.children).toHaveLength(1);
+    expect(scope?.path).toBeUndefined();
+    expect(isValidElement(scope?.element) && scope.element.type).toBe(QueueContinuityScope);
+    expect(scope?.children).toHaveLength(1);
     expect(shell?.children).toHaveLength(FIXTURE_ROUTES.length);
   });
 
@@ -418,6 +563,20 @@ describe('a route and its menu entry cannot disagree', () => {
     ]);
 
     expect(problems).toEqual([expect.stringContaining('permission')]);
+  });
+
+  // Break caught: a role named as the one who decides, where the key belongs.
+  it('refuses a deciding permission that is not a key of the catalogue’s shape', () => {
+    const problems = registryProblems([
+      {
+        path: '/x',
+        element: page('x'),
+        access: { permission: 'pickup.exception.request', decidedBy: 'Senior Ops' },
+        menu: null,
+      },
+    ]);
+
+    expect(problems).toEqual([expect.stringContaining('deciding permission')]);
   });
 
   it('refuses two entries with one place in one area, and an entry with no label', () => {

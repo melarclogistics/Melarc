@@ -4,14 +4,15 @@ import { HUBS } from './hubs.js';
 import { PERMISSION_KEYS } from './permission-keys.js';
 import { IDENTITY_REASONS, reasonCodeRow } from './reasons.js';
 import { SETTINGS } from './settings.js';
+import { WORKFLOW_REASONS, workflowReasonRow } from './workflow-reasons.js';
 
 /**
  * The reference seed (S0.9, corrected by F02; MIGRATION_AND_SEEDING.md section 4): the data of this directory assembled into the one
  * document `melarc.initialize_reference_data` takes (migration 0005). It names each table by its own name and each column by its own
  * name, for the tables in the order their foreign keys need (the permissions and the bundles before the grants that refer to them),
  * and the policy keys it holds are every bundle it creates and both fixed policies. Every number is the data's own: nothing here is
- * typed in twice. The function inserts the columns it names itself, so a revision or a floor in this document would be ignored; the
- * seed starts every bundle and fixed policy at revision 1 and floor 1, which are the tables' defaults.
+ * typed in twice. The function inserts the columns it names itself, so a floor in this document would be ignored: every bundle starts at
+ * revision 1 and floor 1 (the tables' defaults) and every fixed policy at the revision of the build that seeds, with floor 1.
  */
 
 /** A new plan on each call: the arrays are copies, so nothing a caller does to one changes the next. */
@@ -40,6 +41,7 @@ export function referenceSeedPlan(): SeedPlan {
       })),
       fixed_permission_policy: FIXED_POLICIES.map((each) => ({
         principal_type: each.principalType,
+        revision: each.revision,
       })),
       setting: SETTINGS.map((each) => ({
         key: each.key,
@@ -49,7 +51,10 @@ export function referenceSeedPlan(): SeedPlan {
         unit: each.unit,
         description: each.description,
       })),
-      reason_code: IDENTITY_REASONS.map((each) => reasonCodeRow(each)),
+      reason_code: [
+        ...IDENTITY_REASONS.map((each) => reasonCodeRow(each)),
+        ...WORKFLOW_REASONS.map((each) => workflowReasonRow(each)),
+      ],
     },
   };
 }

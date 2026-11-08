@@ -50,6 +50,7 @@ const PORT_NAMES = [
   'UnitOfWork',
   'DeliveryQueue',
   'DeliveryProvider',
+  'TextMessageSender',
   'AttestationVerifier',
   'Metrics',
 ] as const;
@@ -65,10 +66,13 @@ const PORT_NAMES = [
  * work over PostgreSQL, and `staff/postgres.staff-identity-directory.adapter.ts`, the first adapter a domain provides. S0.47 adds the
  * vendor domain's directory and the platform's router that sends each question to the directory of its audience. S0.53 adds the
  * rider directory, which the staff domain provides beside its staff one. S0.54 adds the substitute attestation verifier, the one a local
- * run and staging may select and production refuses. The next adapter, a real one, is added here by the task that builds it, and a review
- * sees the line.
+ * run and staging may select and production refuses. The notification lane adds the text-message port (`TextMessageSender`) and its two
+ * adapters: the capture adapter, which reaches nobody, and the Hubtel one; neither is bound by a composition root yet. The next adapter,
+ * a real one, is added here by the task that builds it, and a review sees the line.
  */
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
+  'fleet/fleet-run-custody.adapter.ts',
+  'pickup/pickup-run-access.adapter.ts',
   'platform/audit/postgres.audit-writer.adapter.ts',
   'platform/auth/attestation/service.attestation-verifier.adapter.ts',
   'platform/auth/attestation/substitute.attestation-verifier.adapter.ts',
@@ -89,6 +93,9 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/limiter/in-memory.rate-limiter.adapter.ts',
   'platform/limiter/postgres.rate-limiter.adapter.ts',
   'platform/metrics/bounded.metrics.adapter.ts',
+  'platform/notifications/capture.text-message-sender.adapter.ts',
+  'platform/notifications/guarded.text-message-sender.adapter.ts',
+  'platform/notifications/hubtel.text-message-sender.adapter.ts',
   'staff/postgres.rider-identity-directory.adapter.ts',
   'staff/postgres.staff-identity-directory.adapter.ts',
   'vendor/postgres.vendor-account-directory.adapter.ts',
@@ -115,6 +122,9 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/limiter/in-memory.rate-limiter.adapter.ts', 'RateLimiter'],
   ['platform/limiter/postgres.rate-limiter.adapter.ts', 'RateLimiter'],
   ['platform/metrics/bounded.metrics.adapter.ts', 'Metrics'],
+  ['platform/notifications/capture.text-message-sender.adapter.ts', 'TextMessageSender'],
+  ['platform/notifications/guarded.text-message-sender.adapter.ts', 'TextMessageSender'],
+  ['platform/notifications/hubtel.text-message-sender.adapter.ts', 'TextMessageSender'],
 ];
 
 /**
@@ -123,6 +133,9 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
  * `ALLOWED_PORT_IMPLEMENTATIONS` like the others, and only the composition root imports them.
  */
 const DOMAIN_ADAPTERS: readonly string[] = [
+  // S1.24: each domain's side of the port the other uses (`platform/domain-ports/`), which is not one of the platform's seventeen.
+  'fleet/fleet-run-custody.adapter.ts',
+  'pickup/pickup-run-access.adapter.ts',
   'staff/postgres.rider-identity-directory.adapter.ts',
   'staff/postgres.staff-identity-directory.adapter.ts',
   'vendor/postgres.vendor-account-directory.adapter.ts',
@@ -137,8 +150,11 @@ const DESCRIBE_ADAPTERS = 'platform/auth/describe/describe-ports.adapter.ts';
 const COMPOSITION_ROOT: readonly string[] = [
   'app.module.ts',
   'delivery-worker-runtime.ts',
+  'domain-ports.module.ts',
+  'notification-sender.ts',
   'tools/seed/seed-runtime.ts',
   'tools/bootstrap/bootstrap-runtime.ts',
+  'tools/sms-smoke.ts',
 ];
 
 /**
@@ -658,13 +674,19 @@ describe('the ports of platform/auth (S0.1)', () => {
     // S0.9 added the second: the `db:seed` process binds the production clock for the seed's database service, in a file of its own.
     // S0.18 added the third: the delivery worker is its own process, and binds its adapters in a file of its own.
     // S0.30 added the fourth: the bootstrap seed and the resume command are processes of their own, and bind the clock, the token
-    // service and the custody adapters in a file of their own.
+    // service and the custody adapters in a file of their own. S1.12 added `notification-sender.ts`, the one place the text-message
+    // sender is composed, for the worker and for the owner's `sms:smoke` command, and `tools/sms-smoke.ts` binds the clock to that command.
+    // S1.24 added `domain-ports.module.ts`, the one place the two domains that meet over a run are joined: it binds the adapter of each (`pickup` and
+    // `fleet`) to the port that `platform/domain-ports/` defines, so that neither imports the other.
     it('names the composition root explicitly: the application module, the delivery worker and the seed and bootstrap process wiring', () => {
       expect(COMPOSITION_ROOT).toEqual([
         'app.module.ts',
         'delivery-worker-runtime.ts',
+        'domain-ports.module.ts',
+        'notification-sender.ts',
         'tools/seed/seed-runtime.ts',
         'tools/bootstrap/bootstrap-runtime.ts',
+        'tools/sms-smoke.ts',
       ]);
     });
 
@@ -1342,8 +1364,37 @@ describe('the database door (S0.4)', () => {
       ['pg_advisory_xact_lock_shared', 'sql`select pg_advisory_xact_lock_shared(1, 2)`'],
     ])('refuses %s outside platform/database/policy-lock/', (_name, text) => {
       expect(findAdvisoryLockViolations([file('staff/staff.repository.ts', text)])).toEqual([
-        "staff/staff.repository.ts calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (and the limiter's key lock in platform/limiter/) and take a class from lock-keys.ts",
+        "staff/staff.repository.ts calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (the limiter's key lock in platform/limiter/ and the notification lane's day count in platform/notifications/) and take a class from lock-keys.ts",
       ]);
+    });
+
+    // Break caught: the notification lane's day count refused where it is built, or accepted with a class written in the call, where the
+    // test that no two classes share a value cannot see it (S1.12e).
+    it('accepts the notification lane’s day count when it takes NOTIFICATION_LIMITS from lock-keys.ts, and refuses a class written in the call', () => {
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'platform/notifications/notification-store.ts',
+            'sql`select pg_advisory_xact_lock(${NOTIFICATION_LIMITS}::int4, 0)`',
+          ),
+        ]),
+      ).toEqual([]);
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'platform/notifications/notification-store.ts',
+            'sql`select pg_advisory_xact_lock(7, 0)`',
+          ),
+        ]),
+      ).toHaveLength(1);
+      expect(
+        findAdvisoryLockViolations([
+          file(
+            'platform/notifications/notification-store.ts',
+            'sql`select pg_try_advisory_xact_lock(${NOTIFICATION_LIMITS}::int4, 0)`',
+          ),
+        ]),
+      ).toHaveLength(1);
     });
 
     // Break caught: a tool taking a class of its own for a transaction-scoped lock, where the test of the classes cannot see it.
@@ -1420,5 +1471,151 @@ describe('the database door (S0.4)', () => {
     it('holds for the application as it is', () => {
       expect(findAdvisoryLockViolations(sourceFiles())).toEqual([]);
     });
+  });
+});
+
+/**
+ * `pickup` (a run and its stops) and `fleet` (the custody of the parcels of a run) meet over a run, and they meet **only through two ports** (S1.24; the
+ * readiness check's F-32: "domain-to-domain imports are allowed by no document"; the Product Owner's decision of 3 November 2026: introduce a port
+ * rather than approve the imports because they run one way). The ports are defined in `platform/domain-ports/`, which depends on no domain; each domain
+ * implements the one it owns (`pickup/pickup-run-access.adapter.ts`, `fleet/fleet-run-custody.adapter.ts`); the composition root wires them
+ * (`domain-ports.module.ts`); and **a port is called with the caller's transaction handle and opens none**, so the custody and the completion of a run
+ * stay one atomic piece of work under one order of locks (state-machines.md section 4).
+ *
+ * What stays allowed is the data layer's own convention: a table's schema file names another domain's table for its foreign key (`pickup` does it for
+ * the riders and the vendors, `vendor` for the riders), and nothing else of a schema crosses.
+ */
+describe('pickup and fleet meet only through ports', () => {
+  /** The schema files of the other domain that a schema file may name for a foreign key. A file added is a decision of the Product Owner's. */
+  const FLEET_MAY_REFERENCE_FROM_PICKUP = ['pickup-manifest.schema'];
+  /** A table of the run, or the function of the custody, named in a statement: after a verb of one, or called through its schema. */
+  const FLEET_NAMES_A_PICKUP_TABLE =
+    /\b(?:from|join|update|into)\s+(?:public\.)?pickup_(?:manifest|stop|request)\b/i;
+  const PICKUP_NAMES_A_CUSTODY_TABLE =
+    /\b(?:from|join|update|into)\s+(?:public\.)?run_custody_handover\b|\bmelarc\.run_custody_holder\b/i;
+  const COMPOSITION_ROOT = ['app.module.ts', 'domain-ports.module.ts'];
+
+  const importsOf = (text: string): string[] =>
+    [...text.matchAll(/from '(\.[^']*)'/g)].map((found) => found[1] ?? '');
+  const production = (): SourceFile[] =>
+    sourceFiles().filter((source) => !source.path.endsWith('.test.ts'));
+  /** The code of a file without its comments, so that a table named in a sentence is not taken for one named in a statement. */
+  const codeOf = (text: string): string =>
+    text.replaceAll(/\/\*[\s\S]*?\*\//g, '').replaceAll(/\/\/.*$/gm, '');
+  const importedFrom = (domain: string, folder: string): { file: string; path: string }[] =>
+    production()
+      .filter((source) => source.path.startsWith(`${domain}/`))
+      .flatMap((source) =>
+        importsOf(source.text)
+          .filter((path) => new RegExp(`^\\.\\./${folder}/`).test(path))
+          .map((path) => ({ file: source.path, path })),
+      );
+
+  // Break caught: a file of the custody domain using a file of the run's domain (its loader, its completion, its page position, its note rule), which is
+  // the coupling the port replaces. Only the foreign key of a schema file is the data layer's own.
+  it('has no file of fleet import a file of pickup but the schema a foreign key names', () => {
+    const offenders = importedFrom('fleet', 'pickup').filter(
+      ({ file, path }) =>
+        !(
+          file.endsWith('.schema.ts') &&
+          FLEET_MAY_REFERENCE_FROM_PICKUP.some((name) => path === `../pickup/${name}.js`)
+        ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  // Break caught: the completion of a run (or any file of pickup) importing the custody domain, which would put the two in a circle.
+  it('has no file of pickup import a file of fleet', () => {
+    expect(importedFrom('pickup', 'fleet')).toEqual([]);
+  });
+
+  // Break caught: a third file wiring one domain to the other, or a domain reaching into fleet or pickup from outside the composition root.
+  it('lets only the composition root, and the domain itself, import fleet or pickup', () => {
+    const offenders = production()
+      .filter((source) => !COMPOSITION_ROOT.includes(source.path))
+      .filter((source) => !source.path.startsWith('fleet/') && !source.path.startsWith('pickup/'))
+      .filter((source) =>
+        importsOf(source.text).some((path) => /(^|\/)(fleet|pickup)\//.test(path)),
+      )
+      .map((source) => source.path);
+    expect(offenders).toEqual([]);
+  });
+
+  // Break caught: the detector going blind, so that the rule below passes because it can see nothing. A table is named in a statement when it follows
+  // a verb of one; the entity that a route's declaration names for the platform's record scope (`record: { entity: 'pickup_manifest' }`) is not that.
+  it('sees a table named in a statement, and not a word in a declaration or a column', () => {
+    for (const text of [
+      'select 1 from pickup_manifest where id = $1',
+      'select 1 from public.pickup_stop s join pickup_request r on true',
+      'update pickup_manifest set state = 1',
+      'insert into pickup_stop (id) values ($1)',
+    ]) {
+      expect(FLEET_NAMES_A_PICKUP_TABLE.test(text), text).toBe(true);
+    }
+    for (const text of [
+      "record: { entity: 'pickup_manifest', param: 'id' }",
+      'relatedIds: { pickup_manifest_id: manifestId }',
+      'select pickup_manifest_id from run_custody_handover',
+    ]) {
+      expect(FLEET_NAMES_A_PICKUP_TABLE.test(text), text).toBe(false);
+    }
+    for (const text of [
+      'select 1 from run_custody_handover h where true',
+      'join public.run_custody_handover on true',
+      'select melarc.run_custody_holder($1)',
+    ]) {
+      expect(PICKUP_NAMES_A_CUSTODY_TABLE.test(text), text).toBe(true);
+    }
+    expect(PICKUP_NAMES_A_CUSTODY_TABLE.test('select pickup_manifest_id from pickup_stop')).toBe(
+      false,
+    );
+  });
+
+  // Break caught: the coupling moved from the imports to the SQL: a domain reading the other's tables by their names.
+  it('has neither domain name the other’s tables in a statement', () => {
+    const named = (domain: string, table: RegExp): string[] =>
+      production()
+        .filter(
+          (source) => source.path.startsWith(`${domain}/`) && !source.path.endsWith('.schema.ts'),
+        )
+        .filter((source) => table.test(codeOf(source.text)))
+        .map((source) => source.path);
+    expect(named('fleet', FLEET_NAMES_A_PICKUP_TABLE)).toEqual([]);
+    expect(named('pickup', PICKUP_NAMES_A_CUSTODY_TABLE)).toEqual([]);
+  });
+
+  // Break caught: a port that is not the use case's own transaction: one that opens a transaction, a unit of work or a runner of its own, which
+  // would turn the atomic work of an act into separate calls.
+  it('has no port or adapter open a transaction of its own', () => {
+    const files = [
+      'pickup/pickup-run-access.adapter.ts',
+      'pickup/pickup-run-completion.ts',
+      'fleet/fleet-run-custody.adapter.ts',
+      'platform/domain-ports/run-access.port.ts',
+      'platform/domain-ports/run-custody.port.ts',
+    ];
+    const sources = sourceFiles();
+    for (const path of files) {
+      const source = sources.find((each) => each.path === path);
+      expect(source, `${path} exists`).toBeDefined();
+      const code = codeOf(source?.text ?? '');
+      expect(code, path).not.toMatch(
+        /\.transaction\(|transactionWithContext|\bOperationRunner\b|\bUnitOfWork\b|\bBEGIN\b|\bCOMMIT\b/i,
+      );
+      expect(code, path).toMatch(/TransactionHandle/);
+    }
+  });
+
+  // Break caught: a port that carries code of a domain (a function body, a class) rather than the shape the other side may rely on.
+  it('keeps the port files to types and tokens', () => {
+    for (const name of ['run-access', 'run-custody']) {
+      const source = sourceFiles().find(
+        (each) => each.path === `platform/domain-ports/${name}.port.ts`,
+      );
+      expect(source, `${name}.port.ts exists`).toBeDefined();
+      const code = codeOf(source?.text ?? '');
+      expect(code, name).not.toMatch(/\bclass\b|\bfunction\b|=>\s*\{|\bawait\b/);
+      expect(code, name).toMatch(/Symbol\(/);
+    }
   });
 });

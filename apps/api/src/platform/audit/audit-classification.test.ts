@@ -93,12 +93,12 @@ describe('the tier of each event is the catalogue’s, read from the document (G
 
   // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
   // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 78 enhanced, 5 that depend on the act, 111 ordinary, of 194', () => {
-    expect(ENHANCED_CODES).toHaveLength(78);
+  it('counts the tiers: 79 enhanced, 5 that depend on the act, 116 ordinary, of 200', () => {
+    expect(ENHANCED_CODES).toHaveLength(79);
     expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(194);
+    expect(AUDIT_EVENT_CODES).toHaveLength(200);
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
-    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(111);
+    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(116);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
     for (const code of Object.keys(CONDITIONAL_CODES)) {
       expect(ENHANCED_CODES as readonly string[]).not.toContain(code);

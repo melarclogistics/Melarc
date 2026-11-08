@@ -1,6 +1,7 @@
 import { runSeed } from '../../../src/platform/database/seed/seed-helper.js';
 import { PROVISIONING_ROLE } from '../../../src/platform/database/technical-roles.js';
 import { fixturePlan } from '../../../src/tools/fixtures/fixtures.js';
+import { hubConfigurationPlan } from '../../../src/tools/seed/hub-configuration.js';
 import { referenceSeedPlan } from '../../../src/tools/seed/reference-seed.js';
 import { buildService } from './service.js';
 import type { TestDatabase } from './test-database.js';
@@ -18,6 +19,20 @@ export async function seedReferenceData(
   try {
     await runSeed(service, referenceSeedPlan());
     if (options.fixtures === true) await runSeed(service, fixturePlan());
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Seeds the launch hub's configuration (S1.4, S1.5: its zones and its fees) into a database that has the reference data, as the seed
+ * command does after the reference seed. A test of a booking, an estimate or a price starts here; a test that is about the absence of
+ * configuration (a second hub) leaves the other hubs without it.
+ */
+export async function seedHubConfiguration(database: TestDatabase): Promise<void> {
+  const { service, close } = buildService(database, { login: PROVISIONING_ROLE });
+  try {
+    await runSeed(service, hubConfigurationPlan());
   } finally {
     await close();
   }

@@ -32,6 +32,7 @@ Use these retained project sources:
 7. `delivery/IMPLEMENTATION_PLAN.md` — product delivery order.
 8. `delivery/slices/` — implementation and acceptance scope for each slice.
 9. `registers/GLOSSARY.md` — canonical terminology.
+10. `design/` — brand, design system, component patterns and the product design direction ([PRODUCT_DESIGN_DIRECTION.md](../design/PRODUCT_DESIGN_DIRECTION.md)): how the interface looks and is composed, never what it does.
 
 When two retained sources appear inconsistent, stop the affected implementation and surface the conflict to the Product Owner. Do not silently choose a new product rule.
 
@@ -110,6 +111,8 @@ Use React with Vite for the Ops Portal.
 The frontend consumes the canonical API through generated wire types. UI-only form and presentation models are allowed, but parallel hand-written API DTOs are not.
 
 The server remains authoritative for permissions, prices, state transitions, commercial eligibility, concurrency and financial outcomes.
+
+Interface work follows the documents in `design/`, starting with [PRODUCT_DESIGN_DIRECTION.md](../design/PRODUCT_DESIGN_DIRECTION.md). The web component and library policy is [DESIGN_SYSTEM.md](../design/DESIGN_SYSTEM.md) §24a.
 
 ### Database
 

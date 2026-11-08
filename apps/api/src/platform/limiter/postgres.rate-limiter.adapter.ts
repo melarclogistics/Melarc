@@ -5,8 +5,8 @@ import { randomUUIDv7 } from '../auth/crypto/uuid-v7.js';
 import type { Clock } from '../auth/ports/clock.port.js';
 import type { Metrics } from '../auth/ports/metrics.port.js';
 import {
-  RATE_LIMIT_BUCKETS,
-  type RateLimitBucket,
+  RATE_LIMIT_COUNTERS,
+  type RateLimitCounter,
   type RateLimitDecision,
   type RateLimiter,
 } from '../auth/ports/rate-limiter.port.js';
@@ -133,9 +133,11 @@ export class PostgresRateLimiter implements RateLimiter {
     }
   }
 
-  async admit(bucket: RateLimitBucket, canonicalKey: string): Promise<RateLimitDecision> {
-    if (!(RATE_LIMIT_BUCKETS as readonly string[]).includes(bucket)) {
-      throw new TypeError('A rate-limit bucket is one of the six canonical buckets');
+  async admit(bucket: RateLimitCounter, canonicalKey: string): Promise<RateLimitDecision> {
+    if (!(RATE_LIMIT_COUNTERS as readonly string[]).includes(bucket)) {
+      throw new TypeError(
+        'A rate-limit counter is one of the six canonical buckets or a sub-ceiling inside one',
+      );
     }
     if (typeof canonicalKey !== 'string') throw new TypeError('A rate-limit key is text');
     if (Buffer.byteLength(canonicalKey, 'utf8') > MAX_KEY_BYTES) {
@@ -172,7 +174,7 @@ export class PostgresRateLimiter implements RateLimiter {
 
   async #decide(
     tx: DatabaseTransaction,
-    bucket: RateLimitBucket,
+    bucket: RateLimitCounter,
     digests: ReturnType<LimiterDigest['digestsFor']>,
   ): Promise<Outcome> {
     // 1. The limit, in this transaction. A setting that is missing or not valid is an answer ("this limiter cannot decide"), not a

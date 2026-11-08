@@ -73,6 +73,64 @@ describe('answerOf: a success', () => {
   });
 });
 
+describe('answerOf: the rule a conflict declares (S1.25)', () => {
+  const STOP = '6b7c8d9e-0f1a-4b2c-8d3e-4f5a6b7c8d9e';
+
+  // Break caught: the rule of a STATE_CONFLICT thrown away, so a refused dispatch can only say that "something changed".
+  it('keeps the rule and the stops a STATE_CONFLICT names', () => {
+    const failure = failureOf(
+      respond(409, {
+        code: 'STATE_CONFLICT',
+        message: 'x',
+        request_id: 'req-2',
+        details: { rule: 'request_not_confirmed', stops: [STOP], service_date: '2026-11-03' },
+      }),
+    );
+
+    expect(failure.rule).toBe('request_not_confirmed');
+    expect(failure.stops).toEqual([STOP]);
+  });
+
+  it('has no rule and no stops when the answer declares none', () => {
+    const failure = failureOf(respond(409, { code: 'STATE_CONFLICT', message: 'x' }));
+
+    expect(failure.rule).toBeUndefined();
+    expect(failure.stops).toEqual([]);
+  });
+
+  // Break caught: a rule that is not a machine name (markup, text of a person's) kept to be drawn, or a stop that is not an identifier.
+  it.each([
+    ['markup', { rule: '<script>alert(1)</script>' }],
+    ['a sentence', { rule: 'The day has passed for this run' }],
+    ['a number', { rule: 7 }],
+    ['an empty text', { rule: '' }],
+  ])('drops a rule that is %s', (_name, details) => {
+    const failure = failureOf(respond(409, { code: 'STATE_CONFLICT', message: 'x', details }));
+
+    expect(failure.rule).toBeUndefined();
+  });
+
+  it('keeps only the stops that are identifiers, and at most 64', () => {
+    const failure = failureOf(
+      respond(409, {
+        code: 'STATE_CONFLICT',
+        message: 'x',
+        details: { rule: 'request_not_confirmed', stops: [STOP, 'not an id', 4, null] },
+      }),
+    );
+    expect(failure.stops).toEqual([STOP]);
+
+    const many = failureOf(
+      respond(409, {
+        code: 'STATE_CONFLICT',
+        message: 'x',
+        details: { rule: 'request_not_confirmed', stops: Array.from({ length: 200 }, () => STOP) },
+      }),
+    );
+    expect(many.stops).toHaveLength(64);
+  });
+});
+
 describe('answerOf: a failure', () => {
   // Break caught: a failure read as `if (error)`, which takes a 403 with an empty body for a success.
   it('is a failure for an error status with no body at all', () => {

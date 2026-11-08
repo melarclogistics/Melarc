@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyChanges,
-  RELEASE_2,
-  RELEASE_2_REVISION,
+  CURRENT_REVISION,
+  NEXT_RELEASE,
+  NEXT_REVISION,
   type SourceChange,
 } from './policy-release.js';
 
@@ -23,8 +24,8 @@ describe('the release the two-build proof compiles (S0.63)', () => {
   // Break caught: a change that silently stops applying (the source moved) or applies twice, leaving a second build that differs from
   // the first in something other than what the proof says, or in nothing.
   it('changes each file in exactly the one place it names, and nothing else', () => {
-    const changed = applyChanges(RELEASE_2);
-    for (const change of RELEASE_2) {
+    const changed = applyChanges(NEXT_RELEASE);
+    for (const change of NEXT_RELEASE) {
       const original = read(change.file);
       const [after] = [...changed.entries()].filter(
         ([path]) =>
@@ -35,14 +36,20 @@ describe('the release the two-build proof compiles (S0.63)', () => {
       expect(after?.[1]).toBe(original.replace(change.from, change.to));
       expect(after?.[1]).not.toBe(original);
     }
-    expect(changed.size).toBe(RELEASE_2.length);
+    expect(changed.size).toBe(NEXT_RELEASE.length);
   });
 
   it('raises both compiled revisions above the current build’s, and changes a predicate of each audience', () => {
-    expect(read('app.module.ts')).toContain('Object.freeze({ VENDOR: 1, RIDER: 1 })');
-    expect(RELEASE_2_REVISION).toEqual({ VENDOR: 2, RIDER: 2 });
-    expect(RELEASE_2.map((change) => change.file).toSorted()).toEqual([
-      'app.module.ts',
+    // The tree's own revisions are read from its source, so the release is always "the next" and the proof outlives a bump.
+    expect(read('platform/auth/sessions/build-fixed-policy.ts')).toContain(
+      `Object.freeze({ VENDOR: ${String(CURRENT_REVISION.VENDOR)}, RIDER: ${String(CURRENT_REVISION.RIDER)} })`,
+    );
+    expect(NEXT_REVISION).toEqual({
+      VENDOR: CURRENT_REVISION.VENDOR + 1,
+      RIDER: CURRENT_REVISION.RIDER + 1,
+    });
+    expect(NEXT_RELEASE.map((change) => change.file).toSorted()).toEqual([
+      'platform/auth/sessions/build-fixed-policy.ts',
       'settings/reason-definitions.controller.ts',
       'settings/rider-assigned-work.ts',
     ]);
@@ -51,7 +58,7 @@ describe('the release the two-build proof compiles (S0.63)', () => {
   // Break caught: a replacement read as a pattern (`$&` stands for the text it replaces), which would put the replaced text, and not the
   // release's, into the second build.
   it('puts the replacement in as it is written, whatever characters it holds', () => {
-    const [first] = RELEASE_2;
+    const [first] = NEXT_RELEASE;
     if (first === undefined) throw new Error('the release changes something');
     const [after] = [...applyChanges([{ ...first, to: 'A$&B$1C$$D' }]).values()];
     expect(after).toContain('A$&B$1C$$D');

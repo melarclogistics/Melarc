@@ -81,6 +81,18 @@ Not every stop succeeds. This feature records **why**, preserves the evidence, a
 - **Never leave a failure undecided indefinitely.** The backstop exists because a queue nobody works is a queue that hides parcels.
 - **Never record a zero collection as anything but a failure** — §21.3 routes it here.
 
+### 5.4 As built (S1.28, 4 November 2026; the part that stands alone)
+
+`reportPickupFailure` is built (migration `0072`, `src/pickup/pickup-failure.*`); the rest of the task is not (below).
+
+**Built.** The assigned rider fails a stop it has arrived at, on a run in progress: one of the four fixed categories, a reason of the `PICKUP_FAILURE` catalogue, the note, and up to ten contact attempts (each a method — a call, a text or in person —, an instant, what came of it and, where the rider wants, a note; migration `0073`). The time the rider waited is not a field of its own: it is derived, from the arrival the database stamped, and a reported wait would be the rider's claim. The stop becomes `FAILED`, which is terminal and frozen for every writer; it keeps its place, its arrival and its claim, and **the request is not written** (it stays `CONFIRMED`; the office reschedules, cancels or escalates it). **The database holds what is the catalogue's and the clock's** (OB-S1-60, as for the count): the reason is an active reason of the catalogue with the label and attribution it holds now, and the note, the contact attempt and the photo its metadata asks for are required (`REASON_REQUIRED`; `details.rule` `contact_attempt` or `photo`); the moment of the failure is the database's own and the snapshot names it. One event in the rider's name, `pickup.stop.failed` (ordinary tier), bound member for member to the stored stop and carrying no note; a run whose last stop failed with nothing collected is **completed by the system** in the same transaction (`pickup.manifest.completed`, cause `LAST_STOP_FAILED`). A stop with a count is never failed. **A refused collection is escalation-only**: `cancelPickupRequest` with a replacement is `PICKUP_ATTEMPT_LIMIT_REACHED` for it whatever the cap, until hub Senior Ops force-extends the request for its next attempt (`extendPickupAttempts`, which now treats a refused collection as one that cannot go on); a plain cancellation and an escalation are open to Ops at once. A count of zero is refused by `recordCollection` and is reported here with a category (`AC-SLICE-001-36`).
+
+**The door wait (review closeout of 5 November 2026, migration `0073`; built on the reviewer's recommendation, the Product Owner's confirmation is open, `OB-S1-69`).** A failure of the category `VENDOR_UNAVAILABLE` is accepted once the hub's `rider_door_wait_minutes` has passed since the arrival of the stop, which the database stamped (a writer under the arrival key does not choose it) and on the database's clock; before that it is `422 PICKUP_DOOR_WAIT_NOT_ELAPSED`, with the wait, the moment the report is allowed and the seconds to it. The stop's guard holds the same rule for every writer; the other three categories carry no wait; a hub with no usable value gets the operational failure, never an invented wait. **The pairing of a reason with a category is not checked anywhere**, so the wait (like the restriction of a refused collection) follows the category the rider reports: a rider who reports `PARCEL_NOT_READY` with a vendor-unavailable reason is not held. Binding the two needs a category on the failure reasons of the catalogue, which is the owner's to decide.
+
+**Not built, and why** (the plan's S1.28 paragraph and OB-S1-66 say the same). (1) **The evidence photo**: the evidence store (S1.11) is built with this task's first user and is not built, so `evidence_ids` is `EVIDENCE_NOT_STORED` and the two reasons that ask for a photo (`ENTRY_REFUSED_BY_SECURITY`, `LOCATION_CLOSED`) cannot be used until it is. (2) **The backstop** (`AC-SLICE-001-34`): its cadence and the process of its lane are the owner's (OB-S1-07; the plan's stop condition), and it needs a capability of its own; until it runs an undecided failure is not escalated by the system. (3) **The narrowing of `escalatePickupRequest`** to a request whose stop failed. (4) **The messages of a failure** (to the sender, the vendor and the Ops feed). (The door wait, which this list held before the review closeout, is built: above.)
+
+**For the owner.** (1) A contact attempt carries a method (`PHONE_CALL`, `SMS`, `IN_PERSON`), an instant, an outcome and an optional note; the wait is derived and not reported (OB-S1-67). (2) A force-extension is one explicitly authorised next attempt: for a refused collection it releases the restriction for exactly that attempt and records that it did, for a request at the cap it lifts the cap by one, and it records which of the two it did; the ceiling before and after are recorded only where one was lifted, and the request's own attempt number is never presented as the ceiling that was in force (OB-S1-68). The release is the request's own: the replacement that carries the extension is not itself released. A request extended before its stop failed as a refused collection cannot be extended a second time (one extension a request, OB-S1-15), so it can only be escalated or cancelled: the owner decides whether the second act is allowed. (3) The door wait is enforced for a vendor-unavailable failure (OB-S1-69).
+
 ---
 
 ## 6. Entities — *pointer*
@@ -129,7 +141,7 @@ The force-extension carries the §35.1.6 minimum: reason, actor, timestamp, **be
 
 ## 12. API operations — *pointer*
 
-`reportPickupFailure` — [openapi.yaml](../../contracts/openapi.yaml). The Ops decision-queue operations are not yet in the contract.
+`reportPickupFailure`, `escalatePickupRequest`, `extendPickupAttempts` — [openapi.yaml](../../contracts/openapi.yaml). The Ops decision-queue operations were added on 23 August (§15); a reschedule is `cancelPickupRequest` with a replacement.
 
 ---
 
@@ -174,10 +186,11 @@ And the only route forward is a new request cloned from the source.
 Given a stop failed with category REFUSED_COLLECTION,
 When an Ops user attempts an ordinary reschedule,
 Then the reschedule is refused,
+And the refusal is PICKUP_ATTEMPT_LIMIT_REACHED,
 And the request may only be escalated, or rescheduled after hub Senior Ops force-extension with a reason.
 ```
 
-**Governs:** §21.6 · **Surface:** Melarc Ops · **Test level:** service
+**Governs:** §21.6, `MSC-DEC-116` · **Surface:** Melarc Ops · **Test level:** service · **Code:** `PICKUP_ATTEMPT_LIMIT_REACHED`
 
 ### `AC-SLICE-001-34` — The backstop escalates an undecided failure
 
@@ -198,18 +211,19 @@ Given a stop failed for a registered vendor,
 When the vendor contacts support to dispute it,
 Then no self-service dispute form exists on Melarc Vendor,
 And the physical failure state is unchanged by the contact,
-And any correction happens through an assisted Ops review that is itself audited.
+And any correction happens through an assisted Ops review, recorded as an audited note on the escalated request (escalatePickupRequest) with the reviewer, the time and what was decided,
+And the review never reverses the physical failure state.
 ```
 
-**Governs:** §21.5, `MSC-DEC-122` · **Surface:** Melarc Vendor · **Test level:** e2e
+**Governs:** §21.5, `MSC-DEC-122` · **Surface:** Melarc Vendor, Melarc Ops · **Test level:** e2e, API
 
 ### `AC-SLICE-001-36` — Zero collection arrives here, not at a completed stop
 
 ```text
 Given a rider who collected zero packages,
 When the outcome is recorded,
-Then the stop cannot close as COLLECTED,
-And the rider is routed to this failure flow with an approved category,
+Then recordCollection refuses a count of zero with ZERO_COLLECTION_IS_FAILURE and the stop cannot close as COLLECTED,
+And the rider is routed to this failure flow (reportPickupFailure) with an approved category,
 And no sender set or hub handover is created.
 ```
 
@@ -239,8 +253,8 @@ No `DECISION_NEEDED` question blocks this feature.
 
 | Surface| Status| Gap|
 |---|---|---|
-| Melarc Rider| ⚪ not built| Everything|
-| Melarc Ops| ⚪ not built| Decision queue, escalation, backstop|
+| Melarc Rider| 🟡 API built, no screen| `reportPickupFailure` (§5.4); the screen is S1.46. Not built: the evidence photo, and the screen that tells the rider how long to wait (the server refuses an early vendor-unavailable report)|
+| Melarc Ops| ⚪ not built| Decision queue (S1.30), the backstop and the narrowing of the escalation (OB-S1-66). The reschedule of a refused collection and its force-extension are built|
 | Melarc Vendor| ⚪ not built| Notification only — no dispute form by design|
 | Recipient channel| N/A| —|
 

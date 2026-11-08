@@ -862,12 +862,27 @@ describe('a vendor and a rider rest on the fixed policy too', () => {
   it('refuses issuance, writing nothing, below the floor, with no compiled revision, and without a seeded policy', async () => {
     // A vendor of its own: an account has at most one live session, and the other test left one for the first.
     const another: PrincipalSummary = { ...vendor, ref: { type: 'VENDOR', id: randomUUID() } };
-    await admin.query(
-      `update fixed_permission_policy set revision = 2, minimum_revision = 2 where principal_type = 'VENDOR'`,
+    // The revision the seed holds is whatever the build shipped with, and the guard lets the floor move only with a raise of exactly one,
+    // to the new revision: so the floor is raised from the stored revision, not to a number written here. A seed that moves on
+    // (the build's revision rose from 1 to 2 with the pickup permissions) leaves this test as true as it was.
+    const seeded = await observer.one<{ revision: number; minimum_revision: number }>(
+      `select revision, minimum_revision from fixed_permission_policy where principal_type = 'VENDOR'`,
     );
+    const held = seeded?.revision ?? 0;
+    expect(held).toBeGreaterThanOrEqual(1);
+    const raised = held + 1;
+    await admin.query(
+      `update fixed_permission_policy set revision = revision + 1, minimum_revision = revision + 1 where principal_type = 'VENDOR'`,
+    );
+    expect(
+      await observer.one(
+        `select revision, minimum_revision from fixed_permission_policy where principal_type = 'VENDOR'`,
+      ),
+    ).toEqual({ revision: raised, minimum_revision: raised });
+    // A build that is exactly the stored revision before the raise is now below the floor.
     const below = assemble(built, {
       identities: fixedDirectory(another),
-      compiledPolicy: { VENDOR: 1 },
+      compiledPolicy: { VENDOR: held },
     });
     const unknown = assemble(built, { identities: fixedDirectory(another), compiledPolicy: {} });
     const request = {
@@ -888,21 +903,26 @@ describe('a vendor and a rider rest on the fixed policy too', () => {
     expect(await observer.count('session', { principal_id: another.ref.id })).toBe(0);
     const current = assemble(built, {
       identities: fixedDirectory(another),
-      compiledPolicy: { VENDOR: 2 },
+      compiledPolicy: { VENDOR: raised },
     });
     const allowed = await current.issuer.issue(request);
-    expect(allowed.session.authority.policyRevision).toBe(2);
+    expect(allowed.session.authority.policyRevision).toBe(raised);
     expect(await observer.count('session', { principal_id: another.ref.id })).toBe(1);
 
     // An addition raises the revision and leaves the floor: a build that is behind the revision and at or above the floor still
     // issues, and records its own revision, not the stored one.
     await admin.query(
-      `update fixed_permission_policy set revision = 3 where principal_type = 'VENDOR'`,
+      `update fixed_permission_policy set revision = revision + 1 where principal_type = 'VENDOR'`,
     );
+    expect(
+      await observer.one(
+        `select revision, minimum_revision from fixed_permission_policy where principal_type = 'VENDOR'`,
+      ),
+    ).toEqual({ revision: raised + 1, minimum_revision: raised });
     const yetAnother: PrincipalSummary = { ...vendor, ref: { type: 'VENDOR', id: randomUUID() } };
     const behind = assemble(built, {
       identities: fixedDirectory(yetAnother),
-      compiledPolicy: { VENDOR: 2 },
+      compiledPolicy: { VENDOR: raised },
     });
     const issuedBehind = await behind.issuer.issue({
       principal: yetAnother.ref,
@@ -910,6 +930,26 @@ describe('a vendor and a rider rest on the fixed policy too', () => {
       verifiedCredentialGeneration: 1,
       registeredDeviceId: randomUUID(),
     });
-    expect(issuedBehind.session.authority.policyRevision).toBe(2);
+    expect(issuedBehind.session.authority.policyRevision).toBe(raised);
+
+    // A policy the seed has not written: the audience's row is gone, so an instance that knows its own revision still cannot be sure of the
+    // policy. The refusal is the operational failure, not an answer about the person, and nothing is written. (The test goes last, so
+    // the Rider row it removes is not read again.)
+    await admin.query(`delete from fixed_permission_policy where principal_type = 'RIDER'`);
+    const unseeded: PrincipalSummary = { ...rider, ref: { type: 'RIDER', id: randomUUID() } };
+    const withoutRow = assemble(built, {
+      identities: fixedDirectory(unseeded),
+      compiledPolicy: { RIDER: 1 },
+    });
+    await expect(
+      withoutRow.issuer.issue({
+        principal: unseeded.ref,
+        correlationId: 'unseeded',
+        verifiedCredentialGeneration: 1,
+        registeredDeviceId: randomUUID(),
+        clientRootSignal: 'NOT_DETECTED',
+      }),
+    ).rejects.toMatchObject({ name: 'FixedPolicyUnavailableError', reason: 'NOT_SEEDED' });
+    expect(await observer.count('session', { principal_id: unseeded.ref.id })).toBe(0);
   });
 });

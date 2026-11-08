@@ -11,6 +11,7 @@
 export const ErrorCode = {
   AccountOverdue: 'ACCOUNT_OVERDUE',
   AllowanceDisabled: 'ALLOWANCE_DISABLED',
+  AlreadyManifested: 'ALREADY_MANIFESTED',
   AttemptsExhausted: 'ATTEMPTS_EXHAUSTED',
   BlindCountViolated: 'BLIND_COUNT_VIOLATED',
   CarrierCostRequired: 'CARRIER_COST_REQUIRED',
@@ -89,6 +90,7 @@ export const ErrorCode = {
   PeriodNotReconciled: 'PERIOD_NOT_RECONCILED',
   PermissionDenied: 'PERMISSION_DENIED',
   PickupAttemptLimitReached: 'PICKUP_ATTEMPT_LIMIT_REACHED',
+  PickupDoorWaitNotElapsed: 'PICKUP_DOOR_WAIT_NOT_ELAPSED',
   PickupMinimumNotMet: 'PICKUP_MINIMUM_NOT_MET',
   RateLimited: 'RATE_LIMITED',
   ReasonNotActive: 'REASON_NOT_ACTIVE',

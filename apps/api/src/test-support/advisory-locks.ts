@@ -20,7 +20,12 @@ const isTool = (file: SourceFile): boolean => file.path.startsWith('tools/');
  * Where an advisory lock may be taken: the policy toolkit, and the rate limiter's per-key serialisation (S0.14, obligation OB-67),
  * whose classes come from the one module `lock-keys.ts`. A new place is added here with its own test, not by a task's say-so.
  */
-const ADVISORY_CALLERS = ['platform/database/policy-lock/', 'platform/limiter/'];
+const ADVISORY_CALLERS = [
+  'platform/database/policy-lock/',
+  'platform/limiter/',
+  // The notification lane's day count (S1.12e): its class is NOTIFICATION_LIMITS.
+  'platform/notifications/',
+];
 
 /** A lock whose first argument is a number written in the call: its class would not be in `lock-keys.ts`, where no two may share a value. */
 const LITERAL_CLASS = /\bpg_advisory_xact_lock(?:_shared)?\s*\(\s*-?\d/;
@@ -67,7 +72,7 @@ export function findAdvisoryLockViolations(files: readonly SourceFile[]): string
       TRANSACTION_LOCK.test(text)
     ) {
       violations.push(
-        `${file.path} calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (and the limiter's key lock in platform/limiter/) and take a class from lock-keys.ts`,
+        `${file.path} calls an advisory lock function; advisory locks live in platform/database/policy-lock/ (the limiter's key lock in platform/limiter/ and the notification lane's day count in platform/notifications/) and take a class from lock-keys.ts`,
       );
     } else if (LITERAL_CLASS.test(text) && !violations.includes(literalClass(file))) {
       violations.push(literalClass(file));

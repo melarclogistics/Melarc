@@ -9,6 +9,51 @@
  *
  * This file is never imported by application code (`test/navigation-no-roles.test.ts` holds that).
  */
+/**
+ * The keys SLICE-001 gives Ops Staff (S1.8; `OPS_STAFF_KEYS_001` of the seed), and the keys that start at Senior Ops
+ * (`SENIOR_ONLY_KEYS_001`): Senior Ops and Platform Admin hold both lists, Ops Staff the first.
+ */
+const OPS_STAFF_KEYS_001 = [
+  'fleet.custody.accept',
+  'fleet.custody.initiate',
+  'fleet.custody.read',
+  'hub.intake.close',
+  'hub.intake.count',
+  'hub.intake.itemize',
+  'hub.read',
+  'pickup.exception.approve',
+  'pickup.exception.request',
+  'pickup.failure.resolve',
+  'pickup.handshake.override',
+  'pickup.manifest.assign',
+  'pickup.manifest.create',
+  'pickup.manifest.dispatch',
+  'pickup.read',
+  'pickup.request.cancel',
+  'pickup.request.cancel_chargeable',
+  'pickup.request.confirm',
+  'pickup.request.create',
+  'pickup.stop.skip',
+  'pricing.correction.create',
+  'pricing.read',
+  'vendor.pickup_location.manage',
+] as const;
+
+const SENIOR_ONLY_KEYS_001 = [
+  'hub.intake.close_exception',
+  'hub.osd.adjudicate',
+  'pickup.attempt.extend',
+  'pickup.cancellation_charge.waive',
+  'pickup.handshake.resolve',
+  'pricing.correction.approve',
+] as const;
+
+/**
+ * The key of the Ops message log (S1.12e; `NOTIFICATION_READ_GRANTS` of the seed, "A S P · own hub"): the three staff bundles hold it, and
+ * Finance, a vendor and a rider do not.
+ */
+const NOTIFICATION_KEYS = ['notification.read'] as const;
+
 export const BUNDLE_KEY_SETS = {
   'Ops Staff': [
     'dispatch.read',
@@ -17,8 +62,13 @@ export const BUNDLE_KEY_SETS = {
     'staff.device.revoke',
     'staff.identity.create',
     'vendor.read',
+    ...NOTIFICATION_KEYS,
+    ...OPS_STAFF_KEYS_001,
   ],
   'Senior Ops': [
+    ...OPS_STAFF_KEYS_001,
+    ...SENIOR_ONLY_KEYS_001,
+    ...NOTIFICATION_KEYS,
     'dispatch.read',
     'permission.assignable_bundle.read',
     'settings.reason.read',
@@ -48,8 +98,11 @@ export const BUNDLE_KEY_SETS = {
     'vendor.credential.recover',
     'vendor.organization.approve',
     'vendor.read',
+    ...NOTIFICATION_KEYS,
+    ...OPS_STAFF_KEYS_001,
+    ...SENIOR_ONLY_KEYS_001,
   ],
-  'Finance/Reconciliation': ['vendor.read'],
+  'Finance/Reconciliation': ['pricing.read', 'vendor.read'],
 } as const satisfies Record<string, readonly string[]>;
 
 export type BundleName = keyof typeof BUNDLE_KEY_SETS;

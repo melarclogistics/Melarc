@@ -1,0 +1,85 @@
+/*
+ * Timeline: a vertical list of steps joined by a rule, each with a round marker. The current step's marker is filled and its title carries words
+ * that say so, so it is never told by colour alone; under forced colours the marker and the rule take the system's text colour. Everything is
+ * in rem, so enlarged text grows it, and a step's text wraps rather than pushing the page sideways at 320 px.
+ */
+.ui-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-timeline__step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  column-gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+/* The rule from one marker to the next: it stops at the last step. */
+.ui-timeline__step:not(:last-child)::before {
+  position: absolute;
+  inset-block: 1.25rem 0;
+  inset-inline-start: calc(0.625rem - 1px);
+  width: 2px;
+  background: var(--color-border-default);
+  content: '';
+}
+
+.ui-timeline__marker {
+  box-sizing: border-box;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.125rem;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-default);
+}
+
+.ui-timeline__step--current .ui-timeline__marker {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary);
+}
+
+.ui-timeline__body {
+  min-width: 0;
+}
+
+.ui-timeline__title {
+  margin: 0;
+  font-weight: var(--text-label-md-weight);
+  overflow-wrap: anywhere;
+}
+
+.ui-timeline__current {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-timeline__details {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+.ui-timeline__details p {
+  margin: 0;
+}
+
+@media (forced-colors: active) {
+  .ui-timeline__step:not(:last-child)::before {
+    background: CanvasText;
+  }
+
+  .ui-timeline__marker {
+    border-color: CanvasText;
+  }
+
+  .ui-timeline__step--current .ui-timeline__marker {
+    border-color: Highlight;
+    background: Highlight;
+  }
+}

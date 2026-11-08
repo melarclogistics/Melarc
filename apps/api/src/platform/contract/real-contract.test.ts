@@ -231,8 +231,6 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   /** What the rider sends, and what comes back for it. */
   const created = {
     collected_count: 3,
-    handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED',
-    handshake_channel: 'PORTAL',
     evidence_ids: [OTHER],
     captured_at: '2026-10-05T09:30:00Z',
   };
@@ -276,14 +274,7 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   });
 
   it('needs the fields every record has: what was sent that is required, and what the server adds', () => {
-    const required = [
-      'collected_count',
-      'handshake_type',
-      'id',
-      'pickup_stop_id',
-      'declared_count',
-      'variance',
-    ];
+    const required = ['collected_count', 'id', 'pickup_stop_id', 'declared_count', 'variance'];
     for (const field of required) {
       const without = Object.fromEntries(Object.entries(record).filter(([name]) => name !== field));
       expect(answer(without), field).toEqual([
@@ -296,8 +287,10 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
     expect(answer({ ...record, variance: 'OVER' })).toEqual([
       { in: 'response-body', pointer: '/variance', rule: 'enum' },
     ]);
-    expect(answer({ ...record, handshake_type: 'ANYTHING' })).toEqual([
-      { in: 'response-body', pointer: '/handshake_type', rule: 'enum' },
+    // The handshake's direction and channel left this record (count, then confirm, 29 October 2026): they
+    // belong to the handshake, and a record carrying either is refused as an undeclared field.
+    expect(answer({ ...record, handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED' })).toEqual([
+      { in: 'response-body', pointer: '', rule: 'additionalProperties' },
     ]);
     expect(answer({ ...record, collected_count: -1 })).toEqual([
       { in: 'response-body', pointer: '/collected_count', rule: 'minimum' },
@@ -319,8 +312,9 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   // own fields are not something a rider may send, and a request is still held to its two required fields.
   it('leaves the creation request exactly as strict as it was', () => {
     expect(sent(created)).toEqual([]);
-    expect(sent({ collected_count: 3 })).toEqual([
-      { in: 'body', pointer: '/handshake_type', rule: 'required' },
+    expect(sent({})).toEqual([{ in: 'body', pointer: '/collected_count', rule: 'required' }]);
+    expect(sent({ ...created, handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED' })).toEqual([
+      { in: 'body', pointer: '', rule: 'additionalProperties' },
     ]);
     expect(sent({ ...created, rider_declared_count: 3 })).toEqual([
       { in: 'body', pointer: '', rule: 'additionalProperties' },
@@ -346,7 +340,7 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
     expect(create.additionalProperties).toBe(false);
     expect(full.additionalProperties).toBe(false);
     const shared = Object.keys(create.properties as JsonObject);
-    expect(shared.length).toBeGreaterThan(5);
+    expect(shared.length).toBeGreaterThanOrEqual(5);
     for (const field of shared) {
       expect((full.properties as JsonObject)[field], field).toEqual(
         (create.properties as JsonObject)[field],
@@ -361,11 +355,16 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
     'arriveAtDeliveryStop',
     'arriveAtPickupStop',
     'completeRiderDeviceEnrolment',
+    'initiateHandshake',
+    'recordCollection',
+    'reportPickupFailure',
     'requestDeliveryOtp',
     'requestRiderSignInChallenge',
+    'requestSmsHandshakeFallback',
     'riderSignIn',
     'startDeliveryRun',
     'startRun',
+    'verifyHandshake',
   ];
 
   /** Every operation that declares `servers` of its own, by operationId. */
@@ -384,15 +383,16 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
     return found.toSorted();
   };
 
-  // Break caught: a server declaration dropped to make a count agree. All eight stay: the dedicated host is
-  // where a native client calls these, and removing one would send it to the cookie-only default.
-  it('keeps all eight operation-level server declarations', () => {
+  // Break caught: a server declaration dropped to make a count agree. All thirteen stay: the dedicated host is
+  // where a native client calls these, and removing one would send it to the cookie-only default. (The three of the
+  // collection handshake were added in S1.27: the rider shows and enters codes at the door; the report of a failure in S1.28.)
+  it('keeps all thirteen operation-level server declarations', () => {
     expect(withServers()).toEqual(RIDER_OPERATIONS);
   });
 
   // Break caught: the comment above `servers` giving a different count from the one the document has, which
   // sends the next reader looking for an operation that is not there.
-  it('says in its header comment how many there are, and says eight', () => {
+  it('says in its header comment how many there are, and says thirteen', () => {
     const text = readFileSync(locateContract(import.meta.dirname), 'utf8');
     const stated = /declared per operation on the (\w+)\s+# Rider native operations/.exec(text);
     const words = [
@@ -407,10 +407,13 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
       'eight',
       'nine',
       'ten',
+      'eleven',
+      'twelve',
+      'thirteen',
     ];
 
     expect(stated?.[1]).toBe(words[withServers().length]);
-    expect(stated?.[1]).toBe('eight');
+    expect(stated?.[1]).toBe('thirteen');
   });
 });
 

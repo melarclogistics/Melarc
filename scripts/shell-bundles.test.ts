@@ -33,18 +33,52 @@ function seededStaffBundles(text: string): Map<string, string> {
   return names;
 }
 
-/** The permission keys each bundle variable is granted, from the two ways the seed writes a grant. */
+/** The text of a call from its opening parenthesis to the one that closes it. */
+function balanced(text: string, open: number): string {
+  let depth = 0;
+  for (let at = open; at < text.length; at += 1) {
+    if (text[at] === '(') depth += 1;
+    if (text[at] === ')') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open, at + 1);
+    }
+  }
+  return text.slice(open);
+}
+
+/** The permission keys each bundle variable is granted, from the three ways the seed writes a grant. */
 function grantedKeys(text: string): Map<string, string[]> {
   const keys = new Map<string, string[]>();
   const add = (variable: string, key: string): void => {
     keys.set(variable, [...(keys.get(variable) ?? []), key]);
   };
-  for (const block of text.matchAll(
-    /\.\.\.staff\(\s*BUNDLE_IDS\.(\w+),\s*'[ASP]',\s*\[([\s\S]*?)\]\s*\)/g,
-  )) {
-    const [, variable, inner] = block;
-    if (variable === undefined || inner === undefined) continue;
-    for (const grant of inner.matchAll(/\['([a-z0-9_.]+)',\s*'(?:own|all|none)'\]/g)) {
+  // SLICE-001 names its keys in lists (`OPS_STAFF_KEYS_001`) and composes a bundle's grants from them: `...staff(BUNDLE_IDS.seniorOps, 'S',
+  // own([...OPS_STAFF_KEYS_001, ...SENIOR_ONLY_KEYS_001]))`. A bundle holds every list its call names.
+  const lists = new Map<string, string[]>();
+  for (const list of text.matchAll(/const ([A-Z][A-Z0-9_]*_001) = \[([\s\S]*?)\] as const;/g)) {
+    const [, name, inner] = list;
+    if (name === undefined || inner === undefined) continue;
+    lists.set(
+      name,
+      [...inner.matchAll(/'([a-z0-9_.]+)'/g)].flatMap((each) =>
+        each[1] === undefined ? [] : [each[1]],
+      ),
+    );
+  }
+  for (const call of text.matchAll(/\.\.\.staff\(/g)) {
+    const body = balanced(text, call.index + '...staff'.length);
+    const variable = /BUNDLE_IDS\.(\w+)/.exec(body)?.[1];
+    if (variable === undefined) continue;
+    const named = new Set(
+      [...body.matchAll(/\b([A-Z][A-Z0-9_]*_001)\b/g)].flatMap((each) =>
+        each[1] === undefined ? [] : [each[1]],
+      ),
+    );
+    for (const name of named) for (const key of lists.get(name) ?? []) add(variable, key);
+    // The grants written out one by one (`['staff.read', 'own']`) are read from the call's own text. A pattern that ran on to the first
+    // `])` after it would take a later call's grants for this bundle's when this call ends in `.map(...)` (the Platform Admin's SLICE-001
+    // call did, and swallowed the message log's `NOTIFICATION_READ_GRANTS` that follow it).
+    for (const grant of body.matchAll(/\['([a-z0-9_.]+)',\s*'(?:own|all|none)'\]/g)) {
       const [, key] = grant;
       if (key !== undefined) add(variable, key);
     }
@@ -73,6 +107,12 @@ describe('the bundle key sets of the navigation tests against the seed', () => {
     }
     assert.ok((seeded.get('Ops Staff') ?? []).includes('settings.reason.read'));
     assert.ok((seeded.get('Platform Admin') ?? []).includes('staff.mfa.reset'));
+    // The keys of SLICE-001 are written as named lists composed into each bundle's call, and are read too: Ops Staff hold the approval, and
+    // the extension of the attempt cap starts at Senior Ops.
+    assert.ok((seeded.get('Ops Staff') ?? []).includes('pickup.exception.approve'));
+    assert.ok(!(seeded.get('Ops Staff') ?? []).includes('pickup.attempt.extend'));
+    assert.ok((seeded.get('Senior Ops') ?? []).includes('pickup.attempt.extend'));
+    assert.ok((seeded.get('Finance/Reconciliation') ?? []).includes('pricing.read'));
   });
 
   it('holds exactly the staff bundles the seed has', () => {

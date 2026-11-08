@@ -31,6 +31,7 @@ These are specifications, not claims that code has been built. Read only the fea
 | pickup | [Pickup Manifest](pickup/pickup-manifest.md) |
 | pickup | [Pickup Request](pickup/pickup-request.md) |
 | reporting | [Daily Operations & Cash Report](reporting/daily-operations-and-cash-report.md) |
+| reporting | [Reporting data dictionary](reporting/reporting-data-dictionary.md) |
 | returns | [Return to Vendor](returns/return-to-vendor.md) |
 | vendor | [Vendor onboarding and account allowance](vendor/vendor-onboarding-and-allowance.md) |
 | vendor | [Vendor saved pickup locations](vendor/vendor-pickup-locations.md) |

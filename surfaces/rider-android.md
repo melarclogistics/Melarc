@@ -99,9 +99,9 @@ Each row names the route, the permission that gates it, and the states that are 
 | Screen| Purpose| Gated by| Operation| States carrying a rule|
 |---|---|---|---|---|
 | Run list| Today's assigned manifest| assigned rider| `listPickupManifests`| **`empty`** before dispatch is correct, not a failure|
-| Run detail| Ordered stops; start the run| assigned rider| `getPickupManifest` · `startRun`| Sequence is **a plan, not a constraint** — working stops out of order must not be blocked. **A run with nothing collected closes by itself** when its last stop turns terminal — there is no handover to offer|
-| Stop detail| Vendor, packages, refined-location note| assigned rider| `getPickupManifest` (stops are embedded; there is no stop-read operation) · `arriveAtPickupStop`| **`offline`** — stop data must be readable with no signal|
-| Handshake| Display code; trigger SMS fallback| assigned rider| `initiateHandshake` · `requestSmsHandshakeFallback`| The code is **displayed here and nowhere else**. Never logged, never in an audit event|
+| Run detail| Ordered stops; start the run| assigned rider| `getPickupManifest` · `startRun`| Sequence is **a plan, not a constraint** — working stops out of order must not be blocked. **A run with nothing collected closes by itself** when its last stop turns terminal — there is no handover to offer. **A run with no pickup left to work** (every pickup cancelled or resolved) is not started: `startRun` answers `MANIFEST_EMPTY`, the screen says there is nothing to work on it, and Ops cancels the run unstarted|
+| Stop detail| The pickup's reference, the sender, the packages **as declared**, the place, the primary contact and, when the request has one, the pickup's note ([the summary](#pickup-run-stop-detail--what-the-rider-is-shown-slice-001-s121))| assigned rider| `getPickupManifest` (stops are embedded; there is no stop-read operation) · `arriveAtPickupStop`| **`offline`** — stop data must be readable with no signal|
+| Handshake| Display code; trigger SMS fallback; **enter the code an individual sender received by text, and the code a vendor read out after an SMS fallback**| assigned rider| `initiateHandshake` · `requestSmsHandshakeFallback` · `verifyHandshake` (for those two codes)| The code is **displayed here and nowhere else**. Never logged, never in an audit event. The rider does not enter the code its own device displays: that is the vendor's act, and the database refuses it to a rider|
 | Collection| Record collected count, variance reason| assigned rider| `recordCollection` · `listReasonDefinitions`| **Requires connectivity.** §19.8 does **not** approve offline collection; only replay safety on a flaky connection is guaranteed. Zero collected is a **failure**, not a collection|
 | Failure| Report a failed stop with reason| assigned rider| `reportPickupFailure` · `listReasonDefinitions`| **`retry`** — must survive a dropped connection at the door|
 | Hub handover| Submit one declared count per collected pickup request| custody holder| `submitHubHandover`| **`offline` — the one approved offline command** (§19.8). **One editable row per collected request**, pre-filled from its collected total and **correctable before submit**, with a read-only total. **A zero row is legal and must be deliberate**: it tells the hub that request's parcels are not in the handover, and Senior Ops reviews it. The device's capture time travels with the submission.|
@@ -174,12 +174,12 @@ second remains `OQ-030`'s.
 | `startDeliveryRun`| `dispatch.run.execute`| Delivery run detail|
 | `startRun`| `pickup.run.execute`| Pickup — Run detail|
 | `submitHubHandover`| `hub.handover.submit`| Pickup — Hub handover; **P**|
-| `verifyHandshake`| `pickup.collection.confirm`| Not a rider act — **Vendor.** *"Vendor account, own stop only"* — the vendor enters the code the rider displays at Pickup — Handshake|
+| `verifyHandshake`| `pickup.collection.confirm`| Not a rider act for the code the rider displays — **Vendor.** *"Vendor account, own stop only"* — the vendor enters the code the rider displays at Pickup — Handshake. **The rider does enter the other two codes through it** (S1.27, `AC-SLICE-001-23` and `-24`): the code an individual sender received by text, and the code a vendor read out after an SMS fallback; which principal may enter which code is the database's to decide|
 
 **Nothing here is screened that a rider cannot reach, and that is the point of the third column.**
 The eleven exclusions were the risk: a key held by **R** makes an operation *look* like rider work,
 and several are refused to a rider outright — by standing (`decideDeliveryLocationChange`,
-`escalateRecipientConfirmation`), by actor (`verifyHandshake`), or by scope and session (the Ops-only
+`escalateRecipientConfirmation`), by actor (`verifyHandshake`, for the code the rider's own device displays), or by scope and session (the Ops-only
 lists a rider session never reaches). A screen built from the permission catalogue alone would have
 shipped dead buttons.
 
@@ -192,7 +192,7 @@ shipped dead buttons.
 |---|---|
 | `listPickupManifests` · `getPickupManifest`| **Reads** — the run list and stop detail; verified through `startRun` and `recordCollection`|
 | `startRun`| `AC-SLICE-001-14`, `AC-SLICE-001-16`|
-| `arriveAtPickupStop`| **Gap** — the arrival transition closes the cancellation window and has no dedicated criterion; `AC-SLICE-001-12` tests the window from assignment, not arrival|
+| `arriveAtPickupStop`| `AC-SLICE-001-13` (refused before the start), `AC-SLICE-001-16` (any order) and `AC-SLICE-001-80` (a colleague's stop). It closes no window: that closed at the assignment (`AC-SLICE-001-12`)|
 | `initiateHandshake` · `requestSmsHandshakeFallback`| `AC-SLICE-001-23`, `AC-SLICE-001-24`, `AC-SLICE-001-26`, `AC-SLICE-001-73`|
 | `recordCollection`| `AC-SLICE-001-20`, `AC-SLICE-001-21`, `AC-SLICE-001-22`, `AC-SLICE-001-29`|
 | `reportPickupFailure`| `AC-SLICE-001-30`, `AC-SLICE-001-31`, `AC-SLICE-001-32`, `AC-SLICE-001-33`, `AC-SLICE-001-34`|
@@ -226,9 +226,41 @@ shipped dead buttons.
 **Two behavioural gaps, and they are `OQ-030`'s follow-on:**
 
 - **The offline sync outcomes.** §4.1 designs pending-sync, successful-sync, the outcome-level reconcile on a `STATE_CONFLICT`, and the actionable rejected-sync — and no §43.1 criterion yet exercises them. `AC-SLICE-001-18` covers *"lands once, capture time kept"*; the reconcile and rejected-sync paths are untested.
-- **The bare arrival transitions.** `arriveAtPickupStop` (closes the cancellation window) and `arriveAtDeliveryStop` (opens the `DOORSTEP` checkpoint) are exercised by downstream criteria but never asserted on their own.
+- **The bare delivery arrival.** `arriveAtDeliveryStop` (opens the `DOORSTEP` checkpoint) is exercised by downstream criteria but never asserted on its own. (`arriveAtPickupStop` is: `AC-SLICE-001-13`, `-16` and `-80` assert it, since S1.22.)
 
 **Every other rider write has a criterion, and every rider read is verified through the write it feeds.** The remaining §41.1 debt — the Ops Portal, Vendor PWA and recipient-channel maps — stays `OQ-030`'s.
+
+### Pickup-run stop detail — what the rider is shown (`SLICE-001`, S1.21)
+
+**The rider reads the stop's `pickup_summary` with the manifest and never reads the request** ([pickup-manifest.md](../features/pickup/pickup-manifest.md) §5.4; the Product Owner's decision of 2 November 2026, on the reviewer's recommendation). The stop detail shows:
+
+- the **reference** of the pickup (the code the sender is texted), at the top: it is how the rider and Ops name the same pickup;
+- the **sender** as booked, and the number of packages **labelled as declared** (*Declared: 4 packages*): the count that counts is the rider's at the door;
+- the **place**: the address, the landmark, a map link and the coordinates where the request has them;
+- the **primary contact**, with a call action (the call to the vendor is the contact attempt that `VENDOR_NOT_AT_LOCATION` and `VENDOR_UNREACHABLE_BY_PHONE` require);
+- the **pickup's note** when the request has one. In Version 1 none does (`location_note` is null until a pickup-instructions field exists): the screen shows no empty note and no placeholder that implies one, and its absence never blocks arriving at the stop or working it.
+
+It never shows the second contact, the goods, the payer, any price, the destination or recipient of a one-package pickup, or any other request of the run. It is readable offline once read, as every stop detail is. A pickup cancelled **before** the run was dispatched has no summary (a cancelled request is never sent to a rider): it appears in its place in the list, cancelled, with nothing of its address or contact.
+
+**The text the rider receives on dispatch** is one run-level message (`RUN_DISPATCHED_RIDER`, D-11), a courtesy and never the guarantee: *Melarc: your pickup run {code} for {date} is ready. Open the Melarc app to see your stops.* **The Product Owner approved exactly these words on 2 November 2026** (`OQ-037`; OB-S1-06; recorded with their digest in the template mechanism, `templates.ts`): the approval is of wording only. It sends nothing and waives no release prerequisite: a real provider is still asked to send it only inside the controlled window (its approval reference, allow-list, cap and end) with the owner's credentials. **The text is queued with the dispatch, in the same transaction, and a dispatch is successful once it commits with its envelope**; whether and when the provider delivers is a separate fact, told by the message log and never a condition of the dispatch.
+
+### Pickup-run stop list — a pickup the office cancelled (`SLICE-001`, S1.20 closeout)
+
+**A cancellation reaches the rider's stop at once, and the app never waits to be told.** When the office cancels a request that a dispatched run holds, the server skips the stop in the same act ([state-machines.md](../contracts/state-machines.md) §5): the rider's next successful read of the manifest (`getPickupManifest`) returns the stop `SKIPPED` with `skipped.reason_code` `REQUEST_CANCELLED` and no note. The stop list therefore:
+
+- shows that stop **in its place in the order**, marked as a pickup the office cancelled (not as one the rider skipped or failed), and **offers no collection on it**: no arrival, no count, no failure;
+- keeps what the rider already did there (an arrival is shown as it happened);
+- **refreshes before it acts**: an act the rider submits from a screen that went out of date is refused by the server against the cancelled request and the resolved stop (`STATE_CONFLICT`), and the app answers by showing the stop as it now is, never by retrying;
+- treats a notification, where the platform sends one, as a courtesy and never as the way a rider learns of the cancellation.
+
+**What the rider reads on a cancelled stop** (the Product Owner, 2 November 2026, on the reviewer's recommendation; the wording is decided, English only):
+
+> **Pickup cancelled — do not collect**
+> Pickup {reference} has been cancelled. Continue with your remaining stops. If you have already received any parcels, contact Ops immediately.
+
+`{reference}` is the `reference` of the stop's `pickup_summary`. The message is shown on the stop at the rider's next read; it asks for nothing (no confirmation, no reply, no acknowledgement) and needs no interaction while riding, so it is short and readable at a glance; and it never delays the cancellation, because the server is authoritative and decides what the rider may do on the stop. The cancellation raises no text message of its own.
+
+**While the rider is travelling, the office contacts the rider** ([pickup-manifest.md](../features/pickup/pickup-manifest.md) §5.2; [ops-portal.md](ops-portal.md)). The procedure (the Product Owner, 2 November 2026) is the office's, documented and not automated: **the officer who handles the cancellation owns contacting the assigned rider** when the run is dispatched or in progress; if the rider cannot be reached, the officer escalates to the duty Senior Ops, and **the contact attempt stays unresolved until the rider acknowledges it or someone takes it over**. The app neither replaces that contact nor invents it. **The system records neither the officer's attempts nor the rider's acknowledgement today** (OB-S1-34): a separate, append-only record of the office's contact with the rider is required before the procedure is operated, and its design is approved and it is not built ([the plan](../delivery/planning/SLICE-001-IMPLEMENTATION-PLAN.md#74-the-proposed-record-of-the-offices-contact-with-a-rider-ob-s1-34)); the note of the cancellation is the cancellation's reason and is not where later events are written. An acknowledgement the officer reports is never an acknowledgement by the rider's authenticated session, and this app sends none.
 
 ### Run custody-handover screens — `SLICE-001`
 
@@ -256,6 +288,8 @@ rider's half had no screen until 24 September 2026**.
 **A handover that is never accepted changes nothing.** Custody stays with the original rider, the
 run stays `IN_PROGRESS`, and Ops may open another (`AC-SLICE-001-68`). **No screen may show a
 pending handover as though custody had already moved.**
+
+**As built (S1.24, the API; the app is SLICE-016's).** The list carries no `ETag`; `getRunCustodyHandover` on the chosen handover does, and `acceptRunCustodyHandover` takes it as `If-Match` with an `Idempotency-Key` and the count taken. The list can be narrowed to the handovers of one run or to the open ones. The representation carries the run's identifier, the two parties, the destination, the state, the count and the two moments, and **no note and no stop**. Any custody that is not the rider's (the sender, a colleague, a handover already resolved, an id that matches nothing) is the one answer `NOT_ASSIGNED_RIDER`. Accepting can complete a run that has nothing collected and nothing to work, by System, in the same transaction; the receiver, who cannot read the run, learns of it only as its own handover `COMPLETED`. A rider who handed custody over can still read the run it was assigned and still arrive at a stop of it: whether that is allowed once custody has moved is for S1.26 to decide with the collection (reported to the Product Owner).
 
 **The discovery gap is closed** (`MSC-DEC-406`, closing `OQ-136`). A rider named as receiver finds
 the handover in a list scoped to the parties, which carries the manifest id `acceptRunCustodyHandover`

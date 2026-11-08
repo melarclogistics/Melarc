@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { Inbox, makeCaptureDirectory, readMessages } from './messages.ts';
+import { Inbox, makeCaptureDirectory, readMessages, readTexts } from './messages.ts';
 import { removeDirectory } from './custody.ts';
 
 let directory = '';
@@ -137,5 +137,63 @@ describe('makeCaptureDirectory', () => {
     expect(existsSync(made)).toBe(true);
     removeDirectory(made);
     expect(existsSync(made)).toBe(false);
+  });
+});
+
+/** A text message as the notification lane's capture writes it (`capture.text-message-sender.adapter.ts`): the text, not a link. */
+function putText(
+  id: string,
+  overrides: Partial<{ at: string; destination: string; text: string }> = {},
+): void {
+  writeFileSync(
+    join(directory, `${id}.json`),
+    `${JSON.stringify({
+      dedupeId: id,
+      destination: '+99900000002',
+      text: 'SENTINEL-TEXT-OF-A-MESSAGE',
+      at: '2026-11-03T09:00:00.000Z',
+      ...overrides,
+    })}
+`,
+  );
+}
+
+describe('the text messages of the notification lane', () => {
+  // Break caught: a text taken for a message with a link, or a message with a link taken for a text, so that one sink read two ways counts twice.
+  it('reads the texts and the messages with a link apart, from the one folder', () => {
+    put(ID_1);
+    putText(ID_2);
+
+    expect(readMessages(directory).map((message) => message.dedupeId)).toEqual([ID_1]);
+    expect(readTexts(directory).map((text) => text.dedupeId)).toEqual([ID_2]);
+  });
+
+  it('holds the text where it prints as nothing', () => {
+    putText(ID_1);
+    const [text] = readTexts(directory);
+
+    expect(String(text?.text)).not.toContain('SENTINEL');
+    expect(JSON.stringify(text)).not.toContain('SENTINEL');
+    expect(text?.text.reveal()).toBe('SENTINEL-TEXT-OF-A-MESSAGE');
+  });
+
+  it('hands each text over once, to the address it was sent to', async () => {
+    putText(ID_1, { destination: '+99900000002' });
+    putText(ID_2, { destination: '+99900000001', at: '2026-11-03T09:00:01.000Z' });
+    const inbox = new Inbox(directory, { timeoutMs: 300, pollMs: 10 });
+
+    expect((await inbox.nextText({ to: '+99900000001' })).dedupeId).toBe(ID_2);
+    expect((await inbox.nextText({ to: '+99900000002' })).dedupeId).toBe(ID_1);
+    await expect(inbox.nextText({ to: '+99900000002' })).rejects.toThrow(/no new text/);
+  });
+
+  it('skips a file that is not a text', () => {
+    writeFileSync(
+      join(directory, `${ID_1}.json`),
+      '{"dedupeId":"x","destination":3,"text":"t","at":"a"}',
+    );
+    writeFileSync(join(directory, `${ID_2}.json`), 'not json');
+
+    expect(readTexts(directory)).toEqual([]);
   });
 });
