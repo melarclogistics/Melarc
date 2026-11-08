@@ -107,8 +107,31 @@ export function watchPage(page: Page) {
   return { problems, requests };
 }
 
-/** One line per violation: the rule, what it asks for and the first elements that break it. */
+/**
+ * Waits until no CSS transition or finite animation is still running. WCAG judges the colours a page settles on, but axe measures the
+ * ones it finds: a button that has just become enabled fades from its disabled grey to its own colour over `--motion-fast` (120 ms),
+ * and the white label of the primary button is under 4.5:1 for most of that fade (1.4:1 to 4.4:1 until about 90 ms in). A scan that
+ * starts inside the fade reports a failure that nobody sees and that comes and goes with timing. An animation that never ends, such
+ * as a spinner, is not waited for. It fails after 5 s, so a page that never settles is reported and not scanned.
+ */
+export async function untilSettled(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.playState !== 'running' ||
+            animation.effect?.getComputedTiming().iterations === Infinity,
+        ),
+    undefined,
+    { timeout: 5_000 },
+  );
+}
+
+/** One line per violation: the rule, what it asks for and the first elements that break it. The page is scanned once its transitions end. */
 export async function wcagViolations(page: Page): Promise<string[]> {
+  await untilSettled(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   return results.violations.map(
     (violation) =>

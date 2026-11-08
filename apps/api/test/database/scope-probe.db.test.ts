@@ -46,6 +46,21 @@ let database: TestDatabase;
 let pool: pg.Pool;
 let service: DatabaseService;
 
+/**
+ * The one test below that holds a table lock on purpose (the probe waiting) polls for up to 500 times 20 ms and commits when it has seen the
+ * probe wait. With the development defaults (lock time-out 2 s, transaction budget 10 s) that is a race against the application's own
+ * time-out: on a loaded runner a stalled event loop missed the window, the probe's read was ended by `lock_timeout` (55P03) before the
+ * test could see it wait, the poll then found nothing until the 10 s budget ran out, and the test failed with `BudgetExpiredError` (twice in
+ * the hosted runs of 8 November 2026, on two branches). A test that holds a lock waits as long as the test needs, as its siblings do
+ * (session-store.db.test.ts); the time-outs that are being tested elsewhere are not this file's business.
+ */
+const PATIENT_DEADLINES = Object.freeze({
+  ...INERT_DEADLINES,
+  lockTimeoutMs: 15_000,
+  statementTimeoutMs: 30_000,
+  transactionTimeoutMs: 60_000,
+});
+
 const existingRecordHub = createScopeProbe({
   hub_record: { schema: 'rls_fixture', table: 'hub_records' },
 });
@@ -61,14 +76,14 @@ beforeAll(async () => {
   pool = createPool({
     url: database.urlFor(API_RUNTIME_ROLE),
     poolMax: 1,
-    deadlines: INERT_DEADLINES,
+    deadlines: PATIENT_DEADLINES,
   });
   service = new DatabaseService(
     pool,
     new CapturedLogs().logger,
     new ShutdownRegistry(),
     new ReadinessRegistry(),
-    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1),
+    databaseRuntime(database.urlFor(API_RUNTIME_ROLE), 1, { deadlines: PATIENT_DEADLINES }),
   );
 });
 

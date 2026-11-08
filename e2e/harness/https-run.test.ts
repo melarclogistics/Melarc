@@ -13,6 +13,7 @@ import {
   runHttpsSuite,
   type HttpsRunDependencies,
 } from './https-run.ts';
+import { HTTPS_SHARDS } from './https-shards.ts';
 import type { MintResult } from './test-ca.ts';
 
 /**
@@ -190,18 +191,21 @@ describe('what it does, in order', () => {
   it('is three runs, the last with the CA in the system store, and every HTTPS project in exactly one', () => {
     expect(HTTPS_PHASES).toEqual([
       {
+        id: 'chromium',
         name: expect.any(String) as string,
         projects: CHROMIUM_RUN,
         systemTrust: false,
         output: CHROMIUM_OUT,
       },
       {
+        id: 'firefox',
         name: expect.any(String) as string,
         projects: FIREFOX_RUN,
         systemTrust: false,
         output: FIREFOX_OUT,
       },
       {
+        id: 'webkit',
         name: expect.any(String) as string,
         projects: WEBKIT_RUN,
         systemTrust: true,
@@ -659,5 +663,197 @@ describe('the projects it runs, and the ones it leaves to the plain run', () => 
     expect(spec).toMatch(
       /test\(\s*'refuses the same origin[^']*',\s*\{ tag: '@untrusted-control' \}/s,
     );
+  });
+});
+
+// The run is made as the jobs of a matrix in CI, a shard of its runs in each (`MELARC_HTTPS_SHARD`, https-shards.ts; the Product Owner's
+// decision of 7 November 2026), because in one job the three runs were longer than a job may last. A run is never cut: its journeys are
+// one story on one stack. And WebKit's refusal, which is a control only while the CA is not in the system store, and WebKit's other proofs,
+// which need it there, are made by one job, in that order.
+describe('the shards of the run, which CI makes in jobs of their own', () => {
+  const shardRun = (value: string, options: Parameters<typeof harness>[0] = {}) =>
+    harness({ ...options, environment: { CI: 'true', PATH: '/bin', MELARC_HTTPS_SHARD: value } });
+  const engineOf = (project: string): string | undefined =>
+    /^https-(chromium|firefox|webkit)/.exec(project)?.[1];
+  const FIRST = [
+    'make-directory',
+    `mint ${TLS}`,
+    `playwright ${CHROMIUM_RUN.join(',')}`,
+    `system-trust install ${CA}`,
+    `playwright ${WEBKIT_RUN.join(',')}`,
+    'system-trust remove',
+    'remove /tmp/run',
+  ];
+  const SECOND = [
+    'make-directory',
+    `mint ${TLS}`,
+    `playwright ${FIREFOX_RUN.join(',')}`,
+    'remove /tmp/run',
+  ];
+
+  // Break caught: a run in no shard (its proofs never made, and nothing says so), or in two (made twice, on two runners).
+  it('cuts the run into two shards and puts every run in exactly one', () => {
+    const ids = HTTPS_PHASES.map((phase) => phase.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(HTTPS_SHARDS).toHaveLength(2);
+    expect(HTTPS_SHARDS.flatMap((shard) => shard.phases).toSorted()).toEqual(ids.toSorted());
+  });
+
+  // Break caught: WebKit's refusal in one job and its other proofs in another, where "refused before, trusted after, and nothing else
+  // differs" is no longer made on one machine; or the proofs before the refusal, where the CA is in the system store and the control fails.
+  it('keeps WebKit’s refusal and WebKit’s other proofs in one shard, the refusal first', () => {
+    const control = HTTPS_PHASES.findIndex((phase) =>
+      phase.projects.includes('https-webkit-control'),
+    );
+    const trusted = HTTPS_PHASES.flatMap((phase, index) => (phase.systemTrust ? [index] : []));
+    expect(control).toBeGreaterThanOrEqual(0);
+    expect(trusted).toHaveLength(1);
+    for (const shard of HTTPS_SHARDS) {
+      const made = HTTPS_PHASES.flatMap((phase, index) =>
+        shard.phases.includes(phase.id) ? [index] : [],
+      );
+      expect(made.includes(control), shard.name).toBe(
+        made.some((index) => trusted.includes(index)),
+      );
+      for (const index of made.filter((candidate) => trusted.includes(candidate))) {
+        expect(index, shard.name).toBeGreaterThan(control);
+      }
+    }
+  });
+
+  // Break caught: a shard whose browsers are not the ones its runs need: the job installs the list the matrix of the workflow gives it, so a
+  // shard that says Chromium alone for a run that has WebKit's proofs fails on a missing browser, in CI only.
+  it('says, for each shard, the browsers its runs need', () => {
+    for (const shard of HTTPS_SHARDS) {
+      const needed = HTTPS_PHASES.filter((phase) => shard.phases.includes(phase.id)).flatMap(
+        (phase) => phase.projects.map(engineOf),
+      );
+      expect([...new Set(needed)].toSorted(), shard.name).toEqual([...shard.browsers].toSorted());
+    }
+  });
+
+  it('makes the runs of the first shard in order, with the CA in the system store only for WebKit’s proofs', () => {
+    const run = shardRun('1/2');
+
+    expect(runHttpsSuite(run.deps)).toBe(0);
+
+    expect(run.events).toEqual(FIRST);
+    expect(run.runs.map((call) => call.args)).toEqual([
+      args(CHROMIUM_RUN, CHROMIUM_OUT),
+      args(WEBKIT_RUN, WEBKIT_OUT),
+    ]);
+    for (const call of run.runs) expect(call.environment.MELARC_E2E_TLS_DIR).toBe(TLS);
+  });
+
+  // Break caught: the shard of Firefox touching the system store (a `sudo` and a CA machine-wide that nothing of this shard needs).
+  it('makes the run of the second shard and never touches the system store', () => {
+    const run = shardRun('2/2');
+
+    expect(runHttpsSuite(run.deps)).toBe(0);
+
+    expect(run.events).toEqual(SECOND);
+    expect(run.runs.map((call) => call.args)).toEqual([args(FIREFOX_RUN, FIREFOX_OUT)]);
+    expect(run.out.join('\n')).not.toMatch(/system trust store/);
+  });
+
+  // Break caught: the shards together making something other than the run: a run twice, or one not at all, with the numbers and the
+  // directories of the unsharded run kept.
+  it('makes, between the two shards, exactly the three runs of the whole', () => {
+    const calls = [shardRun('1/2'), shardRun('2/2')].flatMap((run) => {
+      runHttpsSuite(run.deps);
+      return run.runs.map((call) => JSON.stringify(call.args));
+    });
+    const whole = harness();
+    runHttpsSuite(whole.deps);
+    expect(calls.toSorted()).toEqual(
+      whole.runs.map((call) => JSON.stringify(call.args)).toSorted(),
+    );
+  });
+
+  it('says which shard it is and which runs it makes, and that the others are not in it', () => {
+    const run = shardRun('1/2');
+
+    runHttpsSuite(run.deps);
+
+    const said = run.out.join('\n');
+    expect(said).toContain(
+      'HTTPS shard 1 of 2 (Chromium, and WebKit with the CA in the system store): makes run 1 and 3 of 3',
+    );
+    expect(said).toContain(`run 1 of 3: exit status 0; output ${CHROMIUM_OUT}`);
+    expect(said).toContain(
+      `run 2 of 3: not in this shard (made by the job of another shard); output ${FIREFOX_OUT}`,
+    );
+    expect(said).toContain(`run 3 of 3: exit status 0; output ${WEBKIT_OUT}`);
+    expect(run.out.at(-1)).toBe('  overall exit status 0');
+  });
+
+  // Break caught: a failure of a run of the shard lost to the runs that were not in it, or a run of another shard counted as a failure of
+  // this one: the status is the first failing run of the shard's own, said by its number.
+  it('exits with the status of the first of its own runs that failed, and counts no other shard’s run', () => {
+    const second = shardRun('2/2', { playwright: () => 1 });
+    expect(runHttpsSuite(second.deps)).toBe(1);
+    expect(second.out.at(-1)).toBe('  overall exit status 1, from run 2 of 3');
+
+    const first = shardRun('1/2', {
+      playwright: (projects) => (projects.includes('https-webkit') ? 3 : 0),
+    });
+    expect(runHttpsSuite(first.deps)).toBe(3);
+    expect(first.out.at(-1)).toBe('  overall exit status 3, from run 3 of 3');
+    expect(first.events).toContain('system-trust remove');
+  });
+
+  // Break caught: a value that is not a shard read as "no shard", so that a typo in the workflow makes the whole run in every job and
+  // the job no longer fits its limit. Refused before a directory, a CA or a browser is made.
+  it.each(['0/2', '3/2', '2', 'a/b', '1/0', '1/2/3', '-1/2', '1.5/2', '01/2', '1/', '/2', '1 / 2'])(
+    'refuses %j as a shard and makes nothing',
+    (value) => {
+      const run = shardRun(value);
+
+      expect(runHttpsSuite(run.deps)).toBe(2);
+
+      expect(run.events).toEqual([]);
+      expect(run.err.join('\n')).toMatch(/MELARC_HTTPS_SHARD is ".*", which is not a shard/);
+    },
+  );
+
+  // Break caught: a workflow that cuts the run into more or fewer shards than the harness does (a shard that makes nothing, or a run no
+  // job makes): refused, and said, before anything is made.
+  it.each(['1/1', '1/3', '2/3', '3/3'])(
+    'refuses %j, the total not being the shards of this harness',
+    (value) => {
+      const run = shardRun(value);
+
+      expect(runHttpsSuite(run.deps)).toBe(2);
+
+      expect(run.events).toEqual([]);
+      expect(run.err.join('\n')).toMatch(
+        /cuts the run into 2 shards .* the workflow and the harness disagree/,
+      );
+    },
+  );
+
+  it('makes the whole run without a shard, and accepts one with spaces around it', () => {
+    for (const value of ['', '   ']) {
+      const run = shardRun(value);
+      expect(runHttpsSuite(run.deps)).toBe(0);
+      expect(run.runs).toHaveLength(3);
+      expect(run.out.join('\n')).not.toMatch(/shard/);
+    }
+    const padded = shardRun(' 2/2 ');
+    expect(runHttpsSuite(padded.deps)).toBe(0);
+    expect(padded.events).toEqual(SECOND);
+  });
+
+  // Break caught: the shard read before the refusal of a machine that may not make a CA: the platform and the key rule come first.
+  it('refuses a machine that may not make a CA before it reads the shard', () => {
+    const run = harness({
+      platform: 'win32',
+      environment: { CI: 'true', MELARC_HTTPS_SHARD: 'nonsense' },
+    });
+
+    expect(runHttpsSuite(run.deps)).toBe(2);
+
+    expect(run.err.join('\n')).toMatch(/only on Linux/);
+    expect(run.events).toEqual([]);
   });
 });

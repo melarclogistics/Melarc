@@ -1,17 +1,28 @@
 # The development gate. Every mandatory check runs here, in parallel jobs, and one job judges them all:
 #
-#   static      formatting, lint, strict types, the migration history, the generated client is current
-#   unit        unit, component and process tests of every workspace, and the repository's own tooling tests
-#   database    the PostgreSQL tests, against a real server (and, for the attested rider enrolment, the real verifier service it builds)
-#   integrated  build, the API against the contract, browser smoke test, the browser-API-database journey;
-#               then the build is described and kept
-#   verifier    the private attestation verifier (a JVM service, S0.55): its vendored library against its checksums, the build and every test
-#   audit       dependency vulnerabilities of high or critical severity
-#   ci          "CI result": waits for all of the above and fails unless every one succeeded
+#   static                  formatting, lint, strict types, the migration history, the generated client is current
+#   unit                    unit, component and process tests of every workspace, and the repository's own tooling tests
+#   database                the PostgreSQL tests, against a real server (and, for the attested rider enrolment, the real verifier service it builds)
+#   integrated              build, the API against the contract, the browser-API-database journey over plain HTTP;
+#                           then the build is described and kept
+#   https                   the same journeys over the trusted HTTPS origin, in two shards: Chromium with WebKit, and Firefox
+#   browser-chromium        the browser tests of the Ops shell and components in Chromium: a matrix with a job for each shard
+#   browser-firefox-webkit  the same tests in Firefox and in WebKit, shard by shard; NOT run on a pull request
+#   verifier                the private attestation verifier (a JVM service, S0.55): its vendored library against its checksums, the build and every test
+#   audit                   dependency vulnerabilities of high or critical severity
+#   ci                      "CI result": waits for all of the above and fails unless every one succeeded
+#
+# What runs when (the Product Owner's decision of 7 November 2026): a pull request runs every job but browser-firefox-webkit,
+# which would be 17 more jobs on every push to a pull request; a push to main, the nightly run and a manual run run all of them,
+# so Firefox and WebKit are tested on every commit that reaches main, and every night.
 #
 # Require the "CI result" check, and only that one, in the branch rule for main: it cannot pass while any
-# mandatory job failed, was cancelled or was skipped. scripts/ci-workflow.test.ts keeps this file to that
-# design (no check dropped, no failure absorbed, one verdict, every job on the commit under test).
+# mandatory job failed, was cancelled or was skipped, with one exception that scripts/ci-aggregate.ts makes and
+# nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; on
+# any other run a skip of it is a failure. scripts/ci-workflow.test.ts keeps this file to that design (no check
+# dropped, no failure absorbed, one verdict, every job on the commit under test, the one skip as decided) and
+# scripts/browser-shards.test.ts proves, from Playwright's own list of tests, that each kind of run runs every
+# test of the engines it must, once.
 #
 # To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
 # ticked: the static job fails on purpose and "CI result" must fail with it.
@@ -22,6 +33,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Every night, 02:17 UTC: Ghana, where the team works, keeps UTC all year, so the results are there at the start of the day; and off
+    # the hour, because GitHub delays (and sometimes drops) scheduled runs that start on the hour, when most schedules fire. A scheduled
+    # run tests the head of the default branch (main), with a token that reads, as any other run.
+    - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       rehearse-failure:
@@ -145,7 +161,7 @@ jobs:
         run: pnpm run test:db
 
   integrated:
-    name: Build, contract and browser tests
+    name: Build, contract and journeys
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -187,42 +203,25 @@ jobs:
       - name: Check the API against the contract
         run: pnpm run contract:check
 
-      # The browsers come from the Playwright version the lockfile pins; the revisions they download follow from it.
-      # Chromium also serves the journey below; Firefox and WebKit are the other engines of the supported browsers
-      # (surfaces/ops-portal.md section 11) and run the Ops shell and component tests.
-      - name: Install the browsers
-        run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit
-
-      - name: Browser tests of the Ops shell and components
-        env:
-          MELARC_BROWSERS: chromium,firefox,webkit
-        run: pnpm run test:browser
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. This job's
+      # journeys run in Chromium over plain HTTP; the engines of the supported browsers (surfaces/ops-portal.md section 11) run the Ops
+      # shell and component tests (the browser-chromium and browser-firefox-webkit jobs) and the HTTPS journeys (the https job), each in
+      # jobs of their own.
+      - name: Install the browser
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
 
       - name: Browser, API and database journey
         run: pnpm run test:e2e
 
-      # The trusted HTTPS origin (S0.23): the disposable CA is made, Chromium and Firefox are each given a store of their own that trusts
-      # it, the proofs run in Chromium, Firefox and WebKit, and the CA is removed, all by the one command, which is why it is a step on
-      # its own and not a script of several (e2e/README.md). certutil is the NSS tool that makes the Chromium and Firefox stores. WebKit
-      # trusts only the system store, so on this GitHub-hosted runner (made for this job and discarded after it) the command puts the CA
-      # there with sudo for WebKit's proofs and takes it out when they end (e2e/harness/system-trust.ts; the owner's decision of 12
-      # October 2026); nothing else is installed into any trust store of the runner.
-      - name: Install the NSS tools
-        run: sudo apt-get install --no-install-recommends --yes libnss3-tools
-
-      - name: Browser, API and database journey over the trusted HTTPS origin
-        run: pnpm run test:e2e:https
-
       # Logs of every process, the outbound-connection record and traces of the failed run. The harness hides
       # the passwords it describes; the job's own credentials are throwaway.
-      - name: Keep the failure diagnostics
+      - name: Keep the journey diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: melarc-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
+          name: melarc-journey-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             e2e/test-results
-            apps/ops-web/test-results
           if-no-files-found: ignore
           retention-days: 7
 
@@ -235,10 +234,11 @@ jobs:
         run: node scripts/ci-revision.ts manifest build-manifest.json apps/api/dist apps/ops-web/dist contracts/openapi.yaml
 
       # Build output for later deployment work; not a release package. It is kept only when every step above
-      # succeeded (a failed run keeps the diagnostics instead), for pull requests too, and only this job tested
-      # it: a consumer must use an artifact only when "CI result" succeeded for the same commit and the
-      # manifest's source.ref is refs/heads/main. To check it, unpack
-      # it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
+      # succeeded (a failed run keeps the diagnostics instead), for pull requests too. The journeys above ran
+      # against this build; the browser tests and the HTTPS journeys ran in jobs of their own, against builds of
+      # the same commit made there. A consumer must use an artifact only when "CI result" succeeded for the same
+      # commit (every one of those jobs among them) and the manifest's source.ref is refs/heads/main. To check it,
+      # unpack it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
       - name: Keep the build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -252,6 +252,228 @@ jobs:
           # The manifest lists every file under these paths; an upload that skipped a dotfile would not match it.
           include-hidden-files: true
           retention-days: 14
+
+  # The journeys over the trusted HTTPS origin (S0.23), in two shards that are two jobs: they run the staff journeys in Chromium, Firefox
+  # and WebKit one engine after the other, three runs of one stack each (e2e/harness/https-run.ts), and in one job they took about 31
+  # minutes (not timed on a hosted runner: the 15 journeys take 6.2 minutes in Chromium over plain HTTP here, 1.2 and 1.4 times as long in
+  # WebKit and Firefox by the browser tests' ratios, plus a run's set-up and its other tests), more than a job may last. The job `i` of
+  # `N` makes the runs of shard `i` (MELARC_HTTPS_SHARD, which e2e/harness/https-shards.ts reads, and refuses when it is not one of its
+  # shards): shard 1 is Chromium, with WebKit's refusal, and WebKit's other proofs, which stay in ONE job, in that order, because the
+  # refusal is a control only while the CA is not in the system store and the proofs need it there (the owner's decision of 12 October
+  # 2026); shard 2 is Firefox. About 17 minutes of runs and 3.5 of set-up in shard 1 (about 21 of 30), about 10 and 3 in shard 2. The runs
+  # are indivisible (one stack, one story that begins from the bootstrap administrators), which is why the split is by run and not finer.
+  # The matrix says the browsers each shard's runs need; scripts/https-shards.test.ts holds that, and the number of shards, to the harness.
+  # To resize (if shard 1 proves longer than about 25 minutes on a hosted runner): a third shard needs WebKit's refusal in a run of its own
+  # in front of WebKit's proofs (a phase of https-run.ts, with the CA not yet in the system store), so that one job makes both; then the
+  # shard goes into e2e/harness/https-shards.ts and an entry (shard, shards and browsers, the same total in every entry) in this matrix.
+  https:
+    name: Journeys over the trusted HTTPS origin (${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      # Both shards run to their end: one failure does not cancel the other, so one run shows every shard that failed.
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 1, shards: 2, browsers: 'chromium webkit' }
+          - { shard: 2, shards: 2, browsers: 'firefox' }
+
+    # Same disposable server as the database job; the journeys create a database of their own on it.
+    services:
+      postgres:
+        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        env:
+          POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      MELARC_PG_HOST: 127.0.0.1
+      MELARC_PG_PORT: '5432'
+      MELARC_PG_ADMIN_PASSWORD: ci-admin-password-for-this-job-only
+      MELARC_PG_MIGRATION_PASSWORD: ci-migration-password-for-this-job-only
+      MELARC_PG_RUNTIME_PASSWORD: ci-runtime-password-for-this-job-only
+
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      # The browsers come from the Playwright version the lockfile pins; the revisions they download follow from it. Only the browsers
+      # the runs of this shard make are downloaded. The command builds the API and the Ops Portal first (Turborepo runs the builds the
+      # task depends on).
+      - name: Install the browsers
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.browsers }}
+
+      # The disposable CA is made, Chromium and Firefox are each given a store of their own that trusts it, the proofs of the shard's
+      # engines run, and the CA is removed, all by the one command, which is why it is a step on its own and not a script of several
+      # (e2e/README.md). certutil is the NSS tool that makes the Chromium and Firefox stores. WebKit trusts only the system store, so on
+      # this GitHub-hosted runner (made for this job and discarded after it) shard 1 puts the CA there with sudo for WebKit's proofs and
+      # takes it out when they end (e2e/harness/system-trust.ts; the owner's decision of 12 October 2026); shard 2 touches no system
+      # store. Nothing else is installed into any trust store of the runner.
+      - name: Install the NSS tools
+        run: sudo apt-get install --no-install-recommends --yes libnss3-tools
+
+      - name: Browser, API and database journey over the trusted HTTPS origin
+        env:
+          MELARC_HTTPS_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
+        run: pnpm run test:e2e:https
+
+      # Logs of every process, the outbound-connection record and traces of the failed run, of each run of the shard
+      # (e2e/harness/https-run.ts gives each an output directory of its own below e2e/test-results). The harness hides the passwords it
+      # describes; the job's own credentials are throwaway. The name carries the shard: two shards that fail would otherwise upload
+      # under one name, and the second upload would be refused.
+      - name: Keep the failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: melarc-https-diagnostics-${{ github.sha }}-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The browser tests of the Ops shell and components, one job for each shard of each engine, in two jobs: this one for Chromium, which every
+  # run makes, and the next for Firefox and WebKit, which a pull request does not (the Product Owner's decision of 7 November 2026). They
+  # are two jobs because the matrix context is not available in a job-level `if`: a matrix cannot be skipped by its own entries.
+  #
+  # One engine's whole run is longer than a job may last (1,430 tests an engine on this tree, about 51 minutes for Chromium alone on the
+  # developer machine with the two workers the configuration sets; the same specs took about 1.4 times as long in Firefox and 1.2 times in
+  # WebKit), so Playwright cuts each engine into N shards: the job `i` of `N` runs the tests that `playwright test --shard=i/N` selects
+  # (the configuration reads it from MELARC_BROWSER_SHARD), and the N shards together hold every test of every project of the engine once.
+  # A shard is a run of equal numbers of tests in the order of the projects, so the longest of N takes about 1.4 times the mean: 7 shards
+  # of Chromium make the longest about 10.5 minutes of tests and about 14 with the job's set-up (3.5), in a limit of 30; 8 of WebKit about
+  # 11 and 15; 9 of Firefox about 11 and 15. When the tests grow, add shards to the engine here and nowhere else (the number in every entry
+  # of the engine): scripts/browser-shards.test.ts proves, from Playwright's own list of tests, that the shards of each kind of run hold
+  # every test of every project of the engines it runs once, and scripts/ci-workflow.test.ts that the matrices are complete and every
+  # job is handed its engine and its shard. Nothing here builds the application: the specs build the Ops Portal themselves from the
+  # workspace sources (apps/ops-web/playwright.config.ts) and need no API and no database.
+  browser-chromium:
+    name: Browser tests (${{ matrix.engine }} ${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      # Every shard runs to its end: one failure does not cancel the others, so one run shows every shard that failed.
+      fail-fast: false
+      matrix:
+        include:
+          - { engine: chromium, shard: 1, shards: 7 }
+          - { engine: chromium, shard: 2, shards: 7 }
+          - { engine: chromium, shard: 3, shards: 7 }
+          - { engine: chromium, shard: 4, shards: 7 }
+          - { engine: chromium, shard: 5, shards: 7 }
+          - { engine: chromium, shard: 6, shards: 7 }
+          - { engine: chromium, shard: 7, shards: 7 }
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. Only the engine of
+      # this job's entry is downloaded.
+      - name: Install the browser
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.engine }}
+
+      - name: Browser tests of the Ops shell and components
+        env:
+          MELARC_BROWSERS: ${{ matrix.engine }}
+          MELARC_BROWSER_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
+        run: pnpm run test:browser
+
+      # Traces of the failed tests. They keep the requests and responses of pages that are the synthetic showcase or a stubbed shell:
+      # no real credential, token or seed is typed or received in them (apps/ops-web/playwright.config.ts). The name carries the
+      # engine and the shard: two shards that fail would otherwise upload under one name, and the second upload would be refused.
+      - name: Keep the browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            apps/ops-web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The shards of Firefox and WebKit: the same tests, run the same way, on a push to main, in the nightly run and in a manual run, and NOT
+  # on a pull request. This is the one job of the workflow with a condition, and the one skip that "CI result" accepts, on a pull request
+  # and nowhere else (scripts/ci-aggregate.ts). The condition is exactly the one below: scripts/ci-workflow.test.ts refuses any other, on
+  # this job or any other, and a job that holds Chromium shards cannot have it. A matrix of 17 jobs: 9 of Firefox and 8 of WebKit (see
+  # the sizing above).
+  browser-firefox-webkit:
+    if: github.event_name != 'pull_request'
+    # The name says Firefox and WebKit besides the matrix: a skipped matrix is listed on a pull request under its name as written, with the
+    # expressions not filled in, and this way what it is stays clear.
+    name: Browser tests, Firefox and WebKit (${{ matrix.engine }} ${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      # Every shard runs to its end: one failure does not cancel the others, so one run shows every shard that failed.
+      fail-fast: false
+      matrix:
+        include:
+          - { engine: firefox, shard: 1, shards: 9 }
+          - { engine: firefox, shard: 2, shards: 9 }
+          - { engine: firefox, shard: 3, shards: 9 }
+          - { engine: firefox, shard: 4, shards: 9 }
+          - { engine: firefox, shard: 5, shards: 9 }
+          - { engine: firefox, shard: 6, shards: 9 }
+          - { engine: firefox, shard: 7, shards: 9 }
+          - { engine: firefox, shard: 8, shards: 9 }
+          - { engine: firefox, shard: 9, shards: 9 }
+          - { engine: webkit, shard: 1, shards: 8 }
+          - { engine: webkit, shard: 2, shards: 8 }
+          - { engine: webkit, shard: 3, shards: 8 }
+          - { engine: webkit, shard: 4, shards: 8 }
+          - { engine: webkit, shard: 5, shards: 8 }
+          - { engine: webkit, shard: 6, shards: 8 }
+          - { engine: webkit, shard: 7, shards: 8 }
+          - { engine: webkit, shard: 8, shards: 8 }
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. Only the engine of
+      # this job's entry is downloaded.
+      - name: Install the browser
+        run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.engine }}
+
+      - name: Browser tests of the Ops shell and components
+        env:
+          MELARC_BROWSERS: ${{ matrix.engine }}
+          MELARC_BROWSER_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
+        run: pnpm run test:browser
+
+      # Traces of the failed tests, as in the Chromium job; the name carries the engine and the shard.
+      - name: Keep the browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            apps/ops-web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   verifier:
     name: Attestation verifier
@@ -300,7 +522,18 @@ jobs:
   ci:
     name: CI result
     if: always()
-    needs: [static, unit, database, integrated, audit, verifier]
+    needs:
+      [
+        static,
+        unit,
+        database,
+        integrated,
+        https,
+        browser-chromium,
+        browser-firefox-webkit,
+        audit,
+        verifier,
+      ]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -316,8 +549,12 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # Fails unless every job above succeeded. A failed, cancelled or skipped job is not a success.
+      # Fails unless every job above succeeded. A failed, cancelled or skipped job is not a success; a matrix is one job here though it
+      # is many, and its result is `success` only when every one of its jobs succeeded. The one skip that is accepted is the skip of
+      # browser-firefox-webkit on a pull request, which does not run it (the option below, and EVENT, which says it is a pull request):
+      # on a push to main, in the nightly run and in a manual run a skip of it is a failure like any other.
       - name: Require every mandatory job to have succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/ci-aggregate.ts static unit database integrated audit verifier
+          EVENT: ${{ github.event_name }}
+        run: node scripts/ci-aggregate.ts --skipped-on-pull-request=browser-firefox-webkit static unit database integrated https browser-chromium browser-firefox-webkit audit verifier

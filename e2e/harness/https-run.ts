@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { HTTPS_SHARD_VARIABLE, chooseHttpsShard } from './https-shards.ts';
 import { repositoryPaths } from './paths.ts';
 import { privilegedRunner, systemTrust, systemTrustRefusal } from './system-trust.ts';
 import {
@@ -39,6 +40,12 @@ import {
  *    (`HttpsPhase.output`), because Playwright clears the output directory of the projects it runs at the start of a run: with one
  *    directory for all of them, a later run erased an earlier run's evidence. The recorders of the secret projects are not touched.
  *
+ * **In CI each job makes one shard of the runs** (`MELARC_HTTPS_SHARD=current/total`, `https-shards.ts`): the runs of the other shards are
+ * said to be "not in this shard" and are made by the job of that shard, each on a runner of its own with a CA of its own. The runs keep
+ * their numbers and their output directories. The shard that has WebKit's refusal also has WebKit's other proofs, the refusal first; a
+ * shard without the system-store run never touches the system store. A value that is not a shard of this harness is refused before
+ * anything is made.
+ *
  * **It makes a CA and a private key, so it does not run where it is not allowed to.** It runs on Linux only (Chromium, Chrome and Edge
  * use the operating system's store on Windows and macOS, which has no disposable form), and only in CI or where the person who runs it
  * has said the machine is cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`). The shared developer workstation is not such a
@@ -48,6 +55,8 @@ import {
  * without it, says so, and WebKit's proofs fail to trust, which is the correct report.
  */
 export interface HttpsPhase {
+  /** What a shard names the run by (`HttpsShard.phases`, https-shards.ts). */
+  readonly id: string;
   /** Said in the log. */
   readonly name: string;
   readonly projects: readonly string[];
@@ -72,18 +81,21 @@ export interface HttpsPhase {
  */
 export const HTTPS_PHASES: readonly HttpsPhase[] = [
   {
+    id: 'chromium',
     name: 'Chromium, which trusts the CA by a store of its own, and WebKit refusing it while the system store lacks it',
     projects: ['https-chromium', 'https-chromium-secret', 'https-webkit-control'],
     systemTrust: false,
     output: 'test-results/https-1-chromium',
   },
   {
+    id: 'firefox',
     name: 'Firefox, which trusts the CA by a store of its own',
     projects: ['https-firefox', 'https-firefox-secret'],
     systemTrust: false,
     output: 'test-results/https-2-firefox',
   },
   {
+    id: 'webkit',
     name: 'WebKit, with the CA in the system store',
     projects: ['https-webkit', 'https-webkit-secret'],
     systemTrust: true,
@@ -91,11 +103,15 @@ export const HTTPS_PHASES: readonly HttpsPhase[] = [
   },
 ];
 
-/** What came of one run: Playwright answered; it was started and an error stopped the command before it answered; or it was never started. */
+/**
+ * What came of one run: Playwright answered; it was started and an error stopped the command before it answered; it was never started;
+ * or it is a run of another shard, made by the job of that shard.
+ */
 type RunOutcome =
   | { readonly kind: 'status'; readonly status: number }
   | { readonly kind: 'incomplete' }
-  | { readonly kind: 'not-run' };
+  | { readonly kind: 'not-run' }
+  | { readonly kind: 'other-shard' };
 
 export const HTTPS_PROJECTS: readonly string[] = HTTPS_PHASES.flatMap((phase) => phase.projects);
 
@@ -149,13 +165,29 @@ export function runHttpsSuite(deps: HttpsRunDependencies): number {
     deps.err(refusal);
     return 2;
   }
+  // The shard this job makes (the whole run without one): a value that is not a shard of this harness is refused before anything is made.
+  const choice = chooseHttpsShard(deps.environment[HTTPS_SHARD_VARIABLE]);
+  if (choice.kind === 'refused') {
+    deps.err(choice.why);
+    return 2;
+  }
+  const selected = (phase: HttpsPhase): boolean =>
+    choice.kind === 'whole' || choice.shard.phases.includes(phase.id);
+  if (choice.kind === 'shard') {
+    const made = HTTPS_PHASES.flatMap((phase, index) => (selected(phase) ? [index + 1] : []));
+    deps.out(
+      `HTTPS shard ${String(choice.current)} of ${String(choice.total)} (${choice.shard.name}): makes run ${made.join(' and ')} of ${String(HTTPS_PHASES.length)}; the others are made by the jobs of the other shards.`,
+    );
+  }
   const root = deps.makeDirectory();
   // The status is settled after the `finally`, which can fail the run too (a CA that cannot be taken out of the system store).
   let status = 1;
   // Whether the CA may be in the system store, so that it must be taken out: set *before* the install, which can fail half way.
   let inSystemStore = false;
   let removalFailed = false;
-  const outcomes: RunOutcome[] = HTTPS_PHASES.map(() => ({ kind: 'not-run' }));
+  const outcomes: RunOutcome[] = HTTPS_PHASES.map((phase) =>
+    selected(phase) ? { kind: 'not-run' } : { kind: 'other-shard' },
+  );
   // The run being prepared or made when an error stopped the command, if one did.
   let stoppedAt: number | undefined;
   const takeOutOfSystemStore = (): void => {
@@ -184,6 +216,7 @@ export function runHttpsSuite(deps: HttpsRunDependencies): number {
     const environment = { ...deps.environment, MELARC_E2E_TLS_DIR: directory };
     status = 0;
     for (const [index, phase] of HTTPS_PHASES.entries()) {
+      if (!selected(phase)) continue;
       stoppedAt = index;
       deps.out(`HTTPS run ${String(index + 1)} of ${String(HTTPS_PHASES.length)}: ${phase.name}.`);
       if (phase.systemTrust) {
@@ -247,7 +280,9 @@ function summarize(
   for (const [index, phase] of HTTPS_PHASES.entries()) {
     const outcome = outcomes[index] ?? { kind: 'not-run' };
     let what = 'not run';
-    if (outcome.kind === 'status') {
+    if (outcome.kind === 'other-shard') {
+      what = 'not in this shard (made by the job of another shard)';
+    } else if (outcome.kind === 'status') {
       what = `exit status ${String(outcome.status)}`;
       if (outcome.status !== 0) failing.push(index);
     } else if (outcome.kind === 'incomplete') {

@@ -3,13 +3,21 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 
+import { aggregate, parseArguments } from './ci-aggregate.ts';
 import {
   AGGREGATE_JOB,
+  BROWSERS,
+  MATRIX_BROWSERS,
+  MATRIX_ENGINE,
+  MATRIX_SHARD,
+  PULL_REQUEST_SKIP,
   REQUIRED_COMMANDS,
+  browserMatrix,
   findPostgresImageProblems,
   findWorkflowProblems,
+  httpsMatrix,
 } from './ci-workflow.ts';
 import { readLocalActions, workflowSteps } from './composite-actions.ts';
 import { isRecord } from './workflow-shapes.ts';
@@ -22,6 +30,9 @@ interface Jobs {
   unit: Json;
   database: Json;
   integrated: Json;
+  https: Json;
+  'browser-chromium': Json;
+  'browser-firefox-webkit': Json;
   audit: Json;
   verifier: Json;
   ci: Json;
@@ -29,6 +40,7 @@ interface Jobs {
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 const GITHUB_SHA = '${{ github.sha }}';
+const EVENT_NAME = '${{ github.event_name }}';
 
 const CHECKOUT = {
   name: 'Check out',
@@ -67,11 +79,73 @@ const MANIFEST_SCRIPT =
   'node scripts/ci-revision.ts manifest build-manifest.json apps/api/dist apps/ops-web/dist contracts/openapi.yaml';
 const CLEAN_SCRIPT = 'node scripts/ci-revision.ts clean';
 const BROWSER_TESTS = 'pnpm run test:browser';
-const BROWSER_LIST = 'chromium,firefox,webkit';
-const INSTALL_BROWSERS =
-  'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit';
+const HTTPS_TESTS = 'pnpm run test:e2e:https';
+/** The commands that one step runs: the browser tests are run by two jobs (the Chromium shards, and the Firefox and WebKit shards). */
+const SINGLE_STEP_COMMANDS = REQUIRED_COMMANDS.filter((command) => command !== BROWSER_TESTS);
+/** A job of the HTTPS matrix installs the browsers its entry's runs need (e2e/harness/https-shards.ts), whatever they are. */
+const INSTALL_BROWSERS = `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_BROWSERS}`;
+/** The HTTPS shards, as the harness cuts them: the browsers of each shard's runs. */
+const HTTPS_ENTRIES: Json[] = [
+  { shard: 1, shards: 2, browsers: 'chromium webkit' },
+  { shard: 2, shards: 2, browsers: 'firefox' },
+];
+/** The HTTPS job keeps its own artifact for each shard. */
+const HTTPS_DIAGNOSTICS = {
+  name: 'Keep the failure diagnostics',
+  if: 'failure()',
+  uses: `actions/upload-artifact@${SHA}`,
+  with: {
+    name: `melarc-https-diagnostics-${GITHUB_SHA}-\${{ matrix.shard }}`,
+    path: 'e2e/test-results',
+    'if-no-files-found': 'ignore',
+  },
+};
+/** A job of the browser matrix installs the engine of its entry and no other. */
+const INSTALL_ENGINE = `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_ENGINE}`;
+const INSTALL_CHROMIUM = 'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium';
+/** Every job of the browser matrix has its own artifact name, or two failed shards would upload under one. */
+const SHARD_DIAGNOSTICS = {
+  name: 'Keep the browser diagnostics',
+  if: 'failure()',
+  uses: `actions/upload-artifact@${SHA}`,
+  with: {
+    name: `melarc-browser-diagnostics-${GITHUB_SHA}-${MATRIX_ENGINE}-\${{ matrix.shard }}`,
+    path: 'apps/ops-web/test-results',
+    'if-no-files-found': 'ignore',
+  },
+};
+/** Different numbers of shards for the engines (the slowest has the most), as the real workflow has. */
+const SHARD_COUNTS: Readonly<Record<string, number>> = { chromium: 2, firefox: 3, webkit: 2 };
 
-const JOB_IDS = ['static', 'unit', 'database', 'integrated', 'audit', 'verifier'];
+/** The matrix entries of the fixture: every shard of the engines (all three unless told). */
+function shardEntries(
+  counts: Readonly<Record<string, number>> = SHARD_COUNTS,
+  engines: readonly string[] = BROWSERS,
+): Json[] {
+  return engines.flatMap((engine) =>
+    Array.from({ length: counts[engine] ?? 0 }, (_, index) => ({
+      engine,
+      shard: index + 1,
+      shards: counts[engine],
+    })),
+  );
+}
+
+/** The one job a pull request does not run: the Firefox and WebKit shards of the browser tests. */
+const OTHER_ENGINES = 'browser-firefox-webkit';
+const JOB_IDS = [
+  'static',
+  'unit',
+  'database',
+  'integrated',
+  'https',
+  'browser-chromium',
+  OTHER_ENGINES,
+  'audit',
+  'verifier',
+];
+/** The command of the verdict, with the one allowance and every job named. */
+const AGGREGATE_COMMAND = `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
 
 function job(steps: Json[]): Json {
   return {
@@ -82,12 +156,28 @@ function job(steps: Json[]): Json {
   };
 }
 
+/** A job of a browser matrix: its engine installed, its shard run, its own diagnostics. */
+function browserJob(entries: Json[]): Json {
+  return {
+    ...job([
+      run(INSTALL_ENGINE),
+      {
+        ...run(BROWSER_TESTS),
+        env: { MELARC_BROWSERS: MATRIX_ENGINE, MELARC_BROWSER_SHARD: MATRIX_SHARD },
+      },
+      SHARD_DIAGNOSTICS,
+    ]),
+    strategy: { 'fail-fast': false, matrix: { include: entries } },
+  };
+}
+
 function goodShared(): Json {
   return {
     name: 'CI',
     on: {
       push: { branches: ['main'] },
       pull_request: null,
+      schedule: [{ cron: '17 2 * * *' }],
       workflow_dispatch: { inputs: { 'rehearse-failure': { type: 'boolean', default: false } } },
     },
     permissions: { contents: 'read' },
@@ -105,16 +195,27 @@ function goodShared(): Json {
       integrated: job([
         run('pnpm run build'),
         run('pnpm run contract:check'),
-        run(INSTALL_BROWSERS),
-        { ...run(BROWSER_TESTS), env: { MELARC_BROWSERS: BROWSER_LIST } },
+        run(INSTALL_CHROMIUM),
         run('pnpm run test:e2e'),
-        run('sudo apt-get install --no-install-recommends --yes libnss3-tools'),
-        run('pnpm run test:e2e:https'),
         DIAGNOSTICS,
         run(CLEAN_SCRIPT),
         run(MANIFEST_SCRIPT),
         BUILD_UPLOAD,
       ]),
+      https: {
+        ...job([
+          run(INSTALL_BROWSERS),
+          run('sudo apt-get install --no-install-recommends --yes libnss3-tools'),
+          { ...run(HTTPS_TESTS), env: { MELARC_HTTPS_SHARD: MATRIX_SHARD } },
+          HTTPS_DIAGNOSTICS,
+        ]),
+        strategy: { 'fail-fast': false, matrix: { include: HTTPS_ENTRIES } },
+      },
+      'browser-chromium': browserJob(shardEntries(SHARD_COUNTS, ['chromium'])),
+      [OTHER_ENGINES]: {
+        ...browserJob(shardEntries(SHARD_COUNTS, ['firefox', 'webkit'])),
+        if: PULL_REQUEST_SKIP,
+      },
       audit: job([run('pnpm audit --audit-level high')]),
       verifier: job([run('pnpm run verifier:test')]),
       [AGGREGATE_JOB]: {
@@ -127,8 +228,8 @@ function goodShared(): Json {
           CHECKOUT,
           {
             name: 'Judge',
-            env: { NEEDS: '${{ toJSON(needs) }}' },
-            run: `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`,
+            env: { NEEDS: '${{ toJSON(needs) }}', EVENT: '${{ github.event_name }}' },
+            run: AGGREGATE_COMMAND,
           },
         ],
       },
@@ -184,6 +285,9 @@ const allJobs = (jobs: Jobs): Json[] => [
   jobs.unit,
   jobs.database,
   jobs.integrated,
+  jobs.https,
+  jobs['browser-chromium'],
+  jobs['browser-firefox-webkit'],
   jobs.audit,
   jobs.verifier,
   jobs.ci,
@@ -259,15 +363,19 @@ describe('the aggregate job', () => {
     });
   }
 
-  // Break caught: a job that is not waited for, so its failure never reaches the verdict.
-  it('must wait for every other job', () => {
-    assert.deepEqual(
-      codesWith((_, jobs) => {
-        jobs.ci.needs = JOB_IDS.filter((id) => id !== 'database');
-      }),
-      ['AGGREGATE_NEEDS_DRIFT'],
-    );
-  });
+  // Break caught: a job that is not waited for, so its failure never reaches the verdict. The browser job is a matrix of
+  // many jobs, and one entry in `needs` stands for all of them: the verdict's result for it is `success` only when every
+  // shard succeeded, and `failure`, `cancelled` or `skipped` otherwise (scripts/ci-aggregate.test.ts holds the judging).
+  for (const missing of JOB_IDS) {
+    it(`must wait for the job ${missing}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          jobs.ci.needs = JOB_IDS.filter((id) => id !== missing);
+        }),
+        ['AGGREGATE_NEEDS_DRIFT'],
+      );
+    });
+  }
 
   it('must not wait for a job that does not exist', () => {
     assert.deepEqual(
@@ -342,6 +450,85 @@ describe('the aggregate job', () => {
       ['AGGREGATE_ENV'],
     );
   });
+
+  // Break caught: the verdict not told what the run is (the event dropped, or another expression), so that it cannot tell a pull request,
+  // which may skip the Firefox and WebKit shards, from the runs that must not.
+  for (const event of [undefined, '', 'push', '${{ github.ref }}', '${{ github.event_name }} ']) {
+    it(`must hand the command the event as ${EVENT_NAME}, not ${JSON.stringify(event)}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.ci, 1).env = {
+            NEEDS: '${{ toJSON(needs) }}',
+            ...(event === undefined ? {} : { EVENT: event }),
+          };
+        }),
+        ['AGGREGATE_ENV'],
+      );
+    });
+  }
+
+  // Break caught: the allowance of the verdict drifting from the jobs the workflow does not run on a pull request. A job accepted as skipped
+  // that nothing skips would let a failure of its own be taken for a skip; a job skipped that the verdict does not allow turns every pull
+  // request red. The allowance is one option, naming exactly the jobs that carry the one condition.
+  const allowances: [label: string, command: string][] = [
+    ['no allowance', `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`],
+    [
+      'another job allowed',
+      `node scripts/ci-aggregate.ts --skipped-on-pull-request=unit ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'the job and another allowed',
+      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES},browser-chromium ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'the allowance given twice',
+      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'a job that does not exist allowed',
+      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES},ghost ${JOB_IDS.join(' ')}`,
+    ],
+  ];
+  for (const [label, command] of allowances) {
+    it(`must allow to be skipped exactly the job a pull request does not run: not ${label}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.ci, 1).run = command;
+        }),
+        ['AGGREGATE_SKIP_DRIFT'],
+      );
+    });
+  }
+
+  it('must allow the skip of the job a pull request does not run, and say which job that is', () => {
+    const problems = findWorkflowProblems(
+      workflowWith((_, jobs) => {
+        Reflect.deleteProperty(jobs[OTHER_ENGINES], 'if');
+        stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`;
+      }),
+    ).filter((problem) => problem.code === 'AGGREGATE_SKIP_DRIFT');
+    assert.deepEqual(problems, []);
+    const drift = findWorkflowProblems(
+      workflowWith((_, jobs) => {
+        stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`;
+      }),
+    ).find((problem) => problem.code === 'AGGREGATE_SKIP_DRIFT');
+    assert.match(
+      drift?.message ?? '',
+      /exactly the jobs that a pull request does not run \(browser-firefox-webkit\)/,
+    );
+  });
+
+  // Break caught: an option that is misspelt or unknown read as no allowance and passing in the checks, or a flag counted as a job.
+  for (const option of ['--skip-on-pull-request=unit', '--unknown', '--skipped-on-pull-request']) {
+    it(`must give the command no option but the allowance: not ${option}`, () => {
+      const found = codesWith((_, jobs) => {
+        stepAt(jobs.ci, 1).run =
+          `node scripts/ci-aggregate.ts ${option} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
+      });
+      assert.deepEqual(found, ['AGGREGATE_COMMAND_DRIFT']);
+    });
+  }
 
   it('must not make its own step conditional', () => {
     assert.deepEqual(
@@ -600,7 +787,7 @@ describe('the composite actions the jobs use', () => {
 describe('mandatory commands', () => {
   // Break caught: a check deleted from the workflow (or its name changed so it runs something else), leaving a
   // pipeline that is green because it asks less.
-  for (const command of REQUIRED_COMMANDS) {
+  for (const command of SINGLE_STEP_COMMANDS) {
     it(`requires ${command}`, () => {
       const found = codesWith((_, jobs) => {
         for (const target of allJobs(jobs)) target.steps = withoutScript(target, command);
@@ -650,7 +837,7 @@ describe('mandatory commands', () => {
     ['in a condition', (command) => `if false; then\n${command}\nfi`],
     ['in a heredoc', (command) => `cat <<'EOF'\n${command}\nEOF`],
   ];
-  for (const command of REQUIRED_COMMANDS) {
+  for (const command of SINGLE_STEP_COMMANDS) {
     it(`requires ${command} to be the whole script of its step`, () => {
       for (const [label, script] of around) {
         assert.deepEqual(
@@ -678,7 +865,7 @@ describe('mandatory commands', () => {
   // Break caught: the same command run by a step that changes where or how it runs: another shell (a `python`
   // shell would not run it at all, `bash {0}` runs it without the usual stop on error) or another folder (where
   // the command is a different script or none).
-  for (const command of REQUIRED_COMMANDS) {
+  for (const command of SINGLE_STEP_COMMANDS) {
     for (const [key, value] of [
       ['shell', 'bash'],
       ['shell', 'bash {0}'],
@@ -732,7 +919,7 @@ describe('mandatory commands', () => {
   });
 
   // Break caught: every mandatory command made skippable or absorbable one step at a time, none by name.
-  for (const command of REQUIRED_COMMANDS) {
+  for (const command of SINGLE_STEP_COMMANDS) {
     it(`rejects a condition on the step that runs ${command}`, () => {
       for (const condition of [
         "github.event_name == 'push'",
@@ -763,97 +950,756 @@ describe('mandatory commands', () => {
   }
 });
 
-// The browser tests run the engines MELARC_BROWSERS names, and Chromium alone when it is not set (the Ops
-// Portal's CLAUDE.md says why CI runs all three: they are the engines of the supported browsers). A pipeline that
-// stops setting it, or installs fewer, would keep passing while two of the three engines were never run.
+// The browser tests of the Ops Portal run as the jobs of two matrices, one job for each shard of each engine, because one engine's whole run is
+// longer than a job may last: the Chromium shards in one job, which every event runs, and the Firefox and WebKit shards in another, which a pull
+// request does not (the Product Owner's decision of 7 November 2026). Each job is handed its engine (MELARC_BROWSERS) and its shard
+// (MELARC_BROWSER_SHARD, which the Ops Portal's Playwright configuration reads as `--shard`) and installs that engine alone. Chromium alone is what
+// the tests run when MELARC_BROWSERS is not set, which is why CI names the engine for every job. A pipeline that stops handing either variable,
+// installs the wrong browser or lists a matrix with an engine or a shard missing stays green while tests are never run. That the shards together hold
+// every test of the configuration, on each kind of run, is not read from this text: scripts/browser-shards.test.ts lists the tests of every shard.
+const BROWSER_JOBS = ['browser-chromium', OTHER_ENGINES] as const;
+type BrowserJobId = (typeof BROWSER_JOBS)[number];
+const ENGINES_OF: Readonly<Record<BrowserJobId, readonly string[]>> = {
+  'browser-chromium': ['chromium'],
+  [OTHER_ENGINES]: ['firefox', 'webkit'],
+};
+
+describe('the browser tests, which two jobs run', () => {
+  const codesOf = (change: (jobs: Jobs) => void): string[] =>
+    codesWith((_, jobs) => {
+      change(jobs);
+    });
+  const browserStep = (jobs: Jobs, id: BrowserJobId): Json => stepRunning(jobs[id], BROWSER_TESTS);
+
+  // Break caught: the command removed from the jobs, or the job that holds the Firefox and WebKit shards left with a condition
+  // once it no longer runs the browser tests (which would be a mandatory job that can be skipped for nothing).
+  it('requires the command, and a job that holds shards to run it', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        for (const id of BROWSER_JOBS) jobs[id].steps = withoutScript(jobs[id], BROWSER_TESTS);
+      }).toSorted(),
+      ['AGGREGATE_SKIP_DRIFT', 'COMMAND_MISSING', 'JOB_CONDITIONAL'],
+    );
+  });
+
+  for (const id of BROWSER_JOBS) {
+    // Break caught: the command still named in a script that does more than run it (after an echo, a condition, in a comment): the job
+    // has stopped running the browser tests, and the engines it holds are run on no event.
+    for (const [label, script] of [
+      ['behind echo', (command: string) => `echo ${command}`],
+      ['followed by || true', (command: string) => `${command} || true`],
+      ['before ;', (command: string) => `${command}; echo ok`],
+      ['in a comment', (command: string) => `# ${command}`],
+      ['after another line', (command: string) => `echo start\n${command}`],
+    ] as const) {
+      it(`does not count the step of ${id} when it is not the command alone: ${label}`, () => {
+        const found = codesOf((jobs) => {
+          browserStep(jobs, id).run = script(BROWSER_TESTS);
+        });
+        assert.ok(found.includes('BROWSER_ENGINES_DRIFT'), found.join(', '));
+      });
+    }
+
+    // Break caught: the step run in another shell or folder, where the command is another script or none, or made skippable or absorbable.
+    for (const [key, value] of [
+      ['shell', 'bash {0}'],
+      ['shell', 'python'],
+      ['working-directory', 'apps/api'],
+    ] as const) {
+      it(`rejects ${key}: ${value} on the step of ${id}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            browserStep(jobs, id)[key] = value;
+          }),
+          ['COMMAND_STEP_ALTERED'],
+        );
+      });
+    }
+
+    it(`rejects a condition and continue-on-error on the step of ${id}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          browserStep(jobs, id).if = "github.event_name == 'push'";
+        }),
+        ['STEP_CONDITIONAL'],
+      );
+      assert.deepEqual(
+        codesOf((jobs) => {
+          browserStep(jobs, id)['continue-on-error'] = true;
+        }),
+        ['CONTINUE_ON_ERROR'],
+      );
+    });
+  }
+});
+
 describe('the browser matrix', () => {
   const codesOf = (change: (jobs: Jobs) => void): string[] =>
     codesWith((_, jobs) => {
       change(jobs);
     });
+  const browserStep = (jobs: Jobs, id: BrowserJobId): Json => stepRunning(jobs[id], BROWSER_TESTS);
+  const installStep = (jobs: Jobs, id: BrowserJobId): Json => stepRunning(jobs[id], INSTALL_ENGINE);
+  const strategyOf = (jobs: Jobs, id: BrowserJobId): Json => jobs[id].strategy as Json;
+  const matrixOf = (jobs: Jobs, id: BrowserJobId): Json => strategyOf(jobs, id).matrix as Json;
+  const entriesOf = (jobs: Jobs, id: BrowserJobId): Json[] => matrixOf(jobs, id).include as Json[];
+  const faultsAfter = (id: BrowserJobId, change: (jobs: Jobs) => void): string[] => {
+    const jobs = good().jobs as Jobs;
+    change(jobs);
+    return browserMatrix(jobs[id]).faults;
+  };
 
-  // Break caught: the variable dropped, renamed, reordered, padded or filled with another list or a computed
-  // value, so that the tests run fewer engines than CI promises (or an engine that is not installed).
-  for (const value of [
-    undefined,
-    '',
-    'chromium',
-    'chromium,firefox',
-    'chromium,webkit',
-    'firefox,webkit',
-    'chromium,firefox,webkit,msedge',
-    'firefox,chromium,webkit',
-    'chromium, firefox, webkit',
-    ' chromium,firefox,webkit',
-    'chromium,firefox,webkit ',
-    'chromium,firefox,webkit,',
-    'Chromium,Firefox,WebKit',
-    '${{ vars.BROWSERS }}',
-  ]) {
-    it(`requires MELARC_BROWSERS to be ${BROWSER_LIST}, not ${JSON.stringify(value)}`, () => {
+  it('is accepted as the fixture has it: every shard of each engine, a different number of shards for each', () => {
+    const jobs = good().jobs as Jobs;
+    for (const id of BROWSER_JOBS) {
+      const matrix = browserMatrix(jobs[id]);
+      assert.deepEqual(matrix.faults, [], id);
       assert.deepEqual(
-        codesOf((jobs) => {
-          const step = runningStep(jobs, BROWSER_TESTS);
-          if (value === undefined) Reflect.deleteProperty(step, 'env');
-          else step.env = { MELARC_BROWSERS: value };
-        }),
-        ['BROWSER_MATRIX_ENV'],
+        [...new Set(matrix.shards.map((entry) => entry.engine))].toSorted(),
+        [...ENGINES_OF[id]].toSorted(),
       );
-    });
-  }
-
-  it('requires the variable on the step itself, not only on the job or the workflow', () => {
-    assert.deepEqual(
-      codesOf((jobs) => {
-        Reflect.deleteProperty(runningStep(jobs, BROWSER_TESTS), 'env');
-        jobs.integrated.env = { MELARC_BROWSERS: BROWSER_LIST };
-      }),
-      ['BROWSER_MATRIX_ENV'],
-    );
+    }
+    assert.notEqual(new Set(Object.values(SHARD_COUNTS)).size, 1);
   });
 
-  it('accepts other variables beside it', () => {
+  for (const id of BROWSER_JOBS) {
+    // Break caught: the engine of the job not handed to the tests, or handed as a fixed list: every job runs Chromium alone, or all three
+    // engines whole (and the run is as long as before it was split), or an engine that was not installed.
+    for (const value of [
+      undefined,
+      '',
+      'chromium',
+      'chromium,firefox,webkit',
+      '${{ matrix.shard }}',
+      ' ${{ matrix.engine }}',
+      '${{ matrix.engine }},firefox',
+      '${{ vars.BROWSERS }}',
+    ]) {
+      it(`requires MELARC_BROWSERS to be ${MATRIX_ENGINE} in ${id}, not ${JSON.stringify(value)}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            browserStep(jobs, id).env = {
+              MELARC_BROWSER_SHARD: MATRIX_SHARD,
+              ...(value === undefined ? {} : { MELARC_BROWSERS: value }),
+            };
+          }),
+          ['BROWSER_MATRIX_ENV'],
+        );
+      });
+    }
+
+    // Break caught: the shard of the job not handed to the tests, or handed wrongly: every job runs the whole of its engine, or the same part
+    // of it, and the rest of the tests are never run.
+    for (const value of [
+      undefined,
+      '',
+      '1/2',
+      '${{ matrix.shard }}',
+      '${{ matrix.shards }}',
+      '${{ matrix.shards }}/${{ matrix.shard }}',
+      '${{ matrix.shard }}/2',
+      '${{ matrix.shard }} / ${{ matrix.shards }}',
+    ]) {
+      it(`requires MELARC_BROWSER_SHARD to be ${MATRIX_SHARD} in ${id}, not ${JSON.stringify(value)}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            browserStep(jobs, id).env = {
+              MELARC_BROWSERS: MATRIX_ENGINE,
+              ...(value === undefined ? {} : { MELARC_BROWSER_SHARD: value }),
+            };
+          }),
+          ['BROWSER_SHARD_ENV'],
+        );
+      });
+    }
+
+    it(`requires both variables on the step of ${id} itself, not only on the job`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          Reflect.deleteProperty(browserStep(jobs, id), 'env');
+          jobs[id].env = { MELARC_BROWSERS: MATRIX_ENGINE, MELARC_BROWSER_SHARD: MATRIX_SHARD };
+        }).toSorted(),
+        ['BROWSER_MATRIX_ENV', 'BROWSER_SHARD_ENV'],
+      );
+    });
+
+    it(`accepts other variables beside them in ${id}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          browserStep(jobs, id).env = {
+            CI: 'true',
+            MELARC_BROWSERS: MATRIX_ENGINE,
+            MELARC_BROWSER_SHARD: MATRIX_SHARD,
+          };
+        }),
+        [],
+      );
+    });
+
+    // Break caught: the install of a job naming the wrong browsers: all three (every job downloads the two it does not run), a fixed one
+    // (the job of another engine fails for a missing browser, or, with Chromium installed, runs it), the engine and another, the engine
+    // twice, or none (the default set).
+    for (const [label, script] of [
+      [
+        'all three engines',
+        'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit',
+      ],
+      ['a fixed engine', 'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium'],
+      [
+        'the engine and another',
+        `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_ENGINE} firefox`,
+      ],
+      [
+        'the engine twice',
+        `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_ENGINE} ${MATRIX_ENGINE}`,
+      ],
+      ['none (the default set)', 'pnpm --filter @melarc/e2e exec playwright install --with-deps'],
+      [
+        'the shard',
+        'pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.shard }}',
+      ],
+      ['the browsers of the HTTPS matrix', `pnpm exec playwright install ${MATRIX_BROWSERS}`],
+    ] as const) {
+      it(`requires the install step of ${id} to install the engine of the entry alone: not ${label}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            installStep(jobs, id).run = script;
+          }),
+          ['BROWSER_INSTALL_DRIFT'],
+        );
+      });
+    }
+
+    for (const script of [
+      `pnpm --filter @melarc/e2e exec playwright install ${MATRIX_ENGINE}`,
+      `pnpm exec playwright install --with-deps ${MATRIX_ENGINE}`,
+      `pnpm --filter @melarc/e2e exec playwright install --with-deps ${MATRIX_ENGINE}\n`,
+      `  pnpm exec playwright install ${MATRIX_ENGINE}  \n`,
+    ]) {
+      it(`accepts the install step ${JSON.stringify(script)} in ${id}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            installStep(jobs, id).run = script;
+          }),
+          [],
+        );
+      });
+    }
+
+    // Break caught: the install step deleted, or kept in a form that does not install before the tests, or in another job.
+    it(`requires an install step in ${id}, before the tests, in the job that runs them`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          jobs[id].steps = withoutScript(jobs[id], INSTALL_ENGINE);
+        }),
+        ['BROWSER_INSTALL_DRIFT'],
+      );
+      assert.deepEqual(
+        codesOf((jobs) => {
+          const steps = stepsOf(jobs[id]);
+          const [install] = steps.splice(
+            steps.findIndex((step) => step.run === INSTALL_ENGINE),
+            1,
+          );
+          assert.ok(install !== undefined);
+          steps.splice(steps.findIndex((step) => step.run === BROWSER_TESTS) + 1, 0, install);
+        }),
+        ['BROWSER_INSTALL_DRIFT'],
+      );
+      assert.deepEqual(
+        codesOf((jobs) => {
+          const [install] = stepsOf(jobs[id]).splice(
+            stepsOf(jobs[id]).findIndex((step) => step.run === INSTALL_ENGINE),
+            1,
+          );
+          assert.ok(install !== undefined);
+          stepsOf(jobs.unit).push(install);
+        }),
+        ['BROWSER_INSTALL_DRIFT'],
+      );
+    });
+
+    // Break caught: the install command inside a longer script, where a failure or a condition could skip it while the line stays in the file.
+    for (const wrap of [
+      (command: string) => `echo start\n${command}`,
+      (command: string) => `${command} || true`,
+      (command: string) => `echo ${command}`,
+      (command: string) => `# ${command}`,
+    ]) {
+      it(`does not count an install step of ${id} that is not the command alone: ${JSON.stringify(wrap('INSTALL'))}`, () => {
+        const found = codesOf((jobs) => {
+          installStep(jobs, id).run = wrap(INSTALL_ENGINE);
+        });
+        assert.ok(found.includes('BROWSER_INSTALL_DRIFT'), found.join(', '));
+      });
+    }
+
+    it(`rejects a condition on the install step of ${id} like on any other step`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          installStep(jobs, id).if = "github.event_name == 'push'";
+        }),
+        ['STEP_CONDITIONAL'],
+      );
+    });
+
+    // Break caught: two shards that fail uploading under one name, of which the second upload is refused, so that the second shard's
+    // evidence is lost; or a name that says nothing of which shard it came from.
+    for (const [label, name] of [
+      ['neither', `melarc-browser-diagnostics-${GITHUB_SHA}`],
+      ['only the engine', `melarc-browser-diagnostics-${GITHUB_SHA}-${MATRIX_ENGINE}`],
+      ['only the shard', `melarc-browser-diagnostics-${GITHUB_SHA}-\${{ matrix.shard }}`],
+      [
+        'only the number of shards',
+        `melarc-browser-diagnostics-${GITHUB_SHA}-${MATRIX_ENGINE}-\${{ matrix.shards }}`,
+      ],
+    ] as const) {
+      it(`rejects an artifact name in ${id} with ${label}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            const upload = stepNamed(jobs[id], 'Keep the browser diagnostics');
+            upload.with = { ...(upload.with as Json), name };
+          }),
+          ['ARTIFACT_NOT_PER_SHARD'],
+        );
+      });
+    }
+
+    // Break caught: a matrix that does not list the shards as the check reads them, so that the jobs that run are not the jobs this file
+    // (and the test that lists the tests) can read.
+    const shapes: [label: string, change: (jobs: Jobs) => void][] = [
+      [
+        'a job without a strategy',
+        (jobs) => {
+          Reflect.deleteProperty(jobs[id], 'strategy');
+        },
+      ],
+      [
+        'a matrix computed by an expression',
+        (jobs) => {
+          strategyOf(jobs, id).matrix = '${{ fromJSON(needs.plan.outputs.matrix) }}';
+        },
+      ],
+      [
+        'fail-fast left to its default',
+        (jobs) => {
+          Reflect.deleteProperty(strategyOf(jobs, id), 'fail-fast');
+        },
+      ],
+      [
+        'fail-fast true',
+        (jobs) => {
+          strategyOf(jobs, id)['fail-fast'] = true;
+        },
+      ],
+      [
+        'an exclude beside the list',
+        (jobs) => {
+          matrixOf(jobs, id).exclude = [{ engine: 'webkit', shard: 2 }];
+        },
+      ],
+      [
+        'a key that multiplies the list',
+        (jobs) => {
+          matrixOf(jobs, id).engine = BROWSERS;
+        },
+      ],
+      [
+        'an empty list',
+        (jobs) => {
+          matrixOf(jobs, id).include = [];
+        },
+      ],
+      [
+        'a list that is not a list',
+        (jobs) => {
+          matrixOf(jobs, id).include = '${{ fromJSON(x) }}';
+        },
+      ],
+    ];
+    for (const [label, change] of shapes) {
+      it(`rejects ${label} in ${id}`, () => {
+        const found = codesOf((jobs) => {
+          change(jobs);
+        });
+        assert.ok(found.includes('BROWSER_SHARDS_DRIFT'), found.join(', '));
+        // The only other findings are the engines an unreadable matrix leaves unrun, and a skip nothing makes any more.
+        for (const code of found) {
+          assert.ok(
+            [
+              'BROWSER_SHARDS_DRIFT',
+              'BROWSER_ENGINES_DRIFT',
+              'JOB_CONDITIONAL',
+              'AGGREGATE_SKIP_DRIFT',
+            ].includes(code),
+            code,
+          );
+        }
+      });
+    }
+
+    // Each of these entries is faulted and, not being counted, leaves its place in the engine's shards empty: two faults.
+    const entries: [label: string, change: (entry: Json) => void][] = [
+      ['an entry with a key of its own', (entry) => void (entry.os = 'ubuntu-24.04')],
+      [
+        'an entry without its number of shards',
+        (entry) => void Reflect.deleteProperty(entry, 'shards'),
+      ],
+      ['a shard written as text', (entry) => void (entry.shard = '1')],
+      ['shard 0', (entry) => void (entry.shard = 0)],
+      ['a shard that is not whole', (entry) => void (entry.shard = 1.5)],
+      ['a shard beyond its number of shards', (entry) => void (entry.shard = 9)],
+      ['zero shards', (entry) => void (entry.shards = 0)],
+      ['an engine written in capitals', (entry) => void (entry.engine = 'Chromium')],
+    ];
+    for (const [label, change] of entries) {
+      it(`rejects ${label} in ${id}, and the place it leaves empty`, () => {
+        const found = codesOf((jobs) => {
+          const entry = entriesOf(jobs, id)[0];
+          assert.ok(entry !== undefined);
+          // An engine written in capitals is no engine of the job, so the job is faulted for it and for the shard it no longer holds.
+          change(entry);
+        });
+        assert.deepEqual(
+          found.filter((code) => code === 'BROWSER_SHARDS_DRIFT'),
+          ['BROWSER_SHARDS_DRIFT', 'BROWSER_SHARDS_DRIFT'],
+          found.join(', '),
+        );
+      });
+    }
+  }
+
+  it('rejects an engine that is not one of the three', () => {
+    const faults = faultsAfter('browser-chromium', (jobs) => {
+      entriesOf(jobs, 'browser-chromium').push({ engine: 'msedge', shard: 1, shards: 1 });
+    });
+    assert.equal(faults.length, 1);
+    assert.match(faults[0] ?? '', /engine "msedge"/);
+  });
+
+  // Break caught (the failure to show): a shard dropped from the list leaves the tests that Playwright puts in it to no job.
+  it('rejects a dropped shard, and says which', () => {
+    const faults = faultsAfter(OTHER_ENGINES, (jobs) => {
+      matrixOf(jobs, OTHER_ENGINES).include = entriesOf(jobs, OTHER_ENGINES).filter(
+        (entry) => !(entry.engine === 'firefox' && entry.shard === 2),
+      );
+    });
+    assert.equal(faults.length, 1);
+    assert.match(faults[0] ?? '', /firefox has no entry for shard 2 of 3/);
+    const last = faultsAfter('browser-chromium', (jobs) => {
+      matrixOf(jobs, 'browser-chromium').include = entriesOf(jobs, 'browser-chromium').filter(
+        (entry) => entry.shard !== 2,
+      );
+    });
+    assert.match(last[0] ?? '', /chromium has no entry for shard 2 of 2/);
+  });
+
+  it('rejects a shard listed twice', () => {
+    const faults = faultsAfter(OTHER_ENGINES, (jobs) => {
+      entriesOf(jobs, OTHER_ENGINES).push({ engine: 'webkit', shard: 1, shards: 2 });
+    });
+    assert.equal(faults.length, 1);
+    assert.match(faults[0] ?? '', /webkit lists shard 1 of 2 more than once/);
+  });
+
+  // Break caught: entries of one engine that cut it into different numbers of shards: their parts overlap and leave tests out.
+  it('rejects entries of one engine that disagree on the number of shards', () => {
+    const faults = faultsAfter(OTHER_ENGINES, (jobs) => {
+      const entry = entriesOf(jobs, OTHER_ENGINES).find(
+        (candidate) => candidate.engine === 'firefox',
+      );
+      assert.ok(entry !== undefined);
+      entry.shards = 4;
+    });
+    assert.equal(faults.length, 1);
+    assert.match(faults[0] ?? '', /firefox disagree on the number of shards \(3, 4\)/);
+  });
+
+  it('accepts the entries in another order, and another number of shards for each engine', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        runningStep(jobs, BROWSER_TESTS).env = { CI: 'true', MELARC_BROWSERS: BROWSER_LIST };
+        matrixOf(jobs, OTHER_ENGINES).include = entriesOf(jobs, OTHER_ENGINES).toReversed();
+      }),
+      [],
+    );
+    assert.deepEqual(
+      codesOf((jobs) => {
+        matrixOf(jobs, OTHER_ENGINES).include = shardEntries({ firefox: 1, webkit: 4 }, [
+          'firefox',
+          'webkit',
+        ]);
+        matrixOf(jobs, 'browser-chromium').include = shardEntries({ chromium: 5 }, ['chromium']);
       }),
       [],
     );
   });
+});
 
-  // Break caught: the engines not downloaded, or only some of them, so the run would fail for a missing browser
-  // (or, with another engine installed, test one that is not in the list).
-  for (const [label, script] of [
-    ['only Chromium', 'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium'],
-    [
-      'two engines',
-      'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox',
-    ],
-    [
-      'all three without naming them (the default set)',
-      'pnpm --filter @melarc/e2e exec playwright install --with-deps',
-    ],
-    [
-      'a fourth engine too',
-      'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit msedge',
-    ],
-    [
-      'one engine twice, one missing',
-      'pnpm --filter @melarc/e2e exec playwright install chromium chromium firefox',
-    ],
-    [
-      'an engine named twice',
-      'pnpm --filter @melarc/e2e exec playwright install chromium chromium firefox webkit',
-    ],
-    [
-      'one named in capitals',
-      'pnpm --filter @melarc/e2e exec playwright install chromium firefox WebKit',
-    ],
-  ] as const) {
-    it(`requires the install step to install exactly the three: not ${label}`, () => {
+// What each kind of run runs of the browser tests (the Product Owner's decision of 7 November 2026): a pull request the Chromium shards, and
+// a push to main, the nightly run and a manual run the shards of every engine, each engine in one job. The Firefox and WebKit shards are in a job
+// of their own, `if: github.event_name != 'pull_request'`, because the matrix context is not available in a job-level condition.
+describe('what each kind of run runs of the browser tests', () => {
+  const matrixOf = (jobs: Jobs, id: BrowserJobId = 'browser-chromium'): Json =>
+    (jobs[id].strategy as Json).matrix as Json;
+  const entriesOf = (jobs: Jobs, id: BrowserJobId = 'browser-chromium'): Json[] =>
+    matrixOf(jobs, id).include as Json[];
+  const found = (change: (jobs: Jobs) => void) =>
+    findWorkflowProblems(
+      workflowWith((_, jobs) => {
+        change(jobs);
+      }),
+    );
+  const messagesOf = (problems: ReturnType<typeof findWorkflowProblems>, code: string): string[] =>
+    problems.filter((problem) => problem.code === code).map((problem) => problem.message);
+
+  it('is as the Product Owner decided in the fixture', () => {
+    assert.deepEqual(
+      found(() => undefined),
+      [],
+    );
+  });
+
+  // Break caught: the condition taken off the job of the Firefox and WebKit shards, so that a pull request runs them (17 more jobs, and a
+  // verdict that waits for them): the engines run on a pull request must be Chromium alone.
+  it('rejects the Firefox and WebKit shards without the condition, which would run them on a pull request', () => {
+    const problems = found((jobs) => {
+      Reflect.deleteProperty(jobs[OTHER_ENGINES], 'if');
+    });
+    assert.deepEqual(problems.map((problem) => problem.code).toSorted(), [
+      'AGGREGATE_SKIP_DRIFT',
+      'BROWSER_ENGINES_DRIFT',
+    ]);
+    assert.match(
+      messagesOf(problems, 'BROWSER_ENGINES_DRIFT')[0] ?? '',
+      /^On a pull request, the browser jobs also run firefox and webkit, and only chromium may/,
+    );
+  });
+
+  it('rejects the same when the allowance is taken off the verdict as well, and says which run', () => {
+    const problems = found((jobs) => {
+      Reflect.deleteProperty(jobs[OTHER_ENGINES], 'if');
+      stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts ${JOB_IDS.join(' ')}`;
+    });
+    assert.deepEqual(
+      problems.map((problem) => problem.code),
+      ['BROWSER_ENGINES_DRIFT'],
+    );
+  });
+
+  // Break caught: any other condition on that job, which could skip it on main or at night, or on a pull request but not as decided.
+  for (const condition of [
+    "github.event_name == 'push'",
+    "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
+    'github.event_name != "pull_request"',
+    "github.event_name!='pull_request'",
+    "github.event_name == 'schedule'",
+    'always()',
+    'success()',
+    'false',
+  ]) {
+    it(`rejects the condition ${condition} on the Firefox and WebKit job, which never runs on main or at night as it should`, () => {
+      const problems = found((jobs) => {
+        jobs[OTHER_ENGINES].if = condition;
+      });
+      assert.deepEqual(
+        problems.map((problem) => problem.code).toSorted(),
+        [
+          'AGGREGATE_SKIP_DRIFT',
+          'BROWSER_ENGINES_DRIFT',
+          'BROWSER_ENGINES_DRIFT',
+          'BROWSER_ENGINES_DRIFT',
+          'JOB_CONDITIONAL',
+        ],
+        condition,
+      );
+      for (const message of messagesOf(problems, 'BROWSER_ENGINES_DRIFT')) {
+        assert.match(
+          message,
+          /^(On a push to main|In the nightly run|In a manual run), no browser job runs firefox or webkit/,
+        );
+      }
+    });
+  }
+
+  // Break caught: the condition on a job that runs Chromium shards, or on a job that is not the browser tests: Chromium would be skipped on a
+  // pull request, or a check skipped there that must run.
+  it('rejects the condition on a job that holds Chromium shards, and on any other job', () => {
+    const chromiumSkipped = found((jobs) => {
+      jobs['browser-chromium'].if = PULL_REQUEST_SKIP;
+    });
+    assert.ok(chromiumSkipped.some((problem) => problem.code === 'JOB_CONDITIONAL'));
+    assert.ok(
+      messagesOf(chromiumSkipped, 'BROWSER_ENGINES_DRIFT')[0]?.startsWith(
+        'On a pull request, no browser job runs chromium',
+      ),
+    );
+    for (const id of [
+      'static',
+      'unit',
+      'database',
+      'integrated',
+      'https',
+      'audit',
+      'verifier',
+    ] as const) {
+      const problems = found((jobs) => {
+        jobs[id].if = PULL_REQUEST_SKIP;
+      });
+      assert.ok(
+        problems.some((problem) => problem.code === 'JOB_CONDITIONAL'),
+        id,
+      );
+    }
+    const mixed = found((jobs) => {
+      entriesOf(jobs, OTHER_ENGINES).push({ engine: 'chromium', shard: 1, shards: 1 });
+    });
+    assert.ok(mixed.some((problem) => problem.code === 'JOB_CONDITIONAL'));
+  });
+
+  // Break caught: an engine's shards listed in both jobs, which an event that runs both would run twice, and a pull request would then
+  // run the engine that only the main branch may.
+  it('rejects the shards of an engine listed in both jobs', () => {
+    const problems = found((jobs) => {
+      entriesOf(jobs).push({ engine: 'firefox', shard: 1, shards: 1 });
+    });
+    assert.ok(
+      messagesOf(problems, 'BROWSER_ENGINES_DRIFT').some((message) =>
+        message.startsWith(
+          'The shards of firefox are listed in more than one job (browser-chromium, browser-firefox-webkit)',
+        ),
+      ),
+    );
+    assert.ok(
+      messagesOf(problems, 'BROWSER_ENGINES_DRIFT').some((message) =>
+        message.startsWith('On a pull request, the browser jobs also run firefox'),
+      ),
+    );
+  });
+
+  // Break caught (the failure to show): the Firefox or WebKit shards taken out of the workflow, so that main and the nightly run never run
+  // them, though every pull request is as green as before.
+  for (const engine of ['firefox', 'webkit']) {
+    it(`reports ${engine} missing on main, at night and in a manual run, and not on a pull request`, () => {
+      const problems = found((jobs) => {
+        matrixOf(jobs, OTHER_ENGINES).include = entriesOf(jobs, OTHER_ENGINES).filter(
+          (entry) => entry.engine !== engine,
+        );
+      });
+      assert.deepEqual(
+        problems.map((problem) => problem.code),
+        ['BROWSER_ENGINES_DRIFT', 'BROWSER_ENGINES_DRIFT', 'BROWSER_ENGINES_DRIFT'],
+      );
+      assert.deepEqual(
+        messagesOf(problems, 'BROWSER_ENGINES_DRIFT').map((message) => message.split(',')[0]),
+        ['On a push to main', 'In the nightly run', 'In a manual run'],
+      );
+    });
+  }
+
+  it('reports Chromium missing on every kind of run', () => {
+    const problems = found((jobs) => {
+      matrixOf(jobs).include = [];
+    });
+    assert.equal(messagesOf(problems, 'BROWSER_ENGINES_DRIFT').length, 4);
+  });
+
+  // Break caught: every browser job taken out of the workflow, or one run that cannot be told apart from another.
+  it('reports no engine on any kind of run when no job holds a shard', () => {
+    const problems = found((jobs) => {
+      for (const id of BROWSER_JOBS) {
+        jobs[id].steps = withoutScript(jobs[id], BROWSER_TESTS);
+      }
+    });
+    assert.ok(problems.some((problem) => problem.code === 'COMMAND_MISSING'));
+  });
+});
+
+// The journeys over the trusted HTTPS origin run as the matrix of a job of their own, a shard of the run in each job (the shards of
+// e2e/harness/https-shards.ts), because with the journeys over plain HTTP they were longer than a job may last. A job is handed its shard
+// (MELARC_HTTPS_SHARD) and installs the browsers its runs need, which the harness's table says and scripts/https-shards.test.ts holds the matrix to.
+describe('the HTTPS journeys', () => {
+  const codesOf = (change: (jobs: Jobs) => void): string[] =>
+    codesWith((_, jobs) => {
+      change(jobs);
+    });
+  const httpsStep = (jobs: Jobs): Json => stepRunning(jobs.https, HTTPS_TESTS);
+  const strategyOf = (jobs: Jobs): Json => jobs.https.strategy as Json;
+  const matrixOf = (jobs: Jobs): Json => strategyOf(jobs).matrix as Json;
+  const entriesOf = (jobs: Jobs): Json[] => matrixOf(jobs).include as Json[];
+  const faultsAfter = (change: (jobs: Jobs) => void): string[] => {
+    const jobs = good().jobs as Jobs;
+    change(jobs);
+    return httpsMatrix(jobs.https).faults;
+  };
+
+  it('is accepted as the fixture has it: both shards, each with the browsers of its runs', () => {
+    const jobs = good().jobs as Jobs;
+    const matrix = httpsMatrix(jobs.https);
+    assert.deepEqual(matrix.faults, []);
+    assert.deepEqual(matrix.shards, [
+      { shard: 1, shards: 2, browsers: ['chromium', 'webkit'] },
+      { shard: 2, shards: 2, browsers: ['firefox'] },
+    ]);
+  });
+
+  // Break caught: the shard not handed to the run, or handed wrongly: every job makes every run of the journeys (the job is as long as it
+  // was before it was split), or the same one.
+  for (const value of [
+    undefined,
+    '',
+    '1/2',
+    '${{ matrix.shard }}',
+    '${{ matrix.shards }}/${{ matrix.shard }}',
+    '${{ matrix.shard }}/2',
+    '${{ vars.SHARD }}',
+  ]) {
+    it(`requires MELARC_HTTPS_SHARD to be ${MATRIX_SHARD}, not ${JSON.stringify(value)}`, () => {
       assert.deepEqual(
         codesOf((jobs) => {
-          runningStep(jobs, INSTALL_BROWSERS).run = script;
+          if (value === undefined) Reflect.deleteProperty(httpsStep(jobs), 'env');
+          else httpsStep(jobs).env = { MELARC_HTTPS_SHARD: value };
+        }),
+        ['HTTPS_SHARD_ENV'],
+      );
+    });
+  }
+
+  it('accepts other variables beside the shard, and requires it on the step itself', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        httpsStep(jobs).env = { CI: 'true', MELARC_HTTPS_SHARD: MATRIX_SHARD };
+      }),
+      [],
+    );
+    assert.deepEqual(
+      codesOf((jobs) => {
+        Reflect.deleteProperty(httpsStep(jobs), 'env');
+        jobs.https.env = { MELARC_HTTPS_SHARD: MATRIX_SHARD };
+      }),
+      ['HTTPS_SHARD_ENV'],
+    );
+  });
+
+  // Break caught: the browsers of a shard not the ones its runs need: all three engines in each job (a download of two browsers for
+  // nothing), the engines of the matrix of the browser tests, a fixed list (the Firefox shard without Firefox fails for a missing browser),
+  // or the default set.
+  for (const [label, script] of [
+    [
+      'all three engines',
+      'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit',
+    ],
+    ['a fixed engine', 'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium'],
+    ['the engine of the browser matrix', `pnpm exec playwright install ${MATRIX_ENGINE}`],
+    [
+      'the browsers and another',
+      `pnpm exec playwright install --with-deps ${MATRIX_BROWSERS} webkit`,
+    ],
+    ['none (the default set)', 'pnpm --filter @melarc/e2e exec playwright install --with-deps'],
+  ] as const) {
+    it(`requires the install step to install the browsers of the entry alone: not ${label}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          stepRunning(jobs.https, INSTALL_BROWSERS).run = script;
         }),
         ['BROWSER_INSTALL_DRIFT'],
       );
@@ -861,91 +1707,144 @@ describe('the browser matrix', () => {
   }
 
   for (const script of [
-    'pnpm --filter @melarc/e2e exec playwright install --with-deps webkit firefox chromium',
-    'pnpm --filter @melarc/e2e exec playwright install chromium firefox webkit',
-    'pnpm exec playwright install --with-deps chromium firefox webkit',
-    'pnpm --filter @melarc/e2e exec playwright install --with-deps chromium firefox webkit\n',
-    '  pnpm exec playwright install chromium firefox webkit  \n',
+    `pnpm --filter @melarc/e2e exec playwright install ${MATRIX_BROWSERS}`,
+    `pnpm exec playwright install --with-deps ${MATRIX_BROWSERS}`,
+    `pnpm exec playwright install --with-deps ${MATRIX_BROWSERS}\n`,
   ]) {
     it(`accepts the install step ${JSON.stringify(script)}`, () => {
       assert.deepEqual(
         codesOf((jobs) => {
-          runningStep(jobs, INSTALL_BROWSERS).run = script;
+          stepRunning(jobs.https, INSTALL_BROWSERS).run = script;
         }),
         [],
       );
     });
   }
 
-  // Break caught: the install step deleted, or kept in a form that does not install before the tests.
-  it('requires an install step', () => {
+  // Break caught: the install step deleted, kept in a form that does not install before the journeys, or moved to another job.
+  it('requires the install before the journeys, in the job that runs them', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        jobs.integrated.steps = withoutScript(jobs.integrated, INSTALL_BROWSERS);
+        jobs.https.steps = withoutScript(jobs.https, INSTALL_BROWSERS);
       }),
       ['BROWSER_INSTALL_DRIFT'],
     );
-  });
-
-  it('requires the install to come before the tests that need the browsers', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        const steps = stepsOf(jobs.integrated);
-        const at = steps.findIndex((step) => step.run === INSTALL_BROWSERS);
-        const [install] = steps.splice(at, 1);
-        assert.ok(install !== undefined);
-        steps.splice(steps.findIndex((step) => step.run === BROWSER_TESTS) + 1, 0, install);
-      }),
-      ['BROWSER_INSTALL_DRIFT'],
-    );
-  });
-
-  it('requires the install to be in the job that runs the tests', () => {
-    assert.deepEqual(
-      codesOf((jobs) => {
-        const [install] = stepsOf(jobs.integrated).splice(
-          stepsOf(jobs.integrated).findIndex((step) => step.run === INSTALL_BROWSERS),
+        const steps = stepsOf(jobs.https);
+        const [install] = steps.splice(
+          steps.findIndex((step) => step.run === INSTALL_BROWSERS),
           1,
         );
         assert.ok(install !== undefined);
-        stepsOf(jobs.unit).push(install);
+        steps.splice(steps.findIndex((step) => step.run === HTTPS_TESTS) + 1, 0, install);
+      }),
+      ['BROWSER_INSTALL_DRIFT'],
+    );
+    assert.deepEqual(
+      codesOf((jobs) => {
+        stepRunning(jobs.https, INSTALL_BROWSERS).run = `echo ${INSTALL_BROWSERS}`;
       }),
       ['BROWSER_INSTALL_DRIFT'],
     );
   });
-
-  // Break caught: the install command inside a longer script, where a failure or a condition could skip it
-  // while the line stays in the file.
-  for (const wrap of [
-    (command: string) => `echo start\n${command}`,
-    (command: string) => `${command} || true`,
-    (command: string) => `echo ${command}`,
-    (command: string) => `# ${command}`,
-  ]) {
-    it(`does not count an install step that is not the command alone: ${JSON.stringify(wrap('INSTALL'))}`, () => {
-      const found = codesOf((jobs) => {
-        const step = runningStep(jobs, INSTALL_BROWSERS);
-        step.run = wrap(INSTALL_BROWSERS);
-      });
-      assert.ok(found.includes('BROWSER_INSTALL_DRIFT'), found.join(', '));
-    });
-  }
 
   it('rejects a condition on the install step like on any other step', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        runningStep(jobs, INSTALL_BROWSERS).if = "github.event_name == 'push'";
+        stepRunning(jobs.https, INSTALL_BROWSERS).if = "github.event_name == 'push'";
       }),
       ['STEP_CONDITIONAL'],
     );
   });
 
-  it('leaves a workflow without browser tests to the missing-command rule', () => {
+  // Break caught: two shards that fail uploading under one name, of which the second upload is refused.
+  it('rejects an artifact name that does not carry the shard', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        jobs.integrated.steps = withoutScript(jobs.integrated, BROWSER_TESTS);
+        const upload = stepNamed(jobs.https, 'Keep the failure diagnostics');
+        upload.with = { ...(upload.with as Json), name: `melarc-https-diagnostics-${GITHUB_SHA}` };
       }),
-      ['COMMAND_MISSING'],
+      ['ARTIFACT_NOT_PER_SHARD'],
+    );
+  });
+
+  // Break caught: the job made one job again (a whole run, longer than a job may last), or a matrix the check cannot read.
+  for (const [label, change] of [
+    [
+      'a job that is not a matrix',
+      (jobs: Jobs) => void Reflect.deleteProperty(jobs.https, 'strategy'),
+    ],
+    [
+      'a matrix computed by an expression',
+      (jobs: Jobs) => void (strategyOf(jobs).matrix = '${{ fromJSON(x) }}'),
+    ],
+    ['fail-fast left true', (jobs: Jobs) => void (strategyOf(jobs)['fail-fast'] = true)],
+    ['an exclude beside the list', (jobs: Jobs) => void (matrixOf(jobs).exclude = [{ shard: 2 }])],
+    ['an empty list', (jobs: Jobs) => void (matrixOf(jobs).include = [])],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          change(jobs);
+        }),
+        ['HTTPS_SHARDS_DRIFT'],
+      );
+    });
+  }
+
+  // Each of these entries is faulted and, not being counted, leaves its place empty: two faults.
+  for (const [label, change] of [
+    ['an entry with a key of its own', (entry: Json) => void (entry.os = 'ubuntu-24.04')],
+    [
+      'an entry without its browsers',
+      (entry: Json) => void Reflect.deleteProperty(entry, 'browsers'),
+    ],
+    ['browsers that are not engines', (entry: Json) => void (entry.browsers = 'chrome')],
+    ['an engine twice', (entry: Json) => void (entry.browsers = 'chromium chromium')],
+    [
+      'browsers separated by two spaces',
+      (entry: Json) => void (entry.browsers = 'chromium  webkit'),
+    ],
+    ['no browser', (entry: Json) => void (entry.browsers = '')],
+    ['a shard that is text', (entry: Json) => void (entry.shard = '1')],
+    ['a shard beyond its number', (entry: Json) => void (entry.shard = 3)],
+    ['shard 0', (entry: Json) => void (entry.shard = 0)],
+  ] as const) {
+    it(`rejects ${label}, and the place it leaves empty`, () => {
+      const faults = faultsAfter((jobs) => {
+        const entry = entriesOf(jobs)[0];
+        assert.ok(entry !== undefined);
+        change(entry);
+      });
+      assert.equal(faults.length, 2, faults.join(' | '));
+    });
+  }
+
+  // Break caught (the failure to show): a shard dropped from the matrix leaves the runs it makes to no job.
+  it('rejects a dropped shard, and says which', () => {
+    const faults = faultsAfter((jobs) => {
+      matrixOf(jobs).include = entriesOf(jobs).filter((entry) => entry.shard !== 2);
+    });
+    assert.deepEqual(faults, [
+      'the HTTPS run has no entry for shard 2 of 2, so the tests of that shard are never run',
+    ]);
+  });
+
+  it('rejects a shard listed twice, and shards that disagree on the total', () => {
+    assert.match(
+      faultsAfter((jobs) => {
+        entriesOf(jobs).push({ shard: 2, shards: 2, browsers: 'firefox' });
+      })[0] ?? '',
+      /lists shard 2 of 2 more than once/,
+    );
+    assert.match(
+      faultsAfter((jobs) => {
+        const entry = entriesOf(jobs)[1];
+        assert.ok(entry !== undefined);
+        entry.shards = 3;
+      })[0] ?? '',
+      /disagree on the number of shards \(2, 3\)/,
     );
   });
 });
@@ -1063,23 +1962,33 @@ describe('artifacts', () => {
   });
 
   // Break caught: the clean-tree check and the manifest run before the tests, so they describe a tree and a
-  // build that the browser and journey tests have not yet run against (or touched).
-  it('requires the clean-tree check and the manifest to come after the browser tests', () => {
-    for (const test of ['pnpm run test:browser', 'pnpm run test:e2e', 'pnpm run test:e2e:https']) {
-      assert.deepEqual(
-        codesWith((_, jobs) => {
-          const steps = stepsOf(jobs.integrated);
-          const moved = steps.findIndex((step) => step.run === test);
-          const clean = steps.findIndex((step) => step.run === CLEAN_SCRIPT);
-          const manifest = steps.findIndex((step) => step.run === MANIFEST_SCRIPT);
-          // Put the test after the clean-tree check and the manifest, still before the upload.
-          const [step] = steps.splice(moved, 1);
-          assert.ok(step !== undefined && clean !== -1 && manifest !== -1);
-          steps.splice(steps.findIndex((s) => s.run === MANIFEST_SCRIPT) + 1, 0, step);
-        }),
-        ['ARTIFACT_NOT_AFTER_TESTS'],
-      );
-    }
+  // build that the journey tests of the job have not yet run against (or touched). The browser tests and the HTTPS
+  // journeys run in jobs of their own now, which keep nothing; the rule still names them, and the second case
+  // puts one of them into this job to show it.
+  it('requires the clean-tree check and the manifest to come after the journey tests', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        const steps = stepsOf(jobs.integrated);
+        const moved = steps.findIndex((step) => step.run === 'pnpm run test:e2e');
+        const clean = steps.findIndex((step) => step.run === CLEAN_SCRIPT);
+        const manifest = steps.findIndex((step) => step.run === MANIFEST_SCRIPT);
+        // Put the test after the clean-tree check and the manifest, still before the upload.
+        const [step] = steps.splice(moved, 1);
+        assert.ok(step !== undefined && clean !== -1 && manifest !== -1);
+        steps.splice(steps.findIndex((s) => s.run === MANIFEST_SCRIPT) + 1, 0, step);
+      }),
+      ['ARTIFACT_NOT_AFTER_TESTS'],
+    );
+    // The HTTPS journeys run in a job of their own, which keeps nothing, and the rule still names them: one put into this job after the
+    // manifest is found late (besides what the HTTPS rules find of a job that is no matrix of the HTTPS shards).
+    const late = codesWith((_, jobs) => {
+      const steps = stepsOf(jobs.integrated);
+      steps.splice(steps.findIndex((s) => s.run === MANIFEST_SCRIPT) + 1, 0, {
+        name: 'Run the HTTPS journeys late',
+        run: HTTPS_TESTS,
+      });
+    });
+    assert.ok(late.includes('ARTIFACT_NOT_AFTER_TESTS'), late.join(', '));
   });
 
   // Break caught: a file uploaded that the manifest does not list (so `verify` cannot flag it), or listed
@@ -1258,13 +2167,41 @@ describe('triggers and permissions', () => {
     );
   });
 
-  // Break caught: a trigger that runs this workflow with more than a pull request's own rights, on a schedule or
-  // for an event no change of the code caused. pull_request_target and workflow_run run with the repository's
-  // secrets and a token that can write, on a side of the change the author controls; the others make the
-  // verdict about something other than a commit that was pushed or proposed.
+  // Break caught: the nightly run taken out. A pull request does not run the Firefox and WebKit shards of the browser tests, so the
+  // nightly run and the pushes to main are what run them; without a cron entry nothing runs at night.
+  it('requires the nightly run, a schedule with a cron', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        Reflect.deleteProperty(workflow.on as Json, 'schedule');
+      }),
+      ['TRIGGER_MISSING'],
+    );
+    for (const schedule of [[], [{}], [{ cron: '' }], [{ cron: 3 }], [null], '17 2 * * *', {}]) {
+      assert.deepEqual(
+        codesWith((workflow) => {
+          (workflow.on as Json).schedule = schedule;
+        }),
+        ['TRIGGER_MISSING'],
+        JSON.stringify(schedule),
+      );
+    }
+  });
+
+  it('accepts a schedule of several entries, so long as one is a cron', () => {
+    assert.deepEqual(
+      codesWith((workflow) => {
+        (workflow.on as Json).schedule = [{ cron: '17 2 * * *' }, { cron: '17 14 * * 1-5' }];
+      }),
+      [],
+    );
+  });
+
+  // Break caught: a trigger that runs this workflow with more than a pull request's own rights, or for an event no change of the code
+  // caused. pull_request_target and workflow_run run with the repository's secrets and a token that can write, on a side of the change
+  // the author controls; the others make the verdict about something other than a commit that was pushed or proposed. (The schedule is
+  // allowed since 7 November 2026: the nightly run tests the head of the default branch, a commit that was pushed, with a token that reads.)
   for (const trigger of [
     'pull_request_target',
-    'schedule',
     'workflow_run',
     'repository_dispatch',
     'issue_comment',
@@ -1281,19 +2218,20 @@ describe('triggers and permissions', () => {
     it(`rejects the trigger ${trigger}`, () => {
       assert.deepEqual(
         codesWith((workflow) => {
-          (workflow.on as Json)[trigger] = trigger === 'schedule' ? [{ cron: '0 3 * * *' }] : {};
+          (workflow.on as Json)[trigger] = {};
         }),
         ['TRIGGER_FORBIDDEN'],
       );
     });
   }
 
-  it('accepts exactly push, pull_request and workflow_dispatch', () => {
+  it('accepts exactly push, pull_request, schedule and workflow_dispatch', () => {
     assert.deepEqual(
       codesWith((workflow) => {
         assert.deepEqual(Object.keys(workflow.on as Json).toSorted(), [
           'pull_request',
           'push',
+          'schedule',
           'workflow_dispatch',
         ]);
       }),
@@ -1428,6 +2366,62 @@ describe('this repository', () => {
       ),
       [],
     );
+  });
+
+  // Break caught: a verdict that passes while one job of the real workflow did not succeed, the browser matrices included, or one that
+  // lets a skip through where the workflow runs the job. A matrix is one job here: GitHub gives the verdict one result for all of its
+  // jobs, `success` only when every one succeeded, and otherwise `failure`, `cancelled` or `skipped`. The verdict is judged here as the
+  // workflow runs it: its real command line, for each event, each job and each result; a skip is accepted for the one job a pull request
+  // does not run, on a pull request, and nowhere else.
+  it('has a verdict that fails when any one of its jobs did not succeed, and allows only the skip a pull request makes', () => {
+    const text = read('.github/workflows/ci.yml');
+    const workflow: unknown = parse(text);
+    const jobs = isRecord(workflow) && isRecord(workflow.jobs) ? workflow.jobs : {};
+    const ids = Object.keys(jobs).filter((id) => id !== AGGREGATE_JOB);
+    for (const id of ['https', 'integrated', 'browser-chromium', 'browser-firefox-webkit']) {
+      assert.ok(ids.includes(id), id);
+    }
+    const jobRecord = (id: string): Json => {
+      const record = jobs[id];
+      assert.ok(isRecord(record), id);
+      return record;
+    };
+    const judge = stepsOf(jobRecord(AGGREGATE_JOB)).find(
+      (step) => typeof step.run === 'string' && step.run.includes('ci-aggregate.ts'),
+    );
+    assert.ok(judge !== undefined && typeof judge.run === 'string');
+    const command = parseArguments(judge.run.trim().split(/\s+/).slice(2));
+    assert.deepEqual(command.unreadable, []);
+    assert.deepEqual(command.jobs.toSorted(), ids.toSorted());
+    // The job a pull request does not run, by what the workflow says of it (its condition), and the allowance the command gives.
+    const notOnPullRequest = ids.filter((id) => jobRecord(id).if === PULL_REQUEST_SKIP);
+    assert.deepEqual(notOnPullRequest, ['browser-firefox-webkit']);
+    assert.deepEqual(command.skippedOnPullRequest, notOnPullRequest);
+
+    for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
+      const judged = (result: (id: string) => string) =>
+        aggregate(
+          JSON.stringify(Object.fromEntries(ids.map((id) => [id, { result: result(id) }]))),
+          command.jobs,
+          { event, skippedOnPullRequest: command.skippedOnPullRequest },
+        ).problems.map((problem) => `${problem.code} ${problem.job ?? ''}`);
+      assert.deepEqual(
+        judged(() => 'success'),
+        [],
+        event,
+      );
+      for (const id of ids) {
+        for (const result of ['failure', 'cancelled', 'skipped']) {
+          const accepted =
+            event === 'pull_request' && result === 'skipped' && notOnPullRequest.includes(id);
+          assert.deepEqual(
+            judged((other) => (other === id ? result : 'success')),
+            accepted ? [] : [`JOB_NOT_SUCCESSFUL ${id}`],
+            `${event}: ${id} ${result}`,
+          );
+        }
+      }
+    }
   });
 
   // Break caught: a command the workflow requires being renamed in package.json, or vice versa.

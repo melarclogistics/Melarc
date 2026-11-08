@@ -55,13 +55,14 @@
         "GITHUB_ACTIONS",
         "RUNNER_ENVIRONMENT",
         "MELARC_E2E_KEYS_CLEARED",
+        "MELARC_HTTPS_SHARD",
         "OPENSSL",
         "CERTUTIL"
       ]
     },
     "test:browser": {
       "cache": false,
-      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS"]
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "MELARC_BROWSERS", "MELARC_BROWSER_SHARD"]
     }
   }
 }
