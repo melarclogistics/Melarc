@@ -845,4 +845,47 @@ describe('what the table itself holds to', () => {
     expect(await stateOf(insertAs(STAFF_A, PRINCIPAL_2, 'STAFF'))).toBe('42501');
     expect(await stateOf(insertAs(STAFF_A, PRINCIPAL_1, 'VENDOR'))).toBe('42501');
   });
+
+  // Break caught: the on-behalf arms of migration 0036 missing (the vendor's additional-browser grant cannot keep its key), or admitting the
+  // capability to another operation's record, to another type of principal's, or to a sealed one.
+  it('lets the authentication capability keep a vendor’s record of requestAdditionalDeviceGrant, unsealed, and no other', async () => {
+    const authentication = systemContext('authentication');
+    // The vendor context's principal is PRINCIPAL_1 (its organisation is VENDOR_1), so every row here is that principal's.
+    const insertAs = (context: SecurityContext, type: string, operationId: string, key: string) =>
+      withHandle(built.service, context, async (_handle, tx) => {
+        await tx.execute(sql`insert into idempotency_record (id, principal_type, principal_id, operation_id, idempotency_key, fingerprint, state)
+          values (gen_random_uuid(), ${type}, ${PRINCIPAL_1}::uuid, ${operationId}, ${key}, ${FINGERPRINT}, 'IN_PROGRESS')`);
+      });
+    const kept = freshKey('on-behalf');
+    expect(
+      await stateOf(insertAs(authentication, 'VENDOR', 'requestAdditionalDeviceGrant', kept)),
+    ).toBeUndefined();
+    expect(
+      await stateOf(insertAs(authentication, 'VENDOR', 'signOut', freshKey('on-behalf'))),
+    ).toBe('42501');
+    expect(
+      await stateOf(
+        insertAs(authentication, 'STAFF', 'requestAdditionalDeviceGrant', freshKey('on-behalf')),
+      ),
+    ).toBe('42501');
+    // The vendor's own record of another operation stays out of the capability's sight.
+    const own = freshKey('on-behalf');
+    expect(await stateOf(insertAs(VENDOR_SAME_ID, 'VENDOR', 'signOut', own))).toBeUndefined();
+
+    const seen = await withHandle(built.service, authentication, async (_handle, tx) => {
+      const result = await tx.execute(
+        sql`select idempotency_key from idempotency_record where idempotency_key in (${kept}, ${own})`,
+      );
+      return result.rows;
+    });
+    expect(seen).toEqual([{ idempotency_key: kept }]);
+    const completed = await withHandle(built.service, authentication, async (_handle, tx) => {
+      const result = await tx.execute(
+        sql`update idempotency_record set state = 'COMPLETED', response_status = 202, response_body = ''::bytea, completed_at = now()
+            where idempotency_key = ${kept} returning id`,
+      );
+      return result.rows.length;
+    });
+    expect(completed).toBe(1);
+  });
 });

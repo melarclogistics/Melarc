@@ -14,13 +14,16 @@ import { TEST_CONFIG } from './test-config.js';
 
 export { TEST_CONFIG };
 
-/** The real application module plus extra modules, for tests that need routes of their own. */
+/**
+ * The real application module plus extra modules, for tests that need routes of their own. The routes of the product contract are
+ * left out (`productRoutes: false`): such a test brings its own routes, and usually its own contract, which holds none of the product's.
+ */
 export function appWith(...extra: NonNullable<ModuleMetadata['imports']>): RootModuleFactory {
   @Module({})
   class TestRootModule {}
   return (options) => ({
     module: TestRootModule,
-    imports: [AppModule.register(options), ...extra],
+    imports: [AppModule.register({ ...options, productRoutes: false }), ...extra],
   });
 }
 

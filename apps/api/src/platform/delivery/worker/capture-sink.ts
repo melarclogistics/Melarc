@@ -17,6 +17,8 @@ export interface CapturedMessage {
   readonly channel: DeliveryChannel;
   readonly destination: string;
   readonly link: string;
+  /** A vendor message's account identifier, shown beside the link (S0.47); absent from every other message. */
+  readonly accountIdentifier?: string;
 }
 
 /** Where captured messages go. One message per deduplication identity: the same identity stored again leaves one message. */

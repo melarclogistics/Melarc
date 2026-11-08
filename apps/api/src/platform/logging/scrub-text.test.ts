@@ -11,7 +11,7 @@ import { REDACTED, scrubText } from './scrub-text.js';
  * scrubbed to the end of the text. A line that was cut in the middle of a value is no reason to print the value.
  */
 const SECRET_WORDS =
-  'password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf';
+  'password|passwd|secret|token|api[_-]?key|signature|authorization|cookie|credential|session|csrf|melarc[_-]vendor[_-]device|melarc[_-]trusted[_-]browser';
 const REFERENCE = {
   url: /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi,
   auth: /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi,
@@ -106,6 +106,23 @@ describe('scrubText: what is scrubbed', () => {
       '{"password": "[REDACTED]", "name": "a"}',
     ],
     ['a pair', 'a=1&session_token=abc123&b=2', 'a=1&session_token=[REDACTED]&b=2'],
+    // The two long-lived cookies of the staff and vendor sign-ins have no secret word in their names; their values are credentials
+    // (AC-SLICE-000-139: the trusted-browser credential is in no log).
+    [
+      'the trusted-browser cookie as a pair',
+      'Cookie seen: melarc_trusted_browser=AbCdEf123_-xyz; other=1',
+      'Cookie seen: melarc_trusted_browser=[REDACTED]; other=1',
+    ],
+    [
+      'the trusted-browser cookie as a JSON member',
+      '{"melarc_trusted_browser": "AbCdEf123", "n": 1}',
+      '{"melarc_trusted_browser": "[REDACTED]", "n": 1}',
+    ],
+    [
+      'the vendor device cookie as a pair',
+      'melarc_vendor_device=AbCdEf123 next',
+      'melarc_vendor_device=[REDACTED] next',
+    ],
     ['a short whole key after a hyphen', 'x-pin=1234 ', 'x-pin=[REDACTED] '],
     ['a short whole key, in capitals', 'OTP=123456;', 'OTP=[REDACTED];'],
   ])('scrubs %s', (_label, input, expected) => {

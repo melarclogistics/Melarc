@@ -1,3 +1,5 @@
+import { isIPv4 } from 'node:net';
+
 import { z } from 'zod';
 
 import { ARGON2ID_LIMITS } from '../auth/crypto/argon2-parameters.js';
@@ -137,7 +139,13 @@ export const EXPECTED = {
   ATTESTATION_VERIFIER_TIMEOUT_MS:
     'an integer from 100 to 60000; required with service, absent with substitute',
   ATTESTATION_VERIFIER_CALLER_SECRET:
-    'a 32-byte key as 43 unpadded base64url characters; required with service when the URL is not on a loopback host, absent with substitute',
+    'a 32-byte key as 43 unpadded base64url characters; required with service when APP_ENV is production or the URL is not on a loopback host, absent with substitute',
+  METRICS_HOST:
+    'a host name or IP address without spaces; a loopback address unless METRICS_SECRET is set',
+  METRICS_PORT:
+    'an integer from 1 to 65535, not HTTP_PORT (whatever the hosts); absent: the private metrics endpoint is off',
+  METRICS_SECRET:
+    'a 32-byte key as 43 unpadded base64url characters; required when METRICS_HOST is not a loopback address, absent without METRICS_PORT',
 } as const satisfies Record<string, string>;
 
 export type ConfigKey = keyof typeof EXPECTED;
@@ -152,6 +160,8 @@ export const OPTIONAL_KEYS: readonly ConfigKey[] = [
   'ATTESTATION_VERIFIER_URL',
   'ATTESTATION_VERIFIER_TIMEOUT_MS',
   'ATTESTATION_VERIFIER_CALLER_SECRET',
+  'METRICS_PORT',
+  'METRICS_SECRET',
 ];
 
 export const integerBetween = (min: number, max: number) =>
@@ -172,6 +182,16 @@ export function parseEndpoint(text: string): URL | undefined {
 export const isLoopbackHost = (url: URL): boolean =>
   ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
   /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+
+/**
+ * Whether an address to listen on is the local machine's alone: a listener there is reached by nothing off the host. `localhost`, `::1`
+ * and an IPv4 address of the 127 block, written whole (`127.999.1.1` is not an address, and `127.1` is a name the resolver may read as
+ * anything).
+ */
+export const isLoopbackAddress = (host: string): boolean => {
+  const name = host.toLowerCase();
+  return name === 'localhost' || name === '::1' || (isIPv4(name) && name.startsWith('127.'));
+};
 
 const canonicalKey = z.string().refine((text) => parseKeyMaterial(`1:${text}`) !== undefined);
 const endpoint = z.string().refine((text) => parseEndpoint(text) !== undefined);
@@ -235,4 +255,10 @@ export const envShape = {
   ATTESTATION_VERIFIER_URL: endpoint.optional(),
   ATTESTATION_VERIFIER_TIMEOUT_MS: integerBetween(100, 60_000).optional(),
   ATTESTATION_VERIFIER_CALLER_SECRET: canonicalKey.optional(),
+  METRICS_HOST: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .default('127.0.0.1'),
+  METRICS_PORT: integerBetween(1, 65535).optional(),
+  METRICS_SECRET: canonicalKey.optional(),
 } satisfies Record<ConfigKey, z.ZodType>;

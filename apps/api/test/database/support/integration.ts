@@ -1,4 +1,8 @@
 import { AppModule } from '../../../src/app.module.js';
+import type { AttestationVerifier } from '../../../src/platform/auth/ports/attestation-verifier.port.js';
+import type { Metrics } from '../../../src/platform/auth/ports/metrics.port.js';
+import type { CompiledFixedPolicy } from '../../../src/platform/auth/sessions/session-authority.js';
+import type { VendorOrganizationResolver } from '../../../src/platform/authorization/operation-contexts.js';
 import { API_RUNTIME_ROLE, loadConfig } from '../../../src/platform/config/load-config.js';
 import type {
   CapturedMessage,
@@ -15,6 +19,7 @@ import { Opened } from '../../../src/test-support/cleanup.js';
 import { ManualClock } from '../../../src/test-support/manual-clock.js';
 import { startTestApp, type TestApp } from '../../../src/test-support/test-app.js';
 import { TestClient } from '../../../src/test-support/test-client.js';
+import { registerWatch, watchServerFailures } from '../../../src/test-support/failure-evidence.js';
 import { traceStatements } from '../../../src/test-support/work-shape.js';
 import { openAdmin, type Admin } from './admin.js';
 import { observe, type Observer } from './observe.js';
@@ -67,6 +72,24 @@ export interface IntegrationOptions {
   readonly poolMax?: number;
   /** Settings beyond the defaults of `validEnv`; a key mapped to `undefined` is removed. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The fixed-policy revisions the application is composed with. By default the build's own (`BUILD_FIXED_POLICY`: the Vendor's revision
+   * since S0.48 and the Rider's since S0.59); a test of another revision, or of none, gives its own.
+   */
+  readonly compiledFixedPolicy?: CompiledFixedPolicy;
+  /** Where a Vendor session's organisation comes from; by default the vendor domain's own resolver, as the runtime composes it. */
+  readonly vendorOrganization?: VendorOrganizationResolver;
+  /**
+   * A metrics registry bound to the port. The runtime composition of the API binds none until the private metrics endpoint does (S0.68), so
+   * an operation that counts (the excluded recovery requests, S0.50) counts nothing there; a test that reads a count gives one.
+   */
+  readonly metrics?: Metrics;
+  /**
+   * The attestation verifier the application is given in place of the one its configuration selects (S0.57): a test that counts the calls it
+   * makes, or controls the verdicts, supplies one through the same `ports` option a test double always was. The runtime composition binds the
+   * substitute for a local configuration and the HTTP adapter for a service one, whatever is said here is this file's composition only.
+   */
+  readonly attestationVerifier?: AttestationVerifier;
 }
 
 export async function startIntegrationKit(
@@ -97,7 +120,22 @@ export async function startIntegrationKit(
       await startTestApp({
         config: loaded.config,
         rootModule: (moduleOptions) =>
-          AppModule.register({ ...moduleOptions, ports: { clock: { useValue: clock } } }),
+          AppModule.register({
+            ...moduleOptions,
+            ports: {
+              clock: { useValue: clock },
+              ...(options.metrics === undefined ? {} : { metrics: { useValue: options.metrics } }),
+              ...(options.attestationVerifier === undefined
+                ? {}
+                : { attestationVerifier: { useValue: options.attestationVerifier } }),
+            },
+            ...(options.compiledFixedPolicy === undefined
+              ? {}
+              : { compiledFixedPolicy: options.compiledFixedPolicy }),
+            ...(options.vendorOrganization === undefined
+              ? {}
+              : { vendorOrganization: options.vendorOrganization }),
+          }),
       }),
       (running) => running.stop(),
     );
@@ -109,6 +147,13 @@ export async function startIntegrationKit(
     );
     const { reader: capture, sink: captureSink } = createCapture<CapturedMessage>();
     const client = new TestClient({ baseUrl: app.baseUrl, now: () => clock.now() });
+    opened.add(
+      'the server-error watch',
+      registerWatch(watchServerFailures(client, app.logs)),
+      (forget) => {
+        forget();
+      },
+    );
 
     return {
       app,

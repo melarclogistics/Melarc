@@ -18,3 +18,10 @@
 /packages/api-client/src/generated/
 # drizzle-kit writes the migration journal and snapshots in its own format and rewrites them on each generate.
 /apps/api/migrations/meta/
+# The attestation verifier: the vendored library is kept byte for byte (its checksums are in FILES.sha256), and the real chains are machine output of
+# fixtures/convert-real-chains.mjs.
+/apps/attestation-verifier/third_party/
+/apps/attestation-verifier/fixtures/real-chains.v1.json
+# Protocol vectors that a generator writes and a test holds to a fresh run byte for byte (apps/api/test/vectors/README.md).
+/apps/api/test/vectors/attestation-chains.v1.json
+/apps/api/test/vectors/device-key.v1.json

@@ -325,6 +325,32 @@ describe('the delivery worker, one job at a time (S0.18)', () => {
     ).toBe(1);
   });
 
+  // Break caught (S0.47; SECURITY_DESIGN.md section 13.9a): a vendor's message sent without the account identifier it carries, which the
+  // vendor needs to sign in; or one added to a message that has none.
+  it('hands the provider a vendor message’s account identifier, and none for a message that has none', async () => {
+    const vendor = claimed({
+      request: {
+        ...claimed().request,
+        principal: { type: 'VENDOR', id: claimed().request.principal.id },
+        accountIdentifier: 'ABCD2345',
+      },
+    });
+    const r = rig([vendor]);
+
+    await r.worker.runOnce();
+
+    expect(r.provider.sent).toEqual([
+      {
+        dedupeId: DEDUPE,
+        kind: 'SETUP_GRANT',
+        channel: 'EMAIL',
+        destination: DESTINATION,
+        link: LINK,
+        accountIdentifier: 'ABCD2345',
+      },
+    ]);
+  });
+
   // Break caught: nothing claimed being treated as work, or a worker that does anything with nothing to do.
   it('reports that nothing was due, and does nothing else', async () => {
     const r = rig([]);

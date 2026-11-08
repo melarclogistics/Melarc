@@ -247,6 +247,65 @@ describe('a process that does not become ready', () => {
   });
 });
 
+describe('a process with no listener (the delivery worker, S0.45)', () => {
+  const NO_LISTENER = {
+    name: 'worker',
+    command: process.execPath,
+    env: {} as Record<string, string>,
+  };
+
+  // Break caught: a worker that is started and not waited for, so that the first journey asks for a link before the lanes are running,
+  // or one that is waited for by a URL it does not have. It is ready when its output says its lanes are running.
+  it('is returned only once a line of its output matches', async () => {
+    const file = script(
+      'worker.mjs',
+      `setTimeout(() => console.log('{"msg":"delivery worker started"}'), 300); setInterval(() => {}, 1000);`,
+    );
+    const started = Date.now();
+
+    const process_ = await ManagedProcess.start({
+      ...NO_LISTENER,
+      args: [file],
+      logDirectory: join(directory, 'logs'),
+      ready: { log: /delivery worker started/, timeoutMs: 10_000 },
+    });
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    expect(process_.logs().stdout).toContain('delivery worker started');
+  });
+
+  // Break caught: a worker that never says it started being waited for for ever, and left running when the wait ends.
+  it('fails at the deadline, naming the line it waited for, and is stopped', async () => {
+    const file = script('quiet.mjs', 'setInterval(() => {}, 1000);');
+
+    await expect(
+      ManagedProcess.start({
+        ...NO_LISTENER,
+        args: [file],
+        logDirectory: join(directory, 'logs'),
+        ready: { log: /delivery worker started/, timeoutMs: 600 },
+      }),
+    ).rejects.toThrow(
+      /not ready after 600 ms[\s\S]*no line of its output matched \/delivery worker started\//,
+    );
+  });
+
+  // Break caught: a worker that exits at start (a refused configuration) being waited for until the deadline instead of reported at once
+  // with what it wrote.
+  it('fails at once, with its last output, when it exits first', async () => {
+    const file = script('refuses.mjs', `console.error('refused: a setting'); process.exit(1);`);
+
+    await expect(
+      ManagedProcess.start({
+        ...NO_LISTENER,
+        args: [file],
+        logDirectory: join(directory, 'logs'),
+        ready: { log: /delivery worker started/, timeoutMs: 10_000 },
+      }),
+    ).rejects.toThrow(/exited before it was ready[\s\S]*refused: a setting/);
+  });
+});
+
 describe('stopping', () => {
   // Break caught: a stop that returns before the process is gone, so the next step (dropping its database)
   // races a process that still holds connections.

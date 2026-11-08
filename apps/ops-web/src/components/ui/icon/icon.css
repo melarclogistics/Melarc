@@ -1,0 +1,29 @@
+/*
+ * The icons of the Ops Portal (design/DESIGN_SYSTEM.md section 24; design/COMPONENT_PATTERNS.md section 22). One family (Lucide), one stroke
+ * (set by the component), three sizes from tokens, the colour of the text around it. The size is set here and not by the library's width and
+ * height attributes, which a stylesheet overrides, so that the same token sizes every icon and enlarged text enlarges them.
+ */
+.ui-icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-icon--sm {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.ui-icon--md {
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+}
+
+.ui-icon--lg {
+  width: var(--icon-size-lg);
+  height: var(--icon-size-lg);
+}

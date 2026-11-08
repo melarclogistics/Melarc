@@ -103,6 +103,29 @@ describe('Argon2Hasher (S0.3a)', () => {
       });
     });
 
+    // Break caught: a text handed to a native routine as a C string, which ends at the first NUL byte, so that every password that
+    // begins with the same characters would verify against the others.
+    it('hashes a text with a NUL byte in it as the whole text, and never as the part before the NUL', async () => {
+      const { hasher } = hasherWithPepper([1]);
+      const nul = String.fromCharCode(0);
+      const stored = `correct horse${nul}battery staple`;
+      const encoded = await hasher.hash('STAFF_PASSWORD', stored);
+
+      await expect(hasher.verify('STAFF_PASSWORD', stored, encoded)).resolves.toMatchObject({
+        matches: true,
+      });
+      for (const guess of [
+        'correct horse',
+        `correct horse${nul}`,
+        `correct horse${nul}battery staplf`,
+        `correct horse${nul}${nul}battery staple`,
+      ]) {
+        await expect(hasher.verify('STAFF_PASSWORD', guess, encoded)).resolves.toMatchObject({
+          matches: false,
+        });
+      }
+    });
+
     it('hashes an empty text without failing: a short guess is just a wrong credential', async () => {
       const { hasher } = hasherWithPepper([1]);
 

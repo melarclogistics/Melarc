@@ -483,17 +483,20 @@ describe('the scope of the grant that authorizes this operation (SECURITY_DESIGN
   });
 
   // Break caught (GBT-GS1, GBT-GS3): the all-hub authority of one grant widening another, or lost for the grant that carries it.
-  // A Platform Admin holds staff.read at own and vendor.read at all hubs: each operation runs under its own grant's scope.
+  // A Platform Admin holds dispatch.read at own and staff.read and vendor.read at all hubs: each operation runs under its own grant's scope.
   it('runs two operations of one session under two scopes: own for the grant scoped own, ALL for the grant scoped all', async () => {
     const platformAdmin = await staffAs(BUNDLE_IDS.platformAdmin);
 
-    const own = await get('staff-read', { cookie: platformAdmin.cookie });
-    const all = await get('vendor-read', { cookie: platformAdmin.cookie });
+    const own = await get('dispatch-read', { cookie: platformAdmin.cookie });
+    const all = await get('staff-read', { cookie: platformAdmin.cookie });
+    const vendor = await get('vendor-read', { cookie: platformAdmin.cookie });
 
-    expect(own.body).toMatchObject({ authorization_key: 'staff.read', hub_scope_mode: 'SET' });
+    expect(own.body).toMatchObject({ authorization_key: 'dispatch.read', hub_scope_mode: 'SET' });
     expect(hubs(own.body as unknown as Observed)).toEqual([ACCRA]);
-    expect(all.body).toMatchObject({ authorization_key: 'vendor.read', hub_scope_mode: 'ALL' });
+    expect(all.body).toMatchObject({ authorization_key: 'staff.read', hub_scope_mode: 'ALL' });
     expect(hubs(all.body as unknown as Observed)).toEqual([]);
+    expect(vendor.body).toMatchObject({ authorization_key: 'vendor.read', hub_scope_mode: 'ALL' });
+    expect(hubs(vendor.body as unknown as Observed)).toEqual([]);
   });
 
   // Break caught (GBT-B4): a hub scope mode taken from the request.
@@ -564,10 +567,14 @@ describe('a record named by the path: found, outside the hubs, or not there (AC-
     const senior = await staffAs(BUNDLE_IDS.seniorOps);
 
     const outside = await get(`staff-records/${RECORD_ELSEWHERE}`, { cookie: senior.cookie });
-    const ownGrantOfAdmin = await get(`staff-records/${RECORD_ELSEWHERE}`, {
+    // A Platform Admin holds dispatch.read at its own hub, and staff.read and vendor.read at all hubs (Product decision, 22 October 2026).
+    const ownGrantOfAdmin = await get(`dispatch-records/${RECORD_ELSEWHERE}`, {
       cookie: platformAdmin.cookie,
     });
     const allGrantOfAdmin = await get(`vendor-records/${RECORD_ELSEWHERE}`, {
+      cookie: platformAdmin.cookie,
+    });
+    const staffGrantOfAdmin = await get(`staff-records/${RECORD_ELSEWHERE}`, {
       cookie: platformAdmin.cookie,
     });
     const inside = await get(`staff-records/${RECORD_IN_ACCRA}`, { cookie: senior.cookie });
@@ -577,6 +584,7 @@ describe('a record named by the path: found, outside the hubs, or not there (AC-
     expect(ownGrantOfAdmin.status).toBe(403);
     expect(ownGrantOfAdmin.body.code).toBe('HUB_SCOPE_VIOLATION');
     expect(allGrantOfAdmin.status).toBe(200);
+    expect(staffGrantOfAdmin.status).toBe(200);
     expect(inside.status).toBe(200);
   });
 

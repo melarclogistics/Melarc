@@ -55,7 +55,7 @@ CRIT-07 return refund this now gives a path to execute).
 | Surface| Actor| Can do| Gated by|
 |---|---|---|---|
 | Melarc Ops| Senior Ops, Platform Admin| Propose a resolution for an adjustment at their own hub| `payment.adjustment.resolve`|
-| Melarc Ops| Finance, Platform Admin| Approve or reject a proposed resolution, at any hub| `payment.adjustment.approve`, decider ≠ proposer|
+| Melarc Ops| Finance, Platform Admin| Approve or reject a proposed resolution, at any hub| `payment.adjustment.approve`, decider ≠ proposer (a Platform Admin excepted)|
 | Melarc Vendor| Vendor account| **N/A.** A vendor reads their balance and statement, never this record| —|
 | Recipient channel| —| **N/A.** A recipient has no account and no portal (§49)| —|
 
@@ -111,7 +111,7 @@ because writing money off is still money moving.
 |---|---|---|
 | Validation failure| Missing `method` or `destination` for `REFUND`; missing `reason_code` for `UNCLAIMED_DISPOSITION` or for a vendor `REFUND`; missing `reference` for a transfer method| `VALIDATION_FAILED`|
 | Unauthorized| No `payment.adjustment.resolve`/`.approve` grant, or a hub-scoped proposer reaching another hub's adjustment| `PERMISSION_DENIED`|
-| Self-approval| The decider is the proposer| `SELF_APPROVAL_FORBIDDEN`|
+| Self-approval| The decider is the proposer and is not a Platform Admin| `SELF_APPROVAL_FORBIDDEN`|
 | Wrong state| The adjustment is already `RESOLVED`, already carries a `PROPOSED` or `APPROVED` resolution, or `UNCLAIMED_DISPOSITION` is proposed before the grace period elapses| `STATE_CONFLICT`|
 | Duplicate / replay| `Idempotency-Key` on both operations — a retry creates no second resolution and no second decision| `IDEMPOTENCY_KEY_CONFLICT`|
 | Concurrent edit| Two concurrent proposals for one adjustment — the uniqueness of `financial_adjustment_required_id` is the guard; only the first is created| `STATE_CONFLICT`|
@@ -166,7 +166,7 @@ because writing money off is still money moving.
 | Key| Holders| Scope| Home|
 |---|---|---|---|
 | `payment.adjustment.resolve`| Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
-| `payment.adjustment.approve`| Finance, Platform Admin| all hubs, decider ≠ proposer| permissions.md §7 — new this pass|
+| `payment.adjustment.approve`| Finance, Platform Admin| all hubs, decider ≠ proposer (a Platform Admin excepted)| permissions.md §7 — new this pass|
 
 **`OQ-005` named these `payment.refund.*`.** They are `payment.adjustment.*` because the
 resolution covers credit, allocation and unclaimed disposition as well as refund, and a key named
@@ -182,7 +182,7 @@ for one of four outcomes would misdescribe the other three.
 
 | Code| When|
 |---|---|
-| `SELF_APPROVAL_FORBIDDEN`| The decider is the proposer| [errors-and-enums.md](../../contracts/errors-and-enums.md) §5|
+| `SELF_APPROVAL_FORBIDDEN`| The decider is the proposer and is not a Platform Admin| [errors-and-enums.md](../../contracts/errors-and-enums.md) §5|
 | `STATE_CONFLICT`| Already resolved, already proposed, or the grace period has not elapsed| errors-and-enums.md §5|
 | `VALIDATION_FAILED`| A field the class requires is absent| errors-and-enums.md §5|
 | `PERMISSION_DENIED`| No grant, or another hub's adjustment| errors-and-enums.md §5|
@@ -252,7 +252,7 @@ And payment.adjustment.resolution_proposed is emitted.
 ```
 **Governs:** `MSC-DEC-395`, domain-model.md §6.15 · **Surface:** API · **Test level:** integration
 
-### `AC-ADJUST-05` — Finance approves, and the approver is never the proposer
+### `AC-ADJUST-05` — Finance approves, and the approver is never the proposer unless a Platform Admin
 
 ```text
 Given a PROPOSED resolution raised by Senior Ops A,

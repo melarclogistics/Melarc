@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canonicalWorkEmail } from './work-email.js';
+import { canonicalWorkEmail, isEmailShape } from './work-email.js';
 
 const canonical = (raw: string): string => {
   const result = canonicalWorkEmail(raw);
@@ -88,5 +88,38 @@ describe('the work-email canonical form (domain-model.md §6.8: trimmed, NFKC, l
     ['a reversed pair', 'alice@example.com\uDE00\uD83D'],
   ])('refuses %s', (_label, raw) => {
     expect(canonicalWorkEmail(raw)).toEqual({ ok: false, refusal: 'MALFORMED_UNICODE' });
+  });
+});
+
+// "The address is canonicalised first and only then checked to be an email address" (domain-model.md §6.8): the check is on the
+// canonical form, and it asks only for the shape of an address: something, an at sign, a domain with a dot, and no white space.
+describe('the shape of an email address, judged on the canonical form', () => {
+  it.each(['alice@example.com', 'a.b+tag@sub.example.co.uk', 'ünï@exämple.test'])(
+    'accepts %s',
+    (address) => {
+      expect(isEmailShape(address)).toBe(true);
+    },
+  );
+
+  // Break caught: a text that is no address reaching a lookup, a limiter key or a ledger as if it were one.
+  it.each([
+    ['nothing', ''],
+    ['no at sign', 'alice.example.com'],
+    ['no local part', '@example.com'],
+    ['no domain', 'alice@'],
+    ['a domain with no dot', 'alice@example'],
+    ['two at signs', 'a@b@example.com'],
+    ['white space inside', 'ali ce@example.com'],
+    ['a line break', 'alice@exam\nple.com'],
+    ['longer than 320 characters', `${'a'.repeat(310)}@example.com`],
+    // PostgreSQL refuses a text with a NUL byte, so a lookup, a count or a ledger row made from one answers with a server error where
+    // an unknown address is answered like every other refusal: a control character has no place in an address at all.
+    ['a NUL in the local part', `ali${String.fromCharCode(0)}ce@example.com`],
+    ['a NUL in the domain', `alice@exam${String.fromCharCode(0)}ple.com`],
+    ['a control character', `ali${String.fromCharCode(1)}ce@example.com`],
+    ['a delete character', `ali${String.fromCharCode(0x7f)}ce@example.com`],
+    ['a C1 control character', `ali${String.fromCharCode(0x85)}ce@example.com`],
+  ])('refuses %s', (_label, address) => {
+    expect(isEmailShape(address)).toBe(false);
   });
 });

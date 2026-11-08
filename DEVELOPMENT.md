@@ -6,17 +6,21 @@ or Git Bash), WSL2 and Linux. `scripts/local-setup.test.ts` fails if this page n
 does not exist.
 
 When you are done you have the database on `127.0.0.1:5432`, the API on `127.0.0.1:3000` and the Ops Portal dev
-server proxying `/api/v1` to it. There are no product screens or business routes yet: the API serves its technical
-probes and the Ops Portal is the application shell.
+server proxying `/api/v1` to it. The Ops Portal has the five pre-sign-in screens (the staff sign-in and its second step,
+and the three setup pages, S0.43) and, once you are signed in, the landing and the six identity screens (S0.44): the staff
+list with the approver's queue, adding a profile, one profile, resetting an authenticator, and a person's sessions. No
+screen can be reached before the first sign-in (section 5). The API serves its technical probes and the operations that
+`src/tools/contract/implemented-scope.ts` lists.
 
 ## Prerequisites
 
-| You need | Version                                                          | Notes                                                                                                                                 |
-| -------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Git      | any recent                                                       |                                                                                                                                       |
-| Node.js  | **24.21.0**, the version in [.node-version](.node-version)       | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json). |
-| pnpm     | **11.1.3**, the `packageManager` in [package.json](package.json) | `npm install -g pnpm@11.1.3`                                                                                                          |
-| Docker   | Docker Desktop, or Docker Engine with the Compose plugin         | Running before step 3. It only hosts the local PostgreSQL service.                                                                    |
+| You need | Version                                                          | Notes                                                                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git      | any recent                                                       |                                                                                                                                                                                                                                   |
+| Node.js  | **24.21.0**, the version in [.node-version](.node-version)       | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json).                                                                                             |
+| pnpm     | **11.1.3**, the `packageManager` in [package.json](package.json) | `npm install -g pnpm@11.1.3`                                                                                                                                                                                                      |
+| Docker   | Docker Desktop, or Docker Engine with the Compose plugin         | Running before step 3. It only hosts the local PostgreSQL service.                                                                                                                                                                |
+| JDK      | **21**, the major in [.java-version](.java-version)              | Temurin; for the verifier ([step 6](#the-attestation-verifier)) and for `pnpm run test:db`, whose attested rider enrolment test and alert rehearsal build and start it. Windows: `winget install EclipseAdoptium.Temurin.21.JDK`. |
 
 ## 1. Install dependencies
 
@@ -31,9 +35,10 @@ For the browser tests (step 6) install the Chromium that the pinned Playwright e
 pnpm --filter @melarc/e2e exec playwright install chromium
 ```
 
-The browser tests run Chromium unless `MELARC_BROWSERS` names more. CI runs `chromium,firefox,webkit`, the engines of the
-browsers the Ops Portal supports. To do the same on your machine, install the other two once and name them for the run
-(this is `cmd`; in a POSIX shell use `export MELARC_BROWSERS=chromium,firefox,webkit`):
+The browser tests run Chromium unless `MELARC_BROWSERS` names more. CI runs Chromium on every pull request, and
+`chromium,firefox,webkit`, the engines of the browsers the Ops Portal supports, on every push to main, every night and every
+manual run ([what runs when](#what-ci-runs-when), below). To run the three on your machine, install the other two once and name
+them for the run (this is `cmd`; in a POSIX shell use `export MELARC_BROWSERS=chromium,firefox,webkit`):
 
 ```text
 pnpm --filter @melarc/e2e exec playwright install firefox webkit
@@ -41,11 +46,40 @@ set MELARC_BROWSERS=chromium,firefox,webkit
 pnpm run test:browser
 ```
 
+One engine's whole run is longer than a CI job may last, so CI runs the browser tests as a matrix of jobs, one for each
+shard of each engine: `MELARC_BROWSER_SHARD=2/9` (`current/total`, counted from 1, Playwright's `--shard`) runs the second
+of nine parts of the engine's tests, and the shards of an engine together run every test of it once
+([ci.yml](.github/workflows/ci.yml); `scripts/browser-shards.test.ts` proves it from Playwright's own list of the tests).
+To reproduce one job of CI, name its engine and its shard, for example (the engine installed first, as above):
+
+```text
+set MELARC_BROWSERS=firefox
+set MELARC_BROWSER_SHARD=2/9
+pnpm run test:browser
+```
+
+The gate and the affected run never read `MELARC_BROWSER_SHARD`: they run every spec they choose whole, so a shard left in your
+shell does not make a run that passes for a part of its tests.
+
 The integrated run (`pnpm run test:e2e`) serves the Ops Portal over plain HTTP in Chromium only. The trusted HTTPS origin
 the identity slice needs, with Firefox and WebKit, is `pnpm run test:e2e:https`: it makes a disposable test CA, so it runs in CI
 and on a machine cleared for key material, and it refuses on this workstation (Windows has no disposable trust store for Chromium or
 Edge). On a machine cleared for key material WebKit's proofs fail to trust, because WebKit's only trust is the system store, which the run
 changes only on a GitHub-hosted runner. What exists, what is blocked and the steps for a clean machine are in [e2e/README.md](e2e/README.md).
+It is three runs, and CI makes it as two jobs, a shard of the runs in each: `MELARC_HTTPS_SHARD=1/2` makes Chromium's run, with
+WebKit's refusal, and WebKit's other proofs, in that order (they stay in one job: the refusal is a control only while the CA is not in the
+system store), and `MELARC_HTTPS_SHARD=2/2` makes Firefox's. Without the variable it makes all three; a value that is not a shard of the
+harness (`e2e/harness/https-shards.ts`) is refused before anything is made.
+
+### What CI runs when
+
+[ci.yml](.github/workflows/ci.yml) (the Product Owner's decision of 7 November 2026): a **pull request** runs every job but the
+Firefox and WebKit shards of the browser tests, which is the Chromium shards, the HTTPS journeys in both shards and every other
+check; a **push to main**, the **nightly run** (02:17 UTC, every day) and a **manual run** run all of it, so Firefox and WebKit
+are tested on every commit that reaches main and every night. The one skip that "CI result" accepts is that job's, on a pull
+request and nowhere else. The browser tests of each engine are cut into shards that are jobs of their own, and the
+shards of an engine together run every test of it once; `scripts/browser-shards.test.ts` proves it for each kind of run from
+Playwright's own list of the tests. Nothing here can be tried on a machine without a push, which the owner authorizes.
 
 ## 2. Create the local settings
 
@@ -82,6 +116,12 @@ and waits until it is healthy. It listens on loopback only, `127.0.0.1:5432`, an
 the address the database tools use and says whether a PostgreSQL server answers there. It sends no password and
 changes nothing, and when it fails it says why and what to do.
 
+**Or a native server, without Docker.** A PostgreSQL 18 installed on this machine works the same. Set
+`MELARC_PG_PORT` in `infrastructure/postgres/.env` to its port, the same port in `DATABASE_URL` of `apps/api/.env`,
+and `MELARC_PG_ADMIN_PASSWORD` to the password of its `postgres` superuser; make it listen on this machine only
+(`listen_addresses = 'localhost'`). Then skip `infra:up`: `infra:check` works the same, and step 4 creates the roles and
+the database. `infra:up`, `infra:down` and the volume belong to the container alone.
+
 ## 4. Build and migrate
 
 ```text
@@ -109,6 +149,29 @@ to run it twice: it refuses a database that already holds any of it, and changes
 For another database set `DATABASE_SEED_URL` (the provisioning login) and `APP_ENV`; the API refuses to start with either
 `DATABASE_SEED_URL` or `DATABASE_MIGRATION_URL` in its environment. `db:reset` (section 8) returns the database to migrated and empty, which allows a new seed.
 
+```text
+pnpm --filter @melarc/api run bootstrap:seed -- --custodian "Full Name <work@email>" --custodian "Full Name <work@email>"
+pnpm --filter @melarc/api run bootstrap:resume -- --custodian <work@email>
+```
+
+`bootstrap:seed` makes the two bootstrap administrators of an empty staff table and writes one custody bundle for each into
+`BOOTSTRAP_CUSTODY_DIRECTORY` (an absolute folder outside the checkout, with no default); `bootstrap:resume` gives one stranded
+administrator a fresh secret in a new bundle. They run as the provisioning login after the reference seed, under the same
+`DATABASE_SEED_URL` and `APP_ENV` rules, and they are processes you start: no API operation or screen can run them. A bundle holds
+a setup secret in clear: give it to its custodian alone, delete it after handover, keep the folder out of any synchronised or shared
+location (a cloud-synced profile folder copies it), and never create one on a machine you do not trust (the plan's open item
+names this one). Neither command prints a secret, a work email or a path
+([MIGRATION_AND_SEEDING.md](architecture/MIGRATION_AND_SEEDING.md) §3.2 and §3.3a).
+
+Setting the folder: name it in the shell the command is started from (`set BOOTSTRAP_CUSTODY_DIRECTORY=...` in `cmd`; the scripts read no
+`.env` file for it, so a line in `apps/api/.env` does nothing). **Use one folder for each environment.** Each bundle records which
+database it was written for, and a run removes only the earlier bundles of its own database (a run that did not commit leaves such
+a bundle); it leaves any other in the folder alone and says how many. The folder must be private before the command is started, and the
+command refuses one that is not: on POSIX it is owned by you with no access for group or others, and on Windows its access list names
+no one but you, the local system and the administrators (a folder under your user profile does; a folder directly on a data drive
+usually does not, because the drive grants Users and Authenticated Users access). The command only reads the list of the folder; it
+never changes it. A bundle that is found in the checkout is refused by `pnpm run package:source` by its name and by what it begins with.
+
 ## 5. Run the applications
 
 In two terminals:
@@ -126,12 +189,36 @@ curl http://127.0.0.1:3000/livez
 curl http://127.0.0.1:3000/readyz
 ```
 
-`/readyz` answers ready only while the database is reachable. The Ops dev server prints its address (Vite's default,
-`http://localhost:5173`) and forwards `/api/v1` to the API, so the browser only ever talks to its own origin.
+`/readyz` answers ready only while the database is reachable and the reference seed has run on it (`503` with `reference_data_missing` otherwise: run `db:seed`). The Ops dev server listens on `http://127.0.0.1:5172` and
+no other port (it stops if that port is taken), because that is the one origin the API allows (`OPS_ORIGIN`), and it
+forwards `/api/v1` to the API, so the browser only ever talks to its own origin. Open exactly that address: `localhost`
+can lead to another server or to none, and a sign-in from any other origin is refused with 403 ("The request could not be
+verified"). It is not Vite's usual 5173, which other projects on the same machine take.
 
-The credential-delivery worker is a third process, with no listener, that sends the messages the API queues
-(setup grants and recovery links). Nothing queues one yet, so there is nothing for it to do until the first
-credential-issuing operation exists, but it can be started and stopped now:
+### First sign-in
+
+Nobody can sign in until `db:seed` and `bootstrap:seed` (section 4) have run on this database. `/readyz` checks for the
+first: it answers `503` with `reference_data_missing` until `db:seed` has run. If sign-in answers `503` all the same and the API log
+says a setting "has no approved value", the seed ran against another database or an older version of it.
+There is no preset password. Each of the two bootstrap administrators sets their own, with the one-time secret in their
+custody bundle and an authenticator app of their own:
+
+1. Open the bundle (a `melarc-bootstrap-<random>.bundle` file in `BOOTSTRAP_CUSTODY_DIRECTORY`) that names the
+   administrator on its `custodian:` line. The line under `secret:` is the secret. It is not a link: in the browser open
+   `http://127.0.0.1:5172/setup/credential#token=` followed by the secret. Use that address and not `localhost`: the API
+   accepts only the origin in `OPS_ORIGIN`.
+2. Choose a password (12 to 128 characters), add the authenticator by scanning the code or typing the setup key, and enter
+   the six digits it shows.
+3. Sign in at `http://127.0.0.1:5172/sign-in` with the work email, the password and a code. You land on the Overview, with
+   Staff, Add a staff profile and Sessions in the menu.
+
+Delete the bundle after use; a lost or used secret is replaced with `bootstrap:resume`. One administrator is enough to see
+every screen, and to add a profile and approve it: a Platform Admin approves a profile they made. The other
+administrator is needed to reset an authenticator, and to see a profile that a different person approved.
+
+The credential-delivery worker is a third process, with no listener, that sends the messages the API queues: the setup
+link of an approved profile, a re-sent setup link and the link to set up a new authenticator after a reset. Start it
+whenever you do one of those, or the person never receives the link:
 
 ```text
 pnpm --filter @melarc/api run start:worker:local
@@ -142,22 +229,35 @@ the local cluster's settings, as `db:seed` does, so `DATABASE_WORKER_URL` stays 
 set). It sends through the capture adapter only: each message is written, in clear and with its link, to a folder of
 yours outside the repository (`DELIVERY_CAPTURE_DIRECTORY`, by default `~/.melarc/capture`), where you follow the link
 by hand. The worker refuses a folder inside the checkout and refuses to select a real provider, none being built.
-Until the redemption records it must read exist (SLICE-000 S0.29 and S0.50) it confirms none, so it sends nothing and
-says so when it starts. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+It reads the standing of a setup grant (SLICE-000 S0.29) or of a recovery request (S0.50) before each send, and sends nothing
+for a record it cannot confirm. Stop it with Ctrl+C: it stops claiming, finishes or gives back what it holds, and exits 0.
+
+#### The private metrics endpoints
+
+The API and the worker each have an endpoint of their own for their counters, and neither is a route of the API: the public
+port has no `/metrics`. Each is off until its port is set in `apps/api/.env` (`METRICS_PORT` for the API,
+`DELIVERY_WORKER_METRICS_PORT` for the worker; two different ports, neither the API's `HTTP_PORT`), listens on the loopback
+address unless `METRICS_HOST` or `DELIVERY_WORKER_METRICS_HOST` says otherwise, and answers `GET /metrics` alone in the
+Prometheus text format. Off the loopback address it needs a secret (`METRICS_SECRET`, `DELIVERY_WORKER_METRICS_SECRET`) that the
+scraper sends as `Authorization: Bearer`. The worker's also serves the age of the oldest message due to be sent. Nothing in
+either carries an identifier. The alert rules that read them are `apps/api/src/platform/metrics/alert-rules.ts`; which tool
+evaluates them in production is release gate G3 ([OBSERVABILITY_AND_RECOVERY.md](architecture/OBSERVABILITY_AND_RECOVERY.md) §3).
 
 ## 6. Run the checks and the smoke tests
 
 These are the checks CI runs ([ci.yml](.github/workflows/ci.yml)), which also runs `pnpm run build`,
-`pnpm --filter @melarc/api run db:check` and `pnpm audit --audit-level high`.
+`pnpm --filter @melarc/api run db:check` and `pnpm audit --audit-level high`. The order to run them in, and the commands
+that run all of them once, are in [The development loop and the gate](#the-development-loop-and-the-gate) below.
 
-| Command                                                        | Needs                          | Proves                                                                                    |
-| -------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
-| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                        | formatting, lint, strict types                                                            |
-| `pnpm test`                                                    | nothing running                | unit, component and process tests of every workspace, and the repository's tooling tests  |
-| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first | the implemented operations (none yet) match the contract; the generated client is current |
-| `pnpm run test:db`                                             | the database (step 3)          | migrations, roles, row-level security and connection handling against a real server       |
-| `pnpm run test:browser`                                        | Chromium (step 1)              | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit) |
-| `pnpm run test:e2e`                                            | the database, Chromium, builds | a real browser, the API and a disposable database together                                |
+| Command                                                        | Needs                           | Proves                                                                                                                                                                                               |
+| -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint, strict types                                                                                                                                                                       |
+| `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                                             |
+| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                                            |
+| `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment and the alert rehearsal against the real verifier service (built on its first run) |
+| `pnpm run test:browser`                                        | Chromium (step 1)               | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit)                                                                                                            |
+| `pnpm run test:e2e`                                            | the database, Chromium, builds  | a real browser, the API and a disposable database together                                                                                                                                           |
+| `pnpm run verifier:test`                                       | a JDK 21                        | the attestation verifier: its vendored library, its build and every one of its tests                                                                                                                 |
 
 ```text
 pnpm test
@@ -176,6 +276,191 @@ failure to be explained, not retried.
 ```text
 pnpm run test:local
 ```
+
+### The development loop and the gate
+
+A full run of every check takes about an hour on a developer machine, so the order of the checks matters as much as the
+checks. The hour is lost, and lost again, in three ways: a cheap check fails late (a stale generated client, a
+formatting slip); a file is edited while the run goes on, so its result describes a tree that no longer exists; or two
+heavy runs share the machine and each fails for the load of the other. The loop below prevents all three. While a task
+is developed it runs only the tests a change can reach, and says what it left; the gate, which the owner starts, skips
+no check, retries nothing, shards nothing and gives no timeout more time. Neither changes what a check proves.
+
+1. **While editing**, run the tests your change reaches: `pnpm run test:affected` (step 4), or one test file, never a
+   whole suite. A slice's plan may add a run of its own: SLICE-000's
+   [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps) adds the end-to-end
+   journeys for a task whose evidence names them.
+2. **After a change to a contract, a schema, a migration or a document, and before a task is handed over**, run
+   `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the generated client, formatting, types,
+   the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
+   network, in parallel, with the content caches of the formatter and ESLint and turbo's
+   task cache switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
+   a few minutes on cold caches, and exits 0 only when every check passed. It is not a gate and says nothing about a
+   test, and it refuses to run while a gate runs. Its one weakness is ESLint's cache: a file already linted is not
+   linted again, so a type changed in another file can hide a finding that the gate's lint from scratch reports.
+   `pnpm run precheck --uncached` runs the real commands.
+3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
+   edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
+4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It
+   chooses the tests a change can reach and runs only those, the parallel Vitest suites with four workers (`--workers`
+   sets `MELARC_TEST_WORKERS`, which every Vitest configuration reads):
+   - What changed. Each target (the root tests, the client, the harness, the Ops Portal's unit tests and its browser
+     specs in Chromium, the API's unit, process and database tests, the verifier and the end-to-end journeys) is
+     compared with the tree of its last green run, which an affected run or a gate records. Nothing has to run first: a
+     target with no record is compared with the last commit, so it runs whole while the working tree differs much from
+     that commit, and its first green run records it. `--since <revision>` compares with that revision instead.
+   - What a change reaches. A test that imports a changed file through any chain of imports; a test that reads files
+     and names the changed one, or, in the cheap suites, any test that reads files when its package changed; an API
+     test that starts a process when the API's source changed; every browser spec of a page that changed, every spec
+     when the application shell changed; a whole target when its configuration, a migration or the server's image
+     changed; everything when the lockfile, the workspace or the Node pin changed. What it cannot place runs more,
+     never less. `--dry-run` says what it would run and why, `--only <targets>` narrows it.
+   - On request. Three parts are reported as owed when a change reaches them, and run only when asked; the gate runs
+     them all (the owner's decision of 27 October 2026). The end-to-end journeys run with `--with-e2e`. The API's
+     process tests run with `--with-process`, or by themselves when the change touches what only they test: start-up,
+     configuration, shutdown, the logs, the probes, the command-line tools, or those tests and their helpers. The
+     development-server project of a browser spec that also runs against the production build runs with
+     `--with-dev-browser`. The browser target's record moves on the projects it ran.
+   - The record. A target's record moves only when every test chosen for it passed on a tree that did not change while
+     they ran, so a failing test keeps being chosen until it passes. It lives below `node_modules/.cache`, and
+     `--forget` drops it.
+   - One at a time. It refuses to start beside a gate or another affected run (they would share the browsers' ports,
+     the database server and the memory, and each fail for the other), and a gate refuses to start beside it.
+   - The result. Its last lines say what passed and, as `Owed:`, what the change reaches that did not pass here: the
+     end-to-end journeys left to the gate and every target that could not run, each with its reason. Exit code 0 means
+     every test chosen passed, 1 a test failed or the API they needed did not build, 2 it would not start or a target
+     could not run here (the database does not answer, no JDK 21 for the verifier or for the database tests that start
+     it) and 3 the tree changed while it ran.
+
+   It is not a gate. Report what it chose, what passed and what it left owed, never as the gate's result.
+
+5. **The gate is the owner's full run: `pnpm run gate`.** The owner starts it when they want the whole proof, at the
+   end of a stage and before a commit or a pull request; an agent starts it only when the owner asks for it in the
+   task, and then with `--asked`, without which the gate refuses an agent (the owner's decision of 27 October 2026).
+   Start it in the background and leave the tree alone: it runs for about an hour. It runs every command of CI that this machine can run, once, uncached and one at a time:
+   - The cheap checks first, all of them. If any fails, no test starts: tests of a tree that fails its cheap checks
+     prove nothing. Then the tests (`pnpm run test:local --continue`, `verifier:test`, `test:db`, `test:browser`,
+     `test:e2e` and the audit), all of them whatever one did, so that one run shows everything that is wrong. `--profile ci` runs
+     `pnpm test` as CI does. The HTTPS end-to-end run is left to CI: it makes a certificate authority and refuses to run
+     on a developer machine.
+   - The tree held still. It takes a fingerprint of every file Git tracks or sees as new and not ignored, and ends the
+     run as `UNSETTLED` (exit code 3) when one changes: an edit, a new file, or a file one of its own stages leaves in
+     the tree. That result is void, whatever its stages said. A file a test makes and removes again is not a change.
+   - The machine looked after. It refuses to start with less than 2 GB of memory free (`--allow-low-memory` accepts the
+     risk) and warns below 4 GB, because a run that starves fails for the machine and says nothing about the code. It
+     refuses to start beside another gate or an affected run, and while the database does not answer (`pnpm run infra:check`): the database
+     stages come half an hour in, and starting the database (step 3) is yours, never the gate's. It refuses to start,
+     too, without the JDK 21 that the verifier stage and two database tests need
+     ([the attestation verifier](#the-attestation-verifier)), for the same reason. It records the lowest
+     free memory seen during each stage, and lists the test databases left behind, which it never drops (step 8). Every
+     Vitest configuration runs four workers (`MELARC_TEST_WORKERS`; the API's parallel database files three,
+     `MELARC_DB_WORKERS`): at Vitest's default the suites left this machine with no free memory and failed tests that
+     pass alone. Never set `VITEST_MAX_WORKERS`: Vitest applies it to every project, so the API's one-at-a-time tests
+     would run side by side. The API's configuration refuses it, and the gate and the affected run remove it.
+   - The record. One log per stage and a `summary.txt`, in `melarc-gate/<name>/` below the operating system's temporary
+     folder (`--name` names it; the default is the date and time). Exit code 0 means every stage passed on a tree that
+     stayed the same, 1 a check failed, 2 it would not start, 3 the tree changed and 130 it was stopped. Each test stage
+     that passed on the settled tree is recorded as the last green run of the targets it ran whole, so the next
+     `pnpm run test:affected` starts from there.
+6. **Watch and stop it with its own commands.** `pnpm run gate:status` says where it is (add `--wait 540` to wait for
+   the next stage to end). `pnpm run gate:stop` asks the runner to stop, which ends the stage it started, with everything
+   that stage started, and records the stop; only if the runner has not stopped within 30 seconds does it end that stage
+   and the runner itself. It touches no other process. A stage ended half way can still leave a test database (the
+   summary lists them; step 8 says how one is removed).
+7. **Report what it says.** A gate that failed is reported as failed, stage by stage. A later run of the failed parts
+   is a diagnosis and not a gate: the parts that passed did so on another tree. Fix, run the precheck, run a new gate. A
+   gate that ended `UNSETTLED`, was stopped or would not start has not run: say so, and run it again.
+8. **CI is the parallel gate.** [ci.yml](.github/workflows/ci.yml) runs the same commands as parallel jobs on clean
+   machines, the HTTPS run included (in two jobs, a shard of its runs in each, and the browser tests in a job for each shard
+   of each engine, which together run every test once), and is the quickest complete run. A pull request runs the Chromium
+   shards of the browser tests and a push to main, the nightly run and a manual run run those of all three engines
+   ([what CI runs when](#what-ci-runs-when)). It needs a push, which the owner authorizes: do not push to get a run unasked.
+
+What looks like a saving and costs the proof: wrapping a gate, or any long run, in `timeout` (it can end the wrapper and
+leave what the wrapper started running, or kill a stage half way; either way test databases and temporary folders are
+left behind and nothing records it, where `pnpm run gate:stop` ends the whole stage and lists what it left); editing the
+tree, or starting another build, lint or test, while a gate runs; raising a timeout, adding a retry, skipping or
+sharding a test (CI shards the browser tests across jobs that together run every one; a gate on one machine runs them
+whole), or running the package suites side by side to finish sooner. On a machine of this size that last one is
+how test workers fail to start, and the failure is then the machine's and not the code's. Two savings were measured and
+are not worth having: ESLint's `--concurrency` (no faster here, and it leaves the machine with almost no free memory)
+and a template database for the database tests (about a minute of the nineteen they take). And an affected run is
+never a gate: it chooses tests by what it can read of the code, and a test it cannot tie to a change waits for the gate.
+
+```text
+pnpm run test:affected
+pnpm run precheck
+pnpm run gate
+pnpm run gate:status
+pnpm run gate:stop
+```
+
+### The attestation verifier
+
+The private service that judges a Rider handset's device attestation ([apps/attestation-verifier/](apps/attestation-verifier/CLAUDE.md)) is a JVM
+program built by Gradle, not a pnpm package, so it is not in `pnpm install`, `pnpm test` or `turbo`: it has commands of its own, and CI and the gate
+run the first. All of them need a **JDK 21** (the major version of [.java-version](.java-version); Eclipse Temurin is what CI uses): set `JAVA_HOME`
+to it or put it first on the path. So does `pnpm run test:db`, whose attested-enrolment test builds and starts the service, and the gate and
+the affected run check for it before they start what needs it (`scripts/jdk.ts`). A missing JDK, another major version or a JRE ends the command with exit code 2 and says how to install one.
+Nothing else needs installing: the Gradle wrapper downloads its pinned Gradle (held to a checksum) and every dependency is held to the checksum in
+`gradle/verification-metadata.xml`, so the first run needs the network and takes a few minutes.
+
+```text
+pnpm run verifier:test
+pnpm run verifier:build
+pnpm run verifier:start
+pnpm run verifier:status
+pnpm run verifier:stop
+```
+
+`verifier:test` runs Gradle `check` without a daemon, so nothing stays running afterwards: the vendored library against its checksums, the
+compiler and every test (about a minute once the downloads are cached). `verifier:build` makes the runnable folder
+`apps/attestation-verifier/service/build/install/attestation-verifier`.
+
+To run the service, copy `apps/attestation-verifier/.env.example` to `apps/attestation-verifier/.env` (git-ignored) and fill in the three release inputs
+that have no default: the Rider package name, the SHA-256 digests of its signing certificates, and (when the verifier is not on loopback) the shared
+secret. `verifier:start` builds the service, starts it in the background on `127.0.0.1:8765` and waits until it answers; its trust data (the accepted
+roots and Google's revocation list, fetched over HTTPS) loads in the background, and `verifier:status` says `READY` when it has. It gives the service
+its own settings and nothing else of your environment, writes its log below the operating system's temporary folder and records the process it
+started there: `verifier:stop` ends that process and no other (it checks the command line first, so a recycled process id is never touched).
+On Linux or WSL2 install `temurin-21-jdk` (or `openjdk-21-jdk`) with your package manager; the Gradle wrapper is started with `sh`, so no file mode
+matters.
+
+### The two-build proof, the concurrency run, the alert rehearsal and the capacity measurement
+
+Four database tests of SLICE-000 Stage 8 need the database like the others; each runs alone, in
+`apps/api/test/database/alone/`, and two of them start processes:
+
+- `two-builds.db.test.ts` compiles the API twice from the tree (the current build, and a release with a higher compiled
+  policy revision and a changed predicate) into `apps/api/.policy-release/`, which git ignores, and starts both on one database.
+  A cold compile takes 15 to 20 seconds, and a tree that has not changed reuses it; delete the folder to force a compile.
+- `concurrency.db.test.ts` runs randomised interleavings by seed, in the test's own process (it starts none). It prints each
+  seed it ran; to run one again, set `MELARC_CONCURRENCY_SEED` to it (a whole number). The seed fixes the schedule of the
+  operations, not what the database does between them, so a failure is read from its printed outcomes and not only repeated.
+- `alert-rehearsal.db.test.ts` runs the alert rules on the readings of the real delivery queue, the worker's metrics endpoint
+  and the attestation verifier service, which it builds and starts: it needs a **JDK 21** like the attested rider enrolment
+  ([the attestation verifier](#the-attestation-verifier)), and its last test waits for the verifier's once-a-minute look at
+  its roots file, so the file takes about two minutes. To run it alone:
+
+```text
+pnpm --filter @melarc/api exec vitest run --project database-alone test/database/alone/alert-rehearsal.db.test.ts
+```
+
+- `capacity-benchmark.db.test.ts` measures sign-in, an authenticated read and a refusal at rising concurrency, and is skipped
+  unless asked. Run it on an idle machine, with nothing else open, in `cmd`:
+
+```text
+set MELARC_BENCHMARK=1&& set MELARC_BENCHMARK_OUTPUT=%TEMP%\melarc-capacity.json&& pnpm --filter @melarc/api exec vitest run --project database-alone test/database/alone/capacity-benchmark.db.test.ts
+```
+
+The raw figures of a run are written, as JSON, to the file `MELARC_BENCHMARK_OUTPUT` names (the report quotes them; the
+maxima are only there). To repeat the report's three- and four-slot rows, add `MELARC_BENCHMARK_HASH_SLOTS=3` and
+`MELARC_BENCHMARK_THREADPOOL=4`, or `=4` and `=8`, to the command in the same way.
+
+The single-hash measurement of the Argon2id cost is `node apps/api/dist/tools/benchmark-argon2.js --runs 15` after a build
+(the report's table is 15 runs; the default is 9), once for each profile, named with `--memory-kib`, `--passes` and
+`--parallelism 1`. What they measured, on which machine, and the values they propose are in
+[SLICE-000-CAPACITY-REPORT.md](delivery/planning/SLICE-000-CAPACITY-REPORT.md): proposals for the owner, never settings.
 
 ## 7. Stop safely
 
@@ -304,9 +589,11 @@ database, which listens on loopback.
   `infrastructure/postgres/.env` and the port in `DATABASE_URL` in `apps/api/.env`, then recreate the container
   (`down` without `--volumes`, then `pnpm run infra:up`). The tools only ever act on a server on this machine, and they
   must only be pointed at the one this repository started.
-- **Port 3000 (the API) or 5173 (the Ops dev server) is taken** by another project. Set `HTTP_PORT` in
-  `apps/api/.env`; for the Ops dev server copy `apps/ops-web/.env.example` to `apps/ops-web/.env` and set
-  `OPS_API_PROXY_TARGET` to the API's new address. Vite moves itself to the next free port.
+- **Port 3000 (the API) or 5172 (the Ops dev server) is taken** by another project. For the API set `HTTP_PORT` in
+  `apps/api/.env`, then copy `apps/ops-web/.env.example` to `apps/ops-web/.env` and set `OPS_API_PROXY_TARGET` to the
+  API's new address. The dev server never moves to another port, because the API allows exactly one origin: to move it,
+  change `port` in `apps/ops-web/vite.config.ts` and `OPS_ORIGIN` in `apps/api/.env.example` and `apps/api/.env`
+  together (`apps/ops-web/test/dev-server-origin.test.ts` holds the first two together), then restart the API.
 - **Password authentication failed after a password in `infrastructure/postgres/.env` changed or the file was
   regenerated:** the server still holds the passwords it was given. Run `db:bootstrap` (step 4), which sets the
   migration and runtime passwords from the file, and make `DATABASE_URL` in `apps/api/.env` carry the runtime one. If
@@ -333,5 +620,5 @@ database, which listens on loopback.
 
 Seeded fixtures for the Local environment belong to the product slices that need them
 ([DEPLOYMENT_AND_ENVIRONMENTS.md](architecture/DEPLOYMENT_AND_ENVIRONMENTS.md) sections 3 and 4); there is no product
-data to seed yet. The capture adapter and the delivery worker exist (section 5), but no operation queues a message yet,
-and no real email or SMS provider is built. Staging and production are not set up from here.
+data to seed yet. The capture adapter and the delivery worker exist (section 5) and the staff operations queue messages
+for them, but no real email or SMS provider is built. Staging and production are not set up from here.

@@ -144,6 +144,9 @@ export class DescribeSessionStore extends DescribeAdapter implements SessionStor
   terminate(): Promise<readonly string[]> {
     return refuse('SessionStore', 'terminate');
   }
+  expire(): Promise<boolean> {
+    return refuse('SessionStore', 'expire');
+  }
 }
 
 export class DescribeIdentityDirectory extends DescribeAdapter implements IdentityDirectory {
@@ -161,6 +164,56 @@ export class DescribeIdentityDirectory extends DescribeAdapter implements Identi
   }
   lockIdentity(): Promise<PrincipalSummary | null> {
     return refuse('IdentityDirectory', 'lockIdentity');
+  }
+  establishCredential(): Promise<{ readonly generation: number } | null> {
+    return refuse('IdentityDirectory', 'establishCredential');
+  }
+  accountLabel(): Promise<string | null> {
+    return refuse('IdentityDirectory', 'accountLabel');
+  }
+
+  findStaffForSignIn(): Promise<never> {
+    return refuse('IdentityDirectory', 'findStaffForSignIn');
+  }
+
+  isCredentialLocked(): Promise<boolean> {
+    return refuse('IdentityDirectory', 'isCredentialLocked');
+  }
+
+  readCredentialHash(): Promise<string | null> {
+    return refuse('IdentityDirectory', 'readCredentialHash');
+  }
+
+  recordFailedAttempt(): Promise<never> {
+    return refuse('IdentityDirectory', 'recordFailedAttempt');
+  }
+
+  rehashCredential(): Promise<boolean> {
+    return refuse('IdentityDirectory', 'rehashCredential');
+  }
+
+  clearFailedAttempts(): Promise<void> {
+    return refuse('IdentityDirectory', 'clearFailedAttempts');
+  }
+
+  displayName(): Promise<string | null> {
+    return refuse('IdentityDirectory', 'displayName');
+  }
+
+  vendorOrganizationOf(): Promise<string | null> {
+    return refuse('IdentityDirectory', 'vendorOrganizationOf');
+  }
+
+  registeredChannel(): Promise<never> {
+    return refuse('IdentityDirectory', 'registeredChannel');
+  }
+
+  recoveryEligible(): Promise<boolean> {
+    return refuse('IdentityDirectory', 'recoveryEligible');
+  }
+
+  replaceCredential(): Promise<{ readonly generation: number } | null> {
+    return refuse('IdentityDirectory', 'replaceCredential');
   }
 }
 

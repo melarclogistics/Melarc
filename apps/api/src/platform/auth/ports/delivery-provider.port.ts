@@ -8,6 +8,8 @@ export interface ProviderMessage {
   readonly channel: DeliveryChannel;
   readonly destination: string;
   readonly link: string;
+  /** A vendor message's account identifier, which the message shows beside the link; absent from every other message. */
+  readonly accountIdentifier?: string;
 }
 
 /**

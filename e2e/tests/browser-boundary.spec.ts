@@ -64,14 +64,13 @@ test.describe('the browser can reach the stack origin and nothing else (audit F0
   test('still reaches the stack origin, exactly', async ({ page, stack, sandbox }) => {
     await page.goto('/');
 
+    // The real API answers, from the stack origin and not from anywhere else: nobody is signed in, so it is the session check's `401`.
     const answer = await page.evaluate(async (origin) => {
-      const response = await fetch(
-        `${origin}/api/v1/e2e/notes/00000000-0000-4000-8000-000000000000`,
-      );
+      const response = await fetch(`${origin}/api/v1/auth/session`);
       return response.status;
     }, stack.origin);
 
-    expect(answer).toBe(404);
+    expect(answer).toBe(401);
     expect(sandbox.externalBrowserRequests()).toEqual([]);
   });
 
@@ -82,13 +81,16 @@ test.describe('the browser can reach the stack origin and nothing else (audit F0
   }) => {
     await page.goto('/');
 
+    // The popup opens an address no guard moves it from: `/` would be taken to sign-in once the page has asked the API who
+    // is signed in, and its address would depend on how long that takes. The sign-in screen (S0.43) asks for no session.
     const [popup] = await Promise.all([
       page.waitForEvent('popup'),
       page.evaluate((url) => {
         window.open(url);
-      }, `${stack.origin}/`),
+      }, `${stack.origin}/sign-in`),
     ]);
     await popup.waitForLoadState('domcontentloaded');
+    await expect(popup.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     // Nothing on the stack speaks WebSocket, so the socket does not open: what matters is that the sandbox
     // let it try, and did not close it or record it.
     const closedBySandbox = await page.evaluate(
@@ -108,7 +110,7 @@ test.describe('the browser can reach the stack origin and nothing else (audit F0
       `${stack.origin.replace('http:', 'ws:')}/socket`,
     );
 
-    expect(popup.url()).toBe(`${stack.origin}/`);
+    expect(popup.url()).toBe(`${stack.origin}/sign-in`);
     expect(closedBySandbox).toBe(false);
     expect(sandbox.externalBrowserRequests()).toEqual([]);
   });

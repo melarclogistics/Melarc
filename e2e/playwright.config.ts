@@ -64,6 +64,9 @@ export default defineConfig({
   timeout: 60_000,
   outputDir: './test-results/artifacts',
   use: {
+    // A step that cannot be done fails in seconds and says which, instead of waiting for the whole test's time (S0.46: a journey is minutes long).
+    actionTimeout: 20_000,
+    navigationTimeout: 30_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // A service worker's own requests do not pass through the boundary on the browser context (harness/browser-guard.ts).

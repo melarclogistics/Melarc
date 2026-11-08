@@ -100,7 +100,11 @@ export const GRANTS: readonly GrantSeed[] = [
     ['vendor.organization.approve', 'own'],
     ['vendor.read', 'own'],
   ]),
-  // Platform Admin (holder P): all hubs where the catalogue says P's reach is all hubs; own hub where it says own hub.
+  // Platform Admin (holder P): all hubs where the catalogue says P's reach is all hubs; own hub where it says own hub. **The three keys
+  // of the staff identity's lifecycle that the catalogue gives `S: own hub · P: all hubs` (staff.read, staff.identity.create,
+  // staff.identity.approve) are all-hub for Platform Admin** (Product decision, 22 October 2026): a seeded Platform Admin has no primary
+  // hub, so its own hub is none, and it would read, create and approve no identity at all. The scope is the grant's; being a Platform
+  // Admin is no bypass.
   ...staff(BUNDLE_IDS.platformAdmin, 'P', [
     ['dispatch.read', 'own'],
     ['permission.assignable_bundle.read', 'none'],
@@ -109,10 +113,10 @@ export const GRANTS: readonly GrantSeed[] = [
     ['staff.device.register', 'all'],
     ['staff.device.reregister', 'own'],
     ['staff.device.revoke', 'own'],
-    ['staff.identity.approve', 'own'],
-    ['staff.identity.create', 'own'],
+    ['staff.identity.approve', 'all'],
+    ['staff.identity.create', 'all'],
     ['staff.mfa.reset', 'all'],
-    ['staff.read', 'own'],
+    ['staff.read', 'all'],
     ['staff.session.revoke', 'all'],
     ['vendor.credential.recover', 'all'],
     ['vendor.organization.approve', 'own'],

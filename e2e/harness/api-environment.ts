@@ -31,7 +31,10 @@ const KEY_SETTINGS: readonly string[] = [
  * Throwaway key material for one run: a fresh random key for each purpose (32 bytes as 43 unpadded base64url characters),
  * all different, held in memory for the life of the process it is given to and written nowhere. It protects nothing real.
  */
-function runKeys(): Record<string, string> {
+/** The Vendor PWA's origin as the API is configured with it. Nothing serves it; the vendor journeys' client sends it as its `Origin`. */
+export const VENDOR_ORIGIN = 'http://127.0.0.1:4174';
+
+export function runKeys(): Record<string, string> {
   const keys: Record<string, string> = {};
   for (const purpose of KEY_SETTINGS) {
     keys[`KEY_${purpose}_MATERIAL`] = `1:${randomBytes(32).toString('base64url')}`;
@@ -46,6 +49,13 @@ export interface ApiEnvironmentOptions {
   readonly runtimeUrl: string;
   /** Where the sandbox writes what it refuses. */
   readonly captureFile: string;
+  /**
+   * The key material of the run, which `runKeys` makes once: the API and the delivery worker must hold the same `credential_delivery`
+   * key, or the worker could not open what the API sealed for it. Made here when the caller gives none.
+   */
+  readonly keys?: Readonly<Record<string, string>>;
+  /** The one origin the Ops Portal is reached at. The API judges `Origin` against it exactly, so a real sign-in needs the browser's own. */
+  readonly opsOrigin?: string;
   readonly extra?: Readonly<Record<string, string>>;
 }
 
@@ -70,12 +80,13 @@ export function apiEnvironment(options: ApiEnvironmentOptions): Record<string, s
     SHUTDOWN_DRAIN_DELAY_MS: '0',
     DATABASE_URL: options.runtimeUrl,
     DATABASE_POOL_MAX: '3',
-    // The surfaces are not served by this run; the settings are required and judged at start, and nothing reads them yet.
-    OPS_ORIGIN: 'http://127.0.0.1:4173',
-    VENDOR_ORIGIN: 'http://127.0.0.1:4174',
+    // The Ops Portal is served by this run, and the API judges the `Origin` of every browser mutation against this origin, exactly. The
+    // Vendor PWA is not served; the vendor journeys (rows 10a and 11, S0.52) present its origin from a client of their own.
+    OPS_ORIGIN: options.opsOrigin ?? 'http://127.0.0.1:4173',
+    VENDOR_ORIGIN,
     RATE_LIMITER: 'postgres',
     KEY_CUSTODY: 'local',
-    ...runKeys(),
+    ...(options.keys ?? runKeys()),
     DELIVERY_EMAIL_ADAPTER: 'capture',
     DELIVERY_SMS_ADAPTER: 'capture',
     ATTESTATION_VERIFIER: 'substitute',

@@ -50,8 +50,20 @@ describe('the sealed payload of a delivery job', () => {
     ['an array', '[]'],
     ['null', 'null'],
     [
-      'a layout that is not the one written',
+      'a vendor layout without the account identifier',
       '{"v":2,"destination":"a@b.test","link":"https://x.test/"}',
+    ],
+    [
+      'an account identifier in the layout that carries none',
+      '{"v":1,"account_identifier":"ABCD2345","destination":"a@b.test","link":"https://x.test/"}',
+    ],
+    [
+      'an account identifier that is not one',
+      '{"v":2,"account_identifier":"abcd2345","destination":"a@b.test","link":"https://x.test/"}',
+    ],
+    [
+      'an account identifier with a character the alphabet leaves out',
+      '{"v":2,"account_identifier":"ABCD2340","destination":"a@b.test","link":"https://x.test/"}',
     ],
     ['no version', '{"destination":"a@b.test","link":"https://x.test/"}'],
     [
@@ -77,10 +89,10 @@ describe('the sealed payload of a delivery job', () => {
   // Break caught: a payload written in a layout that only a newer writer makes being taken for garbage and destroyed. The reader says
   // by its reason that it does not support the layout, so that the worker keeps the payload for one that does.
   it.each([
-    ['a newer layout', '{"v":2,"destination":"a@b.test","link":"https://x.test/"}'],
+    ['a newer layout', '{"v":3,"destination":"a@b.test","link":"https://x.test/"}'],
     [
       'a newer layout with a field of its own',
-      '{"v":3,"destination":"a@b.test","link":"https://x.test/","body":"hi"}',
+      '{"v":4,"destination":"a@b.test","link":"https://x.test/","body":"hi"}',
     ],
   ])('says that %s is one it does not support, not that it is garbage', (_label, text) => {
     expect(reasonOf(text)).toBe('VERSION_UNSUPPORTED');
@@ -113,7 +125,8 @@ describe('the sealed payload of a delivery job', () => {
   it('says nothing of the payload when it refuses one', () => {
     for (const text of [
       `{"v":1,"destination":"ama@example.test","link":"${LINK}","extra":1}`,
-      `{"v":2,"destination":"ama@example.test","link":"${LINK}"}`,
+      `{"v":3,"destination":"ama@example.test","link":"${LINK}"}`,
+      `{"v":2,"account_identifier":"ama@example.test","destination":"ama@example.test","link":"${LINK}"}`,
     ]) {
       let message = '';
       try {
@@ -125,6 +138,33 @@ describe('the sealed payload of a delivery job', () => {
       expect(message).not.toContain('ama@example.test');
     }
   });
+
+  // Break caught (SECURITY_DESIGN.md section 13.9a: "the payload is the link, the purpose and, for a vendor, the account identifier"): a
+  // vendor's setup message that cannot tell the vendor which account it is for, or a staff message whose stored layout changed.
+  it('holds a vendor message’s account identifier beside the destination and the link, in a layout of its own', () => {
+    const vendor = { ...CONTENT, accountIdentifier: 'ABCD2345' };
+    const bytes = encodeDeliveryPayload(vendor);
+
+    expect(decodeDeliveryPayload(bytes)).toEqual(vendor);
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
+      v: 2,
+      account_identifier: 'ABCD2345',
+      ...CONTENT,
+    });
+    expect(JSON.parse(new TextDecoder().decode(encodeDeliveryPayload(CONTENT)))).toEqual({
+      v: 1,
+      ...CONTENT,
+    });
+  });
+
+  it.each(['abcd2345', 'ABCD234', 'ABCD23450', 'ABCD234O', ''])(
+    'refuses to write the account identifier %j, which is not one',
+    (accountIdentifier) => {
+      expect(() => encodeDeliveryPayload({ ...CONTENT, accountIdentifier })).toThrow(
+        PayloadUnreadableError,
+      );
+    },
+  );
 
   // Break caught: bounds that let a payload grow without limit, in a table that every instance reads.
   it('bounds the destination and the link', () => {

@@ -14,7 +14,9 @@ export type PinProblemCode =
   | 'ENGINES_NODE_FORMAT'
   | 'NODE_OUTSIDE_ENGINES'
   | 'PACKAGE_MANAGER_FORMAT'
+  | 'JAVA_VERSION_FORMAT'
   | 'CI_NODE_PIN'
+  | 'CI_JAVA_PIN'
   | 'CI_PNPM_PIN'
   | 'CI_FROZEN_INSTALL'
   | 'CI_ACTION_UNPINNED'
@@ -28,6 +30,8 @@ export interface PinProblem {
 export interface PinInputs {
   /** Contents of `.node-version`. */
   nodeVersionFile: string;
+  /** Contents of `.java-version`, the JDK of the attestation verifier (S0.55). */
+  javaVersionFile: string;
   /** Parsed contents of the root `package.json`. */
   packageJson: unknown;
   /** Contents of `.github/workflows/ci.yml`. */
@@ -104,9 +108,29 @@ function checkPackageManagerPin(packageJson: unknown): PinProblem[] {
   ];
 }
 
+function checkJavaPin(javaVersionFile: string): PinProblem[] {
+  if (parseVersion(EXACT_VERSION, javaVersionFile.trim()) !== undefined) return [];
+  return [
+    {
+      code: 'JAVA_VERSION_FORMAT',
+      message: '.java-version must contain one exact version such as 21.0.12.',
+    },
+  ];
+}
+
 function readsNodeVersionFile(step: Step): boolean {
   const inputs = inputsOf(step);
   return inputs['node-version-file'] === '.node-version' && !('node-version' in inputs);
+}
+
+/** The JDK comes from `.java-version`, from Temurin (the distribution the tests ran on), and from nothing else. */
+function readsJavaVersionFile(step: Step): boolean {
+  const inputs = inputsOf(step);
+  return (
+    inputs['java-version-file'] === '.java-version' &&
+    !('java-version' in inputs) &&
+    inputs.distribution === 'temurin'
+  );
 }
 
 const FULL_COMMIT_SHA = /@[0-9a-f]{40}$/;
@@ -158,6 +182,15 @@ function checkCiWorkflowPins(ciWorkflow: string, localActions: LocalActions): Pi
     });
   }
 
+  const javaSetups = steps.filter((step) => isAction(step, 'actions/setup-java'));
+  if (javaSetups.length === 0 || !javaSetups.every(readsJavaVersionFile)) {
+    problems.push({
+      code: 'CI_JAVA_PIN',
+      message:
+        'Every actions/setup-java step must read .java-version, set no java-version and use the temurin distribution, and CI needs one (the attestation verifier is built and tested there).',
+    });
+  }
+
   const pnpmSetups = steps.filter((step) => isAction(step, 'pnpm/action-setup'));
   if (pnpmSetups.length === 0 || pnpmSetups.some((step) => 'version' in inputsOf(step))) {
     problems.push({
@@ -191,6 +224,7 @@ export function findPinProblems(inputs: PinInputs): PinProblem[] {
   return [
     ...checkNodePin(inputs.nodeVersionFile, inputs.packageJson),
     ...checkPackageManagerPin(inputs.packageJson),
+    ...checkJavaPin(inputs.javaVersionFile),
     ...checkCiWorkflowPins(inputs.ciWorkflow, inputs.localActions ?? {}),
   ];
 }
@@ -200,6 +234,7 @@ export function readPinInputs(rootDir: string): PinInputs {
   const ciWorkflow = readFileSync(join(rootDir, '.github', 'workflows', 'ci.yml'), 'utf8');
   return {
     nodeVersionFile: readFileSync(join(rootDir, '.node-version'), 'utf8'),
+    javaVersionFile: readFileSync(join(rootDir, '.java-version'), 'utf8'),
     packageJson: JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as unknown,
     ciWorkflow,
     localActions: readLocalActions(rootDir, workflowSteps(ciWorkflow)),

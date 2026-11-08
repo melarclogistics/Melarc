@@ -97,6 +97,7 @@ const SCRATCH = 'local scratch files';
 const GIT_METADATA = 'git history and configuration';
 const AGENT_STATE = 'agent session state';
 const ARCHIVE = 'earlier archive';
+const CUSTODY_BUNDLE = 'bootstrap custody bundle';
 
 const DIRECTORY_REASONS = new Map<string, string>([
   ['.git', GIT_METADATA],
@@ -122,6 +123,12 @@ const DIRECTORY_REASONS = new Map<string, string>([
 
 const KEY_EXTENSIONS = ['.pem', '.key', '.p12', '.pfx', '.keystore', '.jks'];
 const KEY_NAMES = ['id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'];
+/**
+ * The file name of a bootstrap custody bundle (`apps/api/src/tools/bootstrap/custody-bundle.ts`, S0.30): it holds a setup secret in
+ * clear, and the commands write it outside the checkout, so a copy in the tree is somebody's mistake and is refused by name.
+ */
+const CUSTODY_BUNDLE_NAME = /^melarc-bootstrap-[0-9a-f]{32}\.bundle$/;
+
 const ARCHIVE_EXTENSIONS = ['.zip', '.tar', '.tar.gz', '.tgz', '.gz', '.7z', '.rar'];
 
 /**
@@ -144,6 +151,7 @@ export function denyReason(path: string): string | undefined {
   if (KEY_EXTENSIONS.some((extension) => name.endsWith(extension))) return KEYS;
   if (KEY_NAMES.some((prefix) => name.startsWith(prefix))) return KEYS;
   if (name === '.npmrc') return CREDENTIALS;
+  if (CUSTODY_BUNDLE_NAME.test(name)) return CUSTODY_BUNDLE;
   if (ARCHIVE_EXTENSIONS.some((extension) => name.endsWith(extension))) return ARCHIVE;
   if (name.endsWith('.log')) return LOGS;
   return undefined;
@@ -233,6 +241,30 @@ export function findPrivateKeys(files: readonly ZipEntry[]): string[] {
         )
         .map((file) => file.path),
     ),
+  ].sort();
+}
+
+/**
+ * The first line of a bootstrap custody bundle (`apps/api/src/tools/bootstrap/custody-bundle.ts`, `BUNDLE_MAGIC`; a test of the API
+ * holds the two literals equal). A bundle holds a setup secret in clear and the commands write it outside the checkout, so one that is
+ * in the tree is somebody's copy: it is refused by its name (`denyReason`) and, because a copy may be renamed, by what it begins with.
+ */
+const CUSTODY_BUNDLE_MAGIC = 'MELARC-BOOTSTRAP-BUNDLE v1';
+
+/** Whether the start of a file is the start of a bundle: its first line is the magic, the whole line. A mention further in is not. */
+function beginsAsCustodyBundle(data: Buffer): boolean {
+  const head = data.subarray(0, CUSTODY_BUNDLE_MAGIC.length + 2).toString('utf8');
+  return (
+    head === CUSTODY_BUNDLE_MAGIC ||
+    head.startsWith(`${CUSTODY_BUNDLE_MAGIC}\n`) ||
+    head.startsWith(`${CUSTODY_BUNDLE_MAGIC}\r\n`)
+  );
+}
+
+/** The paths of the files that begin as a custody bundle does, whatever they are called, sorted, once each. Never the secret. */
+export function findCustodyBundles(files: readonly ZipEntry[]): string[] {
+  return [
+    ...new Set(files.filter((file) => beginsAsCustodyBundle(file.data)).map((file) => file.path)),
   ].sort();
 }
 
@@ -633,6 +665,13 @@ export function packageSource(root: string, options: PackageOptions = {}): Packa
     throw new PackageSourceError(
       `a private key block appears in ${keyed.join(', ')}. Nothing was written. Remove it from ${keyed.length === 1 ? 'that file' : 'those files'}` +
         ' and, if the file was shared, replace the key. The key is not shown.',
+    );
+  }
+  const bundles = findCustodyBundles(packed);
+  if (bundles.length > 0) {
+    throw new PackageSourceError(
+      `a bootstrap custody bundle appears in ${bundles.join(', ')}. Nothing was written. Move ${bundles.length === 1 ? 'that file' : 'those files'} out of the checkout` +
+        ' and, if the file was shared, have the setup secret replaced (the resume command does). The secret is not shown.',
     );
   }
 

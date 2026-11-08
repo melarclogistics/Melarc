@@ -37,9 +37,12 @@ const HUB = '5eed0100-0000-4000-8000-0000000000e1';
 
 describe('the application, real, over a real database of its own', () => {
   // The application is wired as it ships: the runtime composition, connected as the API's login, over a pool of one.
+  // The database of this file is migrated and not seeded, so the instance says so (the owner's decision of 25 October 2026):
+  // not ready, with a reason of its own. The probe still runs its checks on the pool, which is what this test shows.
   it('answers readiness through the test client, connected as melarc_api_runtime over a pool of one', async () => {
     const response = await kit.client.get('/readyz');
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
+    expect(response.json()).toEqual({ status: 'not_ready', reason: 'reference_data_missing' });
     const pool = kit.app.app.get<{ options: { max: number; user?: string } }>(DATABASE_POOL);
     expect(pool.options.max).toBe(1);
     expect(
@@ -60,8 +63,9 @@ describe('the application, real, over a real database of its own', () => {
   // Break caught: a pool larger than the test asked for, which would hide a connection held across an await (a deadlock a pool of
   // one makes certain).
   it('does not leave a connection held after a request: two requests in a row on a pool of one', async () => {
-    expect((await kit.client.get('/readyz')).status).toBe(200);
-    expect((await kit.client.get('/readyz')).status).toBe(200);
+    // Each probe takes the pool's one connection to run its checks and gives it back: a second would wait for ever if one was held.
+    expect((await kit.client.get('/readyz')).status).toBe(503);
+    expect((await kit.client.get('/readyz')).status).toBe(503);
   });
 });
 
@@ -309,8 +313,15 @@ describe('a database of its own for each file, and several at once (Stop if: par
         await one.admin.query(`insert into hub (id, name) values ($1, 'Only in one')`, [HUB]);
         expect(await one.observe.count('hub')).toBe(1);
         expect(await two.observe.count('hub')).toBe(0);
-        expect((await one.client.get('/readyz')).status).toBe(200);
-        expect((await two.client.get('/readyz')).status).toBe(200);
+        // Each application reaches its own database and finds it unseeded: both answers come from a query of their own.
+        expect((await one.client.get('/readyz')).json()).toEqual({
+          status: 'not_ready',
+          reason: 'reference_data_missing',
+        });
+        expect((await two.client.get('/readyz')).json()).toEqual({
+          status: 'not_ready',
+          reason: 'reference_data_missing',
+        });
       } finally {
         await Promise.all([one.stop(), two.stop()]);
       }

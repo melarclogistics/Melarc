@@ -8,23 +8,29 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { SystemClock } from '../../src/platform/auth/clock/system.clock.adapter.js';
 import { AesGcmSecretCipher } from '../../src/platform/auth/crypto/aes-gcm.secret-cipher.adapter.js';
+import { Sha256TokenService } from '../../src/platform/auth/crypto/sha256.token-service.adapter.js';
+import { SetupGrantStore } from '../../src/platform/auth/setup-grants/setup-grant-store.js';
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
+import { SettingsReader } from '../../src/platform/settings/settings-reader.js';
 import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles.js';
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import { PostgresDeliveryQueue } from '../../src/platform/delivery/postgres.delivery-queue.adapter.js';
 import { localKeys } from '../../src/test-support/key-config.js';
 import {
   DEADLINES,
+  freePort,
   killAll,
   requireBuild,
   start,
   WORKER_FIXTURE,
+  WORKER_MAIN,
   type Finished,
 } from '../support/api-process.js';
 import { openAdmin, type Admin } from './support/admin.js';
 import { withHandle } from './support/handle.js';
 import { observe, type Observer } from './support/observe.js';
 import { PRINCIPAL_1, systemContext } from './support/rls-fixture.js';
+import { seedReferenceData } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
 import { createTestDatabase, type TestDatabase } from './support/test-database.js';
 
@@ -52,6 +58,8 @@ let sink: string;
 beforeAll(async () => {
   requireBuild();
   database = await createTestDatabase();
+  // A setup grant takes its lifetime from a setting, so the reference data is seeded as the product seeds it.
+  await seedReferenceData(database);
   api = buildService(database, { poolMax: 2 });
   work = buildService(database, { poolMax: 2, login: WORKER_RUNTIME_ROLE });
   admin = await openAdmin(database);
@@ -130,7 +138,12 @@ const rowOf = (id: string) =>
     payload_ciphertext: Buffer | null;
   }>('select * from credential_delivery_job where id = $1', [id]);
 
-async function until(condition: () => Promise<boolean> | boolean, what: string, ms = 8_000) {
+/** Waits for what a worker process just started does first: a start, so it waits as long as one may take (api-process.ts). */
+async function until(
+  condition: () => Promise<boolean> | boolean,
+  what: string,
+  ms: number = DEADLINES.ready,
+) {
   const deadline = Date.now() + ms;
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -217,8 +230,11 @@ describe('a worker process that erases expired credential material while it runs
   // that shares the process keeps running.
   it('leaves a live queued message unclaimed and unspent while its readers are not built, and still runs the cleanup', async () => {
     const id = await issue();
+    // `--unbuilt-readers`: the worker as it was composed before S0.29, with the reader that confirms nothing. As composed now it reads
+    // setup grants, and the message of a record it cannot find waits on its schedule instead (the test after this one).
     const running = start(WORKER_FIXTURE, workerEnvironment(), [
       'plain',
+      '--unbuilt-readers',
       '--retention=100',
       '--signal-after=1500',
     ]);
@@ -241,6 +257,65 @@ describe('a worker process that erases expired credential material while it runs
     );
     expect(said(finished)).not.toContain('delivery claimed');
     expect(finished.stdout).not.toContain('SENTINEL-PROCESS-TOKEN');
+  });
+
+  // Break caught (S0.29, OB-119): the worker as composed, with its real reader, unable to send the message of a real setup grant; or one
+  // that sends for a record it cannot find. The first is the evidence that the reader and the grant on the table are wired; the second
+  // that a message whose record is missing is not sent and is not spent either.
+  it('as composed, sends the message of a real setup grant and leaves the message of a missing record unsent and unspent', async () => {
+    const clockNow = new SystemClock();
+    const grants = new SetupGrantStore({
+      tokens: new Sha256TokenService(),
+      queue,
+      settings: new SettingsReader(),
+      clock: clockNow,
+    });
+    const issued = await withHandle(api.service, ISSUER, (handle) =>
+      grants.issue(handle, {
+        principal: { type: 'STAFF', id: randomUUID() },
+        purpose: 'STAFF_CREDENTIAL_SETUP',
+        delivery: {
+          kind: 'SETUP_GRANT',
+          channel: 'EMAIL',
+          destination: 'composed.recipient@example.test',
+          link: (token) => `https://ops.example.test/setup/credential#token=${token}`,
+        },
+      }),
+    );
+    const orphan = await issue();
+    const running = start(WORKER_FIXTURE, workerEnvironment(), ['plain', '--signal-after=2500']);
+
+    await until(
+      async () =>
+        (
+          await observer.one<{ state: string }>(
+            'select state from credential_delivery_job where id = $1',
+            [issued.job?.id],
+          )
+        )?.state === 'ACCEPTED',
+      'the message of the setup grant to be sent',
+    );
+    const finished = await running.waitForExit(DEADLINES.stop, 'did not end by itself');
+
+    expect(finished).toMatchObject({ code: 0, signal: null, stderr: '' });
+    // The worker claimed it, could not confirm the record and gave the claim back as a deferral, which is not one of the sends the
+    // schedule allows: every claim it made is a deferral, nothing reached the provider, and the sealed payload is still there.
+    const waiting = await observer.one<{
+      state: string;
+      outcome_class: string | null;
+      attempt_count: number;
+      deferred_claims: number;
+    }>(
+      'select state, outcome_class, attempt_count, deferred_claims from credential_delivery_job where id = $1',
+      [orphan],
+    );
+    expect(waiting).toMatchObject({ state: 'RETRYABLE', outcome_class: 'REDEMPTION_UNCONFIRMED' });
+    expect(waiting?.attempt_count).toBe(waiting?.deferred_claims);
+    expect((await rowOf(orphan))?.payload_ciphertext).not.toBeNull();
+    // What was sent is in the capture sink, which is outside the checkout and clear by design; the process's own output holds none of it.
+    expect(finished.stdout).not.toContain(issued.token);
+    expect(finished.stdout).not.toContain('composed.recipient@example.test');
+    expect(said(finished).some((line) => String(line).includes('not built yet'))).toBe(false);
   });
 });
 
@@ -317,5 +392,33 @@ describe('a worker process stopped with a message in flight (S0.18; OB-24)', () 
     const finished = await running.waitForExit(DEADLINES.stop, 'did not end after SIGTERM');
 
     await expectTheMessageGivenBack(finished, id);
+  });
+});
+
+describe('the real worker serves its private metrics endpoint against its database (S0.68)', () => {
+  // Break caught: an endpoint wired to a gauge that is not the queue's. With nothing due, the age of the oldest due message is 0 and the
+  // process serves it under the name the catalogue gives it. The ages above zero are read in alone/alert-rehearsal.db.test.ts, over a
+  // composition of the same store.
+  it('answers GET /metrics with the backlog gauge at zero while nothing is due, and is gone with the process', async () => {
+    const port = await freePort();
+    const url = `http://127.0.0.1:${String(port)}/metrics`;
+    const running = start(WORKER_MAIN, {
+      ...workerEnvironment(),
+      DELIVERY_WORKER_METRICS_PORT: String(port),
+    });
+    const scrape = async (): Promise<Response | undefined> => {
+      try {
+        return await fetch(url, { signal: AbortSignal.timeout(DEADLINES.request) });
+      } catch {
+        return undefined;
+      }
+    };
+    await until(async () => (await scrape())?.status === 200, 'the endpoint to answer');
+
+    const text = await (await fetch(url)).text();
+    expect(text).toMatch(/^credential_delivery_oldest_due_age_seconds 0$/m);
+
+    await running.stop('SIGKILL');
+    await expect(fetch(url, { signal: AbortSignal.timeout(DEADLINES.request) })).rejects.toThrow();
   });
 });

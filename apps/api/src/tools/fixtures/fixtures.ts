@@ -13,8 +13,8 @@ import { reasonCodeRow, type ReasonSeed } from '../seed/reasons.js';
  * catalogue refuses for a stated cause: one that is inactive, and one that permits no real operation. The names of the operations
  * a fixture permits start with `fixtureOnly`, which no operation of the contract does.
  *
- * The demonstration rider and vendor of MIGRATION_AND_SEEDING.md sections 4a and 4b are fixtures too, but they write tables that
- * do not exist yet (`RiderIdentity`, the vendor tables) and arrive with the tasks that build those tables.
+ * The demonstration rider and vendor of MIGRATION_AND_SEEDING.md sections 4a and 4b are fixtures too, and arrive with the tasks that
+ * build their tables: the vendor is `vendor-fixture.ts` (S0.47, `db:seed --vendor-fixture`); the rider is S0.53's.
  */
 
 /** The prefix of every fixture code. `melarc.add_reason_fixtures` (migration 0005) writes codes with this prefix and no others. */

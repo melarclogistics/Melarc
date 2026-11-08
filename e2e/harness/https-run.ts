@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { HTTPS_SHARD_VARIABLE, chooseHttpsShard } from './https-shards.ts';
 import { repositoryPaths } from './paths.ts';
 import { privilegedRunner, systemTrust, systemTrustRefusal } from './system-trust.ts';
 import {
@@ -23,28 +24,39 @@ import {
  * 1. refuse unless it is allowed to make key material (below);
  * 2. make a directory of its own outside the checkout, and in it the disposable CA and leaf (`test-ca.ts`: the CA's key is deleted as
  *    soon as the leaf is signed, after `openssl verify` has shown that the CA refuses a name outside the loopback);
- * 3. run Playwright's HTTPS projects in **two runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
- *    judges the material, makes the per-engine stores below it, and starts the HTTPS front):
- *    - the first, with the system store lacking the CA: Chromium and Firefox, which trust it by a store of their own, and **WebKit's
- *      refusal**, the control that shows WebKit does not trust the origin until the CA is trusted;
- *    - the second, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
+ * 3. run Playwright's HTTPS projects in **three runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
+ *    judges the material, makes the per-engine stores below it, and starts the HTTPS front) and **each with a stack of its own**: a run is
+ *    one Playwright invocation, so one global setup, so one database, one set of one-time bootstrap bundles, one capture folder and one
+ *    worker, and the journeys of an engine are never run against what another engine has used (audit G01):
+ *    - the first, with the system store lacking the CA: Chromium, which trusts it by a store of its own, and **WebKit's refusal**, the
+ *      control that shows WebKit does not trust the origin until the CA is trusted;
+ *    - the second, also with the system store lacking the CA: Firefox, which trusts it by a store of its own;
+ *    - the third, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
  *      WebKit's other proofs. WebKit has no way to trust a CA for one process (the first hosted run showed `SSL_CERT_FILE` ignored), so
  *      the order is what makes its control honest: refused before, trusted after, and nothing else differs;
  * 4. remove the CA from the system store if it was put there, and the directory, whatever happened, and exit with the status of the
  *    first run that failed. Each run says its exit status when it ends, and the command ends with a summary of every run and of the one
  *    the overall status comes from. Each run writes its artifacts to an output directory of its own below `test-results`
  *    (`HttpsPhase.output`), because Playwright clears the output directory of the projects it runs at the start of a run: with one
- *    directory for both, the second run erased the first run's evidence. The recorders of the secret projects are not touched.
+ *    directory for all of them, a later run erased an earlier run's evidence. The recorders of the secret projects are not touched.
+ *
+ * **In CI each job makes one shard of the runs** (`MELARC_HTTPS_SHARD=current/total`, `https-shards.ts`): the runs of the other shards are
+ * said to be "not in this shard" and are made by the job of that shard, each on a runner of its own with a CA of its own. The runs keep
+ * their numbers and their output directories. The shard that has WebKit's refusal also has WebKit's other proofs, the refusal first; a
+ * shard without the system-store run never touches the system store. A value that is not a shard of this harness is refused before
+ * anything is made.
  *
  * **It makes a CA and a private key, so it does not run where it is not allowed to.** It runs on Linux only (Chromium, Chrome and Edge
  * use the operating system's store on Windows and macOS, which has no disposable form), and only in CI or where the person who runs it
  * has said the machine is cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`). The shared developer workstation is not such a
  * machine (the owner's ruling of 11 October 2026). **No trust store of the machine, the user or a browser is changed, with one
  * exception**: on a GitHub-hosted runner alone, a machine made for one job and discarded after it, WebKit's proofs run with the CA in the
- * system store, which is the only trust WebKit has (the owner's decision of 12 October 2026). Anywhere else the second run is made
+ * system store, which is the only trust WebKit has (the owner's decision of 12 October 2026). Anywhere else WebKit's run is made
  * without it, says so, and WebKit's proofs fail to trust, which is the correct report.
  */
 export interface HttpsPhase {
+  /** What a shard names the run by (`HttpsShard.phases`, https-shards.ts). */
+  readonly id: string;
   /** Said in the log. */
   readonly name: string;
   readonly projects: readonly string[];
@@ -60,32 +72,46 @@ export interface HttpsPhase {
   readonly output: string;
 }
 
+/**
+ * **One run for each engine that runs the journeys** (the audit of 26 October 2026, G01). A Playwright run has one global setup and so one
+ * stack: one database, one set of bootstrap bundles, one capture folder and one worker. The journeys of S0.46 are one story that starts
+ * from the two bootstrap administrators, whose one-time bundles and setup grants a first reading consumes, so a second engine sent through
+ * the same stack would meet a story that has already been told. Each engine therefore has a run, and a stack, of its own. The control of
+ * WebKit's refusal runs no journey and has nothing to consume, so it shares the first run, which keeps it ahead of the system store.
+ */
 export const HTTPS_PHASES: readonly HttpsPhase[] = [
   {
-    name: 'the engines that trust the CA by a store of their own, and WebKit refusing it while the system store lacks it',
-    projects: [
-      'https-chromium',
-      'https-chromium-secret',
-      'https-firefox',
-      'https-firefox-secret',
-      'https-webkit-control',
-    ],
+    id: 'chromium',
+    name: 'Chromium, which trusts the CA by a store of its own, and WebKit refusing it while the system store lacks it',
+    projects: ['https-chromium', 'https-chromium-secret', 'https-webkit-control'],
     systemTrust: false,
-    output: 'test-results/https-1-own-stores',
+    output: 'test-results/https-1-chromium',
   },
   {
+    id: 'firefox',
+    name: 'Firefox, which trusts the CA by a store of its own',
+    projects: ['https-firefox', 'https-firefox-secret'],
+    systemTrust: false,
+    output: 'test-results/https-2-firefox',
+  },
+  {
+    id: 'webkit',
     name: 'WebKit, with the CA in the system store',
     projects: ['https-webkit', 'https-webkit-secret'],
     systemTrust: true,
-    output: 'test-results/https-2-system-store',
+    output: 'test-results/https-3-webkit-system-store',
   },
 ];
 
-/** What came of one run: Playwright answered; it was started and an error stopped the command before it answered; or it was never started. */
+/**
+ * What came of one run: Playwright answered; it was started and an error stopped the command before it answered; it was never started;
+ * or it is a run of another shard, made by the job of that shard.
+ */
 type RunOutcome =
   | { readonly kind: 'status'; readonly status: number }
   | { readonly kind: 'incomplete' }
-  | { readonly kind: 'not-run' };
+  | { readonly kind: 'not-run' }
+  | { readonly kind: 'other-shard' };
 
 export const HTTPS_PROJECTS: readonly string[] = HTTPS_PHASES.flatMap((phase) => phase.projects);
 
@@ -139,13 +165,29 @@ export function runHttpsSuite(deps: HttpsRunDependencies): number {
     deps.err(refusal);
     return 2;
   }
+  // The shard this job makes (the whole run without one): a value that is not a shard of this harness is refused before anything is made.
+  const choice = chooseHttpsShard(deps.environment[HTTPS_SHARD_VARIABLE]);
+  if (choice.kind === 'refused') {
+    deps.err(choice.why);
+    return 2;
+  }
+  const selected = (phase: HttpsPhase): boolean =>
+    choice.kind === 'whole' || choice.shard.phases.includes(phase.id);
+  if (choice.kind === 'shard') {
+    const made = HTTPS_PHASES.flatMap((phase, index) => (selected(phase) ? [index + 1] : []));
+    deps.out(
+      `HTTPS shard ${String(choice.current)} of ${String(choice.total)} (${choice.shard.name}): makes run ${made.join(' and ')} of ${String(HTTPS_PHASES.length)}; the others are made by the jobs of the other shards.`,
+    );
+  }
   const root = deps.makeDirectory();
   // The status is settled after the `finally`, which can fail the run too (a CA that cannot be taken out of the system store).
   let status = 1;
   // Whether the CA may be in the system store, so that it must be taken out: set *before* the install, which can fail half way.
   let inSystemStore = false;
   let removalFailed = false;
-  const outcomes: RunOutcome[] = HTTPS_PHASES.map(() => ({ kind: 'not-run' }));
+  const outcomes: RunOutcome[] = HTTPS_PHASES.map((phase) =>
+    selected(phase) ? { kind: 'not-run' } : { kind: 'other-shard' },
+  );
   // The run being prepared or made when an error stopped the command, if one did.
   let stoppedAt: number | undefined;
   const takeOutOfSystemStore = (): void => {
@@ -174,6 +216,7 @@ export function runHttpsSuite(deps: HttpsRunDependencies): number {
     const environment = { ...deps.environment, MELARC_E2E_TLS_DIR: directory };
     status = 0;
     for (const [index, phase] of HTTPS_PHASES.entries()) {
+      if (!selected(phase)) continue;
       stoppedAt = index;
       deps.out(`HTTPS run ${String(index + 1)} of ${String(HTTPS_PHASES.length)}: ${phase.name}.`);
       if (phase.systemTrust) {
@@ -237,7 +280,9 @@ function summarize(
   for (const [index, phase] of HTTPS_PHASES.entries()) {
     const outcome = outcomes[index] ?? { kind: 'not-run' };
     let what = 'not run';
-    if (outcome.kind === 'status') {
+    if (outcome.kind === 'other-shard') {
+      what = 'not in this shard (made by the job of another shard)';
+    } else if (outcome.kind === 'status') {
       what = `exit status ${String(outcome.status)}`;
       if (outcome.status !== 0) failing.push(index);
     } else if (outcome.kind === 'incomplete') {

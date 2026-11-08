@@ -16,6 +16,7 @@ import {
   tierOf,
   type EventRequirements,
 } from './audit-classification.js';
+import { validateBootstrapResumedFacts } from './audit-bootstrap-resumed.js';
 import { validateMfaResetFacts } from './audit-mfa-reset.js';
 import { isAuditEventCode, type AuditEventCode } from './audit-event-codes.js';
 import {
@@ -131,6 +132,25 @@ function screenText(text: string, field: string, maxLength: number): string {
   if (EMAIL.test(scrubbed.replaceAll(URL_USERINFO, '://')) || PHONE.test(scrubbed))
     refuseDetail(field);
   return scrubbed;
+}
+
+/** Why the writer would not keep a note: too long, or text its screening refuses (a control character, an address, a number). */
+export type NoteRefusal = 'maxLength' | 'format';
+
+/**
+ * Whether the audit writer would keep this note, asked before the act so that a caller is refused with a reason of their own and not met
+ * with the writer's refusal as an unexplained `500` after the act has begun (F04 of 23 October 2026). It is the writer's own screening
+ * (`screenText` with the note's bound), never a second policy: the two cannot disagree.
+ */
+export function noteRefusal(note: string): NoteRefusal | undefined {
+  if (note.length > AUDIT_LIMITS.maxNoteLength) return 'maxLength';
+  try {
+    screenText(note, 'note', AUDIT_LIMITS.maxNoteLength);
+    return undefined;
+  } catch (error) {
+    if (error instanceof AuditRefusedError) return 'format';
+    throw error;
+  }
 }
 
 function screenValue(value: unknown, field: string, depth: number): AuditJson {
@@ -354,6 +374,33 @@ function enforceRequirements(
       : undefined;
   if (whenObject !== undefined && !hasKeys(facts.relatedIds, whenObject)) {
     refuseEvent('relatedIds');
+  }
+
+  // S0.50: who initiated a recovery request is a fact of its basis. An administrator's names that administrator, who is the actor; a
+  // self-service request was initiated by nobody, and names no one.
+  if (input.code === 'auth.recovery.requested') {
+    const initiatedBy = facts.relatedIds?.initiated_by ?? null;
+    const administrator = input.enhancedBasis === 'ADMINISTRATOR_INITIATED';
+    if (
+      administrator ? initiatedBy === null || initiatedBy !== facts.actorId : initiatedBy !== null
+    ) {
+      refuseEvent('relatedIds');
+    }
+  }
+
+  if (input.code === 'auth.bootstrap.resumed') {
+    validateBootstrapResumedFacts(
+      {
+        outcome: input.outcome,
+        objectType: facts.objectType,
+        objectId: facts.objectId,
+        actorId: facts.actorId,
+        detail: input.detail,
+        relatedIds: facts.relatedIds,
+        beforeAfter: facts.beforeAfter,
+      },
+      refuseEvent,
+    );
   }
 
   if (input.code === 'auth.mfa.reset') {

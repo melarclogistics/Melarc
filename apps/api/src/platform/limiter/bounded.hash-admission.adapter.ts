@@ -97,25 +97,8 @@ export class BoundedHashAdmission implements HashAdmission {
   }
 }
 
-export type AdmittedOutcome<T> =
-  { readonly admitted: true; readonly value: T } | { readonly admitted: false };
-
-/**
- * Runs `work` in a slot, or does not run it. When no slot is free the work is **not called at all** (nothing is hashed, nothing
- * counted) and the outcome says so; the caller answers `RATE_LIMITED`. The slot is given back when the work finishes or fails.
- */
-export async function runAdmitted<T>(
-  admission: HashAdmission,
-  work: () => Promise<T>,
-): Promise<AdmittedOutcome<T>> {
-  const slot = admission.tryAdmit();
-  if (slot === null) return { admitted: false };
-  try {
-    return { admitted: true, value: await work() };
-  } finally {
-    slot.release();
-  }
-}
+// `runAdmitted` is not an adapter and lives in its own file, so that a use case can import it (`run-admitted.ts`).
+export { runAdmitted, type AdmittedOutcome } from './run-admitted.js';
 
 export interface HashAdmissionPlan {
   readonly slots: number;

@@ -1,8 +1,10 @@
 import { sealedContext } from '../auth/crypto/sealed-context.js';
 import type { DeliveryChannel } from '../auth/ports/delivery-queue.port.js';
+import { canonicalAccountIdentifier } from '../auth/vendor/vendor-vocabulary.js';
 import { isUuid } from '../database/transaction-context.js';
 import {
   DELIVERY_PAYLOAD_VERSION,
+  PLAIN_PAYLOAD_VERSION,
   type DeliveryKind,
   type RedemptionRecordType,
 } from './delivery-vocabulary.js';
@@ -12,9 +14,10 @@ import {
  * today is opened by the worker of a later release, so the layout is versioned (`DELIVERY_PAYLOAD_VERSION`, stored in the text
  * and by the envelope), the associated data is pinned by a test, and neither changes in place.
  *
- * **What the payload holds is the least a send needs**: the destination and the link, which carries the raw token. The kind, the
- * channel and the principal are columns of the row and are not repeated inside it; the message's wording belongs to the provider
- * adapter. The destination and the token exist in clear nowhere else in Melarc, apart from the capture sink of a non-production
+ * **What the payload holds is the least a send needs**: the destination and the link, which carries the raw token, and for a vendor the
+ * account identifier the vendor signs in with (SECURITY_DESIGN.md §13.9a; S0.47), which is not a secret and travels in a layout of its
+ * own (version 2) so that every other message keeps the layout it always had (version 1). The kind, the channel and the principal are
+ * columns of the row and are not repeated inside it; the message's wording belongs to the provider adapter. The destination and the token exist in clear nowhere else in Melarc, apart from the capture sink of a non-production
  * environment, which holds the message in clear by design.
  *
  * **What it is bound to.** The associated data names the job, the kind, the principal and the redemption record, as the document
@@ -30,6 +33,8 @@ const CONTROL_OR_SPACE = /[\s\p{Cc}]/u;
 export interface DeliveryPayloadContent {
   readonly destination: string;
   readonly link: string;
+  /** A vendor message's account identifier, in its canonical form; absent from every other message. */
+  readonly accountIdentifier?: string;
 }
 
 /**
@@ -84,8 +89,15 @@ export function linkProblem(link: string): TextProblem | undefined {
 
 /** What is wrong with the content as text, whatever the channel: the channel's own shape is judged where the channel is known. */
 function contentProblem(content: DeliveryPayloadContent): TextProblem | undefined {
-  const { destination, link } = content;
+  const { destination, link, accountIdentifier } = content;
   if (typeof destination !== 'string' || typeof link !== 'string') return 'SHAPE';
+  if (
+    accountIdentifier !== undefined &&
+    (typeof accountIdentifier !== 'string' ||
+      canonicalAccountIdentifier(accountIdentifier) !== accountIdentifier)
+  ) {
+    return 'SHAPE';
+  }
   if (destination === '') return 'EMPTY';
   if (destination.length > MAX_DESTINATION_CHARACTERS || CONTROL_OR_SPACE.test(destination)) {
     return 'SHAPE';
@@ -97,11 +109,16 @@ function contentProblem(content: DeliveryPayloadContent): TextProblem | undefine
 export function encodeDeliveryPayload(content: DeliveryPayloadContent): Uint8Array {
   if (contentProblem(content) !== undefined) throw new PayloadUnreadableError();
   return new TextEncoder().encode(
-    JSON.stringify({
-      v: DELIVERY_PAYLOAD_VERSION,
-      destination: content.destination,
-      link: content.link,
-    }),
+    JSON.stringify(
+      content.accountIdentifier === undefined
+        ? { v: PLAIN_PAYLOAD_VERSION, destination: content.destination, link: content.link }
+        : {
+            v: DELIVERY_PAYLOAD_VERSION,
+            account_identifier: content.accountIdentifier,
+            destination: content.destination,
+            link: content.link,
+          },
+    ),
   );
 }
 
@@ -126,15 +143,19 @@ export function decodeDeliveryPayload(bytes: Uint8Array): DeliveryPayloadContent
   ) {
     throw new PayloadUnreadableError('VERSION_UNSUPPORTED');
   }
-  if (Object.keys(record).sort().join(',') !== 'destination,link,v') {
-    throw new PayloadUnreadableError();
-  }
-  const { v, destination, link } = record;
-  if (v !== DELIVERY_PAYLOAD_VERSION) throw new PayloadUnreadableError();
+  // Each layout has exactly its own keys: the plain one the destination and the link, the vendor one the account identifier besides.
+  const keys = Object.keys(record).sort().join(',');
+  const { v, destination, link, account_identifier: accountIdentifier } = record;
+  const plain = v === PLAIN_PAYLOAD_VERSION && keys === 'destination,link,v';
+  const vendor = v === DELIVERY_PAYLOAD_VERSION && keys === 'account_identifier,destination,link,v';
+  if (!plain && !vendor) throw new PayloadUnreadableError();
   if (typeof destination !== 'string' || typeof link !== 'string') {
     throw new PayloadUnreadableError();
   }
-  const content: DeliveryPayloadContent = { destination, link };
+  if (vendor && typeof accountIdentifier !== 'string') throw new PayloadUnreadableError();
+  const content: DeliveryPayloadContent = vendor
+    ? { destination, link, accountIdentifier: accountIdentifier as string }
+    : { destination, link };
   if (contentProblem(content) !== undefined) throw new PayloadUnreadableError();
   return content;
 }

@@ -15,6 +15,7 @@ import { buildOpenApiDocument } from './build-openapi-document.js';
 import {
   DEFAULT_SECURITY,
   DescribeCookies,
+  DescribeOptionalCookies,
   DescribeSecurity,
   DescribeServers,
   RIDER_SERVERS,
@@ -275,6 +276,59 @@ describe('DescribeCookies: the cookies a response sets or expires', () => {
     expect(() => DescribeCookies(200, ['melarc_session'], { for: 'basicAuth' as never })).toThrow(
       /basicAuth is not a security scheme/,
     );
+  });
+});
+
+describe('DescribeOptionalCookies: the cookies a response may also set', () => {
+  @Controller('optional')
+  @TechnicalEndpoint()
+  class Optional {
+    @Post('in')
+    @ContractOperation('optionalSignIn')
+    @ApiResponse({ status: 200, description: 'OK' })
+    @DescribeCookies(200, ['melarc_session', 'melarc_csrf'])
+    @DescribeOptionalCookies(200, ['melarc_trusted_browser'])
+    signIn(): string {
+      return 'x';
+    }
+
+    @Post('plain')
+    @ContractOperation('plainOperation')
+    @ApiResponse({ status: 200, description: 'OK' })
+    @DescribeCookies(200, ['melarc_session'])
+    plain(): string {
+      return 'x';
+    }
+  }
+
+  // Break caught: a cookie a response only may set being stated as owed (every sign-in would be refused for not setting it), or left
+  // out of the description (so that a code that sets it reads as equal to a contract that does not know it).
+  it('states the optional cookies beside the owed ones, and only on the response that names them', async () => {
+    const document = await describe_(Optional);
+    const answer = (path: string): JsonObject =>
+      object(object(operation(document, path, 'post').responses, 'responses')['200'], '200');
+
+    expect(answer('/optional/in')['x-set-cookies']).toEqual(['melarc_session', 'melarc_csrf']);
+    expect(answer('/optional/in')['x-set-cookies-optional']).toEqual(['melarc_trusted_browser']);
+    expect(answer('/optional/plain')['x-set-cookies-optional']).toBeUndefined();
+  });
+
+  it('refuses a cookie that is not one of the slice, and optional cookies on a response the handler does not describe', async () => {
+    expect(() => DescribeOptionalCookies(200, ['analytics'])).toThrow(/analytics is not a cookie/);
+
+    @Controller('bad-optional')
+    @TechnicalEndpoint()
+    class Bad {
+      @Post()
+      @ContractOperation('badOptional')
+      @ApiResponse({ status: 200, description: 'OK' })
+      @DescribeOptionalCookies(204, ['melarc_trusted_browser'])
+      bad(): string {
+        return 'x';
+      }
+    }
+
+    await expect(describe_(Bad)).rejects.toThrow(/204/);
   });
 });
 

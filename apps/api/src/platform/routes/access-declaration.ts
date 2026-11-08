@@ -2,9 +2,15 @@ import { applyDecorators, SetMetadata } from '@nestjs/common';
 import { ApiExtension } from '@nestjs/swagger';
 
 import type { RateLimitBucket } from '../auth/ports/rate-limiter.port.js';
-import { isTier, TIER_RULE_NAME, type Tier } from '../authorization/tier-policy.js';
+import {
+  isTier,
+  TIER_RULE_NAME,
+  type QueryTierDeclaration,
+  type Tier,
+} from '../authorization/tier-policy.js';
 import type { IdentifierSpec } from '../http/admission/bounded-identifier.js';
 import { DescribeSecurityByDefault } from '../openapi/operation-statements.js';
+import type { LimitPartition } from './limit-partitions.js';
 
 /** Metadata key under which a controller or route declares how it may be reached: one of the four kinds below. */
 export const ACCESS_DECLARATION_KEY = 'melarc:access';
@@ -35,6 +41,8 @@ export interface AnonymousLimit {
   readonly bucket: RateLimitBucket;
   readonly identifier: IdentifierSpec;
   readonly canonical: (raw: string) => string | undefined;
+  /** A finer key than the identifier's (`limit-partitions.ts`): the vendor sign-in's account and recognised browser (S0.48). */
+  readonly partition?: LimitPartition;
 }
 
 /** The two browser surfaces, whose origins the deployment configures (`OPS_ORIGIN`, `VENDOR_ORIGIN`). */
@@ -119,6 +127,12 @@ export interface TierDeclaration {
    * is answered by the scope and learns nothing of what the record needs).
    */
   readonly rule?: string;
+  /**
+   * A discriminator in the query that decides the tier (`listSessions`: `principal_type`), with the tier each of its values needs.
+   * It is decided at the same step as `minimum`, from the query as it arrived and without validating it; a value that is missing,
+   * repeated or not listed grants nothing (`queryTierRequirement`). The use case asks again on the value it parsed.
+   */
+  readonly byQuery?: QueryTierDeclaration;
 }
 
 /** What every authenticated route states beside what it requires (S0.26). */
@@ -199,6 +213,16 @@ export const Anonymous = (
   );
 };
 
+/** A query discriminator that names its parameter plainly and lists at least one value, each with a tier of the catalogue. */
+function isQueryTierDeclaration(value: unknown): value is QueryTierDeclaration {
+  if (typeof value !== 'object' || value === null) return false;
+  const { param, tiers } = value as Record<string, unknown>;
+  if (typeof param !== 'string' || !/^[a-z][a-z0-9_]*$/.test(param)) return false;
+  if (typeof tiers !== 'object' || tiers === null || Array.isArray(tiers)) return false;
+  const entries = Object.entries(tiers);
+  return entries.length > 0 && entries.every(([name, tier]) => name !== '' && isTier(tier));
+}
+
 function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteOptions {
   const given = options as unknown as Record<string, unknown>;
   const surfaces: unknown = given.surfaces;
@@ -226,10 +250,12 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
     const named = tier as Record<string, unknown>;
     const hasMinimum = named.minimum !== undefined;
     const hasRule = named.rule !== undefined;
+    const hasByQuery = named.byQuery !== undefined;
     if (
-      (!hasMinimum && !hasRule) ||
+      (!hasMinimum && !hasRule && !hasByQuery) ||
       (hasMinimum && !isTier(named.minimum)) ||
-      (hasRule && (typeof named.rule !== 'string' || !TIER_RULE_NAME.test(named.rule)))
+      (hasRule && (typeof named.rule !== 'string' || !TIER_RULE_NAME.test(named.rule))) ||
+      (hasByQuery && !isQueryTierDeclaration(named.byQuery))
     ) {
       throw refused;
     }

@@ -126,6 +126,26 @@ describe('the capture adapter as a provider (S0.18)', () => {
     expect(reference).not.toContain('example.test');
   });
 
+  // Break caught (S0.47): a vendor's setup message captured without the account identifier the vendor must sign in with, or a staff
+  // message given one.
+  it('keeps a vendor message’s account identifier beside the link, and adds none to another message', async () => {
+    const sink = new MemoryCaptureSink();
+    const provider = new CaptureDeliveryProvider({ sink, clock });
+    const vendor = {
+      ...MESSAGE,
+      dedupeId: '5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f',
+      accountIdentifier: 'ABCD2345',
+    };
+
+    await provider.send(vendor);
+    await provider.send(MESSAGE);
+
+    expect(sink.messages.get(vendor.dedupeId)).toEqual(
+      captured({ dedupeId: vendor.dedupeId, accountIdentifier: 'ABCD2345' }),
+    );
+    expect(sink.messages.get(DEDUPE)).not.toHaveProperty('accountIdentifier');
+  });
+
   // Break caught: a retry of the same identity sending a second message, or a status query that does not know what it captured.
   it('is one message for one identity, and says so when asked', async () => {
     const sink = new MemoryCaptureSink();

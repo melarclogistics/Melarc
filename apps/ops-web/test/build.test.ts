@@ -1,10 +1,14 @@
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { packageDirectory } from './support/package-directory';
+
+const require = createRequire(import.meta.url);
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const CONFIG_FILE = resolve(APP_ROOT, 'vite.config.ts');
 const REPOSITORY_ROOT = resolve(APP_ROOT, '../..');
@@ -142,6 +146,89 @@ describe('the production build', () => {
     }
     expect(styles).not.toMatch(/url\(\s*['"]?data:/i);
     expect(output.get('licenses/Inter-OFL.txt')).toContain('SIL OPEN FONT LICENSE Version 1.1');
+  });
+
+  // Break caught: the icons shipped without their licence (ISC asks that the notice appear in every copy, and the Feather icons Lucide
+  // derives from carry an MIT notice of their own: the package's LICENSE file holds both), or a licence that is not the package's.
+  it('ships the icons with the licence of the package that draws them, byte for byte', async () => {
+    const packaged = await readFile(
+      resolve(dirname(require.resolve('lucide-react/package.json')), 'LICENSE'),
+      'utf8',
+    );
+
+    expect(output.get('licenses/Lucide-ISC.txt')).toBe(packaged);
+    expect(packaged).toContain('ISC License');
+    expect(packaged).toContain('Cole Bemis');
+  });
+
+  // Break caught: React Aria Components, or a package it brings that ends up in the bundle, shipped without its licence (Apache-2.0 asks that a
+  // copy of the licence travel with the work, MIT that the notice does), or with a text that is not the package's own. The list of packages
+  // is held to the lockfile by aria-licences.test.ts.
+  it('ships React Aria Components and what it brings with their licences, byte for byte', async () => {
+    const aria = packageDirectory(APP_ROOT, 'react-aria-components');
+    const reactAria = packageDirectory(aria, 'react-aria');
+    const wanted: readonly (readonly [string, string])[] = [
+      ['React-Aria-Apache-2.0.txt', aria],
+      ['swc-helpers-Apache-2.0.txt', packageDirectory(aria, '@swc/helpers')],
+      ['use-sync-external-store-MIT.txt', packageDirectory(aria, 'use-sync-external-store')],
+      ['clsx-MIT.txt', packageDirectory(reactAria, 'clsx')],
+      ['aria-hidden-MIT.txt', packageDirectory(reactAria, 'aria-hidden')],
+    ];
+
+    for (const [file, directory] of wanted) {
+      const licence = (await readdir(directory)).find((entry) => /^licen[cs]e$/i.test(entry));
+      expect(licence, directory).toBeDefined();
+      const packaged = await readFile(join(directory, licence ?? ''), 'utf8');
+      expect(output.get(`licenses/${file}`), file).toBe(packaged);
+    }
+    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Apache License');
+    expect(output.get('licenses/React-Aria-Apache-2.0.txt')).toContain('Version 2.0');
+    expect(output.get('licenses/clsx-MIT.txt')).toContain('MIT License');
+  });
+
+  // Break caught: the logo inlined as a data: URI (Vite does that to any asset under 4 KiB, and this one is just under;
+  // `img-src 'self'` refuses it, so the banner would show a broken image), left out of the build, or changed on its way
+  // in (BRAND_FOUNDATION 4.3, 4.6: the artwork is shipped as it was supplied).
+  it('ships the logo as its own file, unchanged, and inlines nothing', async () => {
+    const original = await readFile(resolve(APP_ROOT, 'src/assets/brand/melarc-logo-primary.svg'));
+    const shipped = [...output.keys()].filter((name) =>
+      /^assets\/melarc-logo-primary-[\w-]+\.svg$/.test(name),
+    );
+    expect(shipped).toHaveLength(1);
+    const [name = ''] = shipped;
+    const built = await readFile(join(outputDirectory, name));
+    expect(built.equals(original)).toBe(true);
+
+    const scripts = [...output]
+      .filter(([file]) => file.endsWith('.js'))
+      .map(([, content]) => content)
+      .join('\n');
+    expect(scripts).toContain(`/${name}`);
+    expect(scripts).not.toMatch(/data:image\/svg/i);
+    expect(scripts).not.toContain('Layer_1-2');
+  });
+
+  // Break caught: the icon left out of the build (a 404 on every page, in the console), renamed with a hash so that the page's link
+  // does not find it, inlined, or changed on its way in. It is copied from `public/` to the root of the output as it was supplied.
+  it('ships the favicon at /favicon.svg, unchanged, and links it from the page', async () => {
+    const original = await readFile(resolve(APP_ROOT, 'public/favicon.svg'), 'utf8');
+
+    expect(output.get('favicon.svg')).toBe(original);
+    expect(output.get('index.html') ?? '').toMatch(
+      /<link\b[^>]*rel="icon"[^>]*href="\/favicon\.svg"|<link\b[^>]*href="\/favicon\.svg"[^>]*rel="icon"/,
+    );
+  });
+
+  // Break caught: the test-only QR decoder shipping to users, which would be a second QR implementation in the bundle for
+  // nothing; and the check passing because it looks for text that the library does not hold.
+  it('does not contain the test-only QR decoder', async () => {
+    const decoder = await readFile(resolve(APP_ROOT, 'node_modules/jsqr/dist/jsQR.js'), 'utf8');
+    expect(decoder).toContain('inversionAttempts');
+
+    for (const [name, content] of output) {
+      expect(content, name).not.toContain('inversionAttempts');
+      expect(content, name).not.toMatch(/jsQR/);
+    }
   });
 
   // Break caught: the development showcase shipping to users, in its route, its code, its styles or its synthetic text.

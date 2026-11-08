@@ -16,6 +16,9 @@ export const DB_MIGRATE = resolve(API_ROOT, 'dist/tools/db-migrate.js');
 export const DB_RESET = resolve(API_ROOT, 'dist/tools/db-reset.js');
 export const DB_SEED = resolve(API_ROOT, 'dist/tools/db-seed.js');
 export const DB_ORPHANS = resolve(API_ROOT, 'dist/tools/db-orphans.js');
+/** The two bootstrap commands (S0.30): processes an operator starts as the provisioning login, which nothing in the application runs. */
+export const BOOTSTRAP_SEED = resolve(API_ROOT, 'dist/tools/bootstrap-seed.js');
+export const BOOTSTRAP_RESUME = resolve(API_ROOT, 'dist/tools/bootstrap-resume.js');
 /** The delivery worker's entry point, and a test-only entry that composes it with a provider that stalls (S0.18). */
 export const WORKER_MAIN = resolve(API_ROOT, 'dist/delivery-worker-main.js');
 export const WORKER_FIXTURE = resolve(API_ROOT, 'test/support/worker-process-fixture.mjs');
@@ -40,12 +43,17 @@ export const UNREACHABLE_DATABASE_URL =
  * timed out, and it does not stop what the test started. Every deadline here is shorter than that, and
  * so is the sum of the ones the longest test waits for in turn, so a helper fails first, says what it was
  * waiting for, and has already killed its process. api-process.test.ts holds the sum to the real timeout.
+ *
+ * They guard against a hang; they do not measure speed. A start or a finish may take 20 seconds (the
+ * owner's decision of 27 October 2026, SLICE-000 plan 7.48): on an idle Windows workstation a refusal
+ * exits in about 2 seconds and a tool, or the API's first answer, takes 4 to 5, and a busy one missed
+ * the 8 seconds these were before. Changing them is the owner's decision, never a way to get a test green.
  */
 export const DEADLINES = {
   /** A script that is expected to finish by itself, such as a startup refusal. */
-  finish: 8_000,
+  finish: 20_000,
   /** The API answering /readyz after it starts. */
-  ready: 8_000,
+  ready: 20_000,
   /** One /readyz request. */
   request: 1_000,
   /** A process ending after a stop signal it is expected to handle. */
@@ -66,6 +74,8 @@ export function requireBuild(): void {
     DB_RESET,
     DB_SEED,
     DB_ORPHANS,
+    BOOTSTRAP_SEED,
+    BOOTSTRAP_RESUME,
     WORKER_MAIN,
     BUILT_SHUTDOWN_HANDLERS,
   ]) {

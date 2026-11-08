@@ -1,5 +1,7 @@
-import { ApiError, BrowserTransportError } from '@melarc/api-client/browser';
-import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { BrowserTransportError } from '@melarc/api-client/browser';
+import { QueryClient } from '@tanstack/react-query';
+
+import { StaleSessionError } from '../session/session-boundary';
 
 /** How many times a failed query is tried again after its first attempt. */
 const MAX_QUERY_RETRIES = 2;
@@ -13,27 +15,24 @@ function httpStatusOf(error: unknown): number | undefined {
  * Retry only what could plausibly succeed on a second attempt: a dropped connection or a server fault,
  * a bounded number of times. A client error (401, 403, 404, 409, 422, 429, ...) is the server's answer
  * and will not change by asking again, and neither will a request the browser transport refused to send:
- * that is a defect in the page, not a fault in the network.
+ * that is a defect in the page, not a fault in the network. An answer refused because the session changed is not retried either:
+ * the retry would be sent for whichever session is current, which is not the one the query was asked for.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
-  if (error instanceof BrowserTransportError) return false;
+  if (error instanceof BrowserTransportError || error instanceof StaleSessionError) return false;
   const status = httpStatusOf(error);
   if (status !== undefined && status >= 400 && status < 500) return false;
   return failureCount < MAX_QUERY_RETRIES;
 }
 
-export interface QueryClientOptions {
-  /**
-   * Called when the API says that the session has ended (`SESSION_INVALID`, or `SESSION_SUPERSEDED` for a vendor
-   * displaced by a colleague), with that code. The cache has been cleared by then. It may be called more than once
-   * when several requests are answered that way together, so what it does must not mind: take the person to sign-in.
-   */
-  readonly onSessionEnded?: (code: string) => void;
-}
-
 /**
  * The end of a session as far as the data on the page goes: what is cached is the previous person's, and what is
- * still on its way would answer into the next person's. Nothing of either may outlive the session.
+ * still on its way would answer into the next person's. The cache is emptied and the queries in flight are cancelled.
+ *
+ * That is all this does. It does not cancel a mutation that is running (TanStack Query has no way to), and a query whose
+ * function ignores its abort signal still runs to the end. What keeps such an answer from reaching the next person is not
+ * here: every call goes through the session boundary (`SessionBoundary`), which refuses an answer to a request sent for a
+ * session that has ended, whatever the cache holds.
  */
 export function endSession(client: QueryClient): void {
   void client.cancelQueries();
@@ -43,25 +42,21 @@ export function endSession(client: QueryClient): void {
 /**
  * One client per application instance, never shared. Mutations are never retried automatically: a blind
  * replay can repeat a business effect, and the contract protects writes with explicit If-Match and
- * Idempotency-Key headers instead (contracts/openapi.yaml, "Four contract-wide rules").
+ * Idempotency-Key headers instead (contracts/openapi.yaml, "Four contract-wide rules"). A mutation is not kept after
+ * its screen lets go of it; an answer that is itself a secret is not fetched through the cache at all
+ * (`useTransientSecret`).
  *
- * Every failure of a query or a mutation passes through here, so this is where the end of a session is noticed:
- * whichever request the API answers first with a session code ends the session for all of them.
+ * It does not notice the end of a session: that is the session boundary's, which sees every call, those made outside the
+ * cache included.
  */
-export function createQueryClient(options: QueryClientOptions = {}): QueryClient {
-  const noticeSessionEnd = (error: unknown): void => {
-    if (!(error instanceof ApiError) || !error.endsSession || error.code === undefined) return;
-    endSession(client);
-    options.onSessionEnded?.(error.code);
-  };
-
-  const client: QueryClient = new QueryClient({
-    queryCache: new QueryCache({ onError: noticeSessionEnd }),
-    mutationCache: new MutationCache({ onError: noticeSessionEnd }),
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: {
       queries: { retry: shouldRetryQuery },
-      mutations: { retry: false },
+      // `gcTime: 0` removes a mutation, and the answer it holds, as soon as the screen that sent it lets go of it. The
+      // default is five minutes, and a command can answer with a secret. It removes the record of the mutation; it does not
+      // erase a string, and it does not stop a mutation that is running.
+      mutations: { retry: false, gcTime: 0 },
     },
   });
-  return client;
 }

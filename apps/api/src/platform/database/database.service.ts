@@ -63,8 +63,28 @@ export interface DatabaseRuntime {
   readonly canceller: StatementCanceller;
 }
 
+/**
+ * What a transaction may ask of its opening besides its security context. **The default is the database's (`READ COMMITTED`), at which
+ * every statement sees the rows committed when it starts**: several statements are then not one picture of the data. A read that
+ * answers from more than one statement, and must answer one coherent state (the staff reads of S0.35), asks for `REPEATABLE READ`: the
+ * transaction's first statement fixes one snapshot that all the later ones, inside a function as well, are read from. Only those two
+ * levels exist here: a policy change and the locking operations are READ COMMITTED by their own rules (`policy-lock/acquire.ts`).
+ */
+export interface TransactionOptions {
+  readonly isolation?: 'REPEATABLE READ';
+}
+
 /** Set while a transaction's work runs, so that a transaction opened inside it is seen for what it is. */
 const openTransaction = new AsyncLocalStorage<true>();
+
+/** The statement that begins a transaction at the isolation asked for. The text is chosen here and never built from the caller's. */
+function beginStatementOf(options: TransactionOptions): string {
+  // Read as text: the type admits one level, and a caller that passes anything else (a cast, a plain JavaScript caller) is refused.
+  const isolation: string | undefined = options.isolation;
+  if (isolation === undefined) return 'begin';
+  if (isolation === 'REPEATABLE READ') return 'begin isolation level repeatable read';
+  throw new TypeError('A transaction is opened at the default isolation or at REPEATABLE READ');
+}
 
 /** Where a transaction was when its budget ran out. */
 type Phase = 'beginning' | 'working' | 'committing';
@@ -172,7 +192,10 @@ export class DatabaseService {
   async transactionWithContext<T>(
     context: SecurityContext,
     work: (tx: DatabaseTransaction) => Promise<T>,
+    options: TransactionOptions = {},
   ): Promise<T> {
+    // Refused with the context, before a connection is taken.
+    beginStatementOf(options);
     const settings = toContextSettings(context);
     // Taken in the same synchronous step as the validation: this copy is what was validated, and what the transaction runs under.
     const fixedContext = frozenContextCopy(context);
@@ -195,7 +218,7 @@ export class DatabaseService {
         throw new SecurityContextError(['taskCapability']);
       }
       return work(tx);
-    });
+    }, options);
   }
 
   /**
@@ -217,7 +240,10 @@ export class DatabaseService {
    * budget that runs out **while COMMIT is in flight** is a different case: nothing can say whether the commit happened, so
    * the caller gets `CommitOutcomeUnknownError`, no rollback is sent and none is claimed.
    */
-  private async runInTransaction<T>(work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  private async runInTransaction<T>(
+    work: (tx: DatabaseTransaction) => Promise<T>,
+    options: TransactionOptions,
+  ): Promise<T> {
     if (openTransaction.getStore() === true) {
       throw new Error(
         'A transaction is already open in this request: do the work in it, a second one would hold a second connection',
@@ -323,7 +349,7 @@ export class DatabaseService {
       const serverBound = Math.ceil(budget.remainingMilliseconds()) + DISPOSAL_BOUND_MS;
       run.sentBegin = true;
       await send(
-        `begin; select set_config('transaction_timeout', '${String(serverBound)}ms', true)`,
+        `${beginStatementOf(options)}; select set_config('transaction_timeout', '${String(serverBound)}ms', true)`,
       );
       run.phase = 'working';
       const tx: DatabaseTransaction = drizzle(guarded as never);

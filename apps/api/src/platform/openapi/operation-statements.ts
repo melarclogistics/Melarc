@@ -101,9 +101,16 @@ interface CookieStatement {
   readonly when?: { readonly principalType: 'STAFF' | 'VENDOR' | 'RIDER' };
 }
 
+/** The cookies a response may also set (`x-set-cookies-optional`): none is owed, and one that is set must carry what the contract says. */
+interface OptionalCookieStatement {
+  readonly status: number;
+  readonly cookies: readonly string[];
+}
+
 interface Statements {
   readonly security?: readonly (readonly SchemeName[])[];
   readonly cookies?: readonly CookieStatement[];
+  readonly optionalCookies?: readonly OptionalCookieStatement[];
   readonly servers?: readonly DescribedServer[];
 }
 
@@ -182,6 +189,25 @@ export function DescribeCookies(
   return state((current) => ({
     ...current,
     cookies: [...(current.cookies ?? []), { status, cookies, ...limits }],
+  }));
+}
+
+/**
+ * States the cookies a response **may also** set (`x-set-cookies-optional`), which the request decides: the trusted-browser credential,
+ * set when the person asked to be remembered and expired when the browser asking is removed. None is owed; one that is set is held to the
+ * attributes the contract gives it. A cookie that is owed is stated with `DescribeCookies`, and the two do not overlap.
+ */
+export function DescribeOptionalCookies(
+  status: number,
+  cookies: readonly string[],
+): MethodDecorator {
+  for (const cookie of cookies) {
+    if (!COOKIE_NAMES.includes(cookie))
+      throw new TypeError(`${cookie} is not a cookie of the identity slice`);
+  }
+  return state((current) => ({
+    ...current,
+    optionalCookies: [...(current.optionalCookies ?? []), { status, cookies }],
   }));
 }
 
@@ -310,6 +336,16 @@ export function applyOperationStatements(document: OpenAPIObject, app: INestAppl
       if (statement.when !== undefined) {
         response['x-set-cookies-when'] = { principal_type: statement.when.principalType };
       }
+    }
+    for (const statement of statements.optionalCookies ?? []) {
+      const responses = (operation.responses ?? {}) as Record<string, Record<string, unknown>>;
+      const response = responses[String(statement.status)];
+      if (response === undefined) {
+        throw new Error(
+          `${where} states the optional cookies of the ${String(statement.status)} response of ${operationId}, which it does not describe`,
+        );
+      }
+      response['x-set-cookies-optional'] = [...statement.cookies];
     }
   }
 }

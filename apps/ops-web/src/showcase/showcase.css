@@ -10,6 +10,28 @@
   line-height: var(--text-heading-md-line-height);
 }
 
+/* A frame to look at the side menu in: it is full height in the application, so here it has a height of its own. */
+.showcase-side-menu {
+  display: flex;
+  height: 28rem;
+}
+
+.showcase-icons {
+  display: grid;
+  /* A column is never wider than the container, so enlarged text at 320 px makes one column and not a sideways scroll. */
+  grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.showcase-icons li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .showcase-row {
   display: flex;
   flex-wrap: wrap;
@@ -25,7 +47,7 @@
 
 .showcase-surfaces {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
   gap: var(--space-4);
 }
 

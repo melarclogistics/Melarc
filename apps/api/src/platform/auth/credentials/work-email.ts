@@ -21,3 +21,22 @@ export function canonicalWorkEmail(raw: string): CanonicalWorkEmail {
   if (!isWellFormedUnicode(raw)) return { ok: false, refusal: 'MALFORMED_UNICODE' };
   return { ok: true, email: raw.trim().normalize('NFKC').toLowerCase() };
 }
+
+/** The longest a work email may be, as the table holds it. */
+const MAX_WORK_EMAIL_LENGTH = 320;
+/**
+ * Something, an at sign, a domain with a dot, and no white space, no second at sign and **no control character** (`\p{Cc}`: the C0
+ * and C1 controls and DELETE). A control character has no place in an address, and one of them, the NUL byte, cannot be sent to
+ * PostgreSQL at all: a lookup made from an address that held one failed as a server error where an unknown address is answered like
+ * every other refusal.
+ */
+const EMAIL_SHAPE = /^[^\s@\p{Cc}]+@[^\s@\p{Cc}]+\.[^\s@\p{Cc}]+$/u;
+
+/**
+ * Whether the **canonical** form of an address has the shape of an email address (domain-model.md §6.8: the address is canonicalised
+ * first and only then checked). It judges the shape and nothing else: a well-formed address may belong to nobody. A text that is not an
+ * address is `VALIDATION_FAILED` at the operation and takes no key in a limiter or a lookup.
+ */
+export function isEmailShape(canonicalEmail: string): boolean {
+  return canonicalEmail.length <= MAX_WORK_EMAIL_LENGTH && EMAIL_SHAPE.test(canonicalEmail);
+}

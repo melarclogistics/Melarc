@@ -41,6 +41,7 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   APP_ENV: /^(local|staging|production)$/,
   HTTP_HOST: LOOPBACK,
   HTTP_PORT: /^\d{1,5}$/,
+  METRICS_HOST: LOOPBACK,
   LOG_LEVEL: /^(fatal|error|warn|info|debug|trace|silent)$/,
   DATABASE_URL: { url: { user: API_RUNTIME_ROLE } },
   DATABASE_POOL_MAX: /^\d{1,3}$/,
@@ -82,6 +83,7 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   // The delivery worker's own settings (S0.18). Its other three are commented examples, which have no value to judge.
   DELIVERY_WORKER_CONCURRENCY: /^\d{1,2}$/,
   DELIVERY_WORKER_POLL_INTERVAL_MS: /^\d{1,5}$/,
+  DELIVERY_WORKER_METRICS_HOST: LOOPBACK,
 };
 
 /** The worker's settings the example leaves commented out: each is optional beside a choice, or derived for a local run. */
@@ -90,6 +92,8 @@ const WORKER_OPTIONAL = [
   'DELIVERY_CAPTURE_DIRECTORY',
   'DELIVERY_PROVIDER_APPROVAL_REF',
   'DELIVERY_PROVIDER_ALLOWLIST',
+  'DELIVERY_WORKER_METRICS_PORT',
+  'DELIVERY_WORKER_METRICS_SECRET',
 ];
 
 const POSTGRES_FORMS: Readonly<Record<string, Form>> = {

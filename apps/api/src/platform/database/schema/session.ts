@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -70,6 +71,14 @@ export const session = pgTable(
     csrfTokenHash: bytea('csrf_token_hash'),
     terminatedAt: timestamp('terminated_at', { withTimezone: true }),
     terminationReason: text('termination_reason'),
+    /**
+     * Whether the bundle held at issue is a privileged one: the one fact of `bundle_snapshot` that the idle limit of a session's tier
+     * depends on, generated from it so that an administrator's list can classify a session without being handed the snapshot (the
+     * authority, which only authentication reads). Null only for a snapshot that names none, which the store refuses to read.
+     */
+    privileged: boolean('privileged').generatedAlwaysAs(
+      sql`((bundle_snapshot ->> 'privileged')::boolean)`,
+    ),
   },
   (table) => [
     foreignKey({

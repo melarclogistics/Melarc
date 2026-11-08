@@ -6,6 +6,7 @@ import type { TokenService } from '../ports/token-service.port.js';
 import type { UnitOfWork } from '../ports/unit-of-work.port.js';
 import { endForAuthority, judgeAuthority, type CompiledFixedPolicy } from './session-authority.js';
 import type { PresentedCredential } from './session-credentials.js';
+import { endForExpiry } from './session-expiry.js';
 import { judgeSession } from './session-judgement.js';
 import {
   AUTHENTICATION_PRINCIPAL_ID,
@@ -59,7 +60,7 @@ export type AuthenticationOutcome =
 
 export interface SessionAuthenticatorOptions {
   readonly unitOfWork: UnitOfWork;
-  readonly sessions: Pick<SessionStore, 'findByTokenHash' | 'terminate'>;
+  readonly sessions: Pick<SessionStore, 'findByTokenHash' | 'terminate' | 'expire'>;
   readonly tokens: Pick<TokenService, 'hash'>;
   readonly settings: Pick<SettingsReader, 'object'>;
   /** Where the authority-revoked event is recorded when a request finds a session below its floor. */
@@ -84,7 +85,9 @@ const refused = (
  *   a bearer credential, and a session presented the other way is refused as though it did not exist.
  * - **Expiry is decided here, at request time, never by a job**: `now >= expires_at` ends a session, and for a browser session so
  *   does `now - last_activity_at >= idle` (the idle limit of its tier, read from `session_idle_timeout_minutes`); equality is
- *   expired. A rider has no idle rule. Nothing is written for a refused request.
+ *   expired. A rider has no idle rule. **The request that finds a session out of time ends it** (AC-SLICE-000-35, S0.34): the
+ *   session is terminated with `EXPIRED` and recorded (`session-expiry.ts`), in the transaction that answers it. **Every other
+ *   refusal writes nothing**: an unknown, malformed, ended or wrongly presented credential is not a session this request may change.
  * - **It writes no activity.** Whether a request counts as the person acting is decided after the guards and by the route's own
  *   policy (decision A of 12 October 2026, `SessionActivity`), and a request that is refused by CSRF, authorization or the rate
  *   limit never extends the idle lifetime. The idle limit read here travels with the session for that write.
@@ -142,6 +145,9 @@ export class SessionAuthenticator {
             ? refused('SESSION_TERMINATED', 'SESSION_SUPERSEDED')
             : refused('SESSION_TERMINATED');
         case 'EXPIRED':
+          // The session is ended as `EXPIRED` and recorded, in this transaction, which commits with the refusal: the request that
+          // finds a session out of time is the one that ends it (AC-SLICE-000-35). The statement judges the time again.
+          await endForExpiry(handle, this.#options, found.id, idle, verdict.cause);
           return refused(
             verdict.cause === 'ABSOLUTE' ? 'SESSION_EXPIRED_ABSOLUTE' : 'SESSION_EXPIRED_IDLE',
           );

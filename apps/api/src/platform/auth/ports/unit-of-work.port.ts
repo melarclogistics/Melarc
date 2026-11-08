@@ -12,6 +12,15 @@ export interface TransactionHandle {
 }
 
 /**
+ * What a use case may ask of the transaction besides its context: **the isolation**. The default is the database's (`READ
+ * COMMITTED`: every statement sees what was committed when it started, so several statements are not one picture of the data). A
+ * read that answers from more than one statement and must answer one coherent state asks for `REPEATABLE READ`.
+ */
+export interface UnitOfWorkOptions {
+  readonly isolation?: 'REPEATABLE READ';
+}
+
+/**
  * The use case owns the transaction (SOLUTION_ARCHITECTURE.md §5). It opens one here under a security context, does its work
  * against the handle, and the transaction commits when the work returns and rolls back when it throws. External I/O stays
  * outside; security state is read again after any wait.
@@ -20,6 +29,7 @@ export interface UnitOfWork {
   run<T>(
     context: SecurityContext,
     work: (transaction: TransactionHandle) => Promise<T>,
+    options?: UnitOfWorkOptions,
   ): Promise<T>;
   /**
    * The database's wall-clock time for this transaction. A persisted expiry decision takes one fresh value of it **after the
@@ -36,7 +46,7 @@ export const UNIT_OF_WORK_DESCRIPTOR: PortDescriptor<UnitOfWork> = {
   operations: {
     run: {
       inputs:
-        'the security context of the transaction (principal, surface, scope) and the work to do against the transaction handle',
+        'the security context of the transaction (principal, surface, scope), the work to do against the transaction handle and, optionally, the isolation (REPEATABLE READ for a read that must be one coherent picture)',
       outputs:
         "the work's result, after the commit; on a throw the transaction is rolled back and the error continues",
       outcomes: 'none',

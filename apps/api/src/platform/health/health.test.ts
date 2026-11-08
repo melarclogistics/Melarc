@@ -5,7 +5,7 @@ import { AppModule } from '../../app.module.js';
 import { startTestApp, TEST_CONFIG, type TestApp } from '../../test-support/test-app.js';
 import { CapturedLogs } from '../../test-support/captured-logs.js';
 import { LifecycleService } from '../lifecycle/lifecycle.service.js';
-import { ReadinessRegistry } from './readiness.registry.js';
+import { NotReadyError, ReadinessRegistry } from './readiness.registry.js';
 
 let running: TestApp | undefined;
 
@@ -114,6 +114,73 @@ describe('GET /readyz', () => {
 
     down = false;
     expect((await probe(baseUrl, '/readyz')).status).toBe(200);
+  });
+});
+
+describe('GET /readyz: the reasons a check can give', () => {
+  // Break caught: a database that the seed has not filled reported as a dependency that does not answer, so that the remedy told
+  // (wait) is not the remedy that works (run the seed); or a reason that names the check.
+  it('answers 503 with reference_data_missing, and nothing about the check, for a seed that has not run', async () => {
+    const { app, baseUrl } = await start();
+    app.get(ReadinessRegistry).register({
+      name: 'fixture-reference-data',
+      check: () => {
+        throw new NotReadyError('reference_data_missing');
+      },
+    });
+
+    const failing = await probe(baseUrl, '/readyz');
+
+    expect(failing.status).toBe(503);
+    expect(failing.body).toEqual({ status: 'not_ready', reason: 'reference_data_missing' });
+    expect(JSON.stringify(failing.body)).not.toContain('fixture-reference-data');
+  });
+
+  // Break caught: a missing seed outranking a database that is down: the instance cannot tell whether it is seeded, and the first thing
+  // to try is to wait for the database.
+  it('says the dependency is unavailable before it says the seed is missing', async () => {
+    const { app, baseUrl } = await start();
+    const registry = app.get(ReadinessRegistry);
+    registry.register({
+      name: 'fixture-reference-data',
+      check: () => {
+        throw new NotReadyError('reference_data_missing');
+      },
+    });
+    registry.register({
+      name: 'fixture-database',
+      check: () => {
+        throw new Error('down');
+      },
+    });
+
+    expect((await probe(baseUrl, '/readyz')).body).toEqual({
+      status: 'not_ready',
+      reason: 'dependency_unavailable',
+    });
+  });
+
+  // Break caught: the seed's absence outranked by a policy comparison that could not have been made without it.
+  it('says the seed is missing before it says the policy is superseded', async () => {
+    const { app, baseUrl } = await start();
+    const registry = app.get(ReadinessRegistry);
+    registry.register({
+      name: 'fixture-policy',
+      check: () => {
+        throw new NotReadyError('policy_superseded');
+      },
+    });
+    registry.register({
+      name: 'fixture-reference-data',
+      check: () => {
+        throw new NotReadyError('reference_data_missing');
+      },
+    });
+
+    expect((await probe(baseUrl, '/readyz')).body).toEqual({
+      status: 'not_ready',
+      reason: 'reference_data_missing',
+    });
   });
 });
 

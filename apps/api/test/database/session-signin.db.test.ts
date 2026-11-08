@@ -76,7 +76,21 @@ function fixedDirectory(summary: PrincipalSummary): IdentityDirectory {
     findStaffByCanonicalEmail: () => Promise.resolve(null),
     findVendorAccountByIdentifier: () => Promise.resolve(null),
     findRiderByCanonicalPhone: () => Promise.resolve(null),
+    vendorOrganizationOf: () => Promise.resolve(null),
+    registeredChannel: () => Promise.resolve(null),
+    recoveryEligible: () => Promise.resolve(false),
+    replaceCredential: () => Promise.resolve(null),
     readIdentity: answer,
+    // A fixed principal of an audience with no table has no credential to write and no account to name (S0.31).
+    establishCredential: () => Promise.resolve(null),
+    accountLabel: () => Promise.resolve(null),
+    findStaffForSignIn: () => Promise.resolve(null),
+    readCredentialHash: () => Promise.resolve(null),
+    recordFailedAttempt: () => Promise.resolve({ counted: false, reason: 'LOCKED' }),
+    clearFailedAttempts: () => Promise.resolve(),
+    rehashCredential: () => Promise.resolve(false),
+    isCredentialLocked: () => Promise.resolve(false),
+    displayName: () => Promise.resolve(null),
     lockIdentity: async (handle) => {
       await transactionOf(handle).execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${summary.ref.id}, 0))`,
@@ -134,6 +148,7 @@ class FailingInsertStore implements SessionStore {
     this.inner.findByTokenHash(...args);
   recordActivity: SessionStore['recordActivity'] = (...args) => this.inner.recordActivity(...args);
   terminate: SessionStore['terminate'] = (...args) => this.inner.terminate(...args);
+  expire: SessionStore['expire'] = (...args) => this.inner.expire(...args);
 }
 
 /** An audit writer that fails on the event of the issue itself, the last write of the transaction before the displacement events. */
@@ -428,6 +443,108 @@ describe('the proofs a sign-in spends commit with it (typed steps)', () => {
         steps,
       } as never),
     ).rejects.toThrow(TypeError);
+    expect(await sessionsOf(vendor.ref.id)).toEqual([]);
+  });
+});
+
+/**
+ * What a sign-in answers with is built from the session **in the issuing transaction**, after everything else it wrote (the audit of
+ * 21 October 2026, A04). A view built after the commit can fail with the session already committed and the person answered with a
+ * failure and no credential; built here, a failure takes the whole issue back.
+ */
+describe('the view of the session is built in the issuing transaction', () => {
+  const proof = async (): Promise<string> => {
+    const id = randomUUID();
+    await admin.query(`insert into test_proof (id) values ($1)`, [id]);
+    return id;
+  };
+  const consumed = async (id: string): Promise<boolean> =>
+    (
+      await observer.one<{ consumed: boolean }>(
+        `select consumed_at is not null as consumed from test_proof where id = $1`,
+        [id],
+      )
+    )?.consumed === true;
+  const spend = (id: string): SignInStep => ({
+    name: 'spend the proof',
+    run: async (handle) => {
+      await transactionOf(handle).execute(
+        sql`update test_proof set consumed_at = now() where id = ${id} and consumed_at is null`,
+      );
+    },
+  });
+
+  // Break caught: a view built after the commit in another transaction, which sees the session only because it committed.
+  it('is built on the issuing transaction’s handle, which sees the new session before anything is committed', async () => {
+    const vendor = summaryOf('VENDOR');
+
+    const issued = await machineryFor(vendor).issuer.issue({
+      principal: vendor.ref,
+      correlationId: `signin-${randomUUID()}`,
+      verifiedCredentialGeneration: 1,
+      registeredDeviceId: randomUUID(),
+      project: async (handle, session) => ({
+        sessionId: session.id,
+        seenInside: (
+          await transactionOf(handle).execute(
+            sql`select count(*)::int as n from session where id = ${session.id}::uuid`,
+          )
+        ).rows[0] as { n: number },
+        seenOutside: await observer.count('session', { id: session.id }),
+      }),
+    });
+
+    expect(issued.view).toEqual({
+      sessionId: issued.session.id,
+      seenInside: { n: 1 },
+      seenOutside: 0,
+    });
+    expect(await observer.count('session', { id: issued.session.id })).toBe(1);
+  });
+
+  it('has no view when none was asked for', async () => {
+    expect((await signIn(summaryOf('RIDER'))).view).toBeUndefined();
+  });
+
+  // Break caught: the view built after the commit: the session, the proof its steps spent, the success event and the displacement of the
+  // earlier session all committed for a sign-in that answered with a failure.
+  it('takes back the session, the proof, the success event and the displacement when the view cannot be built', async () => {
+    const vendor = summaryOf('VENDOR');
+    const first = await signIn(vendor);
+    const id = await proof();
+
+    await expect(
+      machineryFor(vendor).issuer.issue({
+        principal: vendor.ref,
+        correlationId: `signin-${randomUUID()}`,
+        verifiedCredentialGeneration: 1,
+        registeredDeviceId: randomUUID(),
+        steps: [spend(id)],
+        project: () => Promise.reject(new Error('the view could not be built')),
+      }),
+    ).rejects.toThrow('the view could not be built');
+
+    expect(await consumed(id)).toBe(false);
+    expect(await sessionsOf(vendor.ref.id)).toEqual([
+      expect.objectContaining({ id: first.session.id, terminated_at: null }),
+    ]);
+    expect(await events('auth.session.issued', vendor.ref.id)).toHaveLength(1);
+    expect(await events('auth.session.superseded', vendor.ref.id)).toEqual([]);
+  });
+
+  it('refuses a projection that is not a function, before anything is written', async () => {
+    const vendor = summaryOf('VENDOR');
+
+    await expect(
+      machineryFor(vendor).issuer.issue({
+        principal: vendor.ref,
+        correlationId: 'bad-projection',
+        verifiedCredentialGeneration: 1,
+        registeredDeviceId: randomUUID(),
+        project: 'a view' as never,
+      }),
+    ).rejects.toThrow(TypeError);
+
     expect(await sessionsOf(vendor.ref.id)).toEqual([]);
   });
 });

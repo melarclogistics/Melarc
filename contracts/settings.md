@@ -186,6 +186,8 @@ The specification distinguishes four conditions that a single "value" column wou
 
 **All six now carry values**. §11.2 deferred *“low-level password/PIN, factor, token, lockout, expiry, device-identifier, and session mechanics”* to security architecture, and that deferral is now discharged: the **structure** was fixed here and the **figures** arrived on 23 August. Every one is Platform Admin launch configuration under `MSC-DEC-217`, so a figure that proves wrong in practice is a settings change rather than a release — which is what made setting them before operating data reasonable.
 
+**The seven days of a trusted browser are not a setting, deliberately** (Product Owner, 25 October 2026; [staff-authentication.md](../features/identity/staff-authentication.md) §5.8): they are a constant of the contract, like the length of a password. A key would need a way to add a setting to a database that was seeded before the key existed, which the project does not have, and a setting that is missing stops Senior Ops and Platform Admin from signing in at all.
+
 **Credential length is not a setting, deliberately.** The 12 to 128 character bounds on staff passwords, the bootstrap password and Vendor shared secrets — counted in code points both as sent and after NFKC, and both must hold ([SECURITY_DESIGN.md](../architecture/SECURITY_DESIGN.md) §13.4a) — and the six-digit rider PIN are constants of the contract, enforced by the request schemas and the credential service, so no administrator can weaken them at runtime and no key exists to be left unset.
 
 ### 7.7 Platform — security operations

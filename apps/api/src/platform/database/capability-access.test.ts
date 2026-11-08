@@ -176,6 +176,8 @@ describe('the invariants the matrix keeps (SECURITY_DESIGN.md §14.1, §14.17b; 
         'StaffIdentity',
         'VendorAccount',
         'VendorCredential',
+        // Its status only: a vendor's recovery is judged on the organisation's (credential-recovery.md section 5.7; S0.50).
+        'VendorOrganization',
       ].toSorted(),
     );
   });

@@ -1,0 +1,33 @@
+/*
+ * The rider screens (S0.60). Layout only: every colour, size and space comes from tokens.css. The components do the rest.
+ */
+
+/* The enrolment code and what is said around it: a column of readable width, with the picture set apart from the prose. */
+.rider-code {
+  max-width: 40rem;
+  margin-top: var(--space-6);
+}
+
+.rider-code__picture {
+  margin: var(--space-4) 0;
+}
+
+/* The steps of a binding, in the order the officer does them. */
+.rider-steps {
+  margin: 0 0 var(--space-4);
+  padding-inline-start: var(--space-6);
+  max-width: 40rem;
+}
+
+.rider-steps > li + li {
+  margin-top: var(--space-2);
+}
+
+/* A form on a rider's page: the fields in a column of readable width. */
+.rider-form {
+  max-width: 40rem;
+}
+
+.rider-form > * + * {
+  margin-top: var(--space-4);
+}

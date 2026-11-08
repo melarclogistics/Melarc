@@ -116,3 +116,19 @@ export async function readFixedPolicy(
     ? null
     : { revision: row.revision, minimumRevision: row.minimum_revision };
 }
+
+/**
+ * Whether a role bundle is privileged (S0.31): the one fact the credential setup needs of a bundle, to decide whether the identity
+ * must prove a second factor before it can hold a session. `null` when there is no such bundle. A plain read in the caller's
+ * transaction; it is not the read of a session's snapshot and takes no policy lock, because nothing here is copied or compared later.
+ */
+export async function bundleIsPrivileged(
+  transaction: TransactionHandle,
+  bundleId: string,
+): Promise<boolean | null> {
+  const found = await transactionOf(transaction).execute(
+    sql`select privileged from role_bundle where id = ${bundleId}`,
+  );
+  const row = found.rows[0] as { privileged: boolean } | undefined;
+  return row === undefined ? null : row.privileged;
+}
