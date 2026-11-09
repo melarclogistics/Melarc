@@ -92,7 +92,8 @@ export function hubOutsideStaffGrant(authorized: AuthorizedRequest, hubId: strin
  * membership alone (`postgres.staff-identity-directory.adapter.ts`), which is all there is until an effective assignment (`HubAssignment`, domain-model.md
  * section 5.8) adds hubs, and the list of hubs is then in ascending order and no longer says which of them is the profile's own. A session that holds
  * several has no primary hub **here**, and a session with none has none: `undefined` for both (run 4, Stage 1, item 8; the day an assignment is built, the
- * primary hub has to be carried on the session, a Finding of that run). It reads nothing from the database.
+ * primary hub has to be carried on the session: it is owed with the assignment, `OB-S1-37` of the SLICE-001 plan, and until then a session with several hubs fails
+ * closed). It reads nothing from the database.
  */
 export function primaryHubOfSession(authorized: AuthorizedRequest): string | undefined {
   const hubs = authorized.session.authority.authorizedHubIds;
