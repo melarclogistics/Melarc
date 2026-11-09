@@ -174,6 +174,94 @@ test.describe('moving through the screens', () => {
   });
 });
 
+test.describe('the lists, drawn for the room they have', () => {
+  const queueTable = (page: Page, name: string) => page.getByRole('table', { name });
+  const queueCards = (page: Page, name: string) => page.getByRole('list', { name });
+
+  // Break caught (the review of 499399c, kept for these lists): a list drawn as cards at 1280 px with the menu open, a box of about 61rem, though its table has room for every
+  // column, or a table squeezed into a phone. The room is the table's box and not the screen.
+  test('keeps the staff table, with every column, at 1280 px with the menu open, and no cards', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { watch } = await open(page, '/admin/staff?view=all');
+
+    const table = queueTable(page, 'Staff profiles');
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Name / work email',
+      'Status',
+      'Role',
+      'Hub',
+    ]);
+    await expect(table.getByRole('row')).toHaveCount(3);
+    await expect(queueCards(page, 'Staff profiles')).toHaveCount(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('draws the staff as cards with every fact of a person at 390 px, and no table', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { watch } = await open(page, '/admin/staff?view=all');
+
+    const cards = queueCards(page, 'Staff profiles');
+    await expect(cards).toBeVisible();
+    await expect(cards.getByRole('listitem')).toHaveCount(2);
+    await expect(queueTable(page, 'Staff profiles')).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    // Each card keeps a heading, the name, for heading navigation, and it is the link to the profile.
+    await expect(first.getByRole('heading', { level: 2 })).toHaveText('Kofi Boateng');
+    await expect(first.getByRole('link', { name: 'Kofi Boateng' })).toHaveAttribute(
+      'href',
+      `/admin/staff/${IDS.kofi}`,
+    );
+    for (const fact of [
+      'Waiting for approval',
+      'kofi.boateng@example.test',
+      'Ops Staff',
+      'Accra Central',
+    ]) {
+      await expect(first).toContainText(fact);
+    }
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('draws the sessions of a person as a table at 1280 px and as cards, with their act, at 390 px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { watch } = await open(
+      page,
+      `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`,
+    );
+    const table = queueTable(page, 'Open sessions');
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Started',
+      'Last active',
+      'Expires',
+      'Action',
+    ]);
+    await expect(queueCards(page, 'Open sessions')).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const cards = queueCards(page, 'Open sessions');
+    await expect(cards).toBeVisible();
+    await expect(cards.getByRole('listitem')).toHaveCount(2);
+    await expect(table).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    await expect(first).toContainText('23 Oct, 09:15');
+    await expect(first).toContainText('23 Oct, 16:00');
+    await expect(
+      first.getByRole('button', { name: 'End session started 23 Oct, 08:00' }),
+    ).toBeVisible();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
 test.describe('times', () => {
   // Break caught: a time shown in the machine's zone: the same instant would read differently on every laptop that opens the page.
   test.describe('whatever the machine’s zone', () => {
@@ -513,7 +601,8 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the approval queue',
     reach: async (page) => {
       await open(page, '/admin/staff');
-      await expect(page.getByRole('table', { name: 'Staff profiles' })).toBeVisible();
+      // A profile is a row of a table or, in a narrow room, a card: the name that links to it is in both.
+      await expect(page.getByRole('link', { name: 'Kofi Boateng' })).toBeVisible();
     },
   },
   {
@@ -590,7 +679,8 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the sessions of a person',
     reach: async (page) => {
       await open(page, `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`);
-      await expect(page.getByRole('table', { name: 'Open sessions' })).toBeVisible();
+      // A session is a row of a table or, in a narrow room, a card: the act that ends it is in both.
+      await expect(page.getByRole('button', { name: 'End session started 22 Oct, 07:05' })).toBeVisible();
     },
   },
   {
