@@ -701,7 +701,10 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the trusted browsers of a person on their profile',
     reach: async (page) => {
       await open(page, `/admin/staff/${IDS.ama}`);
-      await expect(page.getByRole('table', { name: /^Trusted browsers of / })).toBeVisible();
+      // A browser is a row of a table or, in a narrow room, a card: what it is called is in both.
+      await expect(
+        page.getByRole('region', { name: 'Trusted browsers' }).getByText('Firefox on Linux'),
+      ).toBeVisible();
     },
   },
   {
