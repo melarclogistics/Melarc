@@ -697,9 +697,7 @@ describe('the queue: a page the server will not open', () => {
       '/pickup-requests?date=2026-11-03',
     );
 
-    await alertSaying(
-      'That filter was not accepted. Choose a state from the list and a whole date.',
-    );
+    await alertSaying('That filter was not accepted. Choose a state and a whole date.');
     expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
   });
 
@@ -732,9 +730,7 @@ describe('the queue: a page the server will not open', () => {
       '/pickup-requests?date=2026-11-03',
     );
 
-    await alertSaying(
-      'That filter was not accepted. Choose a state from the list and a whole date.',
-    );
+    await alertSaying('That filter was not accepted. Choose a state and a whole date.');
     expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
   });
 

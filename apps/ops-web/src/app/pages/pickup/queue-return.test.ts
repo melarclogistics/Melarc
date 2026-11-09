@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
 import {
   isUnclaimed,
   requestOfClick,
-  restorePlace,
   restoreQueuePlace,
   searchOf,
+  type RecordLinks,
 } from './queue-return';
 
 /**
@@ -14,7 +14,14 @@ import {
  * place is made of, and how the position and the focus are given back. The flows that use them are in PickupRequestListPage.return.test.tsx.
  */
 const REQUEST = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
-const OTHER_REQUEST = '1b2c3d4e-5f6a-4b7c-9d8e-9f0a1b2c3d4e';
+/** A list that marks the link itself with the id of its record. */
+const REQUEST_LINKS: RecordLinks = { selector: 'a[data-request-id]', key: 'requestId' };
+/** The queue workspace's lists, which mark the row and draw the record's code in it as the link: the id is read from the row. */
+const ROW_LINKS: RecordLinks = {
+  selector: 'a[href]',
+  key: 'href',
+  idOf: (found) => found.closest<HTMLElement>('[data-row-id]')?.dataset.rowId,
+};
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -48,8 +55,8 @@ describe('requestOfClick: which click leaves a place', () => {
     const inner = document.createElement('span');
     anchor.append(inner);
 
-    expect(requestOfClick(click(anchor))).toBe(REQUEST);
-    expect(requestOfClick(click(inner))).toBe(REQUEST);
+    expect(requestOfClick(click(anchor), REQUEST_LINKS)).toBe(REQUEST);
+    expect(requestOfClick(click(inner), REQUEST_LINKS)).toBe(REQUEST);
   });
 
   // Break caught: a place left for a click that opens the request in a new tab or window, where the queue stays as it is.
@@ -62,17 +69,37 @@ describe('requestOfClick: which click leaves a place', () => {
     ['alt held', { altKey: true }],
     ['a click something has already handled', { defaultPrevented: true }],
   ])('is nothing for %s', (_what, init) => {
-    expect(requestOfClick(click(link(), init))).toBeUndefined();
+    expect(requestOfClick(click(link(), init), REQUEST_LINKS)).toBeUndefined();
   });
 
   it('is nothing for a link that opens in another tab', () => {
-    expect(requestOfClick(click(link(REQUEST, { target: '_blank' })))).toBeUndefined();
+    expect(
+      requestOfClick(click(link(REQUEST, { target: '_blank' }), {}), REQUEST_LINKS),
+    ).toBeUndefined();
   });
 
   it('is nothing for a click elsewhere, or on a link that is not a request’s', () => {
-    expect(requestOfClick(click(document.createElement('button')))).toBeUndefined();
-    expect(requestOfClick(click(link(null)))).toBeUndefined();
-    expect(requestOfClick(click(null))).toBeUndefined();
+    expect(requestOfClick(click(document.createElement('button')), REQUEST_LINKS)).toBeUndefined();
+    expect(requestOfClick(click(link(null)), REQUEST_LINKS)).toBeUndefined();
+    expect(requestOfClick(click(null), REQUEST_LINKS)).toBeUndefined();
+  });
+
+  // The manifest list and the pickup queue's own links are marked by their row: a plain click on the code in a row is the record of the row, whatever the link says of it.
+  it('is the record of the row a link is in, when the list marks its rows and not its links', () => {
+    const row = document.createElement('tr');
+    row.dataset.rowId = REQUEST;
+    const anchor = document.createElement('a');
+    anchor.href = `/manifests/${REQUEST}`;
+    row.append(anchor);
+    const elsewhere = document.createElement('a');
+    elsewhere.href = '/manifests/new';
+    document.body.append(row, elsewhere);
+
+    expect(requestOfClick(click(anchor), ROW_LINKS)).toBe(REQUEST);
+    expect(requestOfClick(click(anchor, { ctrlKey: true }), ROW_LINKS)).toBeUndefined();
+    expect(requestOfClick(click(anchor, { button: 1 }), ROW_LINKS)).toBeUndefined();
+    // A link outside every row (the page's own action) is no record's.
+    expect(requestOfClick(click(elsewhere), ROW_LINKS)).toBeUndefined();
   });
 });
 
@@ -108,188 +135,6 @@ describe('isUnclaimed: focus nobody has taken', () => {
     expect(isUnclaimed(heading)).toBe(true);
     expect(isUnclaimed(filter)).toBe(false);
     expect(isUnclaimed(control)).toBe(false);
-  });
-});
-
-const spyOnScroll = () => vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
-
-describe('restorePlace: the position and the focus, given back', () => {
-  let scrollTo: ReturnType<typeof spyOnScroll>;
-
-  beforeEach(() => {
-    scrollTo = spyOnScroll();
-  });
-
-  const place = (overrides: Partial<QueuePlace> = {}): QueuePlace => ({
-    signature: 'PENDING|',
-    search: '?state=PENDING',
-    tokens: ['token-two'],
-    scrollY: 420,
-    requestId: REQUEST,
-    ...overrides,
-  });
-
-  /** The queue as it is drawn: the results with a table and cards, each holding the request's link, inside a read state. */
-  function queue(ids: readonly string[] = [REQUEST, OTHER_REQUEST]) {
-    const element = (tag: string, className?: string, ...children: Node[]): HTMLElement => {
-      const made = document.createElement(tag);
-      if (className !== undefined) made.className = className;
-      made.append(...children);
-      return made;
-    };
-    const anchor = (drawing: string, id: string): HTMLElement => {
-      const made = link(id);
-      made.textContent = `${drawing} ${id}`;
-      return made;
-    };
-    const readState = element(
-      'div',
-      'ui-read-state',
-      element(
-        'div',
-        'ui-queue-table',
-        element(
-          'div',
-          'ui-queue-table__results',
-          element(
-            'div',
-            'ui-queue-table__table',
-            element(
-              'table',
-              undefined,
-              element(
-                'tbody',
-                undefined,
-                ...ids.map((id) =>
-                  element('tr', undefined, element('td', undefined, anchor('table', id))),
-                ),
-              ),
-            ),
-          ),
-          element(
-            'ul',
-            'ui-queue-table__cards',
-            ...ids.map((id) => element('li', undefined, anchor('card', id))),
-          ),
-        ),
-      ),
-    );
-    readState.tabIndex = -1;
-    readState
-      .querySelector<HTMLElement>('.ui-queue-table__results')
-      ?.setAttribute('tabindex', '-1');
-    const root = element('div', undefined, readState);
-    document.body.append(root);
-    return root;
-  }
-
-  it('scrolls to where the officer was, once, without easing', () => {
-    restorePlace(queue(), place());
-
-    expect(scrollTo).toHaveBeenCalledTimes(1);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 420, left: 0, behavior: 'instant' });
-  });
-
-  it('gives focus to the request that was opened, in the drawing that is shown', () => {
-    const root = queue();
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(
-      root.querySelector(`.ui-queue-table__table a[data-request-id="${REQUEST}"]`),
-    );
-  });
-
-  it('gives focus to the one that is shown when the other drawing is hidden', () => {
-    const root = queue();
-    root.querySelector<HTMLElement>('.ui-queue-table__table')?.style.setProperty('display', 'none');
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(
-      root.querySelector(`.ui-queue-table__cards a[data-request-id="${REQUEST}"]`),
-    );
-  });
-
-  it('gives focus to the results when the request is no longer on the page', () => {
-    const root = queue([OTHER_REQUEST]);
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(root.querySelector('.ui-queue-table__results'));
-  });
-
-  it('gives focus to whatever stands in the place of the rows when there are none', () => {
-    const root = document.createElement('div');
-    const readState = document.createElement('div');
-    readState.className = 'ui-read-state';
-    readState.tabIndex = -1;
-    readState.append(document.createElement('p'));
-    root.append(readState);
-    document.body.append(root);
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(readState);
-  });
-
-  // Break caught: focus pulled to the request from the control the officer has already moved to while the page was being read.
-  it('leaves focus where the officer put it, and still gives the position back', () => {
-    const root = queue();
-    const filter = document.createElement('select');
-    document.body.append(filter);
-    filter.focus();
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(filter);
-    expect(scrollTo).toHaveBeenCalledTimes(1);
-  });
-
-  it('takes focus from the heading the frame placed it on, which nobody has chosen', () => {
-    const root = queue();
-    const heading = document.createElement('h1');
-    heading.tabIndex = -1;
-    document.body.append(heading);
-    heading.focus();
-
-    restorePlace(root, place());
-
-    expect(document.activeElement).toBe(
-      root.querySelector(`.ui-queue-table__table a[data-request-id="${REQUEST}"]`),
-    );
-  });
-
-  it('does not scroll to bring a request into view that already is in view', () => {
-    const root = queue();
-    const request = root.querySelector<HTMLElement>(`a[data-request-id="${REQUEST}"]`);
-    if (request === null) throw new Error('no link');
-    const scrollIntoView = vi.fn();
-    request.scrollIntoView = scrollIntoView;
-    vi.spyOn(request, 'getBoundingClientRect').mockReturnValue({
-      top: 200,
-      bottom: 230,
-    } as DOMRect);
-
-    restorePlace(root, place());
-
-    expect(scrollIntoView).not.toHaveBeenCalled();
-  });
-
-  it('scrolls only as far as brings the request into view when the saved position leaves it out', () => {
-    const root = queue();
-    const request = root.querySelector<HTMLElement>(`a[data-request-id="${REQUEST}"]`);
-    if (request === null) throw new Error('no link');
-    const scrollIntoView = vi.fn();
-    request.scrollIntoView = scrollIntoView;
-    vi.spyOn(request, 'getBoundingClientRect').mockReturnValue({
-      top: 2000,
-      bottom: 2030,
-    } as DOMRect);
-
-    restorePlace(root, place());
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
   });
 });
 

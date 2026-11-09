@@ -108,7 +108,7 @@ test.describe('moving through the screens', () => {
   }) => {
     const { api, watch } = await open(page, '/');
     await menuEntry(page, 'Pickup runs').click();
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifests' })).toBeFocused();
+    await expect(page.getByRole('heading', { level: 1, name: 'Pickup runs' })).toBeFocused();
 
     await page.getByRole('link', { name: 'ACC-MF-Q92422' }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-Q92422' })).toBeFocused();
@@ -135,10 +135,9 @@ test.describe('moving through the screens', () => {
       manifests: [manifest(), manifest({ id: IDS.run, code: 'ACC-MF-K7M4PX', stops: [] })],
       pageSize: 1,
     });
-    await expect(page.getByText(/Listed oldest first, as the server returns them/)).toBeVisible();
-    // The one control that is a menu is the state filter, and it asks for no state until one is chosen.
-    await expect(page.getByRole('combobox')).toHaveCount(1);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    await expect(page.getByText('Oldest first, as the server lists them')).toBeVisible();
+    // The states are the views of the page, and it asks for no state until one is chosen.
+    await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: /Next page/ }).click();
     await expect(page.getByRole('link', { name: 'ACC-MF-K7M4PX' }).first()).toBeVisible();
@@ -662,7 +661,7 @@ const ALL_CODES = ['ACC-MF-Q92422', 'ACC-MF-K7M4PX', 'ACC-MF-D3F5RT', 'ACC-MF-C4
 const listedCodes = async (page: Page): Promise<string[]> =>
   (
     await page
-      .getByRole('table', { name: 'Manifests' })
+      .getByRole('table', { name: 'Pickup runs' })
       .getByRole('rowheader')
       .evaluateAll((cells) => cells.map((cell) => cell.querySelector('a')?.textContent ?? ''))
   ).filter((code) => code !== '');
@@ -672,7 +671,9 @@ const listRequests = (api: ManifestApi) =>
   api.calls.filter((call) => call.method === 'GET' && call.path === '/api/v1/pickup-manifests');
 
 test.describe('filtering the list', () => {
+  /** The date filter is in the popover of the filter row, which opens with the Filter button and closes once the date is a whole one. */
   async function typeFilterDate(page: Page, digits: string): Promise<void> {
+    await page.getByRole('button', { name: 'Filter', exact: true }).click();
     const day = page.getByRole('group', { name: 'Service date' }).getByRole('textbox');
     await day.click();
     await page.keyboard.type(digits);
@@ -688,7 +689,7 @@ test.describe('filtering the list', () => {
     // which can be after it (a bare read found no rows in one run in forty).
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('DRAFT');
+    await page.getByRole('tab', { name: 'Draft' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     expect(new URL(page.url()).search).toBe('?state=DRAFT');
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT');
@@ -698,11 +699,11 @@ test.describe('filtering the list', () => {
     expect(new URL(page.url()).search).toBe('?state=DRAFT&date=2026-11-05');
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT&service_date=2026-11-05');
 
-    await page.getByRole('button', { name: 'Every service date' }).click();
+    await page.getByRole('button', { name: 'Remove filter: Service date: Thu 5 Nov 2026' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     expect(new URL(page.url()).search).toBe('?state=DRAFT');
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('');
+    await page.getByRole('tab', { name: 'All' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
     expect(new URL(page.url()).search).toBe('');
     expect(listRequests(api).at(-1)?.search).toBe('');
@@ -729,7 +730,7 @@ test.describe('filtering the list', () => {
     );
 
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
     expect(listRequests(api).map((call) => call.search)).toEqual(['']);
     expect(watch.problems).toEqual([]);
   });
@@ -742,7 +743,7 @@ test.describe('filtering the list', () => {
     await expect(page.getByText(/on page 2/)).toBeVisible();
     expect(listRequests(api).at(-1)?.search).toBe('?page_token=2');
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('DRAFT');
+    await page.getByRole('tab', { name: 'Draft' }).click();
 
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
@@ -756,13 +757,13 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, '/manifests?state=COMPLETED&date=2026-11-05', filterWorld());
 
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toBeVisible();
     await expect(
       page.getByText(/Nothing fits the state Completed and the service date Thu 5 Nov 2026\./),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toHaveCount(0);
 
-    const clear = page.getByRole('button', { name: 'Show every manifest' });
+    const clear = page.getByRole('button', { name: 'Show every pickup run' });
     await clear.focus();
     await page.keyboard.press('Enter');
 
@@ -775,8 +776,8 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, '/manifests', { manifests: [] });
 
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toHaveCount(0);
     expect(api.unexpected).toEqual([]);
   });
 
@@ -797,11 +798,13 @@ test.describe('filtering the list', () => {
         },
       }),
     );
-    await page.getByRole('button', { name: 'Refresh page' }).click();
+    await page.getByRole('button', { name: 'Refresh' }).click();
 
-    await expect(page.getByText('The manifests could not be loaded.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toHaveCount(0);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'The pickup runs could not be loaded.' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
   });
 
   // Break caught: a reload that loses the filters, or a way back from a manifest that opens the plain list.
@@ -818,7 +821,7 @@ test.describe('filtering the list', () => {
 
     await page.reload();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-D3F5RT']);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('link', { name: 'ACC-MF-D3F5RT' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-D3F5RT' })).toBeFocused();
@@ -1065,7 +1068,7 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Pickup runs' })).toBeFocused();
     await expect(page.getByText(/on page 2/)).toBeVisible();
     await expect(page.getByRole('link', { name: opened })).toHaveCount(0);
   });
@@ -1076,12 +1079,12 @@ test.describe('the manifests: coming back from a manifest', () => {
     const release = await holdReads(page);
 
     await backLink(page).click();
-    await expect(page.getByText('Loading the manifests…')).toBeVisible();
-    await page.getByRole('combobox', { name: 'State' }).focus();
+    await expect(page.getByText('Loading pickup runs')).toBeAttached();
+    await page.getByRole('tab', { name: 'Draft' }).focus();
     release();
 
     await expect(page.getByRole('link', { name: opened })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'State' })).toBeFocused();
+    await expect(page.getByRole('tab', { name: 'Draft' })).toBeFocused();
   });
 
   test('says there are no manifests on a later page that has emptied, and goes to the first only when asked', async ({
@@ -1093,14 +1096,14 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByRole('heading', { name: 'No manifests on this page' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs on this page' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toHaveCount(0);
     expect(listRequests(api)).toHaveLength(reads + 1);
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
 
     await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Pickup runs' })).toBeFocused();
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT');
   });
 
@@ -1125,10 +1128,14 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByText(/That page of the manifests could not be opened/)).toBeVisible();
+    await expect(
+      page
+        .getByRole('alert')
+        .filter({ hasText: 'That page of the pickup runs could not be opened' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
     await expect(page).toHaveURL('/manifests?state=DRAFT');
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('body')).not.toContainText('Diagnostic text');
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
@@ -1148,7 +1155,7 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
     name: 'the list that a filter empties',
     reach: async (page) => {
       await open(page, '/manifests?state=COMPLETED&date=2026-11-05', filterWorld());
-      await expect(page.getByRole('heading', { name: 'No manifests match' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toBeVisible();
     },
   },
   {

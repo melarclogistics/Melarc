@@ -7,10 +7,10 @@ import type { CopyRule } from './problem-copy';
  * `details.rule` is worded by it** (`problemOf` reads the rule as the context when the page gave none): `service_date_passed` and
  * `request_not_confirmed` of the dispatch are two different things to do next. No wording names a count of the hub's, a price or a role.
  */
-const OTHER_HUB = 'This manifest belongs to a hub your session does not act in.';
-const NOT_FOUND = 'This manifest could not be found.';
+const OTHER_HUB = 'This pickup run belongs to a hub your session does not act in.';
+const NOT_FOUND = 'This pickup run could not be found.';
 const CHANGED =
-  'This manifest changed after you opened it: someone else may have acted on it. Reload it to see where it stands.';
+  'This pickup run changed after you opened it: someone else may have acted on it. Reload it to see where it stands.';
 const NOTE_NEEDED = 'Write a note saying why.';
 /** A note the ledger would not keep: the field says what to change, and the words of the note are never repeated. */
 const NOTE_REFUSED = 'Check the note marked below: it was not accepted as written.';
@@ -19,21 +19,21 @@ const OTHER_HUB_HANDOVER = 'This custody handover belongs to a hub your session 
 
 export const MANIFEST_COPY: readonly CopyRule[] = [
   // The reads.
-  { operation: 'listPickupManifests', text: 'The manifests could not be loaded.' },
+  { operation: 'listPickupManifests', text: 'The pickup runs could not be loaded.' },
   // A filter the server refuses (`state`, `service_date`; the screen sends only values the contract accepts, so this is a contract that moved).
   {
     operation: 'listPickupManifests',
     code: 'VALIDATION_FAILED',
-    text: 'That filter was not accepted. Choose a state from the list and a whole date.',
+    text: 'That filter was not accepted. Choose a state and a whole date.',
   },
   // A page of the list the server will not open (its `page_token` is refused): not a filter, and not worth asking for again.
   {
     operation: 'listPickupManifests',
     context: 'cursor',
     code: 'VALIDATION_FAILED',
-    text: 'That page of the manifests could not be opened: its place in the list was not accepted. Go back to the first page to start again.',
+    text: 'That page of the pickup runs could not be opened: its place in the list was not accepted. Go back to the first page to start again.',
   },
-  { operation: 'getPickupManifest', text: 'This manifest could not be loaded.' },
+  { operation: 'getPickupManifest', text: 'This pickup run could not be loaded.' },
   { operation: 'getPickupManifest', code: 'NOT_FOUND', text: NOT_FOUND },
   { operation: 'getPickupManifest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'getPickupStop', text: 'This stop could not be loaded.' },
@@ -85,16 +85,16 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   },
 
   // Making a manifest.
-  { operation: 'createPickupManifest', text: 'The manifest was not created.' },
+  { operation: 'createPickupManifest', text: 'The pickup run was not created.' },
   {
     operation: 'createPickupManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your account can’t make a manifest. Ask an administrator for access.',
+    text: 'Your account can’t make a pickup run. Ask an administrator for access.',
   },
   {
     operation: 'createPickupManifest',
     code: 'ALREADY_MANIFESTED',
-    text: 'A request you chose is already on a manifest, so nothing was created. The requests marked below are not available: refresh the pool and choose again.',
+    text: 'A request you chose is already on a pickup run, so nothing was created. The requests marked below are not available: refresh the pool and choose again.',
   },
   {
     operation: 'createPickupManifest',
@@ -114,7 +114,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'createPickupManifest',
     context: 'unknown-outcome',
-    text: 'We could not confirm whether the manifest was created. Try again: the same manifest is sent again safely and is not made twice.',
+    text: 'We could not confirm whether the pickup run was created. Try again: the same pickup run is sent again safely and is not made twice.',
   },
 
   // Ordering the stops.
@@ -129,12 +129,12 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'setManifestStopOrder',
     code: 'STATE_CONFLICT',
-    text: 'The stops cannot be ordered now: the manifest was dispatched, or a request on it was cancelled or the manifest changed after you opened it. Reload it to see where it stands.',
+    text: 'The stops cannot be ordered now: the pickup run was dispatched, or a request on it was cancelled or the pickup run changed after you opened it. Reload it to see where it stands.',
   },
   {
     operation: 'setManifestStopOrder',
     code: 'VALIDATION_FAILED',
-    text: 'That order was not accepted: a stop that is no longer to be worked keeps its place, and every stop is listed once. Reload the manifest and arrange the stops again.',
+    text: 'That order was not accepted: a stop that is no longer to be worked keeps its place, and every stop is listed once. Reload the pickup run and arrange the stops again.',
   },
 
   // Assigning a rider.
@@ -149,7 +149,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'assignRider',
     code: 'RIDER_UNAVAILABLE',
-    text: 'This rider cannot be given the manifest: they are not active, or they belong to another hub. Choose another rider.',
+    text: 'This rider cannot be given the pickup run: they are not active, or they belong to another hub. Choose another rider.',
   },
   {
     operation: 'assignRider',
@@ -159,16 +159,16 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'assignRider',
     code: 'STATE_CONFLICT',
-    text: 'A rider can be assigned to a draft only: this manifest was dispatched or cancelled, or it changed after you opened it. Reload it to see where it stands.',
+    text: 'A rider can be assigned to a draft only: this pickup run was dispatched or cancelled, or it changed after you opened it. Reload it to see where it stands.',
   },
   { operation: 'assignRider', code: 'VALIDATION_FAILED', text: 'Choose a rider from the list.' },
 
   // Dispatching.
-  { operation: 'dispatchManifest', text: 'The manifest was not dispatched.' },
+  { operation: 'dispatchManifest', text: 'The pickup run was not dispatched.' },
   {
     operation: 'dispatchManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your account can’t dispatch a manifest. Ask an administrator for access.',
+    text: 'Your account can’t dispatch a pickup run. Ask an administrator for access.',
   },
   { operation: 'dispatchManifest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'dispatchManifest', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -177,23 +177,23 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
     operation: 'dispatchManifest',
     context: 'service_date_passed',
     code: 'STATE_CONFLICT',
-    text: 'The day of this run has passed, so it is never sent out. Nothing was sent. Cancel the manifest, then plan its requests again for a day that has not passed, each carried over with a reason.',
+    text: 'The day of this run has passed, so it is never sent out. Nothing was sent. Cancel the pickup run, then plan its requests again for a day that has not passed, each carried over with a reason.',
   },
   {
     operation: 'dispatchManifest',
     context: 'request_not_confirmed',
     code: 'STATE_CONFLICT',
-    text: 'A pickup on this manifest is no longer confirmed, so nothing was sent and the manifest is still a draft. A cancelled pickup is never sent to a rider. The stops concerned are marked on the page: reload the manifest to see them.',
+    text: 'A pickup on this pickup run is no longer confirmed, so nothing was sent and the pickup run is still a draft. A cancelled pickup is never sent to a rider. The stops concerned are marked on the page: reload the pickup run to see them.',
   },
   {
     operation: 'dispatchManifest',
     code: 'MANIFEST_EMPTY',
-    text: 'Nothing is left to be worked on this manifest, so there is nothing to send. Cancel it, or plan its requests again.',
+    text: 'Nothing is left to be worked on this pickup run, so there is nothing to send. Cancel it, or plan its requests again.',
   },
   {
     operation: 'dispatchManifest',
     code: 'RIDER_UNAVAILABLE',
-    text: 'The manifest has no rider, or its rider is no longer active or no longer belongs to this hub. Assign a rider and dispatch again.',
+    text: 'The pickup run has no rider, or its rider is no longer active or no longer belongs to this hub. Assign a rider and dispatch again.',
   },
   {
     operation: 'dispatchManifest',
@@ -202,23 +202,23 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   },
 
   // Cancelling the manifest.
-  { operation: 'cancelPickupManifest', text: 'The manifest was not cancelled.' },
+  { operation: 'cancelPickupManifest', text: 'The pickup run was not cancelled.' },
   {
     operation: 'cancelPickupManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your account can’t cancel a manifest. Ask an administrator for access.',
+    text: 'Your account can’t cancel a pickup run. Ask an administrator for access.',
   },
   { operation: 'cancelPickupManifest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'cancelPickupManifest', code: 'NOT_FOUND', text: NOT_FOUND },
   {
     operation: 'cancelPickupManifest',
     code: 'RUN_ALREADY_STARTED',
-    text: 'This run has started, so the manifest cannot be cancelled. From here the way out is to skip a stop, or to hand custody over.',
+    text: 'This run has started, so the pickup run cannot be cancelled. From here the way out is to skip a stop, or to hand custody over.',
   },
   {
     operation: 'cancelPickupManifest',
     code: 'STATE_CONFLICT',
-    text: 'This manifest can no longer be cancelled: it is already cancelled or completed, or it changed after you opened it. Reload it to see where it stands.',
+    text: 'This pickup run can no longer be cancelled: it is already cancelled or completed, or it changed after you opened it. Reload it to see where it stands.',
   },
   { operation: 'cancelPickupManifest', code: 'REASON_REQUIRED', text: NOTE_NEEDED },
   { operation: 'cancelPickupManifest', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
@@ -268,7 +268,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'initiateRunCustodyHandover',
     code: 'STATE_CONFLICT',
-    text: 'A handover cannot be opened now: the run is not in progress, one is already waiting, custody is already with the hub, or the manifest changed after you opened it. Reload it to see where it stands.',
+    text: 'A handover cannot be opened now: the run is not in progress, one is already waiting, custody is already with the hub, or the pickup run changed after you opened it. Reload it to see where it stands.',
   },
   {
     operation: 'initiateRunCustodyHandover',
@@ -286,13 +286,13 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
     operation: 'initiateRunCustodyHandover',
     context: 'run_not_in_progress',
     code: 'STATE_CONFLICT',
-    text: 'The run is not in progress, so custody cannot be handed over. A run that has not started, or is over, has nothing to hand over. Reload the manifest to see where it stands.',
+    text: 'The run is not in progress, so custody cannot be handed over. A run that has not started, or is over, has nothing to hand over. Reload the pickup run to see where it stands.',
   },
   {
     operation: 'initiateRunCustodyHandover',
     context: 'custody_handover_pending',
     code: 'STATE_CONFLICT',
-    text: 'A handover of this run is already waiting, and only one can wait at a time. Reload the manifest to see it, then accept it or mark it as failed.',
+    text: 'A handover of this run is already waiting, and only one can wait at a time. Reload the pickup run to see it, then accept it or mark it as failed.',
   },
   {
     operation: 'initiateRunCustodyHandover',
@@ -305,25 +305,25 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
     operation: 'acceptRunCustodyHandover',
     context: 'run_not_in_progress',
     code: 'STATE_CONFLICT',
-    text: 'The run is not in progress any more, so there is nothing to accept. Reload the manifest to see where it stands.',
+    text: 'The run is not in progress any more, so there is nothing to accept. Reload the pickup run to see where it stands.',
   },
   {
     operation: 'acceptRunCustodyHandover',
     context: 'no_custody_handover_pending',
     code: 'STATE_CONFLICT',
-    text: 'No handover is waiting on this run: it was accepted or marked as failed already. Reload the manifest to see where it stands.',
+    text: 'No handover is waiting on this run: it was accepted or marked as failed already. Reload the pickup run to see where it stands.',
   },
   {
     operation: 'failRunCustodyHandover',
     context: 'run_not_in_progress',
     code: 'STATE_CONFLICT',
-    text: 'The run is not in progress any more, so there is nothing to mark as failed. Reload the manifest to see where it stands.',
+    text: 'The run is not in progress any more, so there is nothing to mark as failed. Reload the pickup run to see where it stands.',
   },
   {
     operation: 'failRunCustodyHandover',
     context: 'no_custody_handover_pending',
     code: 'STATE_CONFLICT',
-    text: 'No handover is waiting on this run: it was accepted or marked as failed already. Reload the manifest to see where it stands.',
+    text: 'No handover is waiting on this run: it was accepted or marked as failed already. Reload the pickup run to see where it stands.',
   },
   {
     operation: 'acceptRunCustodyHandover',

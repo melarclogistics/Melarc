@@ -6,16 +6,10 @@ import { describe, expect, it } from 'vitest';
 /**
  * A page asks the kit for what it needs through the component's own props and handle (`QueueWorkspaceHandle`, `DataTableHandle`) and never by a class of the kit's markup: the kit
  * changes its markup, and a page that looked for `.ui-data-table__scroller` would then fail without a word (the review of 5edada2, M4). This holds every file under `src/app/` to it:
- * no string in it names a class of the kit (`.ui-…`), as a selector, as a query or as a constant.
- *
- * Two files still know the markup of the manifest list's old table, and are named here until that list is drawn by the queue workspace as well (redesign step R7a, Stage 4):
- * the list page and the helper that gives a list its place back. Nothing else may.
+ * no string in it names a class of the kit (`.ui-…`), as a selector, as a query or as a constant. There is no exception: the manifest list, the last page that knew the markup
+ * of the old table, is drawn by the queue workspace since redesign step R7a.
  */
 const APP = resolve(import.meta.dirname, '../src/app');
-const LEGACY_UNTIL_THE_MANIFEST_LIST_MOVES = [
-  'pages/manifests/ManifestListPage.tsx',
-  'pages/pickup/queue-return.ts',
-];
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
@@ -44,20 +38,9 @@ describe('the pages of the application', () => {
         file: relative(APP, path).replaceAll('\\', '/'),
         named: kitClassesNamed(readFileSync(path, 'utf8')),
       }))
-      .filter(
-        ({ file, named }) =>
-          named.length > 0 && !LEGACY_UNTIL_THE_MANIFEST_LIST_MOVES.includes(file),
-      );
+      .filter(({ named }) => named.length > 0);
 
     expect(found).toEqual([]);
-  });
-
-  it('keep the legacy list to the two files that still know the old table, and no file that has stopped doing so', () => {
-    const present = LEGACY_UNTIL_THE_MANIFEST_LIST_MOVES.filter(
-      (file) => kitClassesNamed(readFileSync(join(APP, file), 'utf8')).length > 0,
-    );
-    // An entry that no longer names a kit class is a file that has been mended and is held to the rule from now on.
-    expect(present).toEqual(LEGACY_UNTIL_THE_MANIFEST_LIST_MOVES);
   });
 
   // Break caught: the check that finds nothing because it reads nothing, or that is fooled by a comment or by a string that only looks like a class.

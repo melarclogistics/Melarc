@@ -1259,9 +1259,7 @@ describeInterfaceStates('The pickup queue', {
         READER,
         '/pickup-requests?date=2026-11-03',
       );
-      await alertSaying(
-        'That filter was not accepted. Choose a state from the list and a whole date.',
-      );
+      await alertSaying('That filter was not accepted. Choose a state and a whole date.');
     },
   },
   error: {

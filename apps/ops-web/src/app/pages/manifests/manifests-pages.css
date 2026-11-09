@@ -38,20 +38,6 @@
   white-space: nowrap;
 }
 
-.manifest-card__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-}
-
-.manifest-card__title {
-  margin: 0;
-  font-size: var(--text-heading-sm-size);
-  line-height: var(--text-heading-sm-line-height);
-}
-
 .manifest-card__facts {
   margin: var(--space-3) 0 0;
 }

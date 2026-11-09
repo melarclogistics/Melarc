@@ -123,7 +123,7 @@ describe('a refusal that declares its rule is worded by the rule', () => {
     expect(problem.kind).toBe('conflict');
     expect(problem.rule).toBe('service_date_passed');
     expect(problem.message).toMatch(/day of this run has passed/);
-    expect(problem.message).toMatch(/Cancel the manifest/);
+    expect(problem.message).toMatch(/Cancel the pickup run/);
   });
 
   it('tells a dispatch refused for a pickup that is no longer confirmed, and names the stops', () => {
@@ -239,10 +239,8 @@ describe('the words of the list that is filtered', () => {
       context: 'cursor',
     });
 
-    expect(filter.message).toBe(
-      'That filter was not accepted. Choose a state from the list and a whole date.',
-    );
-    expect(page.message).toMatch(/That page of the manifests could not be opened/);
+    expect(filter.message).toBe('That filter was not accepted. Choose a state and a whole date.');
+    expect(page.message).toMatch(/That page of the pickup runs could not be opened/);
     expect(page.message).toMatch(/Go back to the first page/);
     expect(page.message).not.toBe(filter.message);
   });
@@ -271,7 +269,7 @@ describe('the words of the rules', () => {
       operation: 'createPickupManifest',
     });
 
-    expect(problem.message).toMatch(/already on a manifest/);
+    expect(problem.message).toMatch(/already on a pickup run/);
     expect(problem.message).toMatch(/nothing was created/);
   });
 

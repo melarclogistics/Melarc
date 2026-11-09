@@ -131,61 +131,6 @@
   color: var(--color-text-secondary);
 }
 
-/*
- * The filters' date control and its clearing button, side by side where there is room. They line up at the top, as the filters do (the date's
- * help text hangs beneath its control and moves nothing), and the button is set down by the height of the field's label and the gap beneath it,
- * so that it sits on the line of the control it clears and not of the help text.
- */
-.pickup-date-filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-2) var(--space-3);
-}
-
-.pickup-date-filter__clear {
-  margin-top: calc(var(--text-label-md-line-height) + var(--space-1));
-}
-
-/* The late bookings' filter (task C1.1): the words that say it is set, over the button that takes it off, like the date's pair. */
-.pickup-cutoff-filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.pickup-cutoff-filter__text {
-  margin: 0;
-}
-
-/*
- * The refresh and the time of the page's last check, beside the filters (QueueFilters `aside`). It is built like a field, the line of text over
- * the button, so that the button sits on the line of the controls beside it when the aside stands at the end of their row, and is simply the
- * button under its line of text when it has a row to itself. The line keeps its height when it says nothing, so that the button does not move
- * as the line comes and goes. The announcement of a finished refresh is read and not seen (`pickup-hidden`), against this block.
- */
-.pickup-freshness {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
-}
-
-.pickup-freshness__text {
-  min-height: var(--text-label-md-line-height);
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-label-md-line-height);
-}
-
-/* A code, a date, a count: a short line that is never broken in the middle (the other words of a table's cell wrap, and the row grows to hold them). */
-.pickup-nowrap {
-  white-space: nowrap;
-}
-
 /* Two facts in one cell of a queue (a name over an address, a person over a time), each on its own line. */
 .pickup-lines {
   display: grid;
@@ -208,7 +153,7 @@
 /*
  * The dash of a request that needs nothing, and its hidden words (the same device as the message log's, messages-page.css): the words are
  * positioned against their own dash, so that a table scrolled sideways takes them with it. The refresh's announcement uses the same hidden
- * words, positioned against its own block (`pickup-freshness`).
+ * words.
  */
 .pickup-dash {
   position: relative;

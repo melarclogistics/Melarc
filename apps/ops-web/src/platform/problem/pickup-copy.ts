@@ -29,7 +29,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'listPickupRequests',
     code: 'VALIDATION_FAILED',
-    text: 'That filter was not accepted. Choose a state from the list and a whole date.',
+    text: 'That filter was not accepted. Choose a state and a whole date.',
   },
   // A page of the queue the server will not open (its `page_token` is refused): not a filter, and not worth asking for again.
   {

@@ -821,7 +821,7 @@ describeInterfaceStates('the manifest page', {
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL_ERROR'));
-      expect(await screen.findByText('This manifest could not be loaded.')).toBeVisible();
+      expect(await screen.findByText('This pickup run could not be loaded.')).toBeVisible();
       expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
     },
   },

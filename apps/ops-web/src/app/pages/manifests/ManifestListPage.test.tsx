@@ -11,15 +11,16 @@ import {
   MANIFEST_ID,
   STOP_TWO_ID,
 } from '../../../test-support/manifest-fixture';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
- * `/manifests` (`listPickupManifests`; S1.25). The manifests of the session's hubs, as the server lists them: oldest first, never filtered by
- * vendor. Two filters, `state` and `service_date` (OB-S1-25), are the server's: the screen asks, in the address and in the request, and
- * filters nothing itself. A manifest is named by its code, its state is a labelled badge, and an empty list is told as no manifests, or as
+ * `/manifests` (`listPickupManifests`; S1.25; R7a). The pickup runs of the session's hubs, as the server lists them: oldest first, never filtered by
+ * vendor. Two filters, `state` (the views of the page) and `service_date` (OB-S1-25), are the server's: the screen asks, in the address and in the request, and
+ * filters nothing itself. A pickup run is named by its code, its state is a labelled badge, and an empty list is told as no pickup runs, or as
  * a filter that hides everything.
  */
 const LIST = 'GET /pickup-manifests';
@@ -45,6 +46,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 function open(
@@ -63,8 +65,33 @@ function open(
   return renderApp(path);
 }
 
-const table = () => screen.findByRole('table', { name: 'Manifests' });
-const cards = () => screen.findByRole('list', { name: 'Manifests' });
+/** The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited. */
+const table = async (): Promise<HTMLElement> => {
+  const found = await screen.findByRole('table', { name: 'Pickup runs' });
+  await waitFor(() => {
+    expect(found).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return found;
+};
+/** In a room under 40rem the rows are cards (`narrowRoom`). */
+const cards = () => screen.findByRole('list', { name: 'Pickup runs' });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+const viewTab = (name: string) => screen.getByRole('tab', { name });
+const removeChip = (label: string) =>
+  screen.getByRole('button', { name: `Remove filter: ${label}` });
+/** The date filter lives in the popover of the filter row: opened with the Filter button, and its field is the date field of the kit. */
+async function openDateFilter(view: ReturnType<typeof open>): Promise<HTMLElement> {
+  await view.user.click(screen.getByRole('button', { name: 'Filter' }));
+  return screen.findByRole('group', { name: 'Service date' });
+}
+/** The rows of pickup runs the table draws: a run's row header is its code. The table's own message (nothing yet, a failure) sits in a cell and is not one. */
+const runRows = () => screen.queryAllByRole('rowheader');
 const asked = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-manifests');
 const queryOf = (index = -1) => new URL(asked().at(index)?.url ?? 'http://x/').searchParams;
@@ -81,8 +108,8 @@ describe('the manifests: what the list shows', () => {
   it('shows each manifest by its code, state, day, hub and rider, and links to it', async () => {
     open();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Manifests' })).toBeVisible();
-    expect(document.title).toBe('Manifests · Melarc Ops Portal');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Pickup runs' })).toBeVisible();
+    expect(document.title).toBe('Pickup runs · Melarc Ops Portal');
     const first = await rowOf('ACC-MF-Q92422');
     expect(within(first).getByText('Draft')).toBeVisible();
     expect(within(first).getByText('Wed 4 Nov 2026')).toBeVisible();
@@ -108,7 +135,8 @@ describe('the manifests: what the list shows', () => {
     expect(screen.queryByText('DRAFT')).toBeNull();
   });
 
-  it('draws every manifest a second time as a card with the same facts', async () => {
+  it('draws a pickup run as a card with the same facts, in a room too narrow for the columns', async () => {
+    narrowRoom();
     open();
 
     const card = within(await cards())
@@ -132,11 +160,11 @@ describe('the manifests: what the list shows', () => {
     expect(document.body.textContent).not.toContain('9d0e1f2a');
   });
 
-  it('says it is oldest first, as the server returns it, and asks for no filter until one is chosen', async () => {
+  it('says it is oldest first, as the server lists it, and asks for no filter until one is chosen', async () => {
     open();
     await table();
 
-    expect(screen.getByText(/Listed oldest first, as the server returns them\./)).toBeVisible();
+    expect(screen.getByText('Oldest first, as the server lists them')).toBeVisible();
     expect(screen.queryByText(/There is no filter yet/)).toBeNull();
     expect(asked()).toHaveLength(1);
     expect([...queryOf(0).keys()]).toEqual([]);
@@ -146,7 +174,7 @@ describe('the manifests: what the list shows', () => {
     open(undefined, ['pickup.read', 'pickup.manifest.create']);
     await table();
     expect(
-      within(screen.getByRole('main')).getByRole('link', { name: 'Build a manifest' }),
+      within(screen.getByRole('main')).getByRole('link', { name: 'Build a pickup run' }),
     ).toHaveAttribute('href', '/manifests/new');
   });
 
@@ -154,7 +182,7 @@ describe('the manifests: what the list shows', () => {
     open();
     await table();
     expect(
-      within(screen.getByRole('main')).queryByRole('link', { name: 'Build a manifest' }),
+      within(screen.getByRole('main')).queryByRole('link', { name: 'Build a pickup run' }),
     ).toBeNull();
   });
 
@@ -162,8 +190,8 @@ describe('the manifests: what the list shows', () => {
   it('shows no list at all when one manifest in it is not a manifest', async () => {
     open(() => page([draft, { ...started, code: 'not a code' }]));
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The pickup runs could not be loaded.');
+    expect(runRows()).toHaveLength(0);
   });
 });
 
@@ -190,14 +218,14 @@ describe('the manifests: paging and freshness', () => {
     await rowOf('ACC-MF-Q92422');
   });
 
-  it('reads the page again on Refresh page, and says when it was last checked', async () => {
+  it('reads the page again on Refresh, and says when it was last checked', async () => {
     open();
     await table();
-    expect(screen.getByText(/Last checked /)).toBeVisible();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
     const before = asked().length;
 
     const { default: userEvent } = await import('@testing-library/user-event');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh page' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh' }));
     await rowOf('ACC-MF-Q92422');
 
     expect(asked().length).toBe(before + 1);
@@ -206,26 +234,27 @@ describe('the manifests: paging and freshness', () => {
 
 describe('the manifests: filtering', () => {
   it('asks for every state and day by default, and offers each state the contract has', async () => {
-    open();
+    const view = open();
     await table();
 
     expect(queryOf(0).has('state')).toBe(false);
     expect(queryOf(0).has('service_date')).toBe(false);
-    const filter = screen.getByRole('combobox', { name: 'State' });
+    const views = screen.getByRole('tablist', { name: 'Views of the pickup runs' });
     expect(
-      within(filter)
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['Every state', 'Draft', 'Dispatched', 'In progress', 'Completed', 'Cancelled']);
-    expect(screen.getByRole('group', { name: 'Filter the manifests' })).toBeVisible();
-    expect(screen.getByRole('group', { name: 'Service date' })).toBeVisible();
+      within(views)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['All', 'Draft', 'Dispatched', 'In progress', 'Completed', 'Cancelled']);
+    expect(viewTab('All')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('group', { name: 'Filter the pickup runs' })).toBeVisible();
+    expect(await openDateFilter(view)).toBeVisible();
   });
 
   it('asks for the state that is chosen, and puts it in the address', async () => {
     const { user, router } = open();
     await table();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'IN_PROGRESS');
+    await user.click(viewTab('In progress'));
 
     await waitFor(() => {
       expect(queryOf().get('state')).toBe('IN_PROGRESS');
@@ -240,8 +269,8 @@ describe('the manifests: filtering', () => {
 
     expect(queryOf(0).get('state')).toBe('DRAFT');
     expect(queryOf(0).get('service_date')).toBe('2026-11-04');
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
-    expect(screen.getByRole('button', { name: 'Every service date' })).toBeVisible();
+    expect(viewTab('Draft')).toHaveAttribute('aria-selected', 'true');
+    expect(removeChip('Service date: Wed 4 Nov 2026')).toBeVisible();
   });
 
   // Break caught: a made-up value in the address sent to the server as a made-up filter, which it answers with a 400.
@@ -263,8 +292,8 @@ describe('the manifests: filtering', () => {
     expect(queryOf(0).has('state')).toBe(false);
     expect(queryOf(0).has('service_date')).toBe(false);
     // And the screen shows no filter either: it does not hold a value it would never send.
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('');
-    expect(screen.queryByRole('button', { name: 'Every service date' })).toBeNull();
+    expect(viewTab('All')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('button', { name: /^Remove filter: / })).toBeNull();
   });
 
   // Break caught: a repeated parameter sent as it stands in the address, which the contract refuses.
@@ -282,9 +311,10 @@ describe('the manifests: filtering', () => {
   });
 
   it('asks for the day that is typed, once it is a whole date, and keeps the state', async () => {
-    const { user, router } = open(undefined, READER, '/manifests?state=DRAFT');
+    const view = open(undefined, READER, '/manifests?state=DRAFT');
+    const { user, router } = view;
     await table();
-    const group = screen.getByRole('group', { name: 'Service date' });
+    const group = await openDateFilter(view);
 
     await user.click(within(group).getByRole('textbox'));
     await user.keyboard('04112026');
@@ -301,11 +331,11 @@ describe('the manifests: filtering', () => {
     }
   });
 
-  it('takes the day off with its own button, and keeps the state', async () => {
+  it('takes the day off with its own chip, and keeps the state', async () => {
     const { user, router } = open(undefined, READER, '/manifests?state=DRAFT&date=2026-11-04');
     await table();
 
-    await user.click(screen.getByRole('button', { name: 'Every service date' }));
+    await user.click(removeChip('Service date: Wed 4 Nov 2026'));
 
     await waitFor(() => {
       expect(router.state.location.search).toBe('?state=DRAFT');
@@ -317,21 +347,19 @@ describe('the manifests: filtering', () => {
   // Break caught: a screen that sends a parameter the contract refuses (an empty one, a repeated one, a state of another case, a day that does not
   // exist) after a person has chosen, cleared and typed in every order.
   it('sends only parameters the contract accepts, whatever the person does', async () => {
-    const { user } = open();
+    const view = open();
+    const { user } = view;
     await table();
-    const choose = screen.getByRole('combobox', { name: 'State' });
 
-    await user.selectOptions(choose, 'DISPATCHED');
-    await user.selectOptions(choose, '');
-    await user.selectOptions(choose, 'COMPLETED');
-    await user.click(
-      within(screen.getByRole('group', { name: 'Service date' })).getByRole('textbox'),
-    );
+    await user.click(viewTab('Dispatched'));
+    await user.click(viewTab('All'));
+    await user.click(viewTab('Completed'));
+    await user.click(within(await openDateFilter(view)).getByRole('textbox'));
     await user.keyboard('04112026');
     await waitFor(() => {
       expect(queryOf().get('service_date')).toBe('2026-11-04');
     });
-    await user.click(screen.getByRole('button', { name: 'Every service date' }));
+    await user.click(removeChip('Service date: Wed 4 Nov 2026'));
     await waitFor(() => {
       expect(queryOf().has('service_date')).toBe(false);
     });
@@ -373,7 +401,7 @@ describe('the manifests: paging under a filter', () => {
     await screen.findByText(/on page 2/);
     expect(queryOf().get('page_token')).toBe('next-1');
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'DRAFT');
+    await user.click(viewTab('Draft'));
 
     await waitFor(() => {
       expect(queryOf().get('state')).toBe('DRAFT');
@@ -383,14 +411,13 @@ describe('the manifests: paging under a filter', () => {
   });
 
   it('starts again at the first page when the day changes', async () => {
-    const { user } = open(() => page([draft], 'next-1'));
+    const view = open(() => page([draft], 'next-1'));
+    const { user } = view;
     await table();
     await user.click(screen.getByRole('button', { name: /Next page/ }));
     await screen.findByText(/on page 2/);
 
-    await user.click(
-      within(screen.getByRole('group', { name: 'Service date' })).getByRole('textbox'),
-    );
+    await user.click(within(await openDateFilter(view)).getByRole('textbox'));
     await user.keyboard('04112026');
 
     await waitFor(() => {
@@ -415,8 +442,8 @@ describe('the manifests: nothing to show', () => {
   it('tells a list with no manifests at all as that', async () => {
     open(() => page([]));
 
-    expect(await screen.findByRole('heading', { name: 'No manifests yet' })).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests match' })).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'No pickup runs yet' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No pickup runs match' })).toBeNull();
   });
 
   // Break caught (ops-portal.md section 7): "no manifests" and "filtered to nothing" told as one, which sends Ops hunting for a bug.
@@ -427,18 +454,18 @@ describe('the manifests: nothing to show', () => {
       '/manifests?state=IN_PROGRESS&date=2026-11-04',
     );
 
-    expect(await screen.findByRole('heading', { name: 'No manifests match' })).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests yet' })).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'No pickup runs match' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No pickup runs yet' })).toBeNull();
     expect(
       screen.getByText(/Nothing fits the state In progress and the service date Wed 4 Nov 2026\./),
     ).toBeVisible();
 
-    await user.click(screen.getByRole('button', { name: 'Show every manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Show every pickup run' }));
 
     await waitFor(() => {
       expect(router.state.location.search).toBe('');
     });
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    expect(viewTab('All')).toHaveAttribute('aria-selected', 'true');
     expect(queryOf().has('state')).toBe(false);
     expect(queryOf().has('service_date')).toBe(false);
   });
@@ -461,8 +488,10 @@ describe('the manifests: nothing to show', () => {
 
     await user.click(screen.getByRole('button', { name: /Next page/ }));
 
-    expect(await screen.findByRole('heading', { name: 'No manifests on this page' })).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests match' })).toBeNull();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup runs on this page' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No pickup runs match' })).toBeNull();
   });
 });
 
@@ -471,10 +500,10 @@ describe('the manifests: when the list cannot be had under a filter', () => {
   it('keeps a failed read as a failure, with the filters in place and a way to try again', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'), READER, '/manifests?state=DRAFT');
 
-    expect(await screen.findByText('The manifests could not be loaded.')).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests match' })).toBeNull();
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
-    expect(screen.getByRole('button', { name: /try again|retry/i })).toBeVisible();
+    await alertSaying('The pickup runs could not be loaded.');
+    expect(screen.queryByRole('heading', { name: 'No pickup runs match' })).toBeNull();
+    expect(viewTab('Draft')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
   });
 
   // Break caught: a refused filter told as a refused page, or as an empty list that hides the mistake.
@@ -488,12 +517,8 @@ describe('the manifests: when the list cannot be had under a filter', () => {
       '/manifests?state=DRAFT',
     );
 
-    expect(
-      await screen.findByText(
-        'That filter was not accepted. Choose a state from the list and a whole date.',
-      ),
-    ).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests match' })).toBeNull();
+    await alertSaying('That filter was not accepted. Choose a state and a whole date.');
+    expect(screen.queryByRole('heading', { name: 'No pickup runs match' })).toBeNull();
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
@@ -508,7 +533,7 @@ describe('the manifests: when the list cannot be had under a filter', () => {
     await table();
     await user.click(screen.getByRole('button', { name: /Next page/ }));
 
-    expect(await screen.findByText(/That page of the manifests could not be opened/)).toBeVisible();
+    await alertSaying('That page of the pickup runs could not be opened');
     await user.click(screen.getByRole('button', { name: 'Back to first page' }));
 
     await rowOf('ACC-MF-Q92422');
@@ -520,16 +545,16 @@ describeInterfaceStates('the manifest list', {
   loading: {
     test: async () => {
       open(() => new Promise<Response>(() => undefined));
-      expect(await screen.findByText('Loading the manifests…')).toBeVisible();
+      expect(await screen.findByText('Loading pickup runs')).toBeVisible();
     },
   },
   empty: {
     test: async () => {
       open(() => page([]));
-      expect(await screen.findByRole('heading', { name: 'No manifests yet' })).toBeVisible();
+      expect(await screen.findByRole('heading', { name: 'No pickup runs yet' })).toBeVisible();
       expect(screen.queryByText(/filtered|match/i)).toBeNull();
       // And a filter that hides everything is another state (the filtering tests above).
-      expect(screen.queryByRole('heading', { name: 'No manifests match' })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'No pickup runs match' })).toBeNull();
     },
   },
   'validation error': {
@@ -542,18 +567,14 @@ describeInterfaceStates('the manifest list', {
         READER,
         '/manifests?date=2026-11-04',
       );
-      expect(
-        await screen.findByText(
-          'That filter was not accepted. Choose a state from the list and a whole date.',
-        ),
-      ).toBeVisible();
-      expect(screen.getByRole('group', { name: 'Service date' })).toBeVisible();
+      await alertSaying('That filter was not accepted. Choose a state and a whole date.');
+      expect(removeChip('Service date: Wed 4 Nov 2026')).toBeVisible();
     },
   },
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL_ERROR'));
-      expect(await screen.findByText('The manifests could not be loaded.')).toBeVisible();
+      await alertSaying('The pickup runs could not be loaded.');
       expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
     },
   },
@@ -582,7 +603,7 @@ describeInterfaceStates('the manifest list', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
+      await alertSaying(cannotText('pickup.read'));
     },
   },
 });
