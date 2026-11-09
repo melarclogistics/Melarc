@@ -11,6 +11,7 @@ import {
   BROWSERS,
   DATABASE_SHARD_VARIABLE,
   PLAN_JOB,
+  UNPLANNED_JOBS,
   FAILURE_UPLOAD_CONDITION,
   MATRIX_BROWSERS,
   MATRIX_ENGINE,
@@ -179,7 +180,7 @@ const JOB_IDS = [
   'verifier',
 ];
 /** The command of the verdict, with the one allowance and every job named. */
-const AGGREGATE_COMMAND = `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
+const AGGREGATE_COMMAND = `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`;
 
 /** A job that waits for the plan and runs when it says so, as every job but the plan and the verdict does. */
 function job(steps: Json[]): Json {
@@ -191,6 +192,14 @@ function job(steps: Json[]): Json {
     'timeout-minutes': 10,
     steps: [CHECKOUT, SETUP, ...steps],
   };
+}
+
+/** A job the plan does not decide (the dependency audit): no need and no condition, so it runs on every run, the nightly run that stands down included. */
+function unplannedJob(steps: Json[]): Json {
+  const made = job(steps);
+  Reflect.deleteProperty(made, 'needs');
+  Reflect.deleteProperty(made, 'if');
+  return made;
 }
 
 /** The job that decides whether the run is to run. */
@@ -284,7 +293,7 @@ function goodShared(): Json {
         ...browserJob(shardEntries(SHARD_COUNTS, ['firefox', 'webkit'])),
         if: PULL_REQUEST_SKIP,
       },
-      audit: job([run('pnpm audit --audit-level high')]),
+      audit: unplannedJob([run('pnpm audit --audit-level high')]),
       verifier: job([run('pnpm run verifier:test')]),
       [AGGREGATE_JOB]: {
         name: 'CI result',
@@ -547,22 +556,25 @@ describe('the aggregate job', () => {
   // that nothing skips would let a failure of its own be taken for a skip; a job skipped that the verdict does not allow turns every pull
   // request red. The allowance is one option, naming exactly the jobs that carry the one condition.
   const allowances: [label: string, command: string][] = [
-    ['no allowance', `node scripts/ci-aggregate.ts --plan=plan ${JOB_IDS.join(' ')}`],
+    [
+      'no allowance',
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit ${JOB_IDS.join(' ')}`,
+    ],
     [
       'another job allowed',
-      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=unit ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=unit ${JOB_IDS.join(' ')}`,
     ],
     [
       'the job and another allowed',
-      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES},browser-chromium ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES},browser-chromium ${JOB_IDS.join(' ')}`,
     ],
     [
       'the allowance given twice',
-      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
     [
       'a job that does not exist allowed',
-      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES},ghost ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES},ghost ${JOB_IDS.join(' ')}`,
     ],
   ];
   for (const [label, command] of allowances) {
@@ -1572,7 +1584,8 @@ describe('what each kind of run runs of the browser tests', () => {
   it('rejects the same when the allowance is taken off the verdict as well, and says which run', () => {
     const problems = found((jobs) => {
       jobs[OTHER_ENGINES].if = PLANNED_RUN;
-      stepAt(jobs.ci, 1).run = `node scripts/ci-aggregate.ts --plan=plan ${JOB_IDS.join(' ')}`;
+      stepAt(jobs.ci, 1).run =
+        `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit ${JOB_IDS.join(' ')}`;
     });
     assert.deepEqual(
       problems.map((problem) => problem.code),
@@ -2496,12 +2509,17 @@ describe('this repository', () => {
     assert.deepEqual(command.skippedOnPullRequest, notOnPullRequest);
     // The plan the verdict reads is the job that decides, and every job but the plan waits for it and has its condition.
     assert.equal(command.plan, PLAN_JOB);
-    for (const id of ids.filter((name) => name !== PLAN_JOB)) {
+    for (const id of ids.filter((name) => name !== PLAN_JOB && !UNPLANNED_JOBS.includes(name))) {
       assert.ok(
         [PLANNED_RUN, PULL_REQUEST_SKIP].includes(String(jobRecord(id).if)),
         `${id} has the plan's condition`,
       );
       assert.equal(jobRecord(id).needs, PLAN_JOB, id);
+    }
+    // The jobs the plan does not decide (the audit) have no condition and no need, and the verdict is told so.
+    assert.deepEqual(command.runsAlways, [...UNPLANNED_JOBS]);
+    for (const id of UNPLANNED_JOBS) {
+      assert.ok(!('if' in jobRecord(id)) && !('needs' in jobRecord(id)), `${id} is not planned`);
     }
 
     for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch']) {
@@ -2516,7 +2534,12 @@ describe('this repository', () => {
             ),
           ),
           command.jobs,
-          { event, skippedOnPullRequest: command.skippedOnPullRequest, plan: command.plan },
+          {
+            event,
+            skippedOnPullRequest: command.skippedOnPullRequest,
+            runsAlways: command.runsAlways,
+            plan: command.plan,
+          },
         ).problems.map((problem) => `${problem.code} ${problem.job ?? ''}`);
       assert.deepEqual(
         judged(() => 'success'),
@@ -2570,7 +2593,7 @@ function scriptsOf(packageJson: string): string[] {
 // Task CI.2 (the Product Owner's decisions of 7 November 2026): the plan of the run, a timeout on every test step, the diagnostics kept on a
 // cancellation, the browsers cached, the timing tests left out of a pull request, the database tests in shards, and a weekday nightly run.
 describe('the plan of the run', () => {
-  const OTHERS = JOB_IDS.filter((id) => id !== PLAN_JOB);
+  const OTHERS = JOB_IDS.filter((id) => id !== PLAN_JOB && !UNPLANNED_JOBS.includes(id));
   const PLANNED_ONLY = OTHERS.filter((id) => id !== OTHER_ENGINES);
   const planStep = (jobs: Jobs): Json => stepRunning(jobs.plan, PLAN_COMMAND);
 
@@ -2687,24 +2710,85 @@ describe('the plan of the run', () => {
     });
   }
 
+  // Break caught (run 4, Stage 1, item 4): the audit skipped with the rest on a night that stands down. It is the one job the plan does not decide: an
+  // advisory is published with no commit, so a night that audited only when the code had changed would never see one. It has no condition and waits for nothing.
+  for (const id of UNPLANNED_JOBS) {
+    it(`requires ${id} to have no condition: the plan does not decide it`, () => {
+      for (const condition of [PLANNED_RUN, 'always()', "github.event_name != 'pull_request'"]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            const target = (jobs as unknown as Record<string, Json>)[id];
+            assert.ok(target !== undefined);
+            target.if = condition;
+          }),
+          ['JOB_CONDITIONAL'],
+          condition,
+        );
+      }
+    });
+
+    it(`requires ${id} to wait for nothing: a plan that failed does not take it down with it`, () => {
+      for (const needs of ['plan', ['plan'], ['static'], []]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            const target = (jobs as unknown as Record<string, Json>)[id];
+            assert.ok(target !== undefined);
+            target.needs = needs;
+          }),
+          ['UNPLANNED_JOB_DRIFT'],
+          JSON.stringify(needs),
+        );
+      }
+    });
+  }
+
+  // Break caught: the verdict not told that the audit runs on every run, so that a skip of it on a night that stands down is accepted as the plan's.
+  for (const [label, command] of [
+    [
+      'no option',
+      `node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'another job',
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=unit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'the audit and another',
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit,unit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+    [
+      'the option twice',
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+    ],
+  ] as const) {
+    it(`requires the verdict to name the jobs the plan does not decide, once: not ${label}`, () => {
+      assert.deepEqual(
+        codesWith((_, jobs) => {
+          stepAt(jobs.ci, 1).run = command;
+        }),
+        ['AGGREGATE_ALWAYS_DRIFT'],
+      );
+    });
+  }
+
   // Break caught: the verdict not told which job is the plan, so that a night that stands down is red; or told another job, whose output
   // would then decide whether the skips are allowed.
   for (const [label, command] of [
     [
       'no plan',
-      `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
     [
       'another job as the plan',
-      `node scripts/ci-aggregate.ts --plan=static --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=static --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
     [
       'an empty plan',
-      `node scripts/ci-aggregate.ts --plan= --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan= --runs-always=audit --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
     [
       'the plan twice',
-      `node scripts/ci-aggregate.ts --plan=plan --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
+      `node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --plan=plan --skipped-on-pull-request=${OTHER_ENGINES} ${JOB_IDS.join(' ')}`,
     ],
   ] as const) {
     it(`requires the verdict to name the plan once, as --plan=plan: not ${label}`, () => {
@@ -2721,7 +2805,7 @@ describe('the plan of the run', () => {
     assert.deepEqual(
       codesWith((_, jobs) => {
         stepAt(jobs.ci, 1).run =
-          `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} --plan=plan ${JOB_IDS.join(' ')}`;
+          `node scripts/ci-aggregate.ts --skipped-on-pull-request=${OTHER_ENGINES} --runs-always=audit --plan=plan ${JOB_IDS.join(' ')}`;
       }),
       [],
     );

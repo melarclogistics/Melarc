@@ -385,6 +385,7 @@ describe('the arguments of the command', () => {
     assert.deepEqual(parseArguments(['--skipped-on-pull-request=a,b', 'static', 'a', 'b']), {
       jobs: ['static', 'a', 'b'],
       skippedOnPullRequest: ['a', 'b'],
+      runsAlways: [],
       plan: undefined,
       unreadable: [],
     });
@@ -393,6 +394,7 @@ describe('the arguments of the command', () => {
       {
         jobs: [],
         skippedOnPullRequest: ['a', 'b'],
+        runsAlways: [],
         plan: undefined,
         unreadable: [],
       },
@@ -413,6 +415,7 @@ describe('the arguments of the command', () => {
       assert.deepEqual(parseArguments([argument, 'static']), {
         jobs: ['static'],
         skippedOnPullRequest: [],
+        runsAlways: [],
         plan: undefined,
         unreadable: [argument],
       });
@@ -423,6 +426,7 @@ describe('the arguments of the command', () => {
     assert.deepEqual(parseArguments(['--plan=plan', 'plan', 'static']), {
       jobs: ['plan', 'static'],
       skippedOnPullRequest: [],
+      runsAlways: [],
       plan: 'plan',
       unreadable: [],
     });
@@ -441,6 +445,77 @@ describe('the arguments of the command', () => {
       assert.ok(parsed.unreadable.length >= 1, 'an unreadable argument is reported');
     });
   }
+});
+
+describe('the jobs the plan does not decide (run 4, Stage 1, item 4: the dependency audit)', () => {
+  it('reads the option that names them, and finds an empty name unreadable', () => {
+    assert.deepEqual(parseArguments(['--runs-always=audit', 'audit', 'static']).runsAlways, [
+      'audit',
+    ]);
+    assert.deepEqual(parseArguments(['--runs-always=a,b', 'static']).runsAlways, ['a', 'b']);
+    for (const argument of ['--runs-always=', '--runs-always=a,']) {
+      const parsed = parseArguments([argument, 'static']);
+      assert.deepEqual(parsed.unreadable, [argument]);
+      assert.deepEqual(parsed.runsAlways, []);
+    }
+  });
+
+  const JOBS = ['plan', 'static', 'audit'] as const;
+  const night = (results: Record<string, string>, run: string): string =>
+    JSON.stringify(
+      Object.fromEntries(
+        JOBS.map((job) => [
+          job,
+          { result: results[job] ?? 'success', outputs: job === 'plan' ? { run } : {} },
+        ]),
+      ),
+    );
+  const judge = (needs: string, runsAlways: readonly string[]) =>
+    aggregate(needs, JOBS, { event: 'schedule', plan: 'plan', runsAlways });
+
+  // Break caught: the audit skipped with the rest on a night that stands down, which is the finding: an advisory is published with no commit, and the night
+  // that finds the code unchanged would have passed without looking for one.
+  it('does not accept a skip of the audit on a night that stands down, though it accepts the skip of every other job', () => {
+    const needs = night({ static: 'skipped', audit: 'skipped' }, 'false');
+
+    const named = judge(needs, ['audit']);
+    assert.deepEqual(
+      named.problems.map((problem) => [problem.code, problem.job]),
+      [['JOB_NOT_SUCCESSFUL', 'audit']],
+    );
+    assert.deepEqual(
+      named.verdicts.find((verdict) => verdict.job === 'static'),
+      {
+        job: 'static',
+        result: 'skipped',
+        allowed: true,
+        skippedBy: 'plan',
+      },
+    );
+
+    // The control: with nothing named, the plan's word allows the skip of the audit too, which is what the workflow no longer says.
+    assert.deepEqual(judge(needs, []).problems, []);
+  });
+
+  it('is satisfied when the audit ran on the night that stood down', () => {
+    assert.deepEqual(judge(night({ static: 'skipped' }, 'false'), ['audit']).problems, []);
+  });
+
+  // Break caught: a failed audit absorbed by the plan's allowance, or a job named as always-running that the check was not told to expect.
+  it('fails an audit that failed, and refuses an always-running job that is not a mandatory one', () => {
+    assert.deepEqual(
+      judge(night({ audit: 'failure', static: 'skipped' }, 'false'), ['audit']).problems.map(
+        (problem) => problem.code,
+      ),
+      ['JOB_NOT_SUCCESSFUL'],
+    );
+    assert.deepEqual(
+      judge(night({ static: 'skipped' }, 'false'), ['audit', 'elsewhere']).problems.map(
+        (problem) => problem.code,
+      ),
+      ['ALWAYS_JOB_UNKNOWN'],
+    );
+  });
 });
 
 describe('the plan of the nightly run (task CI.2)', () => {

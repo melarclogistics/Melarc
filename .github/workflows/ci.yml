@@ -18,12 +18,13 @@
 # wall-clock time (apps/api/test/timing-sensitive-tests.ts: a loaded runner fails them for a reason that is not the code's); a push to
 # main, the nightly run and a manual run run all of them, so Firefox and WebKit are tested on every commit that reaches main, and every
 # night. The nightly run is a weekday run, and it stands down when nothing changed: the plan job asks GitHub for the last successful
-# nightly run, and when that run tested the commit main is at now, every other job is skipped (scripts/ci-plan.ts). A push, a pull
+# nightly run, and when that run tested the commit main is at now, every other job but the dependency audit is skipped (scripts/ci-plan.ts: an
+# advisory is published with no commit, so the audit runs every night whatever the plan says). A push, a pull
 # request and a manual run are never skipped, and the one nightly skip is the one "CI result" accepts below.
 #
 # Require the "CI result" check, and only that one, in the branch rule for main: it cannot pass while any
 # mandatory job failed, was cancelled or was skipped, with two exceptions that scripts/ci-aggregate.ts makes and
-# nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; and every job
+# nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; and every job but the audit
 # is skipped on a nightly run whose plan, a job that succeeded, said run=false, and that is a success. On any other run a
 # skip is a failure. scripts/ci-workflow.test.ts keeps this file to that design (no check dropped, no failure absorbed, one
 # verdict, every job on the commit under test, the two skips as decided, a timeout of its own on every test step, the
@@ -66,9 +67,9 @@ env:
   TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
-  # Whether this run is to run at all (task CI.2, scripts/ci-plan.ts). Every other job needs this one and runs only when its answer is
+  # Whether this run is to run at all (task CI.2, scripts/ci-plan.ts). Every other job but the dependency audit needs this one and runs only when its answer is
   # true, which it always is except on a nightly run that finds main where the last successful nightly run left it: that night nothing
-  # is tested again, every other job is skipped, and "CI result" accepts the skips on that answer and on no other (scripts/ci-aggregate.ts).
+  # is tested again, every other job but the audit is skipped, and "CI result" accepts the skips on that answer and on no other (scripts/ci-aggregate.ts).
   # The plan asks only on the schedule event, and every way the question can fail answers "run": a night's tests are never skipped on a
   # guess. It is the one job with a permission beyond reading the code: it lists the workflow's runs, which `actions: read` allows.
   plan:
@@ -642,10 +643,11 @@ jobs:
         timeout-minutes: 16
         run: pnpm run verifier:test
 
+  # The one job the plan does not decide (run 4, Stage 1, item 4): no need and no condition, so it runs on every run, the nightly run that stands down
+  # included, and "CI result" never accepts a skip of it (--runs-always=audit). What it checks changes with no commit: an advisory is published overnight,
+  # and a night that audited only when the code had changed would not see it.
   audit:
     name: Dependency audit
-    needs: plan
-    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -697,10 +699,10 @@ jobs:
       # Fails unless every job above succeeded. A failed, cancelled or skipped job is not a success; a matrix is one job here though it
       # is many, and its result is `success` only when every one of its jobs succeeded. Two skips are accepted: the skip of
       # browser-firefox-webkit on a pull request, which does not run it (the second option below, and EVENT, which says it is a pull
-      # request); and the skip of every job on a nightly run whose plan (the first option, the job that decides) succeeded and said
+      # request); and the skip of every job but the audit on a nightly run whose plan (the first option, the job that decides) succeeded and said
       # run=false, EVENT being the schedule: on a push to main, in a manual run and in the other nightly runs a skip is a failure like any other.
       - name: Require every mandatory job to have succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
-        run: node scripts/ci-aggregate.ts --plan=plan --skipped-on-pull-request=browser-firefox-webkit plan static unit database integrated https browser-chromium browser-firefox-webkit audit verifier
+        run: node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=browser-firefox-webkit plan static unit database integrated https browser-chromium browser-firefox-webkit audit verifier

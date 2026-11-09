@@ -13,7 +13,8 @@
  *
  * The verdict job (scripts/ci-aggregate.ts, `--plan`) accepts the skipped jobs of a run only on the schedule event and only when this plan,
  * a job that succeeded, said `run=false`. `scripts/ci-workflow.test.ts` holds the workflow to that design: this job first, every other job
- * after it and conditioned on its answer.
+ * but the dependency audit after it and conditioned on its answer (the audit is not decided by the plan: an advisory is published with no commit, so
+ * it runs on every run, a night that stands down included, and the verdict never accepts a skip of it: `--runs-always=audit`).
  *
  * Usage (in the workflow, one step with the id `plan`; the token needs `actions: read`):
  *   GH_TOKEN='${{ github.token }}' node scripts/ci-plan.ts

@@ -14,6 +14,9 @@
  *     the `schedule` event, with the plan itself a success, a skipped job is a success: the run proved nothing new, because an earlier
  *     run proved this commit. A failed or cancelled job is a failure whatever the plan said, a plan that failed or whose answer cannot
  *     be read fails the run, and `run=false` on any other event is refused: a push, a pull request and a manual run always run;
+ *   - the jobs the plan never decides (`--runs-always=<job id>[,<job id>...]`, the dependency audit: run 4, Stage 1, item 4) run on every run, the nightly
+ *     one included, because what they check changes with no commit (an advisory published overnight): a skip of one is a failure even on a night
+ *     that stands down;
  *   - a mandatory job missing from `needs`, or one `needs` holds that nobody expected, means the workflow and
  *     this check have drifted apart, and the result cannot be trusted;
  *   - unreadable input, or no expected job at all, fails rather than passing for lack of anything to check.
@@ -23,7 +26,7 @@
  * the jobs the workflow does not run on a pull request.
  *
  * Usage (in the workflow):
- *   NEEDS='${{ toJSON(needs) }}' EVENT='${{ github.event_name }}' node scripts/ci-aggregate.ts [--plan=<job id>] [--skipped-on-pull-request=<job id>,...] <job id>...
+ *   NEEDS='${{ toJSON(needs) }}' EVENT='${{ github.event_name }}' node scripts/ci-aggregate.ts [--plan=<job id>] [--runs-always=<job id>,...] [--skipped-on-pull-request=<job id>,...] <job id>...
  */
 
 import { isRecord } from './workflow-shapes.ts';
@@ -37,6 +40,7 @@ export type AggregateProblemCode =
   | 'EVENT_UNREADABLE'
   | 'SKIP_JOB_UNKNOWN'
   | 'PLAN_UNKNOWN'
+  | 'ALWAYS_JOB_UNKNOWN'
   | 'PLAN_UNREADABLE'
   | 'PLAN_SKIP_NOT_ALLOWED'
   | 'ARGUMENT_UNREADABLE';
@@ -69,6 +73,8 @@ export interface AggregateOptions {
   skippedOnPullRequest?: readonly string[];
   /** The job that plans the run (`outputs.run` is `true` or `false`), which must be one of the mandatory jobs. */
   plan?: string | undefined;
+  /** The jobs the plan does not decide: they run on every run, and the plan's `run=false` does not allow a skip of one. */
+  runsAlways?: readonly string[];
 }
 
 /** The only event on which a skipped job can be allowed by the pull request rule. */
@@ -77,6 +83,7 @@ const PULL_REQUEST = 'pull_request';
 const SCHEDULE = 'schedule';
 const SKIP_OPTION = '--skipped-on-pull-request=';
 const PLAN_OPTION = '--plan=';
+const ALWAYS_OPTION = '--runs-always=';
 
 function parseNeeds(needsJson: string | undefined): Record<string, unknown> | undefined {
   if (needsJson === undefined || needsJson.trim() === '') return undefined;
@@ -133,6 +140,14 @@ export function aggregate(
     });
   }
   const mayBeSkipped = (job: string): boolean => event === PULL_REQUEST && skippable.includes(job);
+  const always = [...new Set(options.runsAlways ?? [])];
+  for (const job of always.filter((name) => !expected.includes(name))) {
+    problems.push({
+      code: 'ALWAYS_JOB_UNKNOWN',
+      job,
+      message: `The job "${job}" is named as one that runs on every run but is not among the mandatory jobs. Name it as a mandatory job, or remove it from the option.`,
+    });
+  }
   if (plan !== undefined && !expected.includes(plan)) {
     problems.push({
       code: 'PLAN_UNKNOWN',
@@ -190,7 +205,7 @@ export function aggregate(
       verdicts.push({ job, result, allowed: true });
       continue;
     }
-    if (result === 'skipped' && nothingToRun && job !== plan) {
+    if (result === 'skipped' && nothingToRun && job !== plan && !always.includes(job)) {
       verdicts.push({ job, result, allowed: true, skippedBy: 'plan' });
       continue;
     }
@@ -235,6 +250,7 @@ export function renderReport({ verdicts, problems }: Aggregation): string {
 export interface Arguments {
   jobs: string[];
   skippedOnPullRequest: string[];
+  runsAlways: string[];
   plan: string | undefined;
   unreadable: string[];
 }
@@ -243,6 +259,7 @@ export function parseArguments(args: readonly string[]): Arguments {
   const parsed: Arguments = {
     jobs: [],
     skippedOnPullRequest: [],
+    runsAlways: [],
     plan: undefined,
     unreadable: [],
   };
@@ -259,6 +276,12 @@ export function parseArguments(args: readonly string[]): Arguments {
       } else {
         parsed.plan = name;
       }
+      continue;
+    }
+    if (argument.startsWith(ALWAYS_OPTION)) {
+      const named = argument.slice(ALWAYS_OPTION.length).split(',');
+      if (named.includes('')) parsed.unreadable.push(argument);
+      else parsed.runsAlways.push(...named);
       continue;
     }
     const names = argument.startsWith(SKIP_OPTION)
@@ -280,12 +303,13 @@ export function runAggregate(
   const aggregation = aggregate(env.NEEDS, parsed.jobs, {
     event: env.EVENT,
     skippedOnPullRequest: parsed.skippedOnPullRequest,
+    runsAlways: parsed.runsAlways,
     plan: parsed.plan,
   });
   for (const argument of parsed.unreadable) {
     aggregation.problems.push({
       code: 'ARGUMENT_UNREADABLE',
-      message: `The argument ${argument} is not one this check reads (--plan=<job id>, --skipped-on-pull-request=<job id>[,<job id>...] and job ids).`,
+      message: `The argument ${argument} is not one this check reads (--plan=<job id>, --runs-always=<job id>[,<job id>...], --skipped-on-pull-request=<job id>[,<job id>...] and job ids).`,
     });
   }
   print(renderReport(aggregation));

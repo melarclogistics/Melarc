@@ -80,9 +80,10 @@ check, and it leaves out of the database tests the few whose assertions are wall
 database step of a pull request alone); a **push to main**, the **nightly run** (02:17 UTC, Monday to Friday) and a **manual run**
 run all of it, so Firefox and WebKit are tested on every commit that reaches main and every weekday night. A first job, `plan`
 ([scripts/ci-plan.ts](scripts/ci-plan.ts)), lets the nightly run stand down: when the last successful nightly run tested the commit
-main is at, every other job is skipped and the run is a success (a push, a pull request and a manual run are never skipped, and the
-plan answers "run" whenever it cannot tell). "CI result" accepts two skips and no other: the Firefox and WebKit job's on a pull
-request, and every job's on a nightly run whose plan said so. The browser tests of each engine, the HTTPS journeys and the database
+main is at, every other job but the dependency audit is skipped and the run is a success (a push, a pull request and a manual run are
+never skipped, and the plan answers "run" whenever it cannot tell; the audit is not the plan's to decide, because an advisory is published
+with no commit, so it runs every night). "CI result" accepts two skips and no other: the Firefox and WebKit job's on a pull
+request, and every job's but the audit's on a nightly run whose plan said so. The browser tests of each engine, the HTTPS journeys and the database
 tests are cut into shards that are jobs of their own, and the shards together run every test once (`scripts/browser-shards.test.ts`
 proves it for the browser tests from Playwright's own list of them, `scripts/db-shards.test.ts` for the database test files from
 Vitest's); `MELARC_DB_SHARD=<shard>/<shards>` runs one shard of the database tests locally too, and the gate and the affected run

@@ -8,7 +8,9 @@
  *     two exceptions. The first is the plan of the nightly run (task CI.2, scripts/ci-plan.ts): a job `plan` runs first and
  *     answers whether the run is to run at all (it stands down only on the nightly run, when a successful nightly run already
  *     tested the head of main), every other job needs it and has exactly `if: needs.plan.outputs.run == 'true'`, and the
- *     verdict accepts the skips only on that answer. The second is the Product Owner's decision of 7 November 2026: the job
+ *     verdict accepts the skips only on that answer; the one job the plan does not decide is the dependency audit (run 4, Stage 1, item 4: an
+ *     advisory is published with no commit, so a night that stands down still audits): it has no need and no condition, and the verdict is
+ *     told, by `--runs-always=audit`, that a skip of it is never accepted. The second is the Product Owner's decision of 7 November 2026: the job
  *     of the Firefox and WebKit shards of the browser tests does not run on a pull request (the same condition and `&&
  *     github.event_name != 'pull_request'`, and no other), which runs the Chromium shards and every other job;
  *   - one aggregate job, which runs whatever happened, waits for every other job and judges them with
@@ -110,6 +112,8 @@ export type WorkflowProblemCode =
   | 'PLAN_MISSING'
   | 'PLAN_DRIFT'
   | 'JOB_NOT_PLANNED'
+  | 'UNPLANNED_JOB_DRIFT'
+  | 'AGGREGATE_ALWAYS_DRIFT'
   | 'STEP_TIMEOUT'
   | 'BROWSER_CACHE'
   | 'TIMING_SKIP_DRIFT'
@@ -160,10 +164,17 @@ export const PLANNED_RUN = "needs.plan.outputs.run == 'true'";
  * no Chromium shard: a pull request does not run the Firefox and WebKit shards of the browser tests.
  */
 export const PULL_REQUEST_SKIP = `${PLANNED_RUN} && github.event_name != 'pull_request'`;
+/**
+ * The jobs the plan does not decide (run 4, Stage 1, item 4): they run on every run, the nightly one that stands down included, because what they check can
+ * change with no commit. A new advisory is published overnight; a night that skipped the audit because the code did not change would never see it.
+ */
+export const UNPLANNED_JOBS: readonly string[] = ['audit'];
 /** The option of the aggregate command that names the jobs a pull request may skip (scripts/ci-aggregate.ts). */
 const SKIP_OPTION = '--skipped-on-pull-request=';
 /** The option that names the plan, whose answer allows the skips of a night on which nothing changed (scripts/ci-aggregate.ts). */
 const PLAN_OPTION = '--plan=';
+/** The option that names the jobs the plan does not decide: a skip of one is never accepted (scripts/ci-aggregate.ts). */
+const ALWAYS_OPTION = '--runs-always=';
 /** `github.event_name`, which the aggregate step hands to the verdict. */
 const EVENT_NAME = '${{ github.event_name }}';
 const REHEARSAL_INPUT = 'rehearse-failure';
@@ -322,6 +333,16 @@ function checkCondition(job: Job): WorkflowProblem[] {
           {
             code: 'JOB_CONDITIONAL',
             message: `Job ${PLAN_JOB} has a condition, so it can be skipped. It decides whether the others run, and always runs.`,
+          },
+        ]
+      : [];
+  }
+  if (UNPLANNED_JOBS.includes(id)) {
+    return 'if' in body
+      ? [
+          {
+            code: 'JOB_CONDITIONAL',
+            message: `Job ${id} has a condition, so it can be skipped. What it checks changes with no commit, so it runs on every run, the nightly run that stands down included.`,
           },
         ]
       : [];
@@ -979,6 +1000,7 @@ function checkAggregate(jobs: readonly Job[]): WorkflowProblem[] {
   const options = words.filter((word) => word.startsWith('--'));
   const skipOptions = options.filter((word) => word.startsWith(SKIP_OPTION));
   const planOptions = options.filter((word) => word.startsWith(PLAN_OPTION));
+  const alwaysOptions = options.filter((word) => word.startsWith(ALWAYS_OPTION));
   const allowedToSkip = new Set(
     skipOptions.flatMap((word) => word.slice(SKIP_OPTION.length).split(',')),
   );
@@ -986,11 +1008,11 @@ function checkAggregate(jobs: readonly Job[]): WorkflowProblem[] {
     command === undefined ||
     named === null ||
     !same(namedJobs, others) ||
-    options.length !== skipOptions.length + planOptions.length
+    options.length !== skipOptions.length + planOptions.length + alwaysOptions.length
   ) {
     problems.push({
       code: 'AGGREGATE_COMMAND_DRIFT',
-      message: `Job ${AGGREGATE_JOB} must run "node scripts/ci-aggregate.ts" once, naming exactly every other job, with no option but ${PLAN_OPTION}${PLAN_JOB} and ${SKIP_OPTION}<job id>[,<job id>...].`,
+      message: `Job ${AGGREGATE_JOB} must run "node scripts/ci-aggregate.ts" once, naming exactly every other job, with no option but ${PLAN_OPTION}${PLAN_JOB}, ${ALWAYS_OPTION}<job id>[,<job id>...] and ${SKIP_OPTION}<job id>[,<job id>...].`,
     });
     return problems;
   }
@@ -999,6 +1021,14 @@ function checkAggregate(jobs: readonly Job[]): WorkflowProblem[] {
     problems.push({
       code: 'AGGREGATE_PLAN_DRIFT',
       message: `Job ${AGGREGATE_JOB} must name the plan once, as ${PLAN_OPTION}${PLAN_JOB}: without it a night that stands down is a failure, and with another job named a job's output decides.`,
+    });
+  }
+  // The jobs the plan does not decide are the jobs whose skip the verdict never accepts: a night that stands down must still have audited.
+  const alwaysNamed = alwaysOptions.flatMap((word) => word.slice(ALWAYS_OPTION.length).split(','));
+  if (alwaysOptions.length !== 1 || !same(new Set(alwaysNamed), new Set(UNPLANNED_JOBS))) {
+    problems.push({
+      code: 'AGGREGATE_ALWAYS_DRIFT',
+      message: `Job ${AGGREGATE_JOB} must name, once, in ${ALWAYS_OPTION}<job id>[,<job id>...], exactly the jobs the plan does not decide (${UNPLANNED_JOBS.join(', ')}): without it a night that stands down accepts a skip of them.`,
     });
   }
   const env = isRecord(command.env) ? command.env : {};
@@ -1072,6 +1102,15 @@ function checkPlan(jobs: readonly Job[]): WorkflowProblem[] {
   }
   for (const { id, body } of jobs) {
     if (id === PLAN_JOB || id === AGGREGATE_JOB) continue;
+    if (UNPLANNED_JOBS.includes(id)) {
+      if ('needs' in body) {
+        problems.push({
+          code: 'UNPLANNED_JOB_DRIFT',
+          message: `Job ${id} must have no "needs": the plan does not decide it, so it starts with the plan and runs whatever the plan says, and a plan that failed does not take it down with it.`,
+        });
+      }
+      continue;
+    }
     const needs = body.needs;
     const waitsForPlanOnly =
       needs === PLAN_JOB || (Array.isArray(needs) && needs.length === 1 && needs[0] === PLAN_JOB);
