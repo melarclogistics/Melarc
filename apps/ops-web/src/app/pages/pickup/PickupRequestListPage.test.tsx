@@ -517,7 +517,8 @@ describe('the queue: one panel', () => {
 
     const refused = await alertSaying('Your account cannot read pickup requests.');
     expect(panelOf(refused)).toContainElement(filters());
-    expect(within(screen.getByRole('main')).queryByText(cannotText('pickup.read'))).toBeNull();
+    // Break caught: a refusal that names the key (it once checked that another sentence was absent, which no page draws, so it could never fail).
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
   });
 });
 
@@ -874,7 +875,7 @@ describe('the queue: when it cannot be had', () => {
     await alertSaying(
       'Your account cannot read pickup requests. Ask an administrator to give you access.',
     );
-    expect(within(screen.getByRole('main')).queryByText(cannotText('pickup.read'))).toBeNull();
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });
 });
@@ -1074,6 +1075,55 @@ describe('the queue: the request beside it', () => {
         ),
       ).toHaveLength(1);
       expect(await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/)).toBeVisible();
+    });
+
+    // Break caught (the review of 499399c): a panel that kept the answer of a confirmation for ever, so that the request, opened again after it had changed, was drawn as "Confirmed" whatever
+    // the server said. The answer is written into the panel's own read, which goes with the panel, and the request is read again when it is opened.
+    it('shows the answer of the confirmation at once, and reads the request again when it is opened later', async () => {
+      let server = pending;
+      let reads = 0;
+      const view = openConfirmer(
+        () => {
+          server = pickupRequestFixture({ state: 'CONFIRMED' });
+          return json(200, server, etag('v-answer'));
+        },
+        () => {
+          reads += 1;
+          return json(200, server, etag(`v${String(reads)}`));
+        },
+      );
+      const headerOf = (panel: HTMLElement) =>
+        within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }).parentElement;
+
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      // The panel shows what the server answered, without a second read of the request.
+      await waitFor(() => {
+        expect(headerOf(panel)).toHaveTextContent('Confirmed');
+      });
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+      expect(reads).toBe(1);
+
+      // The request changes at the server (it is cancelled) and is opened again: the panel draws what the server says now, and not the answer of the confirmation. (Focus went back to the
+      // row when the queue was read again, so the panel is closed by its own button.)
+      await view.user.click(within(panel).getByRole('button', { name: 'Close the panel' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeNull();
+      });
+      server = pickupRequestFixture({ state: 'CANCELLED' });
+      await view.user.click(
+        await screen.findByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      );
+      const reopened = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await waitFor(() => {
+        expect(headerOf(reopened)).toHaveTextContent('Cancelled');
+      });
+      expect(headerOf(reopened)).not.toHaveTextContent('Confirmed');
+      expect(reads).toBe(2);
     });
 
     it('opens the same panel, with focus on the panel’s heading and not on its act, from the button that opens the request', async () => {

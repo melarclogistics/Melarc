@@ -85,7 +85,6 @@ export function useConfirmedNews(): (request: PickupRequestView) => void {
 
 function Summary({
   record,
-  answered,
   hubs,
   canConfirm,
   confirmAsk,
@@ -93,15 +92,14 @@ function Summary({
   onReload,
 }: {
   readonly record: PickupRecord;
-  readonly answered: PickupRequestView | undefined;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
   readonly confirmAsk: number;
   readonly onConfirmed: (request: PickupRequestView) => void;
   readonly onReload: () => unknown;
 }) {
-  // What the panel shows is the state of the server's last word on it: the answer of the act the person just made, until the panel is read again.
-  const request = answered ?? record.request;
+  // What the panel shows is the server's last word on the request: the read, which the screen replaces with the answer of the act the person just made.
+  const request = record.request;
   const facts = queueFactsOf(request, hubs);
   const [confirming, setConfirming] = useState(false);
   const [conflicted, setConflicted] = useState(false);
@@ -121,7 +119,7 @@ function Summary({
       <RecordPage
         header={{ code: request.code, sentence: STATE_SENTENCES[request.state] }}
         acts={
-          canConfirm && answered === undefined && canBeConfirmed(request)
+          canConfirm && canBeConfirmed(request)
             ? {
                 primary: (
                   <Button
@@ -197,19 +195,17 @@ function Summary({
  *
  * **The read is the page's, handed in** (`record`): the panel's header (its state badge) and its body are drawn from the same read, and never from the row of the list, which is the
  * last page read and is older than the panel's own answer (the review of 5edada2). **The act confirms with the version of this read**, so that a request that changed since the person saw it
- * is refused and told as changed (a banner with the way to read it again), and never confirmed at a version they never saw. `answered` is the answer of the act just made, which the panel
- * shows at once, and `confirmAsk` counts the times the row's own Confirm asked for focus on the panel's.
+ * is refused and told as changed (a banner with the way to read it again), and never confirmed at a version they never saw. The answer of the act just made is written into that read by the
+ * screen (`onConfirmed`), which shows it at once and keeps it no longer than the panel is open, and `confirmAsk` counts the times the row's own Confirm asked for focus on the panel's.
  */
 export function PickupQueuePanel({
   record,
-  answered,
   hubs,
   canConfirm,
   confirmAsk,
   onConfirmed,
 }: {
   readonly record: PickupRecordRead;
-  readonly answered: PickupRequestView | undefined;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
   readonly confirmAsk: number;
@@ -228,7 +224,6 @@ export function PickupQueuePanel({
       {(data) => (
         <Summary
           record={data}
-          answered={answered}
           hubs={hubs}
           canConfirm={canConfirm}
           confirmAsk={confirmAsk}

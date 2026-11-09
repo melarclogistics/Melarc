@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -26,7 +27,12 @@ import {
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
-import { usePickupRequest, usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
+import {
+  pickupRequestKey,
+  usePickupRequest,
+  usePickupRequests,
+  type PickupRecord,
+} from '../../../platform/pickup/use-pickup-queries';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -136,18 +142,16 @@ export function PickupRequestListPage() {
   const [confirmAsk, setConfirmAsk] = useState(0);
   /** The panel's own read of the request open beside the queue: its header and its body are drawn from it, and never from the list's row, which is older. */
   const panelRead = usePickupRequest(opened?.id ?? '', opened !== undefined);
-  // What an act in the panel came to (the server's answer for the request it made), and what the queue does about it: the rows stay while they are read again, the row that changed is
-  // marked, and focus returns to it once they are drawn (the review of 5edada2).
-  const [answer, setAnswer] = useState<
-    { readonly id: string; readonly request: PickupRequestView } | undefined
-  >();
+  const queryClient = useQueryClient();
+  // What an act in the panel came to (the server's answer for the request it made) is written into that read, so that the panel shows it at once and draws from one place; and what the queue
+  // does about it: the rows stay while they are read again, the row that changed is marked, and focus returns to it once they are drawn (the review of 5edada2). The read goes with the panel, so
+  // a request opened again later is read again and never drawn as the answer it once had (the review of 499399c).
   const [changed, setChanged] = useState<
     { readonly visit: number; readonly ids: readonly string[] } | undefined
   >();
   const [afterAct, setAfterAct] = useState(false);
   const returnTo = useRef<string | undefined>(undefined);
-  const answered = answer?.id === opened?.id ? answer?.request : undefined;
-  const shown = answered ?? panelRead.data?.request;
+  const shown = panelRead.data?.request;
 
   // Refresh page: the page now shown is read again, by the same query (its filters and its cursor). One read at a time: the header's Refresh says it is
   // busy and ignores a press, and a press that gets here while a read is under way (before the screen has drawn the busy line) is given that
@@ -194,7 +198,10 @@ export function PickupRequestListPage() {
   /** The act of the panel was answered: say so, show the answer in the panel at once, mark the row, and read the page again with its rows kept. */
   function confirmedInPanel(request: PickupRequestView): void {
     announceConfirmed(request);
-    setAnswer({ id: request.id, request });
+    // The version stays that of the read the person saw: no act is offered for a confirmed request, and the panel reads the request again when it is opened again.
+    queryClient.setQueryData<PickupRecord>(pickupRequestKey(request.id), (record) =>
+      record === undefined ? record : { ...record, request },
+    );
     setChanged({ visit: visit.id, ids: [request.id] });
     returnTo.current = request.id;
     setAfterAct(true);
@@ -527,7 +534,6 @@ export function PickupRequestListPage() {
                 <PickupQueuePanel
                   key={opened.id}
                   record={panelRead}
-                  answered={answered}
                   hubs={hubs}
                   canConfirm={canConfirm}
                   confirmAsk={confirmAsk}

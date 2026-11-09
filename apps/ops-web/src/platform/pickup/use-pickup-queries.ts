@@ -144,10 +144,13 @@ export async function readPickupRequest(client: ApiClient, id: string): Promise<
 /** The read of one request, as a hook gives it: a page that shows the request in more than one place reads it once and hands the read to each. */
 export type PickupRecordRead = UseQueryResult<PickupRecord>;
 
+/** The key of the read of one request: a screen that holds the server's answer to an act on the request writes it under this key, and the read is the one place the screen draws the request from. */
+export const pickupRequestKey = (id: string) => ['pickup-requests', 'request', id] as const;
+
 export function usePickupRequest(id: string, enabled = true): PickupRecordRead {
   const client = useApiClient();
   return useQuery({
-    queryKey: ['pickup-requests', 'request', id],
+    queryKey: pickupRequestKey(id),
     enabled,
     ...NOT_KEPT,
     queryFn: () => readPickupRequest(client, id),
