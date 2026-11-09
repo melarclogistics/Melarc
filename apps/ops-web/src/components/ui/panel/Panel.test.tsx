@@ -15,6 +15,23 @@ describe('Panel', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Pickup' })).toBeInTheDocument();
   });
 
+  // Break caught: a section a person works in that is no landmark, so that a screen reader cannot jump to it; and a landmark that every panel makes of itself.
+  it('is a region named by its title only when it is asked to be, and says so when it has no title to be named by', () => {
+    const { rerender } = render(<Panel title="Stops">The stops.</Panel>);
+    expect(screen.queryByRole('region')).toBeNull();
+
+    rerender(
+      <Panel title="Stops" region>
+        The stops.
+      </Panel>,
+    );
+    expect(screen.getByRole('region', { name: 'Stops' })).toBeInTheDocument();
+
+    const failure = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(() => render(<Panel region>The stops.</Panel>)).toThrow(/needs a title/);
+    failure.mockRestore();
+  });
+
   // Break caught: a title fixed at one level, which breaks the page's outline when the panel sits under another heading.
   it('puts its title at the level the page asks for', () => {
     render(

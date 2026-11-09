@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '../../primitives/card';
 import './panel.css';
@@ -10,6 +10,11 @@ export interface PanelProps {
   readonly headingLevel?: 2 | 3 | 4;
   /** An action of the panel, at the end of its header: a Button or a link. It needs a title beside it. */
   readonly action?: ReactNode;
+  /**
+   * The panel is a landmark region named by its title, for a section of a record that a person jumps to and works in, with acts of its own (the stops of a pickup run, the custody of its
+   * parcels). Use it sparingly: every region is another stop for a screen reader. It needs a title to be named by.
+   */
+  readonly region?: boolean;
   /** `panel` (12px) for a surface inside a page; `page` (16px) for the page's own card, the one that holds a queue or a record's body. Default `panel`. */
   readonly variant?: 'panel' | 'page';
   /** `none` for content that runs to the edges (a table). Default `default`: 20px, 24px on a page card. */
@@ -28,6 +33,7 @@ export function Panel({
   title,
   headingLevel = 2,
   action,
+  region = false,
   variant = 'panel',
   padding = 'default',
   children,
@@ -35,13 +41,23 @@ export function Panel({
   if (action !== undefined && title === undefined) {
     throw new Error('A panel with an action needs a title to put it beside.');
   }
+  if (region && title === undefined)
+    throw new Error('A panel that is a region needs a title to be named by.');
+  const headingId = useId();
   const Heading = HEADING[headingLevel];
   return (
-    <Card className="ui-panel" data-variant={variant} data-padding={padding}>
+    <Card
+      className="ui-panel"
+      data-variant={variant}
+      data-padding={padding}
+      {...(region ? { role: 'region', 'aria-labelledby': headingId } : {})}
+    >
       {title === undefined ? null : (
         <CardHeader className="ui-panel__header">
           <CardTitle className="ui-panel__title">
-            <Heading className="ui-panel__heading">{title}</Heading>
+            <Heading id={region ? headingId : undefined} className="ui-panel__heading">
+              {title}
+            </Heading>
           </CardTitle>
           {action === undefined ? null : (
             <CardAction className="ui-panel__action">{action}</CardAction>
