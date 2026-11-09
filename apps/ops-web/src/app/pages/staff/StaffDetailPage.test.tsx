@@ -296,8 +296,9 @@ describe('the profile: when it cannot be had', () => {
 
 describe('the profile: where focus is', () => {
   // Break caught (found in a real browser): the heading replaced when the profile arrives, so that the focus the frame put on it falls to the
-  // top of the document and a screen reader says nothing about the page that has just appeared.
-  it('stays on the same heading from loading to loaded', async () => {
+  // top of the document and a screen reader says nothing about the page that has just appeared. The record page template draws the person's name as its own heading (the
+  // one that stood while the profile was read is gone), so the claim is that focus is on the heading that replaces it.
+  it('puts focus on the heading that replaces the loading one when the profile arrives', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -316,7 +317,6 @@ describe('the profile: where focus is', () => {
     release();
 
     const named = await heading('Kofi Boateng');
-    expect(named).toBe(loading);
     expect(named).toHaveFocus();
   });
 
@@ -1086,13 +1086,89 @@ describe('the profile: the other things to do with it', () => {
     expect(screen.queryByRole('link', { name: 'See sessions' })).toBeNull();
   });
 
-  it('has no section of actions for a profile there is nothing to do with', async () => {
+  // Break caught: a panel of acts drawn empty for a profile there is nothing to do with. The acts are grouped by what they change, each group in a panel of its own.
+  it('has no panel of acts for a profile there is nothing to do with', async () => {
     open(KEYS.everything, {
       [RECORD]: () => json(200, staffIdentityFixture({ status: 'REJECTED' }), etag('v2')),
     });
     await heading('Kofi Boateng');
 
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    // The page, not the menu beside it (which has a Sessions entry of its own).
+    const page = within(screen.getByRole('main'));
+    expect(page.queryByRole('heading', { name: 'Credentials' })).toBeNull();
+    expect(page.queryByRole('heading', { name: 'Sessions' })).toBeNull();
+    expect(page.queryByRole('heading', { name: 'Trusted browsers' })).toBeNull();
+    expect(
+      page.queryByRole('button', { name: /link|recovery|authenticator|browsers/i }),
+    ).toBeNull();
+    expect(page.queryByRole('link', { name: /sessions|authenticator/i })).toBeNull();
+    // It could fail: the same page for an active profile of a person with an authenticator has all of them.
+    expect(page.getAllByRole('heading', { level: 2 }).map((each) => each.textContent)).toEqual([
+      'Profile',
+    ]);
+  });
+
+  it('groups the acts by what they change, each group in a panel of its own', async () => {
+    open(KEYS.everything, {
+      [RECORD]: () =>
+        json(
+          200,
+          staffIdentityFixture({
+            status: 'ACTIVE',
+            mfa_enrolled: true,
+            mfa_reset_state: 'FACTOR_ACTIVE',
+          }),
+          etag('v2'),
+        ),
+    });
+    await heading('Kofi Boateng');
+
+    const credentials = (
+      await screen.findByRole('heading', { level: 2, name: 'Credentials' })
+    ).closest('[data-slot="card"]');
+    expect(credentials).not.toBeNull();
+    expect(
+      within(credentials as HTMLElement).getByRole('link', { name: 'Reset authenticator' }),
+    ).toBeVisible();
+    const sessions = screen
+      .getByRole('heading', { level: 2, name: 'Sessions' })
+      .closest('[data-slot="card"]');
+    expect(
+      within(sessions as HTMLElement).getByRole('link', { name: 'See sessions' }),
+    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Trusted browsers' })).toBeVisible();
+  });
+});
+
+describe('the profile: the record page', () => {
+  // Break caught: a person's name drawn as an operational code, in the code face, which cannot wrap and reads as a code.
+  it('draws the name as a name, with the status as a badge and what it means in a sentence under it', async () => {
+    open(KEYS.reader);
+
+    const name = await heading('Kofi Boateng');
+    expect(name.querySelector('.ui-code')).toBeNull();
+    expect(
+      screen.getByText('Waiting for approval', { selector: '.ui-status-badge' }),
+    ).toBeVisible();
+    expect(screen.getByText(/cannot sign in until this profile is approved/)).toBeVisible();
+  });
+
+  it('keeps the facts of the profile in a panel of their own', async () => {
+    open(KEYS.reader);
+    await heading('Kofi Boateng');
+
+    const facts = screen
+      .getByRole('heading', { level: 2, name: 'Profile' })
+      .closest('[data-slot="card"]');
+    expect(facts).not.toBeNull();
+    expect(within(facts as HTMLElement).getByText('Work email')).toBeVisible();
+  });
+
+  it('draws one level-one heading, the name', async () => {
+    open(KEYS.everything);
+    await heading('Kofi Boateng');
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 });
 

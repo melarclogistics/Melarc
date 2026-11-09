@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { Panel } from '../../../components/ui/panel/Panel';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
@@ -14,8 +15,8 @@ import './staff-pages.css';
 
 /**
  * The trusted browsers of one person, on their profile (`listStaffTrustedBrowsers`, `revokeStaffTrustedBrowsers`; staff-authentication.md section 5.8,
- * AC-SLICE-000-137): what each is called and when it was added, used and ends, and one act, *Remove all trusted browsers*, with a reason of the
- * session-revocation domain. Nothing that could be used to sign in is drawn or held.
+ * AC-SLICE-000-137), as a panel of the record page (redesign step R7b): what each is called and when it was added, used and ends, and one act, *Remove all trusted
+ * browsers*, with a reason of the session-revocation domain. Nothing that could be used to sign in is drawn or held.
  *
  * It is offered to a session that holds `staff.session.revoke`; the server decides the rest. The session lists keys and no tiers, so the page
  * cannot tell a Platform Admin (whose tier opens this) from a Senior Ops user (who holds the key and is refused with `INSUFFICIENT_AUTHORITY`):
@@ -36,48 +37,50 @@ export function TrustedBrowsersSection({
   const [notice, setNotice] = useState<string | undefined>(undefined);
 
   return (
-    <section className="staff-actions" aria-labelledby="staff-trusted-browsers">
-      <h2 id="staff-trusted-browsers">Trusted browsers</h2>
-      <p className="staff-action__text">
-        Browsers where {name} chose to skip the authenticator code at sign-in.
-      </p>
+    <>
+      {/* A region of the page, named by its heading: a person who works in it jumps to it, and its act is its own. */}
+      <Panel title="Trusted browsers" region>
+        <p className="staff-action__text">
+          Browsers where {name} chose to skip the authenticator code at sign-in.
+        </p>
 
-      {notice === undefined ? null : (
-        <Alert variant="success">
-          <p>{notice}</p>
-        </Alert>
-      )}
-
-      <ReadState<TrustedBrowserView[]>
-        query={browsers}
-        isEmpty={(data) => data.length === 0}
-        empty={<p className="staff-note">{name} has no browser that skips the code.</p>}
-        loadingLabel="Loading the trusted browsers…"
-        skeleton={<Skeleton lines={2} />}
-        permission="staff.session.revoke"
-        operation="listStaffTrustedBrowsers"
-      >
-        {(data) => (
-          <>
-            <TrustedBrowserTable
-              label={`Trusted browsers of ${name}`}
-              browsers={data}
-              headingLevel={3}
-            />
-            <div className="staff-action__buttons">
-              <Button
-                type="button"
-                variant="danger"
-                onClick={() => {
-                  setAsking(true);
-                }}
-              >
-                Remove all trusted browsers
-              </Button>
-            </div>
-          </>
+        {notice === undefined ? null : (
+          <Alert variant="success">
+            <p>{notice}</p>
+          </Alert>
         )}
-      </ReadState>
+
+        <ReadState<TrustedBrowserView[]>
+          query={browsers}
+          isEmpty={(data) => data.length === 0}
+          empty={<p className="staff-note">{name} has no browser that skips the code.</p>}
+          loadingLabel="Loading the trusted browsers…"
+          skeleton={<Skeleton lines={2} />}
+          permission="staff.session.revoke"
+          operation="listStaffTrustedBrowsers"
+        >
+          {(data) => (
+            <>
+              <TrustedBrowserTable
+                label={`Trusted browsers of ${name}`}
+                browsers={data}
+                headingLevel={3}
+              />
+              <div className="staff-action__buttons">
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setAsking(true);
+                  }}
+                >
+                  Remove all trusted browsers
+                </Button>
+              </div>
+            </>
+          )}
+        </ReadState>
+      </Panel>
 
       <ReasonConfirmationDialog<number>
         open={asking}
@@ -120,6 +123,6 @@ export function TrustedBrowsersSection({
           return browsers.refetch();
         }}
       />
-    </section>
+    </>
   );
 }
