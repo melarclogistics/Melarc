@@ -59,7 +59,11 @@ export function TrustedBrowsersSection({
       >
         {(data) => (
           <>
-            <TrustedBrowserTable caption={`Trusted browsers of ${name}`} browsers={data} />
+            <TrustedBrowserTable
+              label={`Trusted browsers of ${name}`}
+              browsers={data}
+              headingLevel={3}
+            />
             <div className="staff-action__buttons">
               <Button
                 type="button"
