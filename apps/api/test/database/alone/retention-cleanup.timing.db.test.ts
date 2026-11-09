@@ -1,5 +1,5 @@
 // Runs alone: it bounds a cleanup that must not wait behind a lock at 1.5 seconds of wall-clock time.
-// The time bounds of retention-cleanup.db.test.ts; its other tests run on a pull request (task CI.2, run 4 Stage 1 item 5).
+// Functional half, which runs on a pull request: retention-cleanup.db.test.ts (the other tests of the cleanup, which assert no time; task CI.2, run 4 Stage 1 item 5).
 import { randomUUID } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';

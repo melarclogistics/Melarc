@@ -1,5 +1,5 @@
 // Runs alone: its bounds (1.5 seconds, the budget plus the disposal bound) are wall-clock time.
-// The time bounds of execution-budget.db.test.ts; its other tests run on a pull request (task CI.2, run 4 Stage 1 item 5).
+// Functional half, which runs on a pull request: execution-budget.db.test.ts (the same scenarios with the clock in the test's hands and no duration asserted; run 5, Stage 1.2).
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -27,18 +27,15 @@ import { ShutdownRegistry } from '../../../src/platform/lifecycle/shutdown.regis
 import { CapturedLogs } from '../../../src/test-support/captured-logs.js';
 import { applyFixture, HUB_A, staffContext } from '../support/rls-fixture.js';
 import { databaseRuntime } from '../support/runtime.js';
-import {
-  createTestDatabase,
-  scalar,
-  withClient,
-  type TestDatabase,
-} from '../support/test-database.js';
+import { createTestDatabase, withClient, type TestDatabase } from '../support/test-database.js';
 
 /**
- * S0.6 against a real PostgreSQL, connecting as `melarc_api_runtime` (the runtime login, not an administrator): the pool
- * bound, the server's time bounds, and an execution budget that expires waiting for a connection, waiting for a lock and
- * in the middle of work (OB-37). The effects are observed from a second connection (the administrator, who bypasses
- * row-level security and sees every session), never from the connection that did the work.
+ * S0.6 against a real PostgreSQL, connecting as `melarc_api_runtime` (the runtime login, not an administrator): how soon the pool bound, the server's time bounds, and an
+ * execution budget end a wait for a connection, a wait for a lock and work in the middle of a statement (OB-37).
+ *
+ * **Only the bounds are here** (run 5, Stage 1.2). What each scenario does, besides how soon (the waiter takes nothing, the statement is cancelled, the backend is gone,
+ * nothing is committed, the log says so), is asserted without any time by `execution-budget.db.test.ts`, which a pull request runs; each test here keeps the one thing it
+ * needs to be about that scenario (the failure that ended the wait) and asserts the time.
  *
  * Times are real. They are small so the file stays quick, and they are the development-qualified figures recorded in
  * DEPLOYMENT_AND_ENVIRONMENTS.md §12.5, "What S0.6 applied and where it was exercised".
@@ -73,16 +70,6 @@ let database: TestDatabase;
 beforeAll(async () => {
   database = await createTestDatabase();
   await applyFixture(database);
-  await withClient(database.urlFor('postgres'), async (admin) => {
-    // A commit that takes a while: a deferred constraint trigger that sleeps when the transaction commits.
-    await admin.query(`
-      create function rls_fixture.slow_commit() returns trigger language plpgsql as
-        $$ begin perform pg_sleep(1.5); return null; end $$;
-      create constraint trigger slow_commit after insert on rls_fixture.notes
-        deferrable initially deferred for each row when (new.body = 'slow commit')
-        execute function rls_fixture.slow_commit();
-    `);
-  });
 });
 
 afterAll(async () => {
@@ -91,7 +78,6 @@ afterAll(async () => {
 
 interface Built {
   readonly service: DatabaseService;
-  readonly logs: CapturedLogs;
   readonly shutdown: ShutdownRegistry;
 }
 
@@ -109,7 +95,7 @@ function build(deadlines: DatabaseDeadlines, poolMax = 1): Built {
     new ReadinessRegistry(),
     databaseRuntime(url, poolMax, { deadlines, clock }),
   );
-  const each = { service, logs, shutdown };
+  const each = { service, shutdown };
   built.push(each);
   return each;
 }
@@ -141,29 +127,8 @@ async function backends(): Promise<{ pid: number; state: string | null; query: s
   });
 }
 
-async function isGone(pid: number): Promise<boolean> {
-  return withClient(
-    database.urlFor('postgres'),
-    async (admin) =>
-      (await scalar<number>(admin, 'select count(*)::int from pg_stat_activity where pid = $1', [
-        pid,
-      ])) === 0,
-  );
-}
-
-async function notesWith(body: string): Promise<number> {
-  return withClient(database.urlFor('postgres'), (admin) =>
-    scalar<number>(admin, 'select count(*)::int from rls_fixture.notes where body = $1', [body]),
-  );
-}
-
 const insertNote = (tx: DatabaseTransaction, body: string) =>
   tx.execute(sql`insert into rls_fixture.notes (hub_id, body) values (${HUB_A}, ${body})`);
-
-const backendPid = async (tx: DatabaseTransaction): Promise<number> => {
-  const result = await tx.execute(sql`select pg_backend_pid() as pid`);
-  return Number((result.rows[0] as { pid: number | string }).pid);
-};
 
 const settled = <T>(promise: Promise<T>) =>
   promise.then(
@@ -172,8 +137,8 @@ const settled = <T>(promise: Promise<T>) =>
   );
 
 describe('waiting for a connection (the pool bound and the cleanup of waiters)', () => {
-  // Break caught: a wait for a connection that lasts as long as the holder, and a waiter that stays in line after giving up.
-  it('stops waiting at the acquire timeout, and the waiter takes nothing when a connection comes free', async () => {
+  // Break caught: a wait for a connection that lasts as long as the holder.
+  it('stops waiting at the acquire timeout, not before it and not long after', async () => {
     const { service } = build({ ...FAST, acquireTimeoutMs: 300 }, 1);
     try {
       let release: () => void = () => undefined;
@@ -193,17 +158,13 @@ describe('waiting for a connection (the pool bound and the cleanup of waiters)',
       expect(Date.now() - started).toBeLessThan(1_500);
       release();
       await first;
-      // Nobody was waiting any more: the connection is idle, and a later caller is served at once.
-      await expect(
-        service.transactionWithContext(STAFF, () => Promise.resolve('ok')),
-      ).resolves.toBe('ok');
     } finally {
       await closeAll();
     }
   });
 
-  // Break caught (OB-37): a request whose budget ran out while it waited for a connection, still queued and later handed one.
-  it('removes a waiter whose request budget expires, names the budget, and leaves the holder alone', async () => {
+  // Break caught (OB-37): a request whose budget ran out while it waited for a connection, told only when the holder is done.
+  it('ends the wait of a waiter whose request budget expires at the budget, not long after', async () => {
     const { service } = build(SLOW, 1);
     const request = new ExecutionBudget(clock, 'request', 300);
     try {
@@ -229,8 +190,7 @@ describe('waiting for a connection (the pool bound and the cleanup of waiters)',
       expect((waiter as { error: BudgetExpiredError }).error.label).toBe('request');
       expect(Date.now() - started).toBeLessThan(1_500);
       release();
-      await expect(first).resolves.toBe('first done');
-      expect(await notesWith('held by the first')).toBe(1);
+      await first;
     } finally {
       request.finish();
       await closeAll();
@@ -255,17 +215,14 @@ describe('a budget that expires waiting for a lock (OB-37)', () => {
     };
   }
 
-  // Break caught: a lock wait with no end. The database's own lock timeout ends it, the caller is told it was the lock, and the
-  // connection is not kept.
-  it('ends at the lock timeout when the budget is longer: a DatabaseDeadlineError of the lock, the connection destroyed', async () => {
+  // Break caught: a lock wait with no end. The database's own lock timeout ends it, and the caller is told it was the lock.
+  it('ends at the lock timeout when the budget is longer, and not long after', async () => {
     const { service } = build(FAST);
     const lock = await holdTableLock();
     try {
-      let pid = 0;
       const started = Date.now();
       const outcome = await settled(
         service.transactionWithContext(STAFF, async (tx) => {
-          pid = await backendPid(tx);
           await tx.execute(sql`select count(*) from rls_fixture.notes`);
         }),
       );
@@ -273,26 +230,22 @@ describe('a budget that expires waiting for a lock (OB-37)', () => {
       expect(outcome).toMatchObject({ error: expect.any(DatabaseDeadlineError) as unknown });
       expect((outcome as { error: DatabaseDeadlineError }).error.kind).toBe('lock');
       expect(Date.now() - started).toBeLessThan(1_500);
-      await eventually(() => isGone(pid), 'the connection to be destroyed');
     } finally {
       await lock.release();
       await closeAll();
     }
   });
 
-  // Break caught: a budget that stops awaiting while the statement goes on waiting for the lock in the database. The waiter is
-  // gone from the server, the caller is told, the connection destroyed, and the lock is still held by its owner untouched.
-  it('cancels the waiting statement when the request budget expires, rolls back, and destroys the connection', async () => {
-    const { service, logs } = build(SLOW);
+  // Break caught: a budget that stops awaiting late, or only when the lock is freed or the database's own bound ends the wait: the budget, plus a cancel and a rollback.
+  it('ends a wait for a lock at the request budget plus the disposal bound at most, and not at the lock timeout', async () => {
+    const { service } = build(SLOW);
     const lock = await holdTableLock();
     const request = new ExecutionBudget(clock, 'request', 500);
     try {
-      let pid = 0;
       const started = Date.now();
       const outcome = await settled(
         runWithBudget(request, () =>
           service.transactionWithContext(STAFF, async (tx) => {
-            pid = await backendPid(tx);
             await insertNote(tx, 'never committed (lock)');
             await tx.execute(sql`select count(*) from rls_fixture.notes`);
           }),
@@ -305,32 +258,24 @@ describe('a budget that expires waiting for a lock (OB-37)', () => {
       // Not the lock timeout (8 s) and not the statement timeout (20 s): the budget, plus a cancel and a rollback.
       expect(elapsed).toBeGreaterThanOrEqual(450);
       expect(elapsed).toBeLessThan(500 + DISPOSAL_BOUND_MS + 500);
-      await eventually(() => isGone(pid), 'the waiting backend to be gone');
-      expect(
-        logs.records().find((record) => String(record.msg).includes('budget ran out')),
-      ).toMatchObject({ level: 'warn', phase: 'working', cancel: 'signalled' });
     } finally {
       request.finish();
       await lock.release();
       await closeAll();
     }
-    expect(await notesWith('never committed (lock)')).toBe(0);
   });
 });
 
 describe('a budget that expires in the middle of work (OB-37)', () => {
-  // Break caught (the central one): a timeout that stops awaiting while the statement, and the transaction around it, go on in
-  // the database. Seen from a second connection: the session is gone, nothing was written, and nothing appears later.
-  it('cancels the running statement, rolls back, destroys the connection, and leaves nothing committed, then or later', async () => {
-    const { service, logs } = build(SLOW);
+  // Break caught (the central one): a timeout that stops awaiting late, or only when the statement ends of itself.
+  it('ends a running statement at the request budget plus the disposal bound at most', async () => {
+    const { service } = build(SLOW);
     const request = new ExecutionBudget(clock, 'request', 500);
     try {
-      let pid = 0;
       const started = Date.now();
       const outcome = await settled(
         runWithBudget(request, () =>
           service.transactionWithContext(STAFF, async (tx) => {
-            pid = await backendPid(tx);
             await insertNote(tx, 'never committed (running)');
             await tx.execute(sql`select pg_sleep(30)`);
           }),
@@ -339,30 +284,19 @@ describe('a budget that expires in the middle of work (OB-37)', () => {
 
       expect(outcome).toMatchObject({ error: expect.any(BudgetExpiredError) as unknown });
       expect(Date.now() - started).toBeLessThan(500 + DISPOSAL_BOUND_MS + 500);
-      // Observed from outside: the backend that ran the statement is gone, not merely abandoned.
-      await eventually(() => isGone(pid), 'the backend running the statement to be gone');
-      expect(await notesWith('never committed (running)')).toBe(0);
-      await sleep(400);
-      expect(await notesWith('never committed (running)')).toBe(0);
-      expect(
-        logs.records().find((record) => String(record.msg).includes('budget ran out')),
-      ).toMatchObject({ phase: 'working', cancel: 'signalled' });
     } finally {
       request.finish();
       await closeAll();
     }
   });
 
-  // Break caught: a transaction with no request budget outliving the transaction time, or ending only when the database's own
-  // bound does.
+  // Break caught: a transaction with no request budget outliving the transaction time, or ending only when the database's own bound does.
   it('bounds a transaction by its own time when there is no request budget, and names it', async () => {
     const { service } = build({ ...SLOW, transactionTimeoutMs: 400 });
     try {
-      let pid = 0;
       const started = Date.now();
       const outcome = await settled(
         service.transactionWithContext(STAFF, async (tx) => {
-          pid = await backendPid(tx);
           await tx.execute(sql`select pg_sleep(30)`);
         }),
       );
@@ -370,7 +304,6 @@ describe('a budget that expires in the middle of work (OB-37)', () => {
       expect(outcome).toMatchObject({ error: expect.any(BudgetExpiredError) as unknown });
       expect((outcome as { error: BudgetExpiredError }).error.label).toBe('transaction');
       expect(Date.now() - started).toBeLessThan(400 + DISPOSAL_BOUND_MS + 500);
-      await eventually(() => isGone(pid), 'the backend to be gone');
     } finally {
       await closeAll();
     }

@@ -251,6 +251,35 @@ describe('the tests whose bounds are wall-clock time, which a pull request leave
     expect(claimed.toSorted()).toEqual([...TIMING_SENSITIVE_TESTS].toSorted());
   });
 
+  // Break caught (run 5, Stage 1.2): a file of wall-clock bounds whose functional half was never written, was left behind when the file was split, or sits in the list itself, so
+  // that a pull request, which leaves the timing files out, runs nothing of what the scenario proves besides its time (run 4 moved ten whole tests to the timing files and the
+  // documents went on saying a functional half stayed). The second line names it, it exists, it holds tests, and a pull request runs it.
+  it('each name, on their second line, the functional half that a pull request runs, which exists', () => {
+    const timing = alone.filter((file) => claimed.includes(file.path));
+    expect(timing.length).toBe(TIMING_SENSITIVE_TESTS.length);
+    for (const file of timing) {
+      const second = file.text.split('\n')[1] ?? '';
+      const named = /^\/\/ Functional half, which runs on a pull request: (\S+(?: and \S+)*)/.exec(
+        second,
+      )?.[1];
+      expect(named, `${file.path}: its second line names the functional half`).toBeDefined();
+      for (const name of (named ?? '').split(' and ')) {
+        const path = resolve(join(DATABASE_TESTS, 'alone'), name);
+        const relative = `test/database/${path.slice(DATABASE_TESTS.length + 1).replaceAll('\\', '/')}`;
+        const text = readFileSync(path, 'utf8');
+        expect(text, `${file.path}: ${name} holds tests`).toMatch(/\bit\(/);
+        expect(
+          TIMING_SENSITIVE_TESTS,
+          `${file.path}: ${name} is left out of a pull request itself`,
+        ).not.toContain(relative);
+        expect(
+          /^\/\/ Runs alone:.*wall-clock/.test(text.split('\n')[0] ?? ''),
+          `${file.path}: ${name} claims wall-clock bounds itself`,
+        ).toBe(false);
+      }
+    }
+  });
+
   // Break caught: the switch read loosely (`true`, `yes`, a blank), so that a variable set for another reason leaves the tests out, or the project not reading the list.
   it('are left out by the variable set to 1 and by nothing else, in the one project that holds them', () => {
     expect(skipsTimingTests({ MELARC_SKIP_TIMING_TESTS: '1' })).toBe(true);

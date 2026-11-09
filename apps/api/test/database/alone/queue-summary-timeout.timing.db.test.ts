@@ -1,14 +1,14 @@
 // Runs alone: its bounds (a read that must end after about 3 seconds, not the 4 of the lock wait) are wall-clock time.
-// The time bounds of queue-summary-timeout.db.test.ts; its other tests run on a pull request (task CI.2, run 4 Stage 1 item 5).
+// Functional half, which runs on a pull request: queue-summary-timeout.db.test.ts (the failed read made by a cancel, no duration asserted; run 5, Stage 1.2).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { API, HUB_A, startStaffRoutes, type StaffRoutes } from '../support/staff-routes.js';
 
 /**
  * The bound on a count (`AC-QSUM-13`; the Product Owner's decision of 6 November 2026): every statement of `getQueueSummary` is bounded at
- * three seconds by a `SET LOCAL statement_timeout` in the transaction of its counts. Two proofs against a real PostgreSQL: the limiter
- * itself (it only lowers the bound, ends with the transaction, and replaces "none"), and the operation (a count that cannot finish ends the
- * read as the platform's failed read, after three seconds and not after the pool's wait, and the next read is not affected).
+ * three seconds by a `SET LOCAL statement_timeout` in the transaction of its counts. The bound itself against a real PostgreSQL: a count that cannot finish
+ * ends the read after three seconds and not after the pool's wait. **Only the bound is here** (run 5, Stage 1.2): that the read ends as the platform's failed read, with
+ * its own words and nothing of the statement, and that the next read is whole, is `queue-summary-timeout.db.test.ts`, which a pull request runs.
  */
 const SUMMARY = `${API}/ops/queue-summary`;
 
@@ -26,10 +26,10 @@ describe('the operation', () => {
     await routes.stop();
   });
 
-  // Break caught: a summary with no bound of its own, which would hold the connection until the pool's lock wait ends (4 s here), or answer
-  // 200 with a wrong count; and a failure that is not the platform's failed read (a 500 with a code, or a body that tells why).
-  it('ends a count that cannot finish after three seconds, as the failed read of the platform, and the next read is whole', async () => {
+  // Break caught: a summary with no bound of its own, which would hold the connection until the pool's lock wait ends (4 s here), or answer 200 with a wrong count.
+  it('ends a count that cannot finish after three seconds, and not after the four of the lock wait', async () => {
     const officer = await routes.opsStaff(HUB_A);
+    // The pool's first connection and the session are warm, so that the time measured below is the wait and not the start.
     const first = await officer.client.get(SUMMARY);
     expect(first.status).toBe(200);
 
@@ -47,18 +47,8 @@ describe('the operation', () => {
     }
 
     expect(blocked.status).toBe(503);
-    expect((blocked.json() as { code?: string }).code).toBeUndefined();
-    // The platform's own words and a request id, and nothing of the statement, the table or the SQLSTATE (the request id is random, so it is left
-    // out of what is searched: its characters can spell anything).
-    const body = blocked.json() as Record<string, unknown>;
-    expect(Object.keys(body).toSorted()).toEqual(['message', 'request_id']);
-    expect(String(body.message)).not.toMatch(/statement|timeout|pickup_request|57014/i);
     // Three seconds, and not the four of the lock wait that ends any other count.
     expect(elapsed).toBeGreaterThanOrEqual(2800);
     expect(elapsed).toBeLessThan(3800);
-
-    const again = await officer.client.get(SUMMARY);
-    expect(again.status).toBe(200);
-    expect(again.json()).toEqual(first.json());
   }, 60_000);
 });

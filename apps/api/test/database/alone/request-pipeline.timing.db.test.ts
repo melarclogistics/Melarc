@@ -1,5 +1,5 @@
 // Runs alone: its bounds (the budget plus the disposal bound) are wall-clock time.
-// The time bounds of request-pipeline.db.test.ts; its other tests run on a pull request (task CI.2, run 4 Stage 1 item 5).
+// Functional half, which runs on a pull request: request-pipeline.db.test.ts (the same requests with the clock in the test's hands and no duration asserted; run 5, Stage 1.2).
 import { Controller, Inject, Module, Post, Query } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { Logger } from 'pino';
@@ -14,22 +14,23 @@ import { LOGGER } from '../../../src/platform/platform.tokens.js';
 import { TechnicalEndpoint } from '../../../src/platform/routes/access-declaration.js';
 import { validEnv } from '../../../src/test-support/config-env.js';
 import { startTestApp, type TestApp } from '../../../src/test-support/test-app.js';
-import { observe, type Observer } from '../support/observe.js';
 import { applyFixture, HUB_A, staffContext } from '../support/rls-fixture.js';
 import { createTestDatabase, withClient, type TestDatabase } from '../support/test-database.js';
 
 /**
  * S0.20, the pipeline half of the execution budget (plan OB-37 and OB-55), over real HTTP and a real PostgreSQL: a request whose
- * work outlasts its budget is answered, its transaction is rolled back, and nothing it goes on to do after the answer takes
- * effect. Every effect is read from a second connection (the observer), never from the connection that did the work.
+ * work outlasts its budget is answered at the budget, and not when the work ends.
  *
  * The budget is the smallest the configuration accepts (one second), so each case takes about that long. The mechanism and
  * the database half are S0.6's, proved in `execution-budget.db.test.ts`; this file shows the request pipeline puts them to use.
+ *
+ * **Only the bounds are here** (run 5, Stage 1.2): how soon the answer comes, and that the database layer's own failure beats the pipeline's. That the write is rolled back, the
+ * statement cancelled, the late write refused and absent and the pipeline's answer said once is asserted without any time by `request-pipeline.db.test.ts`, which a pull
+ * request runs. Each test here waits for the work to go on to its end (the line it logs), so that nothing it does is left running into the next test or the end of the file.
  */
 const BUDGET_MS = 1_000;
 
 let database: TestDatabase;
-let reader: Observer;
 let app: TestApp | undefined;
 
 @Controller('pipeline')
@@ -157,7 +158,6 @@ beforeAll(async () => {
         execute function rls_fixture.slow_commit();
     `);
   });
-  reader = await observe(database);
 
   const loaded = loadConfig(
     validEnv({
@@ -178,7 +178,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.stop();
-  await reader.close();
   await database.drop();
 });
 
@@ -190,11 +189,6 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-
-const notes = (body: string): Promise<{ n: number }[]> =>
-  reader.rows<{ n: number }>('select count(*)::int as n from rls_fixture.notes where body = $1', [
-    body,
-  ]);
 
 async function eventually(
   check: () => Promise<boolean>,
@@ -216,40 +210,24 @@ const post = (path: string): Promise<Response> => {
 const records = () => app?.logs.records() ?? [];
 
 describe('a request whose statement outlasts the budget', () => {
-  // Break caught: the budget raced and not enforced: the client told 503 while the statement runs to its end and the transaction
-  // commits. The statement is cancelled from another connection, the transaction rolled back and the connection destroyed.
-  it('is answered 503 at the budget, its write is rolled back, and the statement is no longer running', async () => {
+  // Break caught: the budget raced and not enforced, or enforced late: the client told 503 only when the statement ends, or by the pipeline's fallback and not by the work's own
+  // failure, which the database layer raises within its disposal bound.
+  it('is answered 503 at the budget, by the work’s own failure and within the disposal bound', async () => {
     const started = Date.now();
 
     const response = await post('statement?body=cancelled');
     const elapsed = Date.now() - started;
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      message: 'Service unavailable',
-      request_id: response.headers.get('x-request-id'),
-    });
     expect(elapsed).toBeGreaterThanOrEqual(BUDGET_MS - 100);
     // Answered by the work's own failure, which the database layer raised within its disposal bound, not by the fallback.
     expect(elapsed).toBeLessThan(BUDGET_MS + DISPOSAL_BOUND_MS);
-    expect(await notes('cancelled')).toEqual([{ n: 0 }]);
-    // The sleep was cancelled, not left to run its thirty seconds: no session of the API is still running it.
-    await eventually(
-      async () =>
-        (
-          await reader.rows<{ n: number }>(
-            `select count(*)::int as n from pg_stat_activity where datname = current_database() and query like '%pg_sleep(30)%' and pid <> pg_backend_pid() and state <> 'idle'`,
-          )
-        )[0]?.n === 0,
-      'the cancelled statement to leave pg_stat_activity',
-    );
   });
 });
 
 describe('a request whose work waits outside the database, inside its transaction, past the budget', () => {
-  // Break caught: a transaction left open until the work decides to end it, or a write made after the answer. The work heeds
-  // nothing, but everything it asks of the database after the expiry is refused.
-  it('is answered 503, the transaction is rolled back at the expiry, and the late write is refused and absent', async () => {
+  // Break caught: a transaction left open, and the client left waiting, until the work decides to end it (the work here waits for 2.2 seconds beyond the budget).
+  it('is answered 503 at the expiry, not when the work ends', async () => {
     const started = Date.now();
 
     const response = await post('open-transaction?body=held&late=late-in-tx');
@@ -257,8 +235,7 @@ describe('a request whose work waits outside the database, inside its transactio
 
     expect(response.status).toBe(503);
     expect(elapsed).toBeLessThan(BUDGET_MS + DISPOSAL_BOUND_MS);
-    // At the answer the row the transaction wrote is already gone: it was rolled back at the expiry, not when the work ended.
-    expect(await notes('held')).toEqual([{ n: 0 }]);
+    // The work goes on to its end, and is let finish before the next test.
     await eventually(
       () =>
         Promise.resolve(
@@ -266,31 +243,22 @@ describe('a request whose work waits outside the database, inside its transactio
         ),
       'the late write to be attempted',
     );
-    expect(await notes('late-in-tx')).toEqual([{ n: 0 }]);
-    expect(await notes('held')).toEqual([{ n: 0 }]);
-    expect(
-      records().some((record) => record.msg === 'pipeline fixture: the late write was accepted'),
-    ).toBe(false);
   });
 });
 
 describe('a request whose work heeds nothing', () => {
-  // Break caught: a client left waiting for work that never looks at its budget, or work that begins a transaction on behalf of a
-  // request that has been answered.
-  it('is answered 503 by the pipeline, and what the work tries afterwards is refused and absent', async () => {
+  // Break caught: a client left waiting for work that never looks at its budget, or answered before the database layer's own bound had passed.
+  it('is answered 503 by the pipeline, once the budget and the disposal bound have passed and not long after', async () => {
     const started = Date.now();
 
     const response = await post('deaf?late=late-after-answer');
     const elapsed = Date.now() - started;
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      message: 'Service unavailable',
-      request_id: response.headers.get('x-request-id'),
-    });
     // Not before the database layer's own bound had passed, and not long after it.
     expect(elapsed).toBeGreaterThanOrEqual(BUDGET_MS + DISPOSAL_BOUND_MS - 100);
     expect(elapsed).toBeLessThan(BUDGET_MS + DISPOSAL_BOUND_MS + 1_000);
+    // The work goes on to its end, and is let finish before the end of the file.
     await eventually(
       () =>
         Promise.resolve(
@@ -300,18 +268,5 @@ describe('a request whose work heeds nothing', () => {
         ),
       'the late transaction to be attempted',
     );
-    expect(await notes('late-after-answer')).toEqual([{ n: 0 }]);
-    expect(
-      records().some(
-        (record) => record.msg === 'pipeline fixture: the late transaction was accepted',
-      ),
-    ).toBe(false);
-    // Said once, as a warning: the pipeline answered; and not as a defect.
-    expect(
-      records().filter(
-        (record) =>
-          record.msg === 'request answered by the pipeline: its work outlasted the budget',
-      ),
-    ).toHaveLength(1);
   });
 });

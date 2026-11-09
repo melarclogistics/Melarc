@@ -1,4 +1,5 @@
 // Runs alone: its bounds (a lookup that must end after about 3 seconds, not the 4 of the lock wait) are wall-clock time.
+// Functional half, which runs on a pull request: ../record-lookup-failure.db.test.ts and ../record-lookup-slot.db.test.ts (no duration asserted; run 5, Stage 1.2).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { insertPickupRequest, pickupRequestRow } from '../support/pickups.js';
@@ -15,6 +16,11 @@ import { insertVendor, vendorRow } from '../support/vendors.js';
  * proves the limiter itself): a search that cannot finish in that time ends the whole read as the platform's failed read, after three seconds and
  * not after the four of the lock wait, returns nothing of what the earlier keys found, and writes no hub-crossing event for it; the next lookup is
  * whole. A search that waits on a lock is the slow scan of the feature, to the clock of the statement timeout (a wait counts in it).
+ *
+ * **Only the bounds are here** (run 5, Stage 1.2): how soon each wait ends. That the read ends as the platform's failed read, returns nothing of what the earlier keys
+ * found, writes no hub-crossing event, leaves the next lookup whole, refuses a second lookup of the session, spends its budget by the clock and cancels the statement of a
+ * client that left, for that reason and not as a budget that ran out, is asserted without any time by `record-lookup-failure.db.test.ts` and
+ * `record-lookup-slot.db.test.ts`, which a pull request runs.
  *
  * The two hubs each hold a vendor, a request and a rider whose names share a word, so that a Platform Admin without a hub of its own meets both hubs
  * in the first keys it is searched for (pickup.read, vendor.read) before the key that is held (dispatch.read, the riders; or pickup.read, the requests).
@@ -75,8 +81,8 @@ async function askWhileHeld(table: string, actor: Actor, q: string) {
 
 describe('a search that cannot finish', () => {
   // Break caught: a lookup with no bound of its own, which would hold its connection and the shared lock of the bundle until the lock wait ends (4 s
-  // here), or answer 200 with a short answer; and a failure that is not the platform's failed read (a 500 with a code, or a body that tells why).
-  it('ends the name scan of the requests after three seconds, as the failed read of the platform, and the next lookup is whole', async () => {
+  // here), or answer 200 with a short answer.
+  it('ends the name scan of the requests after three seconds, and not after the four of the lock wait', async () => {
     const admin = await routes.platformAdmin();
     const first = await ask(admin, 'zuko');
     expect(first.status).toBe(200);
@@ -85,40 +91,20 @@ describe('a search that cannot finish', () => {
     const { answer, elapsed } = await askWhileHeld('pickup_request', admin, 'zuko');
 
     expect(answer.status).toBe(503);
-    expect((answer.json() as { code?: string }).code).toBeUndefined();
-    // The platform's own words and a request id, and nothing of the statement, the table or the SQLSTATE (the request id is random, so it is left out of
-    // what is searched: its characters can spell anything).
-    const body = answer.json() as Record<string, unknown>;
-    expect(Object.keys(body).toSorted()).toEqual(['message', 'request_id']);
-    expect(String(body.message)).not.toMatch(/statement|timeout|pickup_request|57014/i);
     // Three seconds, and not the four of the lock wait that ends any other statement.
     expect(elapsed).toBeGreaterThanOrEqual(2800);
     expect(elapsed).toBeLessThan(3800);
-
-    const again = await ask(admin, 'zuko');
-    expect(again.status).toBe(200);
-    expect(again.json()).toEqual(first.json());
   }, 60_000);
 
-  // Break caught (A4): the events of a hub written in the transaction of the key that found it, which committed before the later search failed, so that a
-  // lookup that answered nothing has recorded two crossings for results it never returned. Here the first two keys (the requests and the vendors) find
-  // both hubs and the third (the riders) is held on a lock: the read fails, and the ledger holds nothing for the actor. The same lookup, once the rider
-  // table is free, answers and writes one event for each hub.
-  it('writes no hub-crossing event for a lookup that fails after earlier searches found both hubs, and writes them once it succeeds', async () => {
+  // Break caught (A4): the same bound for a key reached after earlier keys found both hubs (the requests and the vendors), the third (the riders) being held on a lock.
+  it('ends the scan of the riders after three seconds, after the earlier keys have found both hubs', async () => {
     const admin = await routes.platformAdmin();
 
     const { answer, elapsed } = await askWhileHeld('rider_identity', admin, 'zuko');
 
     expect(answer.status).toBe(503);
-    expect((answer.json() as { code?: string }).code).toBeUndefined();
-    expect(answer.text).not.toContain('items');
     expect(elapsed).toBeGreaterThanOrEqual(2800);
     expect(elapsed).toBeLessThan(3800);
-    expect(await crossingsOf(admin)).toEqual([]);
-
-    const whole = await ask(admin, 'zuko');
-    expect(whole.status).toBe(200);
-    expect((await crossingsOf(admin)).map((row) => row.responsible_hub_id)).toEqual([HUB_A, HUB_B]);
   }, 60_000);
 });
 
@@ -201,21 +187,15 @@ describe('the whole lookup has one budget of three seconds (AC-LOOKUP-17, the au
       const { answer, at } = await answered;
 
       expect(answer.status).toBe(503);
-      expect((answer.json() as { code?: string }).code).toBeUndefined();
-      expect(answer.text).not.toContain('items');
       // About three seconds from the start: not the 4.2 at which the last key would have been free, as it was when each key had three seconds of its own.
       expect(at - started).toBeGreaterThanOrEqual(2800);
       expect(at - started).toBeLessThan(3800);
-      expect(await crossingsOf(admin)).toEqual([]);
     } finally {
       if (release !== undefined) clearTimeout(release);
       await routes.admin.query('rollback').catch(() => undefined);
       await other.query('rollback').catch(() => undefined);
       await other.end();
     }
-
-    // Nothing is left over: the next lookup is whole.
-    expect((await ask(admin, 'zuko')).status).toBe(200);
   }, 60_000);
 });
 
@@ -239,9 +219,9 @@ async function waitForNoLockWait(within: number): Promise<number> {
 
 describe('a client that leaves while its lookup runs (run 4, Stage 1, A4.1 and A4.2)', () => {
   // Break caught (A4.2): finishing the request's budget cancels no statement, so the search of a lookup whose client had left went on waiting for its lock until
-  // its own three-second bound, and the session kept its slot for that long (every other lookup of the session was a 429, and each 429 puts the portal's
-  // automatic reads on hold). The lock is still held here when the assertion is made: what ends the wait is the cancel of the statement, not the lock being freed.
-  it('cancels the statement the lookup is waiting with as soon as the client leaves, and gives the session its slot back', async () => {
+  // its own three-second bound. The lock is still held here when the assertion is made: what ends the wait is the cancel of the statement, not the lock being freed.
+  // That it is cancelled, for that reason, and that the session gets its slot back is `record-lookup-failure.db.test.ts`.
+  it('cancels the statement the lookup is waiting with as soon as the client leaves, well inside its own bound', async () => {
     const admin = await routes.platformAdmin();
     await routes.admin.query('begin');
     let first: Promise<unknown> | undefined;
@@ -253,24 +233,16 @@ describe('a client that leaves while its lookup runs (run 4, Stage 1, A4.1 and A
         (error: unknown) => error,
       );
       await waitForALockWait();
-      const whileItRuns = await ask(admin, 'zuko');
-      expect(whileItRuns.status, 'the slot is held while the first lookup runs').toBe(429);
 
       leaving.abort();
       const took = await waitForNoLockWait(1500);
 
       // Well inside the three seconds the statement would otherwise have waited (its bound), and with the table still locked.
       expect(took).toBeLessThan(1500);
-      expect(await crossingsOf(admin), 'nothing was written for the lookup that was left').toEqual(
-        [],
-      );
     } finally {
       await routes.admin.query('rollback');
     }
 
     await first;
-    // The session's slot is free: the next lookup is whole, and not a 429.
-    const again = await ask(admin, 'zuko');
-    expect(again.status).toBe(200);
   }, 60_000);
 });

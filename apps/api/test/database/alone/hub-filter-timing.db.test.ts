@@ -1,4 +1,5 @@
 // Runs alone: its bounds are wall-clock time (a read of a hub the session does not reach must answer in milliseconds, with 200,000 rows in that hub), and it loads tables of that size.
+// Functional half, which runs on a pull request: ../hub-filters.db.test.ts and ../hub-filters-older-lists.db.test.ts (a hub outside the grant is answered empty and a count equals its list; no time asserted).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { RESERVED_SYSTEM_ACTOR_ID } from '../../../src/staff/reserved-system-actor.js';
