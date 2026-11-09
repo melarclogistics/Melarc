@@ -9,7 +9,14 @@
   min-width: min(20rem, 100%);
 }
 
-/* An account as a card (the queue's narrow drawing): the status, then the facts. */
+/* The facts of an account, in the groups of their meaning (the record template's main column): one list under another. */
+.vendor-facts-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* An account as a card (the queue's narrow drawing), and a browser of the account in a room too narrow for its columns: the status, then the facts. */
 .vendor-card__head {
   display: flex;
   flex-wrap: wrap;

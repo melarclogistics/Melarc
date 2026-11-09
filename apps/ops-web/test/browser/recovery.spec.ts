@@ -327,6 +327,71 @@ test.describe('the vendor screens', () => {
     expect(seen.unexpected).toEqual([]);
   });
 
+  // The account is drawn by the record template: its identifier is the heading, its status and one sentence sit beside it, its facts are under their names, and its browsers are a table
+  // where the table's own box has room (40rem) and cards under that, never both. Nothing of a credential reaches the page, and it never scrolls sideways.
+  for (const [shown, size] of [
+    ['a table', { width: 1280, height: 800 }],
+    ['a table or cards, one of them', { width: 768, height: 1024 }],
+    ['cards', { width: 390, height: 844 }],
+    ['cards', { width: 320, height: 640 }],
+  ] as const) {
+    // Break caught: a fact the record forgets, browsers drawn twice or not at all, a credential drawn from the answer, or a page wider than a phone.
+    test(`draws the account as a record, with its browsers as ${shown}, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        [`GET /api/v1/ops/vendors/${ACCOUNT}`]: (route) =>
+          route.fulfill({
+            status: 200,
+            headers: { etag: '"v7"' },
+            json: {
+              account: { ...ACCOUNT_BODY, legal_name: LONG_ORGANISATION },
+              devices: [
+                {
+                  id: '9e0f1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b',
+                  principal_type: 'VENDOR',
+                  principal_id: ACCOUNT,
+                  device_kind: 'VENDOR_BROWSER_CREDENTIAL',
+                  status: 'ACTIVE',
+                  registered_at: '2026-10-20T09:00:00Z',
+                  registered_by: null,
+                  device_credential_hash: PLANTED,
+                },
+              ],
+            },
+          }),
+      });
+      await page.setViewportSize(size);
+      await page.goto(`/admin/vendors/${ACCOUNT}`);
+
+      await expect(page.getByRole('heading', { level: 1, name: 'K7M2Q9X4' })).toBeVisible();
+      await expect(page.getByText('This account can sign in.')).toBeVisible();
+      for (const [term, value] of [
+        ['Organisation', LONG_ORGANISATION],
+        ['Shared secret', 'Set'],
+        ['Where links go', 'Its registered email'],
+        ['Active browsers', '1'],
+      ] as const) {
+        await expect(page.locator(`dt:text-is("${term}") + dd`)).toHaveText(value);
+      }
+      const table = page.getByRole('table', { name: 'Browsers of the account' });
+      const cards = page.getByRole('list', { name: 'Browsers of the account' });
+      if (shown === 'a table') {
+        await expect(table).toBeVisible();
+        await expect(cards).toHaveCount(0);
+      } else if (shown === 'cards') {
+        await expect(cards).toBeVisible();
+        await expect(table).toHaveCount(0);
+      } else {
+        expect((await table.count()) + (await cards.count())).toBe(1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(PLANTED);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
+
   // Break caught (AC-SLICE-000-105, -23): a recovery sent without the version or a reason, or its outcome showing a link the answer planted.
   test('start a recovery with the version read and a reason, by the keyboard, and show no link', async ({
     page,
