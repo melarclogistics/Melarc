@@ -120,7 +120,7 @@ function open(
 
 const poolTable = async (): Promise<HTMLElement> => {
   const table = await screen.findByRole('table', {
-    name: 'Confirmed pickups waiting for a manifest',
+    name: 'Confirmed pickups waiting for a pickup run',
   });
   // The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited.
   await waitFor(() => {
@@ -303,7 +303,7 @@ describe('making the manifest', () => {
     );
     await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Full yesterday');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     await waitFor(() => {
       expect(creates()).toHaveLength(1);
@@ -339,7 +339,7 @@ describe('making the manifest', () => {
     await user.click(await box('ACC-PR-7KQ2MZ'));
     await typeDate(user, '04112026');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     await waitFor(() => {
       expect(creates()).toHaveLength(1);
@@ -355,7 +355,7 @@ describe('making the manifest', () => {
     const { user } = open();
     await poolTable();
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     expect(await screen.findByText('Choose at least one request from the pool.')).toBeVisible();
     expect(screen.getByText('Choose the day the run is worked.')).toBeVisible();
@@ -368,11 +368,11 @@ describe('making the manifest', () => {
     await typeDate(user, '04112026');
     const select = await screen.findByRole('combobox', { name: /Why it is carried over/ });
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
     expect(await screen.findByText('Choose why this request is carried over.')).toBeVisible();
 
     await user.selectOptions(select, 'DEMO_NOTE_ME');
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
     expect(await screen.findByText('This reason needs a note.')).toBeVisible();
     expect(creates()).toHaveLength(0);
   });
@@ -409,7 +409,7 @@ describe('making the manifest', () => {
     await user.click(await box('ACC-PR-ZYU26H'));
     await typeDate(user, '04112026');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     expect(await screen.findByText(/A request you chose is already on a manifest/)).toBeVisible();
     const items = within(review()).getAllByRole('listitem');
@@ -431,7 +431,7 @@ describe('making the manifest', () => {
     await user.click(await box('ACC-PR-7KQ2MZ'));
     await typeDate(user, '04112026');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     expect(
       await screen.findByText('That day has passed. Choose today or a later day.'),
@@ -452,7 +452,7 @@ describe('making the manifest', () => {
       'DEMO_RIDER_LATE',
     );
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     expect(await screen.findByText('The carry-over reason was not accepted.')).toBeVisible();
   });
@@ -476,7 +476,7 @@ describe('making the manifest', () => {
     await user.click(await box('ACC-PR-7KQ2MZ'));
     await typeDate(user, '04112026');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
     expect(
       await screen.findByText(/could not confirm whether the manifest was created/i),
     ).toBeVisible();
@@ -494,8 +494,8 @@ describe('making the manifest', () => {
     await user.click(await box('ACC-PR-7KQ2MZ'));
     await typeDate(user, '04112026');
 
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     expect(held.waiting()).toBe(1);
     expect(creates()).toHaveLength(1);
@@ -553,15 +553,15 @@ describe('a run is for one hub (task C3, audit R4-12; AC-HUBF-09)', () => {
     expect(screen.getByText(/^Choose the hub of the run first/)).toBeVisible();
     expect(
       screen.getByText(
-        'Choose the hub first: the pool, the review and the manifest are that hub’s.',
+        'Choose the hub first: the pool, the review and the pickup run are that hub’s.',
       ),
     ).toBeVisible();
     // Nothing of the pool is drawn or asked for, and the rest of the form waits for the answer.
     expect(
-      screen.queryByRole('table', { name: 'Confirmed pickups waiting for a manifest' }),
+      screen.queryByRole('table', { name: 'Confirmed pickups waiting for a pickup run' }),
     ).toBeNull();
     expect(screen.queryByRole('region', { name: 'Review' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Create the manifest' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create the pickup run' })).toBeNull();
     expect(pools()).toHaveLength(0);
 
     await user.selectOptions(runHub(), KUMASI.id);
@@ -668,7 +668,7 @@ describe('a run is for one hub (task C3, audit R4-12; AC-HUBF-09)', () => {
     expect(within(review()).getByText('No request is chosen yet.')).toBeVisible();
     await user.click(await box('KUM-PR-4XN8RD'));
     await typeDate(user, '04112026');
-    await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
     await waitFor(() => {
       expect(creates()).toHaveLength(1);
@@ -773,7 +773,7 @@ describeInterfaceStates('the manifest builder', {
     test: async () => {
       const { user } = open();
       await poolTable();
-      await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+      await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
       expect(await screen.findByText('Choose the day the run is worked.')).toBeVisible();
     },
   },
@@ -810,7 +810,7 @@ describeInterfaceStates('the manifest builder', {
       });
       await user.click(await box('ACC-PR-7KQ2MZ'));
       await typeDate(user, '04112026');
-      await user.click(screen.getByRole('button', { name: 'Create the manifest' }));
+      await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
       expect(await screen.findByText('Already on a manifest.')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Refresh the pool' })).toBeEnabled();
     },
@@ -871,7 +871,7 @@ describe('a session that lists no hub', () => {
 
     expect(
       await screen.findByText(
-        'Your session lists no hub, so there is nothing to build a run from: a manifest is made for one hub.',
+        'Your session lists no hub, so there is nothing to build a run from: a pickup run is made for one hub.',
       ),
     ).toBeVisible();
     expect(
@@ -882,9 +882,9 @@ describe('a session that lists no hub', () => {
     expect(screen.queryByText(/Choose the hub/)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'The hub of the run' })).toBeNull();
     expect(screen.queryByRole('group', { name: /Service date/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Create the manifest' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create the pickup run' })).toBeNull();
     expect(
-      screen.queryByRole('table', { name: 'Confirmed pickups waiting for a manifest' }),
+      screen.queryByRole('table', { name: 'Confirmed pickups waiting for a pickup run' }),
     ).toBeNull();
     // No role and no permission key is named.
     expect(document.body.textContent).not.toMatch(/manifest\.|staff\.|pickup\.|role/i);

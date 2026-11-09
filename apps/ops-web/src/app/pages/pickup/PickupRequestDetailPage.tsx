@@ -13,8 +13,10 @@ import {
 import { Link } from '../../../components/ui/link/Link';
 import { MoneyAmount } from '../../../components/ui/money/MoneyAmount';
 import { Panel } from '../../../components/ui/panel/Panel';
+import type { Stage } from '../../../components/ui/record-header/StageTracker';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
+import { Timeline, type TimelineEntry } from '../../../components/ui/timeline/Timeline';
 import { useApiClient } from '../../../platform/api/api-client';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
 import {
@@ -153,15 +155,19 @@ const fact = (label: string, value: ReactNode, held = true): readonly Descriptio
   held ? [{ label, value }] : [];
 
 /**
- * The facts of the record, grouped by what they mean (PRODUCT_DESIGN_DIRECTION section 6.2): the pickup itself, who to reach and who pays, the exceptions it carries and its
- * history. A fact the record does not hold is not drawn, and one it holds without a value says so in words.
+ * The facts of the record, grouped by what they mean (PRODUCT_DESIGN_DIRECTION section 6.2): the pickup itself, who to reach and who pays, and the exceptions it carries. The page
+ * places the groups: the pickup and the exceptions are the work, and the people are the side column's, beside it where there is room. A fact the record does not hold is not drawn, and
+ * one it holds without a value says so in words. The record's history is told by its own dated facts, as a timeline (`historyOf`).
  */
-function Facts({ request }: { readonly request: PickupRequestView }) {
+interface FactGroups {
+  readonly pickup: readonly DescriptionItem[];
+  readonly people: readonly DescriptionItem[];
+  readonly exceptions: readonly DescriptionItem[];
+}
+
+function useFactGroups(request: PickupRequestView): FactGroups {
   const me = useSignedInSession();
   const capAmount = request.liability_cap_snapshot?.amount_minor;
-  const chargeAmount =
-    request.cancellation_charge?.amount_minor ?? request.cancellation_charge_snapshot?.amount_minor;
-  const cancelledBy = cancelledByText(request);
   const pickup: readonly DescriptionItem[] = [
     ...fact(
       'Booked as',
@@ -278,47 +284,141 @@ function Facts({ request }: { readonly request: PickupRequestView }) {
       request.attempt_extension_id !== undefined,
     ),
   ];
-  const history: readonly DescriptionItem[] = [
-    ...fact('Booked', formatInstant(request.created_at ?? ''), request.created_at !== undefined),
-    ...fact(
-      'Confirmed',
-      formatInstant(request.confirmed_at ?? ''),
-      request.confirmed_at !== undefined,
-    ),
-    ...fact(
-      'Cancellation',
-      <>
-        {cancelledBy === undefined ? null : <p>{cancelledBy}</p>}
-        {request.cancelled_at === undefined ? null : (
-          <p>{`On ${formatInstant(request.cancelled_at) ?? ''}.`}</p>
-        )}
-        {request.cancellation_reason?.label === undefined ? null : (
-          <p>{`Reason: ${request.cancellation_reason.label}`}</p>
-        )}
-        {request.cancellation_charge_outcome === undefined ? null : (
-          <p>{CHARGE_OUTCOME_LABELS[request.cancellation_charge_outcome]}</p>
-        )}
-        {chargeAmount === undefined ? null : (
-          <p>
-            Charge as applied: <MoneyAmount amountMinor={chargeAmount} currency="GHS" />
-          </p>
-        )}
-      </>,
-      request.state === 'CANCELLED',
-    ),
+  return { pickup, people, exceptions };
+}
+
+/**
+ * What the record itself says happened, with when: booked, the one-package exception asked for and decided, confirmed, escalated, cancelled. **Only dated facts of the record, and
+ * nothing invented**: a fuller history (who did each act, an act that left no date on the request) would need a read of the request's audit trail, which the pickup API does not
+ * offer to an Ops session (the record carries the dates above and no more). Oldest first, the latest marked.
+ */
+function historyOf(
+  request: PickupRequestView,
+  principalId: string | undefined,
+): readonly TimelineEntry[] {
+  const chargeAmount =
+    request.cancellation_charge?.amount_minor ?? request.cancellation_charge_snapshot?.amount_minor;
+  const cancelledBy = cancelledByText(request);
+  const exception = request.one_package_exception;
+  const facts: {
+    readonly at: string;
+    readonly key: string;
+    readonly title: string;
+    readonly more?: ReactNode;
+  }[] = [
+    ...(request.created_at === undefined
+      ? []
+      : [{ at: request.created_at, key: 'booked', title: 'Booked' }]),
+    ...(exception === undefined
+      ? []
+      : [
+          {
+            at: exception.requested_at,
+            key: 'exception-requested',
+            title: 'One-package exception asked for',
+            more: <p>{`By ${actorText(exception.requested_by, principalId).toLowerCase()}.`}</p>,
+          },
+        ]),
+    ...(exception?.decided_at === undefined
+      ? []
+      : [
+          {
+            at: exception.decided_at,
+            key: 'exception-decided',
+            title:
+              exception.state === 'REJECTED'
+                ? 'One-package exception refused'
+                : 'One-package exception approved',
+            ...(exception.approved_by === undefined
+              ? {}
+              : {
+                  more: (
+                    <p>{`By ${actorText(exception.approved_by, principalId).toLowerCase()}.`}</p>
+                  ),
+                }),
+          },
+        ]),
+    ...(request.confirmed_at === undefined
+      ? []
+      : [{ at: request.confirmed_at, key: 'confirmed', title: 'Confirmed' }]),
+    ...(request.escalated_at === undefined
+      ? []
+      : [{ at: request.escalated_at, key: 'escalated', title: 'Escalated' }]),
+    ...(request.cancelled_at === undefined
+      ? []
+      : [
+          {
+            at: request.cancelled_at,
+            key: 'cancelled',
+            title: 'Cancelled',
+            more: (
+              <>
+                {cancelledBy === undefined ? null : <p>{cancelledBy}</p>}
+                {request.cancellation_reason?.label === undefined ? null : (
+                  <p>{`Reason: ${request.cancellation_reason.label}`}</p>
+                )}
+                {request.cancellation_charge_outcome === undefined ? null : (
+                  <p>{CHARGE_OUTCOME_LABELS[request.cancellation_charge_outcome]}</p>
+                )}
+                {chargeAmount === undefined ? null : (
+                  <p>
+                    Charge as applied: <MoneyAmount amountMinor={chargeAmount} currency="GHS" />
+                  </p>
+                )}
+              </>
+            ),
+          },
+        ]),
   ];
-  return (
-    <div className="pickup-facts-groups">
-      <DescriptionList heading="Pickup" headingLevel={3} items={pickup} />
-      <DescriptionList heading="Who to reach, and who pays" headingLevel={3} items={people} />
-      {exceptions.length === 0 ? null : (
-        <DescriptionList heading="Exceptions" headingLevel={3} items={exceptions} />
-      )}
-      {history.length === 0 ? null : (
-        <DescriptionList heading="History" headingLevel={3} items={history} />
-      )}
-    </div>
-  );
+  const ordered = [...facts].sort((first, second) => Date.parse(first.at) - Date.parse(second.at));
+  return ordered.map((entry, index) => ({
+    key: entry.key,
+    title: entry.title,
+    details: (
+      <>
+        <p>{formatInstant(entry.at) ?? ''}</p>
+        {entry.more}
+      </>
+    ),
+    current: index === ordered.length - 1,
+  }));
+}
+
+/**
+ * The way a request goes, for the tracker (`contracts/state-machines.md` section 3): **one forward path**, waiting for confirmation and then confirmed, and two ends, declined (from
+ * waiting) and cancelled (from either), each drawn as the end it is: the last stage, reached. A cancelled request that was confirmed has been through the confirmation; one that was
+ * not has not.
+ */
+function stagesOf(request: PickupRequestView): {
+  readonly label: string;
+  readonly stages: readonly Stage[];
+  readonly currentId: string;
+} {
+  const label = 'Progress of the pickup request';
+  const waiting: Stage = { id: 'waiting', label: 'Waiting for confirmation' };
+  const confirmed: Stage = { id: 'confirmed', label: 'Confirmed' };
+  switch (request.state) {
+    case 'PENDING':
+      return { label, stages: [waiting, confirmed], currentId: 'waiting' };
+    case 'CONFIRMED':
+      return { label, stages: [waiting, confirmed], currentId: 'confirmed' };
+    case 'DECLINED':
+      return {
+        label,
+        stages: [waiting, { id: 'declined', label: 'Declined' }],
+        currentId: 'declined',
+      };
+    case 'CANCELLED':
+      return {
+        label,
+        stages: [
+          waiting,
+          ...(request.confirmed_at === undefined ? [] : [confirmed]),
+          { id: 'cancelled', label: 'Cancelled' },
+        ],
+        currentId: 'cancelled',
+      };
+  }
 }
 
 /** Focus to the heading when the page replaces the one that was loading in the same place (the heading of the loaded request is a new element). */
@@ -347,7 +447,9 @@ function Request({
   useEffect(() => {
     if (notice !== undefined) noticeBox.current?.focus();
   }, [notice]);
+  const groups = useFactGroups(record.request);
   if (me === undefined) return null;
+  const history = historyOf(record.request, me.session.principal_id);
 
   const { request, etag } = record;
   const id = request.id;
@@ -601,6 +703,19 @@ function Request({
     escalatedAt === undefined ? '' : ` Escalated on ${escalatedAt}.`
   }`;
 
+  // What a person must know before they choose an act, said beside the acts and not only in the question of the act: an escalation is recorded once and is not taken back; and
+  // once a rider holds the request's run, cancelling or rescheduling it records a decision about the cancellation charge.
+  const rules: readonly string[] = [
+    ...(confirmed && escalatedAt === undefined && me.holds('pickup.failure.resolve')
+      ? ['Escalating a request is recorded once, with your note, and is not taken back.']
+      : []),
+    ...(decidesCharge && me.holds('pickup.request.cancel')
+      ? [
+          'A rider holds this request’s run, so cancelling or rescheduling it records a decision about the cancellation charge: it is applied or waived, with a reason.',
+        ]
+      : []),
+  ];
+
   return (
     <>
       <RecordPage
@@ -608,6 +723,7 @@ function Request({
           code: request.code,
           status: <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />,
           sentence,
+          stages: stagesOf(request),
         }}
         acts={{
           ...(primary === undefined ? {} : { primary }),
@@ -649,12 +765,26 @@ function Request({
                   : 'A declined request is not changed again.'}
               </p>
             ) : null}
+            {rules.map((rule) => (
+              <p key={rule} className="pickup-act__text">
+                {rule}
+              </p>
+            ))}
           </>
         }
         main={
           <>
             <Panel title="The request" headingLevel={2}>
-              <Facts request={request} />
+              <div className="pickup-facts-groups">
+                <DescriptionList heading="Pickup" headingLevel={3} items={groups.pickup} />
+                {groups.exceptions.length === 0 ? null : (
+                  <DescriptionList
+                    heading="Exceptions"
+                    headingLevel={3}
+                    items={groups.exceptions}
+                  />
+                )}
+              </div>
             </Panel>
             {/* The estimate an act's answer carried is shown with its news; the record's own, when the read carries one, is not shown twice. */}
             {request.indicative_estimate === undefined || notice?.estimate !== undefined ? null : (
@@ -665,20 +795,31 @@ function Request({
             </Panel>
           </>
         }
-        {...(me.holds('notification.read')
-          ? {
-              side: (
-                <Panel title="Related" headingLevel={2}>
-                  {/* The message log narrowed to this request, for a session that lists the key of the log (the server checks it all the same). */}
-                  <p>
-                    <Link to={subjectLogPath('PICKUP_REQUEST', id)}>
-                      Messages about this request
-                    </Link>
-                  </p>
-                </Panel>
-              ),
-            }
-          : {})}
+        // Beside the work where the page has room (from 1280px of window), after it where it has not: who to reach and who pays, the history, and what is related.
+        side={
+          <>
+            <Panel title="Who to reach, and who pays" headingLevel={2}>
+              <DescriptionList items={groups.people} />
+            </Panel>
+            {history.length === 0 ? null : (
+              <Panel title="History" headingLevel={2}>
+                <Timeline
+                  label="History of this request, oldest first"
+                  entries={history}
+                  currentLabel="Latest"
+                />
+              </Panel>
+            )}
+            {me.holds('notification.read') ? (
+              <Panel title="Related" headingLevel={2}>
+                {/* The message log narrowed to this request, for a session that lists the key of the log (the server checks it all the same). */}
+                <p>
+                  <Link to={subjectLogPath('PICKUP_REQUEST', id)}>Messages about this request</Link>
+                </p>
+              </Panel>
+            ) : null}
+          </>
+        }
       />
 
       <ConfirmPickupDialog
@@ -742,8 +883,9 @@ function Request({
  * again, never a silent overwrite; the acts that take an `Idempotency-Key` send a new one each time and the same one only to try a lost answer again. A request outside the
  * session's hubs and one that does not exist are pages of their own. **An act the session cannot take is not drawn**: what is offered is a hint and decides nothing, since the
  * server checks the key, the hub and the state. An escalation is recorded once (`escalated_at`) and is then told, not offered; an extension allows one further attempt; whether
- * a rider holds the request's run decides whether a cancellation asks for the charge decision. There is no stage tracker: the request's states are four, and a path through
- * dispatch and collection is not something the request's own read carries.
+ * a rider holds the request's run decides whether a cancellation asks for the charge decision. **The tracker is the contract's one forward path** (waiting for confirmation, then
+ * confirmed; declined and cancelled are drawn as the ends they are): a path through dispatch and collection is not something the request's own read carries, and is not drawn. The
+ * history is the record's own dated facts as a timeline, and the people are in the side column, beside the work where there is room.
  */
 export function PickupRequestDetailPage() {
   const { id = '' } = useParams();

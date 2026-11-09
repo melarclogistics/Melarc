@@ -86,7 +86,7 @@ export interface TaskFormProps {
 /**
  * The task form template (PRODUCT_DESIGN_DIRECTION section 6.3; COMPONENT_PATTERNS, *TaskForm*): creating or completing a unit of work. It composes the kit into: the page header; sections in
  * the order the officer thinks, each a grid sized to its fields (two columns on a desk, one at 768px and below); a **sticky summary** rail beside them with what the server states
- * (it follows the sections on a narrow screen); an optional **review** before anything is sent; the form's actions at the foot of the sections; and a guard against leaving with
+ * (it follows the sections, **before the button that sends them**, on a narrow screen); an optional **review** before anything is sent; the form's actions at the foot of the sections; and a guard against leaving with
  * unsaved changes. Validation is inline and the page's: it passes each field its own error, and the form is `noValidate`. **It owns the structure and the behaviour of the shape and
  * decides nothing**: what a field accepts, what the summary says and what happens on send are the page's and the server's, and a figure that was not given is not drawn.
  * Its success is `announceTaskDone` (a toast with *Open* and a way to do another).
@@ -115,32 +115,36 @@ export function TaskForm({
           aria-busy={busy ? true : undefined}
           onSubmit={onSubmit}
         >
-          {alerts}
-          <div className="ui-task-form__sections" hidden={reviewing}>
-            {children}
+          <div className="ui-task-form__main">
+            {alerts}
+            <div className="ui-task-form__sections" hidden={reviewing}>
+              {children}
+            </div>
+            {review === undefined || !reviewing ? null : (
+              <section className="ui-task-form__review" aria-labelledby="ui-task-form-review">
+                <h2 id="ui-task-form-review" className="ui-task-form__section-title">
+                  {review.title ?? 'Review'}
+                </h2>
+                <div className="ui-task-form__review-body">{review.children}</div>
+                <div>
+                  <Button type="button" variant="secondary" onClick={review.onBack}>
+                    {review.backLabel ?? 'Go back and change'}
+                  </Button>
+                </div>
+              </section>
+            )}
           </div>
-          {review === undefined || !reviewing ? null : (
-            <section className="ui-task-form__review" aria-labelledby="ui-task-form-review">
-              <h2 id="ui-task-form-review" className="ui-task-form__section-title">
-                {review.title ?? 'Review'}
-              </h2>
-              <div className="ui-task-form__review-body">{review.children}</div>
-              <div>
-                <Button type="button" variant="secondary" onClick={review.onBack}>
-                  {review.backLabel ?? 'Go back and change'}
-                </Button>
-              </div>
-            </section>
+          {/* The summary is in the form, between what is entered and the button that sends it: what the booking comes to is read before it is sent, on a narrow page, where it stands
+              after the sections; where the page has room it stands beside them (the stylesheet), and the order of the page does not change. */}
+          {summary === undefined ? null : (
+            <aside className="ui-task-form__rail" aria-label={summary.title ?? 'Summary'}>
+              <Panel title={summary.title ?? 'Summary'} headingLevel={2}>
+                {summary.children}
+              </Panel>
+            </aside>
           )}
           <div className="ui-task-form__actions">{actions}</div>
         </form>
-        {summary === undefined ? null : (
-          <aside className="ui-task-form__rail" aria-label={summary.title ?? 'Summary'}>
-            <Panel title={summary.title ?? 'Summary'} headingLevel={2}>
-              {summary.children}
-            </Panel>
-          </aside>
-        )}
       </div>
       <UnsavedChangesGuard when={dirty} />
     </div>

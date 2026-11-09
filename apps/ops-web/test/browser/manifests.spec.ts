@@ -91,9 +91,9 @@ function clippedControls(page: Page): Promise<string[]> {
 }
 
 const poolTable = (page: Page) =>
-  page.getByRole('table', { name: 'Confirmed pickups waiting for a manifest' });
+  page.getByRole('table', { name: 'Confirmed pickups waiting for a pickup run' });
 const poolCards = (page: Page) =>
-  page.getByRole('list', { name: 'Confirmed pickups waiting for a manifest' });
+  page.getByRole('list', { name: 'Confirmed pickups waiting for a pickup run' });
 
 async function typeDate(page: Page, digits: string): Promise<void> {
   const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
@@ -199,7 +199,7 @@ test.describe('building a manifest', () => {
       .getByRole('combobox', { name: /Why it is carried over/ })
       .selectOption('RUN_WAS_FULL');
 
-    await page.getByRole('button', { name: 'Create the manifest' }).click();
+    await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-N7R4PX' })).toBeFocused();
     await expect(page.getByText(/The manifest is made\./)).toBeVisible();
@@ -225,7 +225,7 @@ test.describe('building a manifest', () => {
       if (row.code === 'ACC-PR-ZYU26H') row.manifested = true;
     }
 
-    await page.getByRole('button', { name: 'Create the manifest' }).click();
+    await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
     await expect(page.getByText('Already on a manifest.')).toBeVisible();
     await expect(page.getByText(/A request you chose is already on a manifest/)).toBeVisible();
@@ -288,6 +288,40 @@ test.describe('the builder in a short window (run 4, Stage 2; the review of 5eda
         return box === null ? 0 : box.scrollWidth - box.clientWidth;
       }),
     ).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe('building a pickup run: what the officer reads (run 4, Stage 3.6)', () => {
+  // Break caught (the review of 5edada2): the officer's word for the thing is "pickup run" (surfaces/ops-portal.md: "Build a pickup run"); the contract word, manifest, and the codes
+  // (ACC-MF-...) are not the screen's.
+  test('says "pickup run" in its title, its breadcrumb, its tab and its button', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/manifests/new');
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Build a pickup run' })).toBeVisible();
+    expect(await page.title()).toBe('Build a pickup run · Melarc Ops Portal');
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Breadcrumb' })
+        .getByRole('link', { name: 'Pickup runs' }),
+    ).toHaveAttribute('href', '/manifests');
+    await expect(page.getByRole('button', { name: 'Create the pickup run' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create the manifest' })).toHaveCount(0);
+  });
+
+  // Break caught: a pool of cards that cannot be moved through by heading, because the card's title is a span.
+  test('keeps a heading for each request of the pool when it is cards', async ({ page }) => {
+    await page.setViewportSize(NARROW);
+    await open(page, '/manifests/new');
+
+    const cards = poolCards(page);
+    await expect(cards).toBeVisible();
+    const headings = cards.getByRole('heading', { level: 3 });
+    await expect(headings).toHaveCount(4);
+    await expect(headings.first()).toHaveText('ACC-PR-7KQ2MZ');
+    await expect(cards.getByRole('listitem')).toHaveCount(4);
   });
 });
 

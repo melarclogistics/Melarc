@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
 import { NoWrap, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
-import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { PickupRequestView, PickupState } from '../../../platform/pickup/pickup-shape';
 import { hubNameOf } from '../staff/staff-presentation';
@@ -185,9 +184,6 @@ export function QueueCard({ facts }: { readonly facts: QueueFacts }) {
   return (
     <>
       <div className="pickup-card__head">
-        <span className="pickup-card__title">
-          <OperationalCode>{facts.code}</OperationalCode>
-        </span>
         <State state={facts.state} />
       </div>
       <p className="pickup-card__sender pickup-support">{facts.sender}</p>

@@ -68,12 +68,6 @@ const INTENT_HELP: Readonly<Record<PickupIntent, string>> = {
   ADHOC_SENDER: 'A person or business that is not a registered vendor.',
 };
 
-const PAYER_HELP: Readonly<Record<PayerIntent, string>> = {
-  RECIPIENT_PAYS: 'The recipient pays for delivery.',
-  SENDER_PAYS_FULL: 'The sender pays for delivery in full.',
-  SPLIT: 'The sender pays a part and the recipient the rest.',
-};
-
 type SenderSource = 'RETURNING' | 'NEW';
 type SplitBasis = 'FIXED_AMOUNT' | 'PERCENTAGE';
 /** The destination of a collection: the vendor's default saved location, or one of its saved locations by id. */
@@ -1182,8 +1176,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               required
               options={PAYER_INTENTS.map((value) => ({
                 value,
+                // The label says it whole ("The recipient pays"): a line of help that repeats it is noise.
                 label: PAYER_LABELS[value],
-                help: PAYER_HELP[value],
               }))}
               value={values.payer}
               disabled={locked}

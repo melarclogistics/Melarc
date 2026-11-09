@@ -6,7 +6,7 @@ import { matchRoutes } from 'react-router';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
-import { ICON_NAMES } from '../../components/ui/icon/icons';
+import { ICON_NAMES, ICONS, type IconName } from '../../components/ui/icon/icons';
 import { QueueContinuityScope } from '../../platform/pickup/QueueContinuityScope';
 import { BUNDLE_KEY_SETS, type BundleName } from '../../test-support/bundle-key-sets';
 import { createAppRoutes } from '../routes';
@@ -310,6 +310,27 @@ describe('the real registry', () => {
     expect(icons.length).toBeGreaterThanOrEqual(10);
     for (const icon of icons) expect(ICON_NAMES).toContain(icon);
     expect(new Set(icons).size).toBe(icons.length);
+  });
+
+  // Break caught (the review of 5edada2): Requests and Decisions drawn with Package and PackageCheck, which are one picture at 16px. Two entries of the sidebar are not drawn from one
+  // family of pictures (the first word of the library's name for the picture: Package, Clipboard, Message).
+  it('draws no two entries of the sidebar from one family of pictures', () => {
+    const familyOf = (icon: IconName): string => {
+      const name = ICONS[icon].displayName ?? '';
+      return /^[A-Z][a-z]+/.exec(name)?.[0] ?? name;
+    };
+    const owners = new Map<string, string>();
+    for (const route of SIGNED_IN_ROUTES) {
+      if (route.menu?.place !== 'sidebar') continue;
+      const family = familyOf(route.menu.icon);
+      expect(family, `${route.menu.label} has a picture with a name`).not.toBe('');
+      expect(
+        owners.get(family),
+        `${route.menu.label} and ${owners.get(family) ?? ''} are drawn from one family of pictures (${family})`,
+      ).toBeUndefined();
+      owners.set(family, route.menu.label);
+    }
+    expect(owners.size).toBeGreaterThanOrEqual(8);
   });
 
   // Break caught: a label that is not a few words, or that names a role or a key (PRODUCT_DESIGN_DIRECTION section 6.5).

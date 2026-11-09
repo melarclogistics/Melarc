@@ -152,6 +152,13 @@ export interface DataTableProps<Item> {
    * table at every width and scrolls sideways.
    */
   readonly card?: (item: Item) => ReactNode;
+  /**
+   * The heading of a card: the record's code, for **heading navigation** (a person who moves between headings reaches each card). It is drawn above the card's button and **outside** it,
+   * for a button's content is presentational to assistive technology and holds no heading; the button's reach is stretched over the heading as over the rest of the card.
+   */
+  readonly cardTitle?: (item: Item) => ReactNode;
+  /** The level of a card's heading, so that the page's outline stays in order: 2 (the default) where the cards are under the page's title, 3 under a panel's heading. */
+  readonly cardHeadingLevel?: 2 | 3 | 4;
   /** `auto` (the default) draws cards when the table's own box is under 40rem (see `crowded`); `table` and `cards` fix it, for a screen that knows better and for a test. */
   readonly layout?: 'auto' | 'table' | 'cards';
   /**
@@ -307,6 +314,8 @@ export function DataTable<Item>({
   selection,
   rowAction,
   card,
+  cardTitle,
+  cardHeadingLevel = 2,
   layout = 'auto',
   crowded = 'drop',
   changedIds,
@@ -781,6 +790,9 @@ export function DataTable<Item>({
                 >
                   {box(row, tab)}
                   <div className="ui-data-table__card-body">
+                    {cardTitle === undefined ? null : (
+                      <CardHeading level={cardHeadingLevel}>{cardTitle(row.original)}</CardHeading>
+                    )}
                     {opener(row, tab, card(row.original))}
                     {isChanged ? (
                       <span id={`${hintId}-${row.id}-changed`} className="ui-visually-hidden">
@@ -952,6 +964,18 @@ export function DataTable<Item>({
       {footer === undefined ? null : <div className="ui-data-table__footer">{footer}</div>}
     </div>
   );
+}
+
+/** The heading of a card, at the level the page's outline asks for. */
+function CardHeading({
+  level,
+  children,
+}: {
+  readonly level: 2 | 3 | 4;
+  readonly children: ReactNode;
+}) {
+  const Heading = `h${String(level)}` as 'h2' | 'h3' | 'h4';
+  return <Heading className="ui-data-table__card-title">{children}</Heading>;
 }
 
 /** What a column says of its priority for the stylesheet: nothing for the one that is always drawn. */

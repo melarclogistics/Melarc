@@ -115,6 +115,24 @@ describe('TaskForm', () => {
     expect(within(rail).getByText('An estimate, not a price.')).toBeVisible();
   });
 
+  // Break caught (the review of 5edada2): what the booking comes to read after the button that sends it, on a narrow page, where the summary follows the sections. The order of the
+  // page puts the summary between what is entered and the actions, and the stylesheet puts it beside the sections where there is room.
+  it('puts the summary between the sections and the actions, in the form, so that it is read before the button that sends', () => {
+    const { container } = renderForm({
+      summary: { title: 'What the server states', children: <p>An estimate, not a price.</p> },
+    });
+
+    const form = container.querySelector('form');
+    const sections = screen.getByRole('heading', { level: 2, name: 'The sender' });
+    const rail = screen.getByRole('complementary', { name: 'What the server states' });
+    const submit = screen.getByRole('button', { name: 'Book the pickup' });
+    const before = (first: Element, second: Element): boolean =>
+      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(form).toContainElement(rail);
+    expect(before(sections, rail)).toBe(true);
+    expect(before(rail, submit)).toBe(true);
+  });
+
   // Break caught: a review that loses what was entered (the sections unmounted), one that is a second form, or one with no way back.
   it('shows the review in place of the sections, keeps the sections, and goes back', async () => {
     const user = userEvent.setup();

@@ -102,7 +102,14 @@ describe('the request: what it shows', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
     expect(document.title).toBe('ACC-PR-7KQ2MZ · Melarc Ops Portal');
-    expect(screen.getByText('Waiting for confirmation')).toBeVisible();
+    // The state is told by the badge and by the tracker (one forward path: waiting, then confirmed), and the sentence says what it means.
+    expect(screen.getAllByText('Waiting for confirmation').length).toBeGreaterThanOrEqual(2);
+    const tracker = screen.getByRole('list', { name: 'Progress of the pickup request' });
+    expect(within(tracker).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(tracker).getByText('Waiting for confirmation').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
     expect(screen.getByText('A vendor’s own packages')).toBeVisible();
     expect(screen.getByText('Tue 3 Nov 2026')).toBeVisible();
     expect(screen.getByText('3 packages')).toBeVisible();
@@ -113,7 +120,16 @@ describe('the request: what it shows', () => {
     // The account card of the menu names the hub too; this is the request's own.
     expect(within(screen.getByRole('main')).getByText('Accra Central')).toBeVisible();
     // 24-hour time in Accra, whatever the machine's zone.
-    expect(screen.getByText('29 Oct, 08:15')).toBeVisible();
+    // The record's own dated facts are its history, as a timeline in the side column; the people are in the side column too.
+    const history = screen.getByRole('list', { name: 'History of this request, oldest first' });
+    expect(within(history).getByText('Booked')).toBeVisible();
+    expect(within(history).getByText('29 Oct, 08:15')).toBeVisible();
+    const side = within(screen.getByRole('main'));
+    expect(
+      side.getByRole('heading', { level: 2, name: 'Who to reach, and who pays' }),
+    ).toBeVisible();
+    expect(side.getByRole('heading', { level: 2, name: 'History' })).toBeVisible();
+    expect(side.getByRole('heading', { level: 3, name: 'Pickup' })).toBeVisible();
     expect(document.body.textContent).not.toContain(REQUEST_ID);
   });
 
@@ -234,7 +250,11 @@ describe('the request: what it shows', () => {
     );
 
     expect(await screen.findByText('Cancelled by Melarc Ops.')).toBeVisible();
-    expect(screen.getByText('On 30 Oct, 09:00.')).toBeVisible();
+    // The cancellation is the latest step of the history, with its date, its reason and the charge as applied.
+    const history = screen.getByRole('list', { name: 'History of this request, oldest first' });
+    const cancelled = within(history).getByText('Cancelled').closest('li') as HTMLElement;
+    expect(cancelled).toHaveAttribute('aria-current', 'step');
+    expect(within(cancelled).getByText('30 Oct, 09:00')).toBeVisible();
     expect(screen.getByText('Reason: Demo: the customer changed their mind')).toBeVisible();
     // The code is the server's, and never drawn.
     expect(document.body.textContent).not.toContain('DEMO_CUSTOMER_CHANGED_MIND');
@@ -400,7 +420,54 @@ describe('confirming', () => {
     await waitFor(() => {
       expect(reads()).toHaveLength(2);
     });
-    expect(await screen.findByText('Confirmed')).toBeVisible();
+    // The state is told by the badge, by the tracker (now at "Confirmed") and by the history's new step.
+    await waitFor(() => {
+      expect(screen.getAllByText('Confirmed').length).toBeGreaterThanOrEqual(2);
+    });
+    const tracker = screen.getByRole('list', { name: 'Progress of the pickup request' });
+    expect(within(tracker).getByText('Confirmed').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+  });
+
+  // Break caught (the review of 5edada2): a rule that changes a choice told only inside the dialog of its act, so that a person chooses the act without having read it.
+  describe('the rules beside the acts', () => {
+    const ESCALATION =
+      'Escalating a request is recorded once, with your note, and is not taken back.';
+    const CHARGE = /records a decision about the cancellation charge/;
+
+    it('says that an escalation is recorded once, beside the acts, to a person who may escalate a request that is not escalated', async () => {
+      open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER);
+
+      expect(await screen.findByText(ESCALATION)).toBeVisible();
+    });
+
+    it('says nothing of an escalation to one who may not escalate, or of a request that was escalated already', async () => {
+      open(
+        () =>
+          answer(
+            pickupRequestFixture({ state: 'CONFIRMED', escalated_at: '2026-11-01T09:00:00Z' }),
+          ),
+        OFFICER,
+      );
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+      expect(screen.queryByText(ESCALATION)).toBeNull();
+    });
+
+    it('says that a cancellation records a charge decision once a rider holds the request’s run, and not before', async () => {
+      open(() => answer(pickupRequestFixture(ASSIGNED)), OFFICER);
+      expect(await screen.findByText(CHARGE)).toBeVisible();
+    });
+
+    it('does not say it for a request no rider holds', async () => {
+      open(
+        () => answer(pickupRequestFixture({ state: 'CONFIRMED', rider_assigned: false })),
+        OFFICER,
+      );
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+      expect(screen.queryByText(CHARGE)).toBeNull();
+    });
   });
 
   // AC-SLICE-001-10: a concurrent confirmation is a STATE_CONFLICT that is explained and read again, never a silent overwrite.
@@ -1176,6 +1243,15 @@ describe('the attempt chain', () => {
       'Attempt 3: ACC-PR-3RTY8N',
     ]);
     expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    // In plain words, each attempt after the first says which one it replaces: the first replaces none, and says nothing of it.
+    const step = (index: number): HTMLElement => {
+      const found = steps[index];
+      if (found === undefined) throw new Error(`The chain has no step ${String(index)}.`);
+      return found;
+    };
+    expect(within(step(0)).queryByText(/^Replaces /)).toBeNull();
+    expect(within(step(1)).getByText('Replaces ACC-PR-9WXH4T.')).toBeVisible();
+    expect(within(step(2)).getByText('Replaces ACC-PR-7KQ2MZ.')).toBeVisible();
     expect(within(chain).getByRole('link', { name: 'Attempt 1: ACC-PR-9WXH4T' })).toHaveAttribute(
       'href',
       `/pickup-requests/${EARLIER_REQUEST_ID}`,
@@ -1199,7 +1275,9 @@ describe('the attempt chain', () => {
   it('says there is no other attempt for a request that is alone', async () => {
     open();
 
-    expect(await screen.findByText(/No other attempt is linked to this request/)).toBeVisible();
+    // In plain words: a request that is the first attempt says so, and does not describe what it replaced and what replaced it.
+    expect(await screen.findByText('This is the first attempt.')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/it replaced none/);
   });
 });
 

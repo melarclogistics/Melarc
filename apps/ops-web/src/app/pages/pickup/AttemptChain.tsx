@@ -6,7 +6,12 @@ import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import { useAttemptChain, type AttemptLink } from '../../../platform/pickup/use-pickup-queries';
 import { PICKUP_STATE_MAP, serviceDateText } from './pickup-presentation';
 
-function entryOf(link: AttemptLink, current: PickupRequestView): TimelineEntry {
+/** One attempt of the chain as a step: its number and code, its state and day, and, in plain words, which attempt it replaces. */
+function entryOf(
+  link: AttemptLink,
+  current: PickupRequestView,
+  replaces: PickupRequestView | undefined,
+): TimelineEntry {
   if (link.kind === 'unreadable') {
     return {
       key: link.id,
@@ -26,10 +31,13 @@ function entryOf(link: AttemptLink, current: PickupRequestView): TimelineEntry {
       </Link>
     ),
     details: (
-      <p>
-        <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />{' '}
-        {`for ${serviceDateText(request.scheduled_service_date)}`}
-      </p>
+      <>
+        <p>
+          <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />{' '}
+          {`for ${serviceDateText(request.scheduled_service_date)}`}
+        </p>
+        {replaces === undefined ? null : <p>{`Replaces ${replaces.code}.`}</p>}
+      </>
     ),
     current: isCurrent,
   };
@@ -55,12 +63,17 @@ export function AttemptChain({ request }: { readonly request: PickupRequestView 
       {(links) =>
         links.length === 1 ? (
           <p>
-            No other attempt is linked to this request: it replaced none, and none has replaced it.
+            {links[0]?.kind === 'read' && links[0].request.attempt_number > 1
+              ? 'No other attempt of this pickup can be read here.'
+              : 'This is the first attempt.'}
           </p>
         ) : (
           <Timeline
             label="Attempts of this pickup, oldest first"
-            entries={links.map((link) => entryOf(link, request))}
+            entries={links.map((link, index) => {
+              const before = links[index - 1];
+              return entryOf(link, request, before?.kind === 'read' ? before.request : undefined);
+            })}
             currentLabel="(this request)"
           />
         )

@@ -1,6 +1,6 @@
 /*
  * RecordPage (design/COMPONENT_PATTERNS.md, *RecordPage*; PRODUCT_DESIGN_DIRECTION section 6.2): the header in a page card, then a main column (two thirds) for the work and the
- * activity and a side column (one third) for facts and people. Under 60rem of the page's own room (a container query: the room is what the record sits in, in the rem it is drawn in, so enlarged text and the shell's sidebar are both counted) the columns become one and the side follows the
+ * activity and a side column (one third) for facts and people. Under 56rem of the page's own room (a container query: the room is what the record sits in, in the rem it is drawn in, so enlarged text and the shell's sidebar are both counted) the columns become one and the side follows the
  * work. Inside a side panel the same pieces stack in one column, and the lead (the sentence, the stages, the acts) stands where the header was. Every size is a token or a rem.
  */
 .ui-record-page {
@@ -18,7 +18,7 @@
   align-items: start;
 }
 
-@container record-page (min-width: 60rem) {
+@container record-page (min-width: 56rem) {
   .ui-record-page__columns[data-side] {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }

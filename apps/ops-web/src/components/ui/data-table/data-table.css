@@ -441,6 +441,14 @@
   min-width: 0;
 }
 
+/* The card's heading: the record's code, above the button that holds the rest of the card. */
+.ui-data-table__card-title {
+  margin: 0;
+  font-size: var(--text-body-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-md-line-height);
+}
+
 /* The one button of the card holds its facts; no height of its own is kept beyond them. */
 .ui-data-table__card .ui-data-table__open {
   display: block;

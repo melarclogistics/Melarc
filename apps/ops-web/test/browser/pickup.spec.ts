@@ -224,6 +224,9 @@ test.describe('the queue, drawn for the room it has', () => {
     await expect(opener(page, CODE)).toHaveCount(1);
     await expect(page.getByRole('main').getByRole('link', { name: 'Book a pickup' })).toBeVisible();
     const first = cards.getByRole('listitem').first();
+    // Each card keeps a heading, its code, for heading navigation (it is outside the card's button, whose content is presentational).
+    await expect(first.getByRole('heading', { level: 2 })).toHaveText(CODE);
+    await expect(cards.getByRole('heading', { level: 2 })).toHaveCount(2);
     for (const fact of [
       CODE,
       'Waiting for confirmation',
@@ -538,6 +541,9 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     await expect(cards).toBeVisible();
     await expect(queueTable(page)).toHaveCount(0);
     const first = cards.getByRole('listitem').first();
+    // Each card keeps a heading, its code, for heading navigation (it is outside the card's button, whose content is presentational).
+    await expect(first.getByRole('heading', { level: 2 })).toHaveText(CODE);
+    await expect(cards.getByRole('heading', { level: 2 })).toHaveCount(2);
     for (const fact of [
       CODE,
       'Demo Fabrics Ltd',
@@ -664,6 +670,156 @@ test.describe('the queue: confirming in the panel', () => {
       await colourOf(panel.getByRole('button', { name: 'Confirm pickup' })),
     );
     await expect(book).toHaveClass(/ui-button--secondary/);
+  });
+});
+
+/**
+ * The request's own page and the booking, at the widths they are used at (run 4, Stage 3.4 and 3.5; the review of 5edada2).
+ */
+test.describe('one request: the record page', () => {
+  // Break caught: focus on the code heading drawn with a ring, as if the heading were a control.
+  test('lands focus on the code heading with no ring', async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, DETAIL);
+
+    const heading = page.getByRole('heading', { level: 1, name: CODE });
+    await expect(heading).toBeFocused();
+    expect(await heading.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe(
+      'none',
+    );
+  });
+
+  // Break caught (the review of 5edada2): one long column at 1280px, with who to reach and the history after the attempts, where a side column has the room.
+  for (const [width, beside] of [
+    [1440, true],
+    [1280, true],
+    [768, false],
+  ] as const) {
+    test(`puts who to reach, the history and what is related ${beside ? 'beside' : 'after'} the work at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, DETAIL);
+
+      const work = await page.getByRole('heading', { level: 2, name: 'The request' }).boundingBox();
+      const people = await page
+        .getByRole('heading', { level: 2, name: 'Who to reach, and who pays' })
+        .boundingBox();
+      const history = await page.getByRole('heading', { level: 2, name: 'History' }).boundingBox();
+      const attempts = await page
+        .getByRole('heading', { level: 2, name: 'Attempts' })
+        .boundingBox();
+      expect(work).not.toBeNull();
+      expect(people).not.toBeNull();
+      if (beside) {
+        // The side column is to the right of the work and starts at its height; the attempts stay in the work's column.
+        expect(people?.x ?? 0).toBeGreaterThan((work?.x ?? 0) + 300);
+        expect(Math.abs((people?.y ?? 0) - (work?.y ?? 0))).toBeLessThan(60);
+        expect(history?.x ?? 0).toBeGreaterThan((work?.x ?? 0) + 300);
+        expect(Math.abs((attempts?.x ?? 0) - (work?.x ?? 0))).toBeLessThan(8);
+      } else {
+        expect(Math.abs((people?.x ?? 0) - (work?.x ?? 0))).toBeLessThan(8);
+        expect(people?.y ?? 0).toBeGreaterThan(work?.y ?? 0);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
+  // Break caught: a path the contract does not give, or an end drawn as a stage still to come.
+  test('tells where the request is on the contract’s one forward path, and the history by its own dated facts', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, DETAIL);
+
+    const tracker = page.getByRole('list', { name: 'Progress of the pickup request' });
+    await expect(tracker.getByRole('listitem')).toHaveText([
+      /Waiting for confirmation/,
+      /Confirmed/,
+    ]);
+    await expect(tracker.locator('[aria-current="step"]')).toContainText(
+      'Waiting for confirmation',
+    );
+    const history = page.getByRole('list', { name: 'History of this request, oldest first' });
+    await expect(history.getByRole('listitem')).toHaveCount(1);
+    await expect(history).toContainText('Booked');
+    await expect(history).toContainText('29 Oct, 08:15');
+  });
+});
+
+test.describe('the booking, at the widths it is used at', () => {
+  const gridColumns = (page: Page) =>
+    page.evaluate(() => {
+      const grids = [...document.querySelectorAll<HTMLElement>('.ui-task-form__grid')].filter(
+        (element) => element.getClientRects().length > 0 && element.children.length >= 2,
+      );
+      return grids.map((grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+    });
+
+  // Break caught: two columns of fields on the tablet, where the pattern says one at 768px and below.
+  for (const [width, columns] of [
+    [1440, 2],
+    [1280, 2],
+    [768, 1],
+    [390, 1],
+  ] as const) {
+    test(`lays the fields out in ${String(columns)} column${columns === 1 ? '' : 's'} at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, '/pickup-requests/new');
+      await fillBooking(page);
+
+      const counts = await gridColumns(page);
+      expect(counts.length).toBeGreaterThan(0);
+      for (const count of counts) expect(count).toBe(columns);
+    });
+  }
+
+  // Break caught: what the booking comes to read after the button that sends it, on a narrow page.
+  for (const size of [{ width: 768, height: 1024 }, NARROW]) {
+    test(`puts "After you book" before the button that books it at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests/new');
+
+      const summary = await page
+        .getByRole('heading', { level: 2, name: 'After you book' })
+        .boundingBox();
+      const submit = await page.getByRole('button', { name: 'Book the pickup' }).boundingBox();
+      expect(summary).not.toBeNull();
+      expect(submit).not.toBeNull();
+      expect(summary?.y ?? 0).toBeLessThan(submit?.y ?? 0);
+    });
+  }
+
+  test('puts "After you book" beside the sections at 1440 px, and the button under them', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests/new');
+
+    const summary = await page
+      .getByRole('heading', { level: 2, name: 'After you book' })
+      .boundingBox();
+    // The rail stands beside the first thing the form asks (what is being booked), and the button that books is under the sections, in the column of the sections.
+    const first = await page.getByRole('group', { name: /What is being booked/ }).boundingBox();
+    const submit = await page.getByRole('button', { name: 'Book the pickup' }).boundingBox();
+    expect(summary?.x ?? 0).toBeGreaterThan((first?.x ?? 0) + 400);
+    expect(Math.abs((summary?.y ?? 0) - (first?.y ?? 0))).toBeLessThan(80);
+    expect(submit?.x ?? 1000).toBeLessThan(summary?.x ?? 0);
+  });
+
+  // Break caught: a line of help under an option that says again what the option says.
+  test('has no help under a payer that repeats its label', async ({ page }) => {
+    await open(page, '/pickup-requests/new');
+    await fillBooking(page);
+
+    const group = page.getByRole('group', { name: /Who pays for delivery/ });
+    await expect(group).toContainText('The recipient pays');
+    await expect(group).not.toContainText('for delivery.');
+    await expect(group).not.toContainText('and the recipient the rest.');
   });
 });
 

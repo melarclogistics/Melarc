@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
@@ -389,7 +390,14 @@ export function PickupRequestListPage() {
               onRefresh: refreshPage,
             },
             ...(me.holds('pickup.request.create')
-              ? { actions: <ButtonLink to="/pickup-requests/new">Book a pickup</ButtonLink> }
+              ? {
+                  // The panel's act is the one primary of the view; booking is one of the New menu's too.
+                  actions: (
+                    <ButtonLink to="/pickup-requests/new" variant="secondary">
+                      Book a pickup
+                    </ButtonLink>
+                  ),
+                }
               : {}),
           }}
           views={{
@@ -462,6 +470,8 @@ export function PickupRequestListPage() {
             openLabel: openLabelOf,
             changedIds: changed?.visit === visit.id ? changed.ids : [],
             card: (row) => <QueueCard facts={row} />,
+            // The code is the heading of each card, for heading navigation (outside the card's button, which is presentational).
+            cardTitle: (row) => <OperationalCode>{row.code}</OperationalCode>,
             ...(canConfirm
               ? {
                   rowAction: {

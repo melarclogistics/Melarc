@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { AlertDialog } from '../../../components/ui/dialog/AlertDialog';
 import {
@@ -87,10 +88,10 @@ const NOT_RECORDED = 'Not recorded';
 const NO_HUB_DESCRIPTION =
   'A run is for one hub, and your session lists none, so there is nothing to build here.';
 const NO_HUB_NOTE =
-  'Your session lists no hub, so there is nothing to build a run from: a manifest is made for one hub.';
+  'Your session lists no hub, so there is nothing to build a run from: a pickup run is made for one hub.';
 
 /** What the page says of the limit of a manifest, beside the review once the choice is as large as a manifest holds. */
-const AT_MOST_STOPS = `A manifest holds at most ${String(MAX_STOPS)} requests; use another manifest for the rest.`;
+const AT_MOST_STOPS = `A pickup run holds at most ${String(MAX_STOPS)} requests; use another pickup run for the rest.`;
 
 function hasControlCharacter(text: string): boolean {
   for (let index = 0; index < text.length; index += 1) {
@@ -168,7 +169,6 @@ function PoolCard({
 }) {
   return (
     <>
-      <span className="manifest-card__title">{request.code}</span>
       <p className="manifest-support">{request.sender_name ?? NOT_RECORDED}</p>
       <dl className="manifest-card__facts">
         <div className="manifest-card__fact">
@@ -223,7 +223,7 @@ function marksOf(
 }
 
 /**
- * Build a manifest (surfaces/ops-portal.md section 7, `/manifests/new`; S1.25): the pool of confirmed requests that no manifest holds
+ * Build a pickup run (surfaces/ops-portal.md section 7, `/manifests/new`; S1.25): the pool of confirmed requests that no pickup run holds
  * (`listPickupRequests` with `state=CONFIRMED&manifested=false`, which the server narrows further: a request awaiting the review of its booking
  * cutoff is not in it), row selection across its pages, the day the run is worked, the carry-over reason of each overdue request, and a review
  * before the manifest is made (`createPickupManifest`, under an `Idempotency-Key`, one to 64 requests).
@@ -535,12 +535,12 @@ export function ManifestBuilderPage() {
           </Button>
         }
       >
-        {`No confirmed pickup at ${runHub.display_name} is waiting for a manifest. A confirmed pickup appears here until a manifest holds it. A run is for one hub: choose another hub to build one for it.`}
+        {`No confirmed pickup at ${runHub.display_name} is waiting for a pickup run. A confirmed pickup appears here until a pickup run holds it. A run is for one hub: choose another hub to build one for it.`}
       </EmptyStateV2>
     ) : (
       <EmptyStateV2 variant="empty" title="The pool is empty" headingLevel={3}>
-        No confirmed pickup is waiting for a manifest. A confirmed pickup appears here until a
-        manifest holds it.
+        No confirmed pickup is waiting for a pickup run. A confirmed pickup appears here until a
+        pickup run holds it.
       </EmptyStateV2>
     );
 
@@ -563,17 +563,17 @@ export function ManifestBuilderPage() {
   });
   return (
     <>
-      <title>Build a manifest · Melarc Ops Portal</title>
+      <title>Build a pickup run · Melarc Ops Portal</title>
       <Builder
         header={{
-          title: 'Build a manifest',
+          title: 'Build a pickup run',
           description:
             runHub === undefined
               ? hubs.length === 0
                 ? NO_HUB_DESCRIPTION
-                : 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the manifest.'
-              : `Run for ${runHub.display_name}. Choose confirmed pickups for one run, on one day. Nothing is made until you create the manifest.`,
-          breadcrumb: [{ label: 'Manifests', to: '/manifests' }],
+                : 'Choose the hub of the run first, then confirmed pickups for it, on one day. Nothing is made until you create the pickup run.'
+              : `Run for ${runHub.display_name}. Choose confirmed pickups for one run, on one day. Nothing is made until you create the pickup run.`,
+          breadcrumb: [{ label: 'Pickup runs', to: '/manifests' }],
         }}
         formRef={form}
         busy={command.phase === 'sending'}
@@ -642,7 +642,7 @@ export function ManifestBuilderPage() {
               note:
                 hubs.length === 0
                   ? NO_HUB_NOTE
-                  : 'Choose the hub first: the pool, the review and the manifest are that hub’s.',
+                  : 'Choose the hub first: the pool, the review and the pickup run are that hub’s.',
             }
           : {
               panes: {
@@ -650,7 +650,7 @@ export function ManifestBuilderPage() {
                   title: 'The pool of confirmed pickups',
                   description: (
                     <>
-                      These are the confirmed pickups of {runHub?.display_name} that no manifest
+                      These are the confirmed pickups of {runHub?.display_name} that no pickup run
                       holds, as the server lists them. A pickup whose late booking waits for an Ops
                       decision is not in it. Choose up to {MAX_STOPS}; your choice is kept as you
                       move between pages.
@@ -682,7 +682,7 @@ export function ManifestBuilderPage() {
                   children: (
                     <DataTable<PickupRequestView>
                       ref={poolTable}
-                      label="Confirmed pickups waiting for a manifest"
+                      label="Confirmed pickups waiting for a pickup run"
                       columns={poolColumnsOf}
                       rows={poolRows}
                       rowId={(row) => row.id}
@@ -693,6 +693,9 @@ export function ManifestBuilderPage() {
                       loadingLabel="Loading the pool"
                       {...(poolFailure === undefined ? {} : { error: poolFailure })}
                       emptyState={poolEmpty}
+                      // The code is the heading of each card (under the pool’s own, so level 3), outside the card’s control, for heading navigation.
+                      cardTitle={(row) => <OperationalCode>{row.code}</OperationalCode>}
+                      cardHeadingLevel={3}
                       card={(row) => (
                         <PoolCard
                           request={row}
@@ -739,7 +742,7 @@ export function ManifestBuilderPage() {
                     <>
                       {chosen.size === 0 ? null : (
                         <p>
-                          The stops take this order; you can change it after the manifest is made,
+                          The stops take this order; you can change it after the pickup run is made,
                           until it is dispatched.
                         </p>
                       )}
@@ -767,7 +770,7 @@ export function ManifestBuilderPage() {
                             empty={
                               <Alert variant="danger">
                                 <p>
-                                  No carry-over reason is configured yet, so a manifest holding a
+                                  No carry-over reason is configured yet, so a pickup run holding a
                                   pickup from an earlier day cannot be made. The reasons are added
                                   to the reason catalogue by an administrator of the settings.
                                 </p>
@@ -850,7 +853,7 @@ export function ManifestBuilderPage() {
                         </Button>
                       ) : (
                         <Button key="create" type="submit" loading={command.phase === 'sending'}>
-                          Create the manifest
+                          Create the pickup run
                         </Button>
                       )}
                       {command.canRetry ? (
