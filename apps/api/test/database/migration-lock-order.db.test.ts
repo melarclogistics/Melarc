@@ -11,7 +11,11 @@ import {
   fixedLockKey,
 } from '../../src/platform/database/policy-lock/lock-keys.js';
 import { MigrationLockOrderError } from '../../src/tools/database/policy-keys.js';
-import { MIGRATIONS_FOLDER, runMigrations } from '../../src/tools/database/run-migrations.js';
+import {
+  MIGRATIONS_FOLDER,
+  MigrationKeyWaitError,
+  runMigrations,
+} from '../../src/tools/database/run-migrations.js';
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
 import { builtBefore, historyBefore, type Built } from './support/history-before.js';
 import { clientFor, createTestDatabase, scalar, withClient } from './support/test-database.js';
@@ -53,6 +57,12 @@ describe('the chain applied from a database at 0073', () => {
     const result = await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) });
 
     expect(result.applied).toBe(COMMITTED - FIRST_NEW);
+    // The run says how long it took and how long it held the keys (the stall of the application), and took them at the first attempt: nothing was in its way.
+    expect(result.keyAttempts).toBe(1);
+    expect(result.keysHeldMs).toBeGreaterThan(0);
+    expect(result.durationMs).toBeGreaterThanOrEqual(result.keysHeldMs);
+    const current = await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) });
+    expect(current).toMatchObject({ applied: 0, keysHeldMs: 0, keyAttempts: 0 });
     expect((await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) })).applied).toBe(0);
     const fingerprint = `select md5(coalesce(string_agg(pg_get_functiondef(p.oid) || coalesce(p.proacl::text, ''), ';' order by p.proname), ''))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'melarc'`;
@@ -65,6 +75,47 @@ describe('the chain applied from a database at 0073', () => {
       expect(now).toBe(then);
     } finally {
       await fromNothing.drop();
+    }
+  }, 120_000);
+
+  // Break caught (run 5, Stage 1.3): a run that waits for its keys with no bound of its own (behind a transaction that never ends, and with the whole application waiting behind
+  // the run), or that gives up with the driver's words and leaves a transaction open. Here a transaction of the application holds a key the run needs (shared) and does not
+  // end: the run tries twice, each time for the length of its wait, says in words why it gave up, and applies nothing; the same run goes through once the transaction is gone.
+  it('gives up with a clear message when a transaction of the application holds a key it needs, applies nothing, and goes through once it is gone', async () => {
+    const application: pg.Client = clientFor(built.target.urlFor('postgres'));
+    await application.connect();
+    const key = bundleLockKey(SEEDED_BUNDLE);
+    try {
+      await application.query('begin');
+      await application.query(
+        `select pg_advisory_xact_lock_shared(${String(AUTH_POLICY_BUNDLE)}, ${String(key)})`,
+      );
+
+      const failure = await runMigrations({
+        url: built.target.urlFor(MIGRATION_ROLE),
+        keyWait: { waitMs: 300, attempts: 2, pauseMs: 20 },
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(MigrationKeyWaitError);
+      expect((failure as MigrationKeyWaitError).message).toContain('2 attempts of 300 ms');
+      expect((failure as MigrationKeyWaitError).message).toContain('Nothing was applied');
+      expect(
+        await scalar<string>(built.admin, 'select count(*) from drizzle.__drizzle_migrations'),
+      ).toBe(String(FIRST_NEW));
+      // Nothing of the run is left behind: no session of the migrator, so no transaction and no key.
+      expect(
+        await scalar<string>(
+          built.admin,
+          `select count(*) from pg_stat_activity where datname = current_database() and application_name = 'melarc-migrate'`,
+        ),
+      ).toBe('0');
+
+      await application.query('commit');
+      const result = await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) });
+      expect(result.applied).toBe(COMMITTED - FIRST_NEW);
+    } finally {
+      await application.query('rollback').catch(() => undefined);
+      await application.end();
     }
   }, 120_000);
 

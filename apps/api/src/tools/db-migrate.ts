@@ -2,7 +2,7 @@ import { postgresUrlProblem } from '../platform/database/postgres-url.js';
 import { CliUsageError, runCli } from './database/cli.js';
 import { readLocalPostgres } from './database/local-env.js';
 import { buildDatabaseUrl } from './database/provisioning.js';
-import { runMigrations } from './database/run-migrations.js';
+import { describeRun, runMigrations } from './database/run-migrations.js';
 import { MIGRATION_ROLE } from './database/safety.js';
 
 /**
@@ -33,10 +33,5 @@ await runCli(async () => {
     url = given;
   }
 
-  const { applied } = await runMigrations({ url });
-  process.stdout.write(
-    applied === 0
-      ? 'database is up to date, nothing applied\n'
-      : `applied ${String(applied)} migration${applied === 1 ? '' : 's'}\n`,
-  );
+  process.stdout.write(`${describeRun(await runMigrations({ url }))}\n`);
 });
