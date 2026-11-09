@@ -35,6 +35,18 @@ export function BackToRequests({ requestId }: { readonly requestId?: string }) {
   );
 }
 
+/**
+ * The way back to one request, above the heading of a page about it that is not the request's own (the exception): the same element in every state of the page, while the request is
+ * read, after a read that failed, beside the form and in place of it (the review of 499399c).
+ */
+export function BackToTheRequest({ id }: { readonly id: string }) {
+  return (
+    <p className="pickup-back">
+      <Link to={`/pickup-requests/${id}`}>Back to the request</Link>
+    </p>
+  );
+}
+
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
 export function useFocusFallenToHeading(): void {
   useLayoutEffect(() => {

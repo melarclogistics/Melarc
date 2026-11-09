@@ -27,7 +27,7 @@ import {
   packagesText,
   PICKUP_STATE_MAP,
 } from './pickup-presentation';
-import { useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
+import { BackToTheRequest, useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
 import './pickup-pages.css';
 
 const OPERATION = 'requestOnePackageException';
@@ -391,9 +391,6 @@ function Exception({
       <>
         <PageHeader {...header} />
         <p className="pickup-act__text">{reason}</p>
-        <p>
-          <Link to={`/pickup-requests/${request.id}`}>Back to the request</Link>
-        </p>
       </>
     );
   }
@@ -421,9 +418,9 @@ export function PickupExceptionPage() {
   return (
     <WithPickupRequest
       id={id}
-      // The way up is the breadcrumb of the page's own heading, once the request is read, so no other way back is drawn above it.
+      // The way back to the request is the same element in every state of the page (the review of 499399c), above the heading, and the breadcrumb of the page's own heading is the way up.
       ownsHeading
-      back={null}
+      back={<BackToTheRequest id={id} />}
       heading={(request) => ({
         title: 'Request a one-package exception',
         ...(request === undefined ? {} : { description: `For ${request.code}.` }),

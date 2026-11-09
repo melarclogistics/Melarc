@@ -144,6 +144,41 @@ describe('the exception: asking for it', () => {
   });
 });
 
+describe('the exception: the way back to the request, in every state of the page', () => {
+  const backLink = () => screen.findByRole('link', { name: 'Back to the request' });
+
+  // Break caught (the review of 499399c): a page with no way back to its request while the request is read, and after a read that failed.
+  it('is there while the request is being read', async () => {
+    open(() => new Promise<Response>(() => undefined));
+
+    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Request a one-package exception' }),
+    ).toBeVisible();
+  });
+
+  it('is there after a read that failed', async () => {
+    open(() => refusal(500, 'INTERNAL_ERROR'));
+
+    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+  });
+
+  it('is there beside the form', async () => {
+    open();
+
+    expect(await screen.findByRole('button', { name: 'Request the exception' })).toBeVisible();
+    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+  });
+
+  it('is there when the exception cannot be asked for', async () => {
+    open(() => json(200, { ...single, state: 'CONFIRMED' }, etag('v1')));
+
+    expect(await screen.findByText(/waits for confirmation/)).toBeVisible();
+    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+  });
+});
+
 describe('the exception: when it does not apply', () => {
   it.each([
     ['a confirmed request', { state: 'CONFIRMED' as const }, /waits for confirmation/],
