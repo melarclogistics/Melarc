@@ -25,8 +25,8 @@ export interface StageTrackerProps {
 
 /**
  * Where a record stands on its way (PRODUCT_DESIGN_DIRECTION section 6.2; COMPONENT_PATTERNS, *RecordHeader and StageTracker*): segmented bars with labels. The
- * stages before the current one are drawn in the secondary text colour, the current one in the brand crimson with a small square beside its label, and the
- * ones after it in the border colour. The state is also told in words for whoever hears the page, so colour is never alone. It decides nothing about
+ * stages before the current one are drawn in the secondary text colour, the current one in Ink with a small crimson square beside its label (crimson is only that
+ * square), and the ones after it in the border colour. The state is also told in words for whoever hears the page, so colour is never alone. It decides nothing about
  * which stage a record is at, and degrades as `StatusBadge` does on a state it does not know: every bar neutral, no stage current, none called done or not reached, and
  * "Unknown stage" said under them (never the raw value).
  */

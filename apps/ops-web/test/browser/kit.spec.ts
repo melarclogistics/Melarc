@@ -314,6 +314,52 @@ test.describe('PageHeader, ViewTabs and FilterBar in a browser', () => {
     await expect(views.getByRole('tab', { name: /^Needs decision/ })).toBeFocused();
   });
 
+  // Break caught (the Product Owner, 9 November 2026): views that run off a narrow screen with nothing to say so, so that the last one looks like the last, or the current view left
+  // behind the edge. The end that is cut off fades, the current view is brought into view, and the keys move focus as they did.
+  for (const width of [320, 390]) {
+    test(`fades the cut-off end of the views, and brings the current view into view, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await openKit(page, 'header', { width, height: 900 });
+      const maskOf = (row: Locator): Promise<string> =>
+        row.evaluate((element) => getComputedStyle(element).maskImage);
+
+      // The first view current: its end is cut off and fades, its start is not.
+      const first = specimen(page, 'In a narrow room: the list scrolls inside its own box');
+      const row = first.locator('.ui-view-tabs__scroll');
+      expect(
+        await row.evaluate((element) => element.scrollWidth - element.clientWidth),
+      ).toBeGreaterThan(0);
+      await expect(row).toHaveAttribute('data-fade', 'end');
+      expect(await maskOf(row)).toContain('linear-gradient');
+
+      // The keys are the same: End moves focus to the last view and the row follows it, so that the start is cut off now and the end is not.
+      await first.getByRole('tab', { name: /^Needs decision/ }).focus();
+      await page.keyboard.press('End');
+      await expect(first.getByRole('tab', { name: /^All/ })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(first.getByRole('tab', { name: /^All/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await expect(row).toHaveAttribute('data-fade', 'start');
+
+      // The last view current when the list is drawn (an address names it): it is whole inside the row, and the start fades.
+      const last = specimen(
+        page,
+        'In a narrow room, the last view current: it is brought into view and the start fades',
+      );
+      await last.scrollIntoViewIfNeeded();
+      const lastRow = last.locator('.ui-view-tabs__scroll');
+      const room = await box(lastRow);
+      const current = await box(last.getByRole('tab', { name: /^All/ }));
+      expect(current.x).toBeGreaterThanOrEqual(room.x - 0.5);
+      expect(current.x + current.width).toBeLessThanOrEqual(room.x + room.width + 0.5);
+      await expect(lastRow).toHaveAttribute('data-fade', 'start');
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
   // Break caught: a chip that cannot be removed with the keyboard, or one that loses the person's place.
   test('removes a chip from the keyboard and focus stays in the bar; the popover opens, takes focus and gives it back', async ({
     page,
@@ -728,11 +774,18 @@ test.describe('SidePanel, RecordHeader, DescriptionList, Panel and StatTile in a
     expect(await colourOf(0)).toBe(
       await resolvedColour(page, '--color-text-secondary', 'backgroundColor'),
     );
+    // The current bar is Ink, the primary action's colour; crimson is only the small square beside the current label (the brand rule).
     expect(await colourOf(1)).toBe(
-      await resolvedColour(page, '--color-brand-default', 'backgroundColor'),
+      await resolvedColour(page, '--color-action-primary', 'backgroundColor'),
     );
     expect(await colourOf(2)).toBe(
       await resolvedColour(page, '--color-border-default', 'backgroundColor'),
+    );
+    const square = header
+      .locator('.ui-stage-tracker__stage[data-state="current"] .ui-stage-tracker__label')
+      .evaluate((element) => getComputedStyle(element, '::before').backgroundColor);
+    expect(await square).toBe(
+      await resolvedColour(page, '--color-brand-default', 'backgroundColor'),
     );
   });
 

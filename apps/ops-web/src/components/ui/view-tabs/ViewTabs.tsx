@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../primitives/tabs';
+import { useEdgeFade } from './use-edge-fade';
 import './view-tabs.css';
 
 /** One named view of a queue. */
@@ -37,7 +38,8 @@ const NUMBER = new Intl.NumberFormat('en-GB');
  * reduced motion). The keys are the primitive's, with **manual activation** (task R5.2, M12): Tab enters the list at the current view, the arrows and Home and End move
  * focus only, and Enter or Space chooses (a choice asks the server for a view, so an arrow that merely passes over a tab must not). A current view that is not one of the views (an
  * address that names a view that no longer exists) draws the first view that can be chosen, and asks for nothing: the page decides whether to correct its address.
- * The counts are the server's, drawn as they are given.
+ * The counts are the server's, drawn as they are given. **On a narrow screen the list scrolls sideways** inside its own box: the end that is cut off fades, so that a row
+ * does not look complete when it is not, and the current view is brought into view when it changes (`use-edge-fade.ts`; the keys are unchanged, and the page is never scrolled).
  */
 export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTabsProps) {
   const duplicate = tabs.find(
@@ -49,6 +51,7 @@ export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTa
   const current = tabs.some((tab) => tab.id === value)
     ? value
     : (tabs.find((tab) => tab.disabled !== true)?.id ?? tabs[0]?.id ?? value);
+  const { scroller, fade } = useEdgeFade(current);
   return (
     <Tabs
       value={current}
@@ -56,7 +59,11 @@ export function ViewTabs({ label, tabs, value, onValueChange, children }: ViewTa
       activationMode="manual"
       className="ui-view-tabs"
     >
-      <div className="ui-view-tabs__scroll">
+      <div
+        ref={scroller}
+        className="ui-view-tabs__scroll"
+        data-fade={fade === '' ? undefined : fade}
+      >
         <TabsList aria-label={label} className="ui-view-tabs__list">
           {tabs.map((tab) => (
             <TabsTrigger

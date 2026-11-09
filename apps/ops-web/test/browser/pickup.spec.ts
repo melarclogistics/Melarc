@@ -257,8 +257,43 @@ test.describe('the queue, drawn for the room it has', () => {
     ]) {
       await expect(first).toContainText(fact);
     }
+    // Break caught (the review of 499399c): the card's words about 5px from the edge of the glass. The card has its own inner padding (space-4, 16px) where it starts.
+    const inset = await first.evaluate((card) => {
+      const body = card.querySelector('.ui-data-table__card-body');
+      if (body === null) throw new Error('the card has no body');
+      return body.getBoundingClientRect().left - card.getBoundingClientRect().left;
+    });
+    expect(inset).toBeGreaterThanOrEqual(16);
     expect(watch.problems).toEqual([]);
   });
+
+  // Break caught (the Product Owner, 9 November 2026): the views of the queue running off a narrow screen with nothing to say so, or the current view (the address names it) left
+  // behind the edge: the end that is cut off fades, and the current view is whole inside the row.
+  for (const width of [320, 390]) {
+    test(`fades the cut-off end of the views, and brings the current view into view, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      const { watch } = await open(page, '/pickup-requests');
+      const row = page.locator('.ui-view-tabs__scroll');
+      await expect(row).toHaveAttribute('data-fade', 'end');
+
+      await page.goto('/pickup-requests?state=CANCELLED');
+      const current = page.getByRole('tab', { name: /^Cancelled/ });
+      await expect(current).toHaveAttribute('aria-selected', 'true');
+      await expect(row).toHaveAttribute('data-fade', 'start');
+      const room = await row.boundingBox();
+      const tab = await current.boundingBox();
+      expect(room).not.toBeNull();
+      expect(tab).not.toBeNull();
+      expect(tab?.x ?? -1).toBeGreaterThanOrEqual((room?.x ?? 0) - 0.5);
+      expect((tab?.x ?? 0) + (tab?.width ?? 0)).toBeLessThanOrEqual(
+        (room?.x ?? 0) + (room?.width ?? 0) + 0.5,
+      );
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(watch.problems).toEqual([]);
+    });
+  }
 
   for (const [shown, size] of [
     ['a table', WIDE],

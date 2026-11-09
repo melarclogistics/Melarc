@@ -62,6 +62,33 @@ describe('Timeline: what it is', () => {
     expect(within(steps[1] ?? document.body).getByText('(the demo step shown)')).toBeVisible();
   });
 
+  // Break caught: "Latest" drawn on every history (the order already says it), or an empty tag left behind when a page gives no words.
+  it('draws no words for the current step when it is given none, and still marks it for assistive technology', () => {
+    const { container } = render(
+      <Timeline
+        label="Demo steps"
+        entries={[
+          { key: 'a', title: 'Demo step one' },
+          { key: 'b', title: 'Demo step two', current: true },
+        ]}
+      />,
+    );
+
+    const steps = within(screen.getByRole('list', { name: 'Demo steps' })).getAllByRole('listitem');
+    expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    expect(steps[1]).toHaveTextContent(/^Demo step two$/);
+    expect(container.querySelector('.ui-timeline__current')).toBeNull();
+  });
+
+  // Break caught: the words of the current step run into the title ("Booked Latest"): they are their own element, which the stylesheet sets apart.
+  it('keeps the words of the current step in an element of their own, after the title', () => {
+    renderTimeline();
+
+    const words = screen.getByText('(the demo step shown)');
+    expect(words.className).toBe('ui-timeline__current');
+    expect(words.parentElement).toHaveTextContent(/^Demo step two \(the demo step shown\)$/);
+  });
+
   it('keeps its markers out of what is read', () => {
     const { container } = renderTimeline();
 

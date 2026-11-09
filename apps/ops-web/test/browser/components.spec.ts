@@ -946,6 +946,37 @@ test.describe('the components of the pickup screens', () => {
     await expect(timeline.locator('[aria-current="step"]')).toContainText('(the demo step shown)');
   });
 
+  // Break caught: the words of the current step running into its title ("Booked Latest"), or a marker drawn as a heavy disc as tall as the text.
+  test('the timeline sets the words of the current step apart from its title, and draws markers no taller than the text', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    const step = page
+      .getByRole('list', { name: 'Demo attempts, oldest first' })
+      .locator('[aria-current="step"]');
+
+    const measured = await step.evaluate((element) => {
+      const title = element.querySelector('.ui-timeline__title');
+      const tag = element.querySelector('.ui-timeline__current');
+      const marker = element.querySelector('.ui-timeline__marker');
+      if (title === null || tag === null || marker === null) {
+        throw new Error('the current step lacks its title, its tag or its marker');
+      }
+      const first = document.createTreeWalker(title, NodeFilter.SHOW_TEXT).nextNode();
+      if (first === null) throw new Error('the title has no text');
+      const words = document.createRange();
+      words.selectNodeContents(first);
+      return {
+        gap: tag.getBoundingClientRect().left - words.getBoundingClientRect().right,
+        marker: marker.getBoundingClientRect().height,
+        text: parseFloat(getComputedStyle(title).fontSize),
+      };
+    });
+
+    expect(measured.gap).toBeGreaterThanOrEqual(8);
+    expect(measured.marker).toBeLessThanOrEqual(measured.text);
+  });
+
   test('money is shown from pesewas in cedis, in figures of one width', async ({ page }) => {
     await openShowcase(page);
 

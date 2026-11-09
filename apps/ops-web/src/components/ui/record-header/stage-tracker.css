@@ -1,7 +1,8 @@
 /*
  * StageTracker (design/COMPONENT_PATTERNS.md, *RecordHeader and StageTracker*): segmented bars with labels. Done stages are drawn in the secondary text colour, the
- * current stage in the brand crimson (the one place the redesign puts crimson in a record: the current stage), the stages not yet reached in the border colour. The
- * label of a stage not yet reached is the muted text, not the border colour: a border is not legible as text. Words carry the state for assistive technology.
+ * current stage in Ink (the primary action's colour), the stages not yet reached in the border colour. Crimson stays in the small square beside the current label and
+ * nowhere else of the tracker (the brand rule: crimson is a small mark, not a bar). The label of a stage not yet reached is the muted text, not the border colour: a
+ * border is not legible as text. Words carry the state for assistive technology.
  */
 .ui-stage-tracker__frame {
   container-type: inline-size;
@@ -36,7 +37,7 @@
 }
 
 .ui-stage-tracker__stage[data-state='current'] .ui-stage-tracker__bar {
-  background: var(--color-brand-default);
+  background: var(--color-action-primary);
 }
 
 .ui-stage-tracker__label {

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -200,5 +200,167 @@ describe('ViewTabs', () => {
     const { container } = render(<Host />);
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+/**
+ * The row of tabs with the measures of a layout engine given to it by hand: jsdom measures nothing, so a test that reads the fade or the scrolling says what the row measures.
+ * `scrollLeft` is kept by the test (and held at 0 or more, as a browser holds it).
+ */
+function measuredRow(container: HTMLElement, sizes: { scrollWidth: number; clientWidth: number }) {
+  const row = container.querySelector<HTMLElement>('.ui-view-tabs__scroll');
+  if (row === null) throw new Error('the tabs have no row');
+  let left = 0;
+  Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => sizes.scrollWidth });
+  Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => sizes.clientWidth });
+  Object.defineProperty(row, 'scrollLeft', {
+    configurable: true,
+    get: () => left,
+    set: (value: number) => {
+      left = Math.min(Math.max(0, value), sizes.scrollWidth - sizes.clientWidth);
+    },
+  });
+  return row;
+}
+
+describe('ViewTabs on a narrow screen', () => {
+  // Break caught: a row that is cut off at the edge of the screen with nothing to say so (the last tab looks like the last tab), or a fade left on a row that fits.
+  it('marks which end of the row is cut off, from its scroll position, and none when nothing is', () => {
+    const { container } = render(<Host />);
+    const sizes = { scrollWidth: 600, clientWidth: 300 };
+    const row = measuredRow(container, sizes);
+    const scrollTo = (value: number) => {
+      row.scrollLeft = value;
+      fireEvent.scroll(row);
+    };
+
+    scrollTo(0);
+    expect(row).toHaveAttribute('data-fade', 'end');
+    scrollTo(150);
+    expect(row).toHaveAttribute('data-fade', 'start end');
+    scrollTo(300);
+    expect(row).toHaveAttribute('data-fade', 'start');
+
+    sizes.scrollWidth = 300;
+    scrollTo(0);
+    expect(row).not.toHaveAttribute('data-fade');
+  });
+
+  // Break caught: a view chosen by the address or by the keys that stays out of sight behind the edge, so that the page says one view and the row shows another.
+  it('brings the current view into view when it changes, and leaves a view that is clear of the edges where it is', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Host />);
+    // The list is 520px wide in a row of 300px, so that it can scroll by 220px: 50px of it lie after the last tab.
+    const row = measuredRow(container, { scrollWidth: 520, clientWidth: 300 });
+    // Four tabs of 110px, 120px apart, in a row 300px wide that starts at 0.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const rect = (left: number, right: number): DOMRect =>
+        ({
+          left,
+          right,
+          top: 0,
+          bottom: 30,
+          width: right - left,
+          height: 30,
+          x: left,
+          y: 0,
+        }) as DOMRect;
+      if (this.classList.contains('ui-view-tabs__scroll')) return rect(0, 300);
+      if (this.getAttribute('role') === 'tab') {
+        const place =
+          [...(this.parentElement?.children ?? [])].indexOf(this) * 120 - row.scrollLeft;
+        return rect(place, place + 110);
+      }
+      return rect(0, 0);
+    });
+
+    // The second view is whole and clear of both ends (120 to 230 in a row of 300, with 24px kept clear): the row stays where it is.
+    await user.click(tab(/^Confirmed/));
+    expect(row.scrollLeft).toBe(0);
+
+    // A view in the middle that is cut off (240 to 350): the row moves until it is whole and clear of the end by 24px, so that the next one shows beside it.
+    await user.click(tab(/^Cancelled/));
+    expect(row.scrollLeft).toBe(350 - 300 + 24);
+    expect(row).toHaveAttribute('data-fade', 'start end');
+
+    // The last view: the row goes to its end, whole, and the 50px after the tab are not left as a cut-off end (a fade there would say that something is hidden when nothing is).
+    await user.click(tab('All'));
+    expect(row.scrollLeft).toBe(220);
+    expect(row).toHaveAttribute('data-fade', 'start');
+
+    // The first view is cut off now: the row goes back to the start.
+    await user.click(tab(/^Needs decision/));
+    expect(row.scrollLeft).toBe(0);
+    expect(row).toHaveAttribute('data-fade', 'end');
+  });
+
+  // Break caught (found on the pickup queue at 320 and 390 px): the current view brought into view once, at the first draw, before the counts and the fonts have arrived and made the list longer,
+  // so that the last view is cut off again and its end fades. The row keeps the current view in view while the list grows, until the person scrolls it themselves.
+  it('keeps the current view in view while the list grows, and stops once the person has scrolled it', async () => {
+    let notify: ResizeObserverCallback = () => undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          notify = callback;
+        }
+        observe(): void {
+          // The test says when the sizes changed.
+        }
+        unobserve(): void {
+          // As above.
+        }
+        disconnect(): void {
+          // As above.
+        }
+      },
+    );
+    const user = userEvent.setup();
+    const { container } = render(<Host />);
+    const sizes = { scrollWidth: 520, clientWidth: 300 };
+    const row = measuredRow(container, sizes);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const rect = (left: number, right: number): DOMRect =>
+        ({
+          left,
+          right,
+          top: 0,
+          bottom: 30,
+          width: right - left,
+          height: 30,
+          x: left,
+          y: 0,
+        }) as DOMRect;
+      if (this.classList.contains('ui-view-tabs__scroll')) return rect(0, 300);
+      if (this.getAttribute('role') === 'tab') {
+        const place =
+          [...(this.parentElement?.children ?? [])].indexOf(this) * 120 - row.scrollLeft;
+        return rect(place, place + 110);
+      }
+      return rect(0, 0);
+    });
+    await user.click(tab('All'));
+    expect(row.scrollLeft).toBe(220);
+
+    // The counts arrive and the list is longer: the last view is still the current one, and the row follows it to the new end.
+    sizes.scrollWidth = 600;
+    act(() => {
+      notify([], {} as ResizeObserver);
+    });
+    expect(row.scrollLeft).toBe(300);
+    expect(row).toHaveAttribute('data-fade', 'start');
+
+    // The person scrolls the row with the wheel: it is theirs from then on, and the list growing again does not move it.
+    fireEvent.wheel(row);
+    row.scrollLeft = 100;
+    sizes.scrollWidth = 700;
+    act(() => {
+      notify([], {} as ResizeObserver);
+    });
+    expect(row.scrollLeft).toBe(100);
   });
 });

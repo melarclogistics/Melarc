@@ -409,7 +409,8 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
-  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-1);
+  /* The card's own inner padding on every side (the review of 499399c: its words were about 5px from the edge): space-4 at the sides, space-3 above and below. */
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
@@ -431,10 +432,12 @@
   animation: ui-data-table-changed var(--motion-highlight) var(--motion-ease-exit) backwards;
 }
 
+/* The box of a card is a 44px target with space round the glyph; it reaches back into the padding by space-3, so the glyph stands where the words of a card without one do. */
 .ui-data-table__card .ui-data-table__box {
   flex: none;
   width: 2.75rem;
   min-height: 2.75rem;
+  margin-inline-start: calc(-1 * var(--space-3));
 }
 
 .ui-data-table__card-body {

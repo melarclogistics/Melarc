@@ -50,11 +50,29 @@
   line-height: var(--text-body-md-line-height);
 }
 
+/* The acts and the one short line under them. The primary act is first, then the others, then the menu: where the row has no room the whole block wraps under the identity. */
+.ui-record-header__acts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
 .ui-record-header__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+.ui-record-header__note {
+  margin: 0;
+  max-width: 24rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
 }
 
 .ui-record-header__stages {

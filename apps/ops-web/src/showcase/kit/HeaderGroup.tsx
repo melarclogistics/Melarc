@@ -154,6 +154,12 @@ function ViewTabsSpecimens() {
       <Specimen label="In a narrow room: the list scrolls inside its own box" width="20rem">
         <Views tabs={VIEWS} width="16rem" />
       </Specimen>
+      <Specimen
+        label="In a narrow room, the last view current: it is brought into view and the start fades"
+        width="20rem"
+      >
+        <Views tabs={VIEWS} initial="all" width="16rem" />
+      </Specimen>
     </KitSection>
   );
 }

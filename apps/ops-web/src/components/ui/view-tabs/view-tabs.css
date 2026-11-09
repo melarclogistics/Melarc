@@ -14,6 +14,29 @@
   scrollbar-width: thin;
 }
 
+/*
+ * The end of the list that is cut off fades out over 1.5rem, so that a row does not look complete when a tab is hidden behind its edge (`data-fade` is set by
+ * `use-edge-fade.ts` from the row's own scroll position: "start", "end" or "start end", and none when nothing is cut off). A mask fades what is drawn, whatever the surface
+ * behind it is, so no colour has to be guessed.
+ */
+.ui-view-tabs__scroll[data-fade='end'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+}
+
+.ui-view-tabs__scroll[data-fade='start'] {
+  mask-image: linear-gradient(to right, transparent, #000 1.5rem);
+}
+
+.ui-view-tabs__scroll[data-fade='start end'] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+}
+
 .ui-view-tabs__tab {
   gap: var(--space-2);
   /* The primitive draws the current view's underline as a border, which cannot grow; it is drawn below as a mark that can. */

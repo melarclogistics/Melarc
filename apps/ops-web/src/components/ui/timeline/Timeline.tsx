@@ -19,8 +19,12 @@ export interface TimelineProps {
   readonly label: string;
   /** The steps, oldest first. The order is the caller's: the timeline sorts nothing. */
   readonly entries: readonly TimelineEntry[];
-  /** The words that mark the current step to the eye, beside its title ("This request"). The list says it to assistive technology too. */
-  readonly currentLabel: string;
+  /**
+   * The words that mark the current step to the eye, in a tag of their own after its title ("This request"). Give them when the page is about one step of
+   * several (an attempt chain); a history in order needs none, because the order says which is the latest. The current step is `aria-current="step"` and
+   * has the filled marker either way.
+   */
+  readonly currentLabel?: string | undefined;
 }
 
 /** What is wrong with a timeline that cannot be drawn truthfully. These are defects of the page, so drawing one throws. */
@@ -40,7 +44,8 @@ function defect({ label, entries }: TimelineProps): string | undefined {
 /**
  * A sequence of steps in the order they happened (the attempt chain of a pickup request: each reschedule a new request linked to the one it
  * replaced). An ordered list named by its label, so a screen reader says how many steps there are and where each one is; the step the page is
- * about is `aria-current="step"` and is marked to the eye in words and by a filled marker, never by colour alone. The markers and the rule
+ * about is `aria-current="step"` and is marked to the eye by a filled marker and, when the page gives words, by a tag after its title (a filled marker differs
+ * from a hollow one in form and in weight, so it is not told by colour alone). The markers are small, about the height of the text. The markers and the rule
  * between them are decoration. It is static: it takes no focus of its own, and a link in a step is a stop for the keyboard in the list's
  * order. What a step says is the caller's; the timeline knows nothing of requests or states.
  */
@@ -65,7 +70,7 @@ export function Timeline(props: TimelineProps) {
             <div className="ui-timeline__body">
               <p className="ui-timeline__title">
                 {entry.title}
-                {current ? (
+                {current && currentLabel !== undefined ? (
                   <>
                     {' '}
                     <span className="ui-timeline__current">{currentLabel}</span>

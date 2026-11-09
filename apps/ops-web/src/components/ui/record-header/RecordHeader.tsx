@@ -20,17 +20,23 @@ export interface RecordHeaderProps {
   readonly sentence?: string;
   /** Where the record is on its way. Left out for a record that has no such way. */
   readonly stages?: StageTrackerProps;
-  /** The record's one primary action, in Ink (a Button). One only: it is what the person does next. */
+  /** The record's one primary action, in Ink (a Button). One only: it is what the person does next. It comes first: on a narrow screen the actions wrap under the identity, and a keyboard meets it first. */
   readonly primaryAction?: ReactNode;
-  /** Other actions that are not the main one (Buttons, `secondary`). */
+  /** Other actions that are not the main one (Buttons, `secondary`). They follow the primary action. */
   readonly secondaryActions?: ReactNode;
-  /** The overflow menu of the rarer and heavier acts: an ActionMenu. */
+  /** The overflow menu of the rarer and heavier acts: an ActionMenu. It comes last. */
   readonly menu?: ReactNode;
+  /**
+   * One short line under the actions, only when it changes whether to act now ("The rider sees nothing until you dispatch."). A rule belongs in the confirmation
+   * of the act, where the choice is made; this is not the place for one (the Product Owner, 9 November 2026).
+   */
+  readonly actionsNote?: string;
 }
 
 /**
  * The top of a record (PRODUCT_DESIGN_DIRECTION section 6.2; COMPONENT_PATTERNS, *RecordHeader and StageTracker*): its code in the monospaced face at 26/32, its
- * status, one sentence, the stage tracker, one primary action in Ink, the other actions, and the menu. It says where the record stands and what can be done next;
+ * status, one sentence, the stage tracker, one primary action in Ink, the other actions, and the menu, in that order (the primary first), with at most one short line
+ * under the actions. It says where the record stands and what can be done next;
  * an act the person cannot take is not passed in (hiding is presentation, and the server decides). It composes `PageHeading` for a record's own page, so that
  * the focus move after a navigation keeps working.
  */
@@ -43,6 +49,7 @@ export function RecordHeader({
   primaryAction,
   secondaryActions,
   menu,
+  actionsNote,
 }: RecordHeaderProps) {
   const inPanel = useContext(InSidePanel);
   const hasActions =
@@ -71,11 +78,18 @@ export function RecordHeader({
           </div>
           {sentence === undefined ? null : <p className="ui-record-header__sentence">{sentence}</p>}
         </div>
-        {hasActions ? (
-          <div className="ui-record-header__actions">
-            {secondaryActions}
-            {primaryAction}
-            {menu}
+        {hasActions || actionsNote !== undefined ? (
+          <div className="ui-record-header__acts">
+            {hasActions ? (
+              <div className="ui-record-header__actions">
+                {primaryAction}
+                {secondaryActions}
+                {menu}
+              </div>
+            ) : null}
+            {actionsNote === undefined ? null : (
+              <p className="ui-record-header__note">{actionsNote}</p>
+            )}
           </div>
         ) : null}
       </div>

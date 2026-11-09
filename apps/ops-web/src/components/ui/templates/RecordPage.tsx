@@ -23,6 +23,11 @@ export interface RecordActs {
   readonly secondary?: ReactNode;
   /** The rarer and heavier acts. A menu with no item is not drawn. */
   readonly menu?: { readonly label: string; readonly items: readonly ActionMenuItem[] };
+  /**
+   * One short line under the acts, only when it changes whether to act now ("The rider sees nothing until you dispatch."). A rule lives in the confirmation of the act, where the
+   * choice is made; a paragraph of rules above the content is not drawn (the Product Owner, 9 November 2026).
+   */
+  readonly note?: string;
 }
 
 /** A version of the record that is not the server's now (a stale `ETag`): the screen says so and offers to read it again. */
@@ -35,9 +40,9 @@ export interface RecordConflict {
 export interface RecordActivity {
   /** Names the list for assistive technology and heads the panel. Default "Activity". */
   readonly title?: string;
-  /** What happened, oldest first. The page marks the latest `current`. */
+  /** What happened, oldest first. The page marks the latest `current` (a filled marker; the order says it is the latest). */
   readonly entries: readonly TimelineEntry[];
-  /** The words that mark the current step to the eye. Default "Latest". */
+  /** Words for the current step, in a tag after its title. None by default: a history in order does not need "Latest". */
   readonly currentLabel?: string;
 }
 
@@ -57,11 +62,12 @@ export interface RecordPageProps {
   readonly activity?: RecordActivity;
 }
 
+/** The acts of a record in a side panel: the primary first, then the others, then the menu (as the header draws them). */
 function Acts({ acts }: { readonly acts: RecordActs }) {
   return (
     <>
-      {acts.secondary}
       {acts.primary}
+      {acts.secondary}
       {acts.menu === undefined || acts.menu.items.length === 0 ? null : (
         <ActionMenu label={acts.menu.label} items={acts.menu.items} />
       )}
@@ -110,7 +116,7 @@ export function RecordPage({
         <Timeline
           label={`${activity.title ?? 'Activity'} of the record`}
           entries={activity.entries}
-          currentLabel={activity.currentLabel ?? 'Latest'}
+          currentLabel={activity.currentLabel}
         />
       </Panel>
     );
@@ -129,6 +135,7 @@ export function RecordPage({
               <Acts acts={acts} />
             </div>
           )}
+          {acts?.note === undefined ? null : <p className="ui-record-page__note">{acts.note}</p>}
         </div>
         {notice}
         {main}
@@ -150,6 +157,7 @@ export function RecordPage({
           {...(header.stages === undefined ? {} : { stages: header.stages })}
           {...(acts?.primary === undefined ? {} : { primaryAction: acts.primary })}
           {...(acts?.secondary === undefined ? {} : { secondaryActions: acts.secondary })}
+          {...(acts?.note === undefined ? {} : { actionsNote: acts.note })}
           {...(acts?.menu === undefined || acts.menu.items.length === 0
             ? {}
             : { menu: <ActionMenu label={acts.menu.label} items={acts.menu.items} /> })}

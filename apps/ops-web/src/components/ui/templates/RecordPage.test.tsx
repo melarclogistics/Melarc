@@ -93,6 +93,43 @@ describe('RecordPage', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  // Break caught: the primary act after the others (a narrow screen draws it below them, a keyboard meets it last), or the short line of the acts lost between the page and the
+  // header. The same in a side panel, where the lead holds the acts.
+  for (const where of ['the page', 'a side panel'] as const) {
+    it(`puts the primary act first, then the others, then the menu, and the short line under them, in ${where}`, () => {
+      renderRecord(
+        {
+          acts: {
+            primary: <Button type="button">Dispatch</Button>,
+            secondary: (
+              <Button type="button" variant="secondary">
+                Assign a rider
+              </Button>
+            ),
+            menu: {
+              label: 'More actions for ACC-PR-7KQ2MZ',
+              items: [{ id: 'cancel', label: 'Cancel the run', onSelect: () => undefined }],
+            },
+            note: 'The rider sees nothing until you dispatch.',
+          },
+        },
+        where === 'the page'
+          ? undefined
+          : (node) => <InSidePanel.Provider value>{node}</InSidePanel.Provider>,
+      );
+
+      const follows = (later: HTMLElement, earlier: HTMLElement): boolean =>
+        (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      const primary = screen.getByRole('button', { name: 'Dispatch' });
+      const secondary = screen.getByRole('button', { name: 'Assign a rider' });
+      const menu = screen.getByRole('button', { name: 'More actions for ACC-PR-7KQ2MZ' });
+      const note = screen.getByText('The rider sees nothing until you dispatch.');
+      expect(follows(secondary, primary)).toBe(true);
+      expect(follows(menu, secondary)).toBe(true);
+      expect(follows(note, menu)).toBe(true);
+    });
+  }
+
   // Break caught: a stale version with no banner, a banner with no Reload, or one that is not announced when it appears.
   it('says a version is stale in a banner with Reload, announced', async () => {
     const user = userEvent.setup();
@@ -130,8 +167,27 @@ describe('RecordPage', () => {
       screen.getByRole('heading', { level: 2, name: 'Sender' }),
     );
     const timeline = screen.getByRole('list', { name: 'Activity of the record' });
-    expect(within(timeline).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(timeline).getByText('Latest')).toBeVisible();
+    const steps = within(timeline).getAllByRole('listitem');
+    expect(steps).toHaveLength(2);
+    // The page marks the latest step for assistive technology; the order says it to the eye, so no "Latest" is drawn beside it.
+    expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    expect(within(timeline).queryByText('Latest')).toBeNull();
+  });
+
+  // Break caught: the words a page gives for its current step lost on the way to the timeline.
+  it('draws the words a page gives for the current step of its activity', () => {
+    renderRecord({
+      activity: {
+        currentLabel: 'This request',
+        entries: [
+          { key: 'a', title: 'Booked by the vendor' },
+          { key: 'b', title: 'Confirmed by the hub', current: true },
+        ],
+      },
+    });
+
+    const timeline = screen.getByRole('list', { name: 'Activity of the record' });
+    expect(within(timeline).getByText('This request')).toBeVisible();
   });
 
   // Break caught: the same composition in a side panel repeating the code as a second heading, drawing a breadcrumb in a narrow panel, or losing the acts the panel is for.
