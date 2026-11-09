@@ -1,13 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type SubmitEvent } from 'react';
 import { useParams, useNavigate } from 'react-router';
 
 import { FormPage } from '../../../components/FormPage';
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { copyFor } from '../../../platform/problem/problem-copy';
 import { registerRiderDevice } from '../../../platform/rider/rider-commands';
@@ -19,12 +19,18 @@ import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNotFound } from './RiderDetailPage';
 import { mayBindDevice } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
-import '../staff/staff-pages.css';
 import './riders.css';
 
 /** The registration asks for nothing of the person: the rider is in the address, and the key is the command's. */
 type Nothing = Readonly<Record<string, never>>;
 const NOTHING: Nothing = {};
+
+/** The way up from the page: the roster. The way to the rider is the link above the heading, which every state of the page keeps. */
+const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
+
+/** What the task is, in two short sentences under its title: it is done in person, and the officer never sees what the handset makes. */
+const INTRO =
+  'Do this in person, with the rider and the handset they will use. A code appears for the rider to scan, and you never see their PIN or key.';
 
 function Registering({ id }: { readonly id: string }) {
   const client = useApiClient();
@@ -70,37 +76,33 @@ function Registering({ id }: { readonly id: string }) {
     code.clear();
     void navigate(`/admin/riders/${id}`);
   }
+  function asking(): void {
+    void command.submit(NOTHING);
+  }
 
   const back = (
-    <p className="staff-back">
+    <p className="rider-back">
       <Link to={`/admin/riders/${id}`}>Back to the rider</Link>
     </p>
   );
+  const header = {
+    title: 'Register a first device',
+    ...(name === undefined ? {} : { description: `For ${name}.` }),
+    breadcrumb: WAY_UP,
+  };
 
-  return (
-    <>
-      <title>Register a first device · Melarc Ops Portal</title>
-      {back}
-      <PageHeader
-        title="Register a first device"
-        {...(name === undefined ? {} : { description: `For ${name}.` })}
-      />
+  // What is under the heading: the code (while it is held), the screen of a code that has lapsed, or the form that asks for one.
+  const showing = code.grant !== undefined;
+  const lapsed = !showing && code.status === 'expired';
+  const asks = !showing && !lapsed;
 
-      {code.grant !== undefined ? (
-        <EnrolmentCode
-          grant={code.grant}
-          onFinish={finish}
-          onNew={() => {
-            void command.submit(NOTHING);
-          }}
-        />
-      ) : code.status === 'expired' ? (
-        <LapsedCode
-          onNew={() => {
-            void command.submit(NOTHING);
-          }}
-        />
-      ) : held > 0 ? (
+  // The task cannot be done for this rider as the record stands: the page says so in its own words, with no form (the pattern of the one-package exception).
+  if (asks && held > 0) {
+    return (
+      <>
+        <title>Register a first device · Melarc Ops Portal</title>
+        {back}
+        <PageHeader {...header} />
         <FormPage>
           <Alert variant="danger">
             <p>
@@ -114,57 +116,91 @@ function Registering({ id }: { readonly id: string }) {
             </p>
           </Alert>
         </FormPage>
-      ) : blockedByStatus ? (
+      </>
+    );
+  }
+  if (asks && blockedByStatus) {
+    return (
+      <>
+        <title>Register a first device · Melarc Ops Portal</title>
+        {back}
+        <PageHeader {...header} />
         <FormPage>
           <Alert variant="danger">
             <p>A device cannot be registered while this rider’s access has ended.</p>
           </Alert>
         </FormPage>
-      ) : (
-        <FormPage>
-          {code.withdrawn ? <WithdrawnCode /> : null}
-          <p>
-            Do this in person, with the rider and the handset they will use. A code appears here;
-            the rider scans it with the Melarc Rider app, which makes the key on their handset and
-            asks them to choose a PIN. You never see the PIN or the key.
-          </p>
-          <ol className="rider-steps">
-            <li>Check that this is the rider, and that the handset is their own.</li>
-            <li>Show the code, and let the rider scan it.</li>
-            <li>The rider chooses their PIN on the handset. Then come back here.</li>
-          </ol>
-          <CommandOutcomeNotice
-            command={command}
-            unknownText={copyFor({ operation: 'registerRiderDevice', context: 'unknown-outcome' })}
-          />
-          <div className="staff-action__buttons" ref={actions}>
-            {command.phase === 'unknown' ? (
-              <CodeRecovery command={command} />
-            ) : command.phase === 'conflict' ? (
-              <Button type="button" data-recovery onClick={command.checkRecord}>
-                Reload the rider
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                loading={command.phase === 'sending'}
-                onClick={() => {
-                  void command.submit(NOTHING);
-                }}
-              >
-                Show the QR code
-              </Button>
-            )}
-          </div>
-        </FormPage>
-      )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <title>Register a first device · Melarc Ops Portal</title>
+      {back}
+      <TaskForm
+        header={header}
+        busy={command.phase === 'sending'}
+        // A code is asked for by the button and by nothing else: no event of the form (an implicit submission, a stray Enter) makes a grant for a rider nobody is with.
+        onSubmit={(event: SubmitEvent<HTMLFormElement>) => {
+          event.preventDefault();
+        }}
+        alerts={
+          asks ? (
+            <>
+              {code.withdrawn ? <WithdrawnCode /> : null}
+              <CommandOutcomeNotice
+                command={command}
+                unknownText={copyFor({
+                  operation: 'registerRiderDevice',
+                  context: 'unknown-outcome',
+                })}
+              />
+            </>
+          ) : null
+        }
+        actions={
+          asks ? (
+            <div className="rider-actions" ref={actions}>
+              {/*
+                Every button here is a button of type "button", and none is the form's submit: the button that asks, the reload of a conflict and the way out of an outcome nobody
+                knows are one element in turn, so the focus stays on it when its words change (it is the button that asked, and it is still there), and a click on the reload cannot
+                become a submission of the form.
+              */}
+              {command.phase === 'unknown' ? (
+                <CodeRecovery command={command} />
+              ) : command.phase === 'conflict' ? (
+                <Button type="button" data-recovery onClick={command.checkRecord}>
+                  Reload the rider
+                </Button>
+              ) : (
+                <Button type="button" loading={command.phase === 'sending'} onClick={asking}>
+                  Show the QR code
+                </Button>
+              )}
+            </div>
+          ) : null
+        }
+      >
+        <TaskFormSection title="The first device" {...(asks ? { description: INTRO } : {})}>
+          {showing ? (
+            <TaskFormWide>
+              <EnrolmentCode grant={code.grant} onFinish={finish} onNew={asking} />
+            </TaskFormWide>
+          ) : lapsed ? (
+            <TaskFormWide>
+              <LapsedCode onNew={asking} />
+            </TaskFormWide>
+          ) : null}
+        </TaskFormSection>
+      </TaskForm>
     </>
   );
 }
 
 /**
- * The first binding of a rider's device (surfaces/ops-portal.md section 7, `/admin/riders/{id}/device/register`; S0.60b), in person. The officer
- * presses a button, the API makes one single-use enrolment grant, and the page draws it as a QR code for the rider to scan. **The QR is the
+ * The first binding of a rider's device (surfaces/ops-portal.md section 7, `/admin/riders/{id}/device/register`; S0.60b; redesign step R7b, the task form, as the one-package exception
+ * is), in person. The officer presses a button, the API makes one single-use enrolment grant, and the page draws it as a QR code for the rider to scan. **The QR is the
  * credential**: it is held in memory only, drawn as modules and written nowhere (no text, no link, no copy button, no cache, no storage, no log),
  * and it is gone when the page is left, when the rider has scanned it, when the page is hidden, when the session ends and when its time is up;
  * a code that has lapsed is never left on screen. The officer never receives the rider's PIN or key.

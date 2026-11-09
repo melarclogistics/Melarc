@@ -9,11 +9,33 @@
   gap: var(--space-5);
 }
 
-/* What the account cannot do about a rider's devices, in one muted line under the header. */
+/* A short line of the page's own, muted: what the account cannot do about a rider's devices, or what happens to the old handset. */
 .rider-note {
   margin: 0;
   max-width: 40rem;
   color: var(--color-text-secondary);
+}
+
+/* The way back to the rider, above the heading of the device pages: the same element in every state of the page. */
+.rider-back {
+  margin: 0 0 var(--space-4);
+}
+
+/* The controls of a code and of a lapsed code: side by side where there is room, and wrapping where there is not (nothing is clipped at 320 px or at enlarged text). */
+.rider-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* The news that takes focus when it replaces what the person was looking at (the earlier code, taken off the screen). The global focus rule draws the ring for a keyboard and not for a mouse. */
+.rider-notice {
+  margin-bottom: var(--space-4);
+}
+
+/* The controls of a form whose button changes with the outcome: they take part in the form's own row of actions, and the element is only the place to find them. */
+.rider-actions {
+  display: contents;
 }
 
 /* The search, in the popover of the filter row: the field and the button that sends it, one under the other. */

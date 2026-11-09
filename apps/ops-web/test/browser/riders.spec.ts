@@ -509,7 +509,7 @@ test.describe('the enrolment code in a real browser', () => {
 
       await expect(page.getByText(news)).toBeVisible();
       await expect(
-        page.locator('.staff-notice', { hasText: 'The earlier code is no longer shown' }),
+        page.locator('.rider-notice', { hasText: 'The earlier code is no longer shown' }),
       ).toBeFocused();
     });
 

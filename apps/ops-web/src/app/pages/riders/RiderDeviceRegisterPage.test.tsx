@@ -197,9 +197,24 @@ describe('the first binding: before a code is asked for', () => {
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Riders',
+      }),
+    ).toHaveAttribute('href', '/admin/riders');
     // No picture on the page: the QR code is the only one it ever draws. (The page, not the document: the sidebar around it draws the logo.)
     expect(within(screen.getByRole('main')).queryByRole('img')).toBeNull();
     expect(posts()).toHaveLength(0);
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs and lists of rules above the content. A task form keeps at most two short sentences under its title.
+  it('tells the task in two short sentences, with no list of steps', async () => {
+    await open();
+    const intro = await screen.findByText(/Do this in person, with the rider and the handset/);
+
+    expect(intro.textContent.split(/(?<=\.)\s+/)).toHaveLength(2);
+    expect(screen.queryByText(/Check that this is the rider/)).toBeNull();
+    expect(screen.queryByText(/Then come back here/)).toBeNull();
   });
 
   // Break caught: a code asked for by merely opening the page, which would make a grant for a rider nobody is with.
