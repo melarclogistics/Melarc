@@ -402,6 +402,20 @@ describe('the manifest: ordering the stops', () => {
     expect(await stopsTable()).toBeVisible();
   });
 
+  // Break caught (the review of 499399c): the focus that was on "Discard the changes" falling to the document when the control leaves the page, or going to a control that has the officer
+  // begin again. It goes to the heading of the stops, where they were working, as it did before the redesign.
+  it('gives focus to the heading of the stops when the changes are put aside', async () => {
+    const { user } = open();
+    await startOrdering(user);
+    await user.click(screen.getByRole('button', { name: 'Move ACC-PR-7KQ2MZ down' }));
+
+    await user.click(screen.getByRole('button', { name: 'Discard the changes' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Stops' })).toHaveFocus();
+    });
+  });
+
   // Break caught: a stop that is no longer to be worked moved by the control, which the server refuses as a stop moved that may not be.
   it('holds a stop that is no longer to be worked in its place', async () => {
     const { user } = open(

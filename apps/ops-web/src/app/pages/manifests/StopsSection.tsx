@@ -135,14 +135,14 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
     wantsCatalogue && me?.holds('settings.reason.read') === true,
   );
   const [order, setOrder] = useState<readonly string[] | undefined>(undefined);
-  const orderButton = useRef<HTMLButtonElement>(null);
-  /** Set when the changes are put aside: focus goes back to the control that began the ordering, which is drawn again in its place. */
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Set when the changes are put aside: focus goes to the heading of the stops, where the officer was working (the control they pressed is gone, and the table is drawn in its place). */
   const returnFocus = useRef(false);
   const reordering = order !== undefined;
   useEffect(() => {
     if (reordering || !returnFocus.current) return;
     returnFocus.current = false;
-    orderButton.current?.focus();
+    heading.current?.focus();
   }, [reordering]);
 
   const command = useConfirmedCommand<
@@ -249,7 +249,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
   ];
 
   return (
-    <Panel title="Stops" headingLevel={2} region>
+    <Panel title="Stops" headingLevel={2} region headingRef={heading}>
       <p className="manifest-note">
         {stopsText(stops.length)}, in the order the rider is shown them.
       </p>
@@ -373,7 +373,6 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
           {canOrder ? (
             <div className="pickup-act__buttons">
               <Button
-                ref={orderButton}
                 type="button"
                 variant="secondary"
                 onClick={() => {

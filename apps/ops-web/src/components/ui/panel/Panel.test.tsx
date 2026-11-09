@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
@@ -13,6 +14,25 @@ describe('Panel', () => {
 
     rerender(<Panel title="Pickup">The facts.</Panel>);
     expect(screen.getByRole('heading', { level: 2, name: 'Pickup' })).toBeInTheDocument();
+  });
+
+  // Break caught (the review of 499399c): a heading that focus cannot be sent to, so that a screen that puts the person back where they were working (the stops, once the changes to their
+  // order are put aside) has nowhere to put them; and a heading that every panel makes a stop of the Tab key.
+  it('lets focus be sent to its heading when it is given the ref, and makes no Tab stop of it', () => {
+    const ref = createRef<HTMLHeadingElement>();
+    const { rerender } = render(<Panel title="Stops">The stops.</Panel>);
+    expect(screen.getByRole('heading', { name: 'Stops' })).not.toHaveAttribute('tabindex');
+
+    rerender(
+      <Panel title="Stops" headingRef={ref}>
+        The stops.
+      </Panel>,
+    );
+    const heading = screen.getByRole('heading', { name: 'Stops' });
+    expect(ref.current).toBe(heading);
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    ref.current?.focus();
+    expect(heading).toHaveFocus();
   });
 
   // Break caught: a section a person works in that is no landmark, so that a screen reader cannot jump to it; and a landmark that every panel makes of itself.
