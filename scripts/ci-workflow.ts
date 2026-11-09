@@ -127,7 +127,9 @@ export type WorkflowProblemCode =
   | 'ARTIFACT_ROOTS_DRIFT'
   | 'ARTIFACT_HIDDEN_FILES'
   | 'REHEARSAL_MISSING'
-  | 'POSTGRES_IMAGE_DRIFT';
+  | 'POSTGRES_IMAGE_DRIFT'
+  | 'CI_NOT_TRUE'
+  | 'MIGRATION_BASE_ENV';
 
 export interface WorkflowProblem {
   code: WorkflowProblemCode;
