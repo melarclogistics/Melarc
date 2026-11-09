@@ -87,7 +87,11 @@ function NoAccess({ manifestId }: { readonly manifestId: string }) {
   useFocusFallenToHeading();
   return (
     <>
-      <ForbiddenPage kind="permission-missing" permission="pickup.read" />
+      <ForbiddenPage
+        kind="permission-missing"
+        permission="pickup.read"
+        capability="see pickup runs"
+      />
       <WayBack manifestId={manifestId} />
     </>
   );
@@ -143,6 +147,7 @@ function Reading({ id, heading, ownsHeading = false, children }: WithManifestPro
           loadingLabel="Loading the pickup run…"
           skeleton={<Skeleton lines={6} />}
           permission="pickup.read"
+          capability="see pickup runs"
           operation="getPickupManifest"
         >
           {() => null}

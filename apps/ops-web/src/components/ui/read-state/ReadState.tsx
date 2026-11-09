@@ -30,6 +30,8 @@ export interface ReadStateProps<Data> {
   readonly skeleton?: ReactNode;
   /** The permission key the read needs. A refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key. */
   readonly permission?: string;
+  /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): the sentence stays the table’s. */
+  readonly capability?: string;
   /** The `operationId` of the read, so that its failures are worded for it. */
   readonly operation?: string;
   readonly context?: string;
@@ -43,12 +45,14 @@ export interface ReadStateProps<Data> {
 function RefusalOrFailure({
   problem,
   permission,
+  capability,
   onRetry,
   retrying,
   recovery,
 }: {
   readonly problem: Problem;
   readonly permission: string | undefined;
+  readonly capability: string | undefined;
   readonly onRetry: () => void;
   readonly retrying: boolean;
   readonly recovery: ReactNode;
@@ -68,7 +72,14 @@ function RefusalOrFailure({
       );
     }
     if (permission !== undefined) {
-      return <ForbiddenState kind={kind} permission={permission} announce />;
+      return (
+        <ForbiddenState
+          kind={kind}
+          permission={permission}
+          announce
+          {...(capability === undefined ? {} : { capability })}
+        />
+      );
     }
     return (
       <Alert variant="danger" announce>
@@ -117,6 +128,7 @@ export function ReadState<Data>({
   loadingLabel,
   skeleton,
   permission,
+  capability,
   operation,
   context,
   recovery,
@@ -140,6 +152,7 @@ export function ReadState<Data>({
       <RefusalOrFailure
         problem={problemOf(query.error, place)}
         permission={permission}
+        capability={capability}
         retrying={query.isFetching}
         recovery={recovery}
         onRetry={() => {

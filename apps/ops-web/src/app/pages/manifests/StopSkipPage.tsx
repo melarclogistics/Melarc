@@ -305,6 +305,7 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
         loadingLabel="Loading the stop…"
         skeleton={<Skeleton lines={4} />}
         permission="pickup.read"
+        capability="see pickup runs"
         operation="getPickupStop"
       >
         {(record) =>

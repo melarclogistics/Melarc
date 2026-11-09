@@ -33,6 +33,7 @@ import {
   usePickupRequests,
   type PickupRecord,
 } from '../../../platform/pickup/use-pickup-queries';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -89,7 +90,7 @@ const STALE_QUEUE =
 function refusalWords(problem: Problem): string {
   return problem.forbidden === 'outside-hubs'
     ? 'These pickup requests are at a hub your account does not work in.'
-    : 'Your account cannot read pickup requests. Ask an administrator to give you access.';
+    : cannotText('pickup.read');
 }
 
 /**

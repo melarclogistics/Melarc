@@ -25,6 +25,8 @@ export type ForbiddenStateProps =
       readonly kind: 'permission-missing';
       /** The permission key the page needs. The refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key or a role. */
       readonly permission: string;
+      /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): the sentence stays the table’s. */
+      readonly capability?: string;
       readonly announce?: boolean;
     }
   | {
@@ -51,13 +53,15 @@ const PAGE_HEADING: Readonly<Record<ForbiddenKind, string>> = {
 function Explanation({
   kind,
   permission,
+  capability,
 }: {
   readonly kind: ForbiddenKind;
   readonly permission?: string;
+  readonly capability?: string;
 }): ReactNode {
   switch (kind) {
     case 'permission-missing':
-      return cannotText(permission);
+      return cannotText(permission, capability);
     case 'insufficient-authority':
       return 'This needs a higher authority than your session has.';
     case 'outside-hubs':
@@ -82,6 +86,9 @@ export function ForbiddenState(props: ForbiddenStateProps) {
         <Explanation
           kind={kind}
           {...(props.permission === undefined ? {} : { permission: props.permission })}
+          {...(props.kind === 'permission-missing' && props.capability !== undefined
+            ? { capability: props.capability }
+            : {})}
         />
       </p>
     </Alert>
@@ -103,6 +110,9 @@ export function ForbiddenPage(props: ForbiddenStateProps) {
           <Explanation
             kind={kind}
             {...(props.permission === undefined ? {} : { permission: props.permission })}
+            {...(props.kind === 'permission-missing' && props.capability !== undefined
+              ? { capability: props.capability }
+              : {})}
           />
         </p>
       </Alert>

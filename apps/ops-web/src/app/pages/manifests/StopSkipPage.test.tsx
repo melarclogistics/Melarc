@@ -23,7 +23,6 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
-import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests/{id}/stops/{stopId}/skip` (`getPickupStop`, `listReasonDefinitions`, `skipPickupStop`; S1.25). Ops skips a stop with a reason
@@ -497,7 +496,11 @@ describeInterfaceStates('the skip page', {
   'permission-restricted': {
     test: async () => {
       open({ [STOP]: () => refusal(403, 'PERMISSION_DENIED') });
-      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
+      expect(
+        await screen.findByText(
+          'Your account can’t see pickup runs. Ask an administrator for access.',
+        ),
+      ).toBeVisible();
     },
   },
 });

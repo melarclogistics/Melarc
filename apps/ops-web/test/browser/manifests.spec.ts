@@ -128,7 +128,7 @@ test.describe('moving through the screens', () => {
     await open(page, '/manifests', { permissions: ['staff.read'] });
 
     await expect(
-      page.getByText('Your account can’t see pickup requests. Ask an administrator for access.'),
+      page.getByText('Your account can’t see pickup runs. Ask an administrator for access.'),
     ).toBeVisible();
     await expect(page.getByRole('main')).not.toContainText('pickup.read');
     await expect(menuEntry(page, 'Pickup runs')).toHaveCount(0);

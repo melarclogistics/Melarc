@@ -58,16 +58,14 @@ export function capabilityOf(permission: string): string | undefined {
 export const ASK_FOR_ACCESS = 'Ask an administrator for access.';
 
 /**
- * The refusal of a page, a panel or an act for want of a permission, as a sentence: "Your account can't see pickup requests. Ask an administrator for access." A key with no words
- * is told as "do this", never as the key.
+ * The refusal of a page, a panel or an act for want of a permission, as a sentence: "Your account can’t see pickup requests. Ask an administrator for access." A key with no words
+ * is told as "do this", never as the key. A page that reads something else with the same key says what it is (`doing`, "see pickup runs"): the sentence is the table’s, and the page
+ * makes none of its own (the review of 499399c: the list of pickup runs was refused in the words of the requests it is not about).
  */
-export function cannotText(permission: string | undefined): string {
-  const words = permission === undefined ? undefined : capabilityOf(permission);
+export function cannotText(permission: string | undefined, doing?: string): string {
+  const words = doing ?? (permission === undefined ? undefined : capabilityOf(permission));
   return `Your account can’t ${words ?? 'do this'}. ${ASK_FOR_ACCESS}`;
 }
-
-/** What an act that waits for someone else's decision says of who decides: an approver, in the words of the act. The key is never named. */
-export const AN_APPROVER_DECIDES = 'An approver decides this.';
 
 /** The permission keys that have words, for the test that holds the table to the catalogue and to the source. */
 export const CAPABILITY_KEYS: readonly string[] = Object.keys(CAPABILITY);

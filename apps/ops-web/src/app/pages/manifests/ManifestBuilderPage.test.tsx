@@ -827,7 +827,7 @@ describeInterfaceStates('the manifest builder', {
       // The refusal is told as what the person lacks, in plain words, and names no key.
       await waitFor(() => {
         expect(screen.getByRole('alert')).toHaveTextContent(
-          'Your account cannot read pickup requests. Ask an administrator to give you access.',
+          'Your account can’t see pickup requests. Ask an administrator for access.',
         );
       });
       expect(document.body.textContent).not.toContain('pickup.read');

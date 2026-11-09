@@ -184,7 +184,7 @@ const ALL_VIEW = 'all';
 function refusalWords(problem: Problem): string {
   return problem.forbidden === 'outside-hubs'
     ? 'These pickup runs are at a hub your account does not work in.'
-    : cannotText('pickup.read');
+    : cannotText('pickup.read', 'see pickup runs');
 }
 
 /**

@@ -631,7 +631,7 @@ describeInterfaceStates('the manifest list', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      await alertSaying(cannotText('pickup.read'));
+      await alertSaying('Your account can’t see pickup runs. Ask an administrator for access.');
     },
   },
 });

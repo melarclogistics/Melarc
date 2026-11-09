@@ -950,7 +950,7 @@ test.describe('the queue, set in one page card', () => {
     {
       name: 'a refusal, in plain words',
       reach: (page) => openAnswering(page, failing(403, 'PERMISSION_DENIED')),
-      shows: 'Your account cannot read pickup requests.',
+      shows: 'Your account can’t see pickup requests. Ask an administrator for access.',
     },
   ];
 

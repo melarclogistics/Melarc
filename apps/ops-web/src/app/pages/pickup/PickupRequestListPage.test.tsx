@@ -517,7 +517,7 @@ describe('the queue: one panel', () => {
   it('holds the filters and the refusal, in plain words', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    const refused = await alertSaying('Your account cannot read pickup requests.');
+    const refused = await alertSaying('Your account can’t see pickup requests.');
     expect(panelOf(refused)).toContainElement(filters());
     // Break caught: a refusal that names the key (it once checked that another sentence was absent, which no page draws, so it could never fail).
     expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
@@ -901,9 +901,7 @@ describe('the queue: when it cannot be had', () => {
   it('says what a session without access lacks in plain words, and names no key and no role', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    await alertSaying(
-      'Your account cannot read pickup requests. Ask an administrator to give you access.',
-    );
+    await alertSaying('Your account can’t see pickup requests. Ask an administrator for access.');
     expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });

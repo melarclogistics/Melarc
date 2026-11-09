@@ -93,6 +93,18 @@ describe('the words of a refusal', () => {
     );
   });
 
+  // Break caught (the review of 499399c): the list of pickup runs refused in the words of the pickup requests it is not about. The sentence is the table's, and a page that reads another
+  // thing with the same key says what it is ("see pickup runs"), without making a sentence of its own.
+  it('make the same sentence of a page’s own words for what the key reads there', () => {
+    expect(cannotText('pickup.read', 'see pickup runs')).toBe(
+      `Your account can’t see pickup runs. ${ASK_FOR_ACCESS}`,
+    );
+    expect(cannotText('pickup.read', 'see pickup runs')).not.toContain('pickup.read');
+    expect(cannotText('pickup.read')).toBe(
+      'Your account can’t see pickup requests. Ask an administrator for access.',
+    );
+  });
+
   // Break caught: a key that has no words told as the key.
   it('tell a key with no words as "do this", and the absence of a key the same way', () => {
     expect(cannotText('made.up.key')).toBe(`Your account can’t do this. ${ASK_FOR_ACCESS}`);

@@ -886,7 +886,11 @@ describeInterfaceStates('the manifest page', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
+      expect(
+        await screen.findByText(
+          'Your account can’t see pickup runs. Ask an administrator for access.',
+        ),
+      ).toBeVisible();
     },
   },
 });
