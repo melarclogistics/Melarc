@@ -384,11 +384,7 @@ describe('an empty list counts the chosen hub as a filter (audit B1)', () => {
     await user.click(await screen.findByRole('menuitemradio', { name: 'Kumasi Hub' }));
 
     expect(await screen.findByRole('heading', { name: 'Nothing at Kumasi Hub' })).toBeVisible();
-    expect(
-      screen.getByText(
-        'No riders at Kumasi Hub fit these filters. Show all hubs, or take the other filters off.',
-      ),
-    ).toBeVisible();
+    expect(screen.getByText('No riders at Kumasi Hub fit these filters.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Show all hubs' })).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Show every rider' }));

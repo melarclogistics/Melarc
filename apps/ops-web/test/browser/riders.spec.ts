@@ -188,19 +188,22 @@ test.describe('moving through the screens', () => {
     await expect(kwame).toContainText('Accra Central');
     await expect(table.getByRole('row', { name: /Esi Owusu/ })).toContainText('No active device');
 
-    await page.getByRole('combobox', { name: 'Status' }).selectOption('SUSPENDED');
+    // The status is a view of the roster (a tab), and the search a field in the filter row's popover.
+    await page.getByRole('tab', { name: 'Suspended' }).click();
     await expect(page).toHaveURL('/admin/riders?status=SUSPENDED');
     await expect(table.getByRole('row')).toHaveCount(2);
     await expect(table.getByRole('row', { name: /Ama Boateng/ })).toBeVisible();
 
-    await page.getByRole('combobox', { name: 'Status' }).selectOption('');
+    await page.getByRole('tab', { name: 'All' }).click();
     // The status is taken off, and the page has drawn the list without it, before the search is typed, as the step above waits for its own: the page
     // builds the new address from what it last drew, so a search made before that (the development server is slow enough for it) keeps the old status.
     await expect(page).toHaveURL('/admin/riders');
     await expect(table.getByRole('row')).toHaveCount(4);
+    await page.getByRole('button', { name: 'Filter', exact: true }).click();
     await page.getByRole('searchbox', { name: 'Search by name or phone' }).fill('  esi  ');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL('/admin/riders?q=esi');
+    await expect(page.getByRole('button', { name: 'Remove filter: Search: esi' })).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(2);
     const last = api.calls.filter((call) => call.path === '/api/v1/ops/riders').at(-1);
     expect(new URL(`http://x${last?.search ?? ''}`).searchParams.get('q')).toBe('esi');
@@ -208,6 +211,71 @@ test.describe('moving through the screens', () => {
     // Nothing of what a server should never send reaches the page.
     expect(await page.content()).not.toContain(PLANTED);
   });
+
+  // The roster is drawn by the queue workspace template: a table with every column where the table's own box has room for them (40rem: at 1280 px with the menu open, and at 768 px),
+  // and cards under that, each with every fact of the rider, never both in the page. Nothing a server should never send reaches either.
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 768, height: 1024 },
+  ]) {
+    // Break caught: a table squeezed into a room it cannot be read in, a column dropped where nothing else shows it, or a page wider than its window.
+    test(`the roster is a table of every column at ${String(size.width)} px, and no cards`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, '/admin/riders');
+
+      const table = page.getByRole('table', { name: 'Riders' });
+      await expect(table).toBeVisible();
+      await expect(table.getByRole('columnheader')).toHaveText([
+        'Rider / phone',
+        'Status',
+        'PIN',
+        'Device',
+        'Hub',
+      ]);
+      await expect(page.getByRole('list', { name: 'Riders' })).toHaveCount(0);
+      await expect(table.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+        'href',
+        `/admin/riders/${IDS.kwame}`,
+      );
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
+
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 320, height: 640 },
+  ]) {
+    // Break caught: a fact the table shows and the card forgets, a card with no heading, or a table drawn where the room has none.
+    test(`the roster is a card for each rider at ${String(size.width)} px, with every fact, a heading and the link, and no table`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, '/admin/riders');
+
+      const cards = page.getByRole('list', { name: 'Riders' });
+      await expect(cards).toBeVisible();
+      await expect(page.getByRole('table', { name: 'Riders' })).toHaveCount(0);
+      await expect(cards.getByRole('listitem')).toHaveCount(3);
+      const card = cards.getByRole('listitem').filter({ hasText: 'Kwame Mensah' });
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText('Kwame Mensah');
+      await expect(card.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+        'href',
+        `/admin/riders/${IDS.kwame}`,
+      );
+      for (const fact of ['Active', '+233201234567', 'Set', 'One active device', 'Accra Central']) {
+        await expect(card).toContainText(fact);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
 
   test('the roster is paged with the token the server gave, and goes back', async ({ page }) => {
     const { api } = await open(page, '/admin/riders', { pageSize: 2 });
