@@ -147,7 +147,7 @@ Stated plainly rather than papered over. **§37.8 names seven deliverables, and 
 
 > ~~Read permissions are undefined, so authorization cannot be fully expressed for any list or detail screen~~ — which is most of the Ops Portal. `SLICE-000` cannot complete without it.
 
-**A gap this document surfaced, and it is closed: general API rate limiting had no owner.** §37.8 names it, §39.9 requires per-integration resilience, and `OQ-048` covers only OTP parameters; **nothing specified request limits for the API itself**, and it was raised as `OQ-060`. **`MSC-DEC-224` answered it on 20 August** — per credential, never per address — and `rate_limit_authenticated_api` now carries **120 / minute** on the active Session ([settings.md](../contracts/settings.md) §7.7, `MSC-DEC-371`).
+**A gap this document surfaced, and it is closed: general API rate limiting had no owner.** §37.8 names it, §39.9 requires per-integration resilience, and `OQ-048` covers only OTP parameters; **nothing specified request limits for the API itself**, and it was raised as `OQ-060`. **`MSC-DEC-224` answered it on 20 August** — per credential, never per address — and `rate_limit_authenticated_api` now carries **120 / minute** on the active Session ([settings.md](../contracts/settings.md) §7.7, `MSC-DEC-371`). The one operation that is also bound per session beyond that bucket is the global lookup: [one lookup in flight for a session, and one budget for the whole of it](../features/operations/global-lookup.md#ac-lookup-16--a-session-has-one-lookup-in-flight) (the feature owns the rule and its figures).
 
 ## 11. §37.8 gate status
 

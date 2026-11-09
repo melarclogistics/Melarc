@@ -271,8 +271,14 @@ describe('what the guard will not decide', () => {
 });
 
 describe('the command', () => {
-  const run = (root: string, ...args: string[]) =>
-    spawnSync('node', [SCRIPT, ...args], { cwd: root, encoding: 'utf8' });
+  /** The command as a developer's shell runs it (no `CI`) and as CI does (`CI=true`). */
+  const environment = (ci: boolean): NodeJS.ProcessEnv => {
+    const { CI: _ignored, ...rest } = process.env;
+    return ci ? { ...rest, CI: 'true' } : rest;
+  };
+  const runIn = (ci: boolean, root: string, ...args: string[]) =>
+    spawnSync('node', [SCRIPT, ...args], { cwd: root, encoding: 'utf8', env: environment(ci) });
+  const run = (root: string, ...args: string[]) => runIn(true, root, ...args);
 
   // Break caught: the exit codes the precheck and CI read: 0 held, 1 changed, 2 could not decide, with the words that say what to do.
   it('exits 0 when held, 1 when a migration of main was changed and 2 when it cannot tell', () => {
@@ -292,6 +298,42 @@ describe('the command', () => {
     const unknown = run(undecided);
     assert.equal(unknown.status, 2);
     assert.match(unknown.stderr, /Cannot tell whether a migration was changed: There is no main/);
+  });
+
+  // Break caught (run 4, Stage 1, item 9): a tree with no main (a source package) stopping the precheck, or, the other way, CI passing a guard that held nothing.
+  // Outside CI it says so and exits 0; in CI it is the failure it was.
+  it('is a warning with exit 0 outside CI when it cannot tell, and still exit 2 in CI', () => {
+    const undecided = repository({ withMain: false });
+
+    const local = runIn(false, undecided);
+    assert.equal(local.status, 0, local.stderr);
+    assert.match(local.stderr, /Cannot tell whether a migration was changed: There is no main/);
+    assert.match(local.stderr, /Warning, not a failure/);
+    assert.doesNotMatch(
+      local.stdout,
+      /Migrations held/,
+      'nothing was held, and it does not say so',
+    );
+
+    const ci = runIn(true, undecided);
+    assert.equal(ci.status, 2);
+    assert.doesNotMatch(ci.stderr, /Warning, not a failure/);
+
+    // A tree that has a revision to be held to can name it, and then it decides, outside CI as in CI.
+    const base = git(undecided, 'rev-parse', 'HEAD');
+    const named = runIn(false, undecided, '--base', base);
+    assert.equal(named.status, 0, named.stderr);
+    assert.match(named.stdout, /Migrations held/);
+  });
+
+  // Break caught: a change of a migration main has going unnoticed outside CI because the warning's exit 0 was given to every outcome.
+  it('still fails outside CI when a migration of main was changed', () => {
+    const changed = repository();
+    write(changed, MIGRATION, 'create table a (id int);\n');
+
+    const failed = runIn(false, changed);
+
+    assert.equal(failed.status, 1);
   });
 
   // Break caught: an option the command does not know being ignored, so that a typo of --base compares with the wrong revision without a word.

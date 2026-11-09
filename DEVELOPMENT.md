@@ -71,6 +71,14 @@ It is four runs (Chromium; Firefox; WebKit's refusal; WebKit's proofs), and CI m
 stay in one job: the refusal is a control only while the CA is not in the system store, which the proofs need it in). Without the
 variable it makes all four; a value that is not a shard of the harness (`e2e/harness/https-shards.ts`) is refused before anything is made.
 
+### In a Git worktree
+
+A worktree (`git worktree add`) is a second working copy and gets **its own** `pnpm install --frozen-lockfile --offline`. **Never link `node_modules` into it, with a junction (`mklink /J`) or a symlink:**
+removing the worktree (`git worktree remove --force`, or a plain delete) follows the link and deletes the packages of the tree it pointed at (run 3 of the redesign lost
+26 packages of the main tree this way, and restored them with `pnpm install --frozen-lockfile --offline`), and pnpm 11 tries to reinstall a linked tree before `pnpm exec`
+unless `npm_config_verify_deps_before_run=false`. If a junction already exists, remove it first with `cmd /c rmdir <path>`, which removes the link and nothing it points at,
+and only then delete anything near it.
+
 ### What CI runs when
 
 [ci.yml](.github/workflows/ci.yml) (the Product Owner's decisions of 7 November 2026): a **pull request** runs every job but the
@@ -350,12 +358,15 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
 2. **After a change to a contract, a schema, a migration or a document, and before a task is handed over**, run
    `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the migration files main has, the generated client, formatting, types,
    the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
-   network, in parallel, with the content caches of the formatter and ESLint and turbo's
-   task cache switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
+   network, in parallel, with the content cache of the formatter and turbo's
+   task cache (which serves lint, one task for each workspace) switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
    a few minutes on cold caches, and exits 0 only when every check passed. It is not a gate and says nothing about a
-   test, and it refuses to run while a gate runs. Its one weakness is ESLint's cache: a file already linted is not
-   linted again, so a type changed in another file can hide a finding that the gate's lint from scratch reports.
-   `pnpm run precheck --uncached` runs the real commands.
+   test, and it refuses to run while a gate runs. Its one weakness is turbo's cache of lint: a workspace whose files, and whose dependencies' files, did not
+   change is not linted again, so a rule that reads something else can hide a finding that the gate's lint from scratch reports.
+   `pnpm run precheck --uncached` runs the real commands. **The migration check** holds the migration files to the merge base of `HEAD` with main. On a tree that has no main
+   (a source package, a clone that fetched no branch) it cannot tell: outside CI it prints a warning and the precheck goes on (CI, which has the whole history, fails on it).
+   `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the migrations to; CI sets it to
+   the revision a push to main came from.
 3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
    edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
 4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It

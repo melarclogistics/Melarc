@@ -91,18 +91,28 @@ describe('the tier of each event is the catalogue’s, read from the document (G
     expect(disagreements).toEqual([]);
   });
 
-  // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
-  // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 81 enhanced, 5 that depend on the act, 116 ordinary, of 202', () => {
-    expect(ENHANCED_CODES).toHaveLength(81);
-    expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(202);
+  // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong three times, and then written
+  // into this test as numbers, which is the same drift one place over. They are derived here from the lists the writer honours, the three tiers are held to be
+  // the whole catalogue (no code counted twice, none left out), and the document's own statement of them is checked against what is derived.
+  it('derives the counts of the tiers from the writer’s lists, and the document states them', () => {
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
-    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(116);
+    const enhanced = tiers.filter((tier) => tier === 'ENHANCED').length;
+    const conditional = tiers.filter((tier) => tier === 'CONDITIONAL').length;
+    const standard = tiers.filter((tier) => tier === 'STANDARD').length;
+
+    expect(enhanced).toBe(ENHANCED_CODES.length);
+    expect(conditional).toBe(Object.keys(CONDITIONAL_CODES).length);
+    expect(enhanced + conditional + standard).toBe(AUDIT_EVENT_CODES.length);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
     for (const code of Object.keys(CONDITIONAL_CODES)) {
       expect(ENHANCED_CODES as readonly string[]).not.toContain(code);
     }
+
+    const stated = (pattern: RegExp): number => Number(pattern.exec(AUDIT_MD)?.[1]);
+    expect(stated(/\*\*(\d+) codes\*\*/)).toBe(AUDIT_EVENT_CODES.length);
+    expect(stated(/\*\*(\d+) are Enhanced\*\*/)).toBe(enhanced);
+    expect(stated(/\*\*(\d+) are Enhanced or Standard by the act\*\*/)).toBe(conditional);
+    expect(stated(/\*\*(\d+) are Standard\*\*/)).toBe(standard);
   });
 
   // Break caught: the document's count of its own codes going stale again (it read 188 when there were 190).

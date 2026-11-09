@@ -10,12 +10,16 @@
  *
  *   exit 0   every migration file the base holds is, in the working tree, what the base holds
  *   exit 1   one is changed, renamed or removed
- *   exit 2   it could not decide: there is no main to compare with, or no history that reaches it (a shallow clone), or the base holds no migration at all
+ *   exit 2   it could not decide: there is no main to compare with, or no history that reaches it (a shallow clone), or the base holds no migration at all.
+ *            **Outside CI that is a warning and the exit is 0** (run 4, Stage 1, item 9): a tree with no main (a source package, a clone that fetched no branch)
+ *            must not stop the precheck, and says on stderr that nothing was held. **In CI (`CI=true`, which GitHub Actions sets) it stays 2**: CI checks out the whole
+ *            history and has main, so there a guard that cannot tell is a failure, and it never passes by having nothing to look at.
  *
- * **The base.** `--base`, else `MELARC_MIGRATION_BASE` (what a CI job that knows better names: the revision a push to main came from), else the merge base of
+ * **The base.** `--base`, else `MELARC_MIGRATION_BASE` (what a CI job that knows better names: the revision a push to main came from; a developer may set it too, to
+ * hold a tree that has no main to a revision it does have: DEVELOPMENT.md), else the merge base of
  * `HEAD` and main (`origin/main`, else a local `main`). **How it behaves while main lacks the files:** a file that main does not have is not frozen, so the
- * migrations a branch adds (and corrects) are free until they merge, and from the merge on they are frozen; this branch's `0001` to `0078` are free today
- * because main holds only `0000`. When `HEAD` is main itself the base is `HEAD`, so what the guard then catches is an uncommitted edit of a committed
+ * migrations a branch adds (and corrects) are free until they merge, and from the merge on they are frozen; on the branch of the Ops Portal redesign `0074` to `0079` are
+ * free today, because origin/main (d600057, the merge of 8 November 2026) holds `0000` to `0073`. When `HEAD` is main itself the base is `HEAD`, so what the guard then catches is an uncommitted edit of a committed
  * migration. **It never passes by having nothing to look at**: no main, no shared history, or a base with no migration under
  * the folder (a moved folder, a wrong base) is exit 2 and says what to do, and never exit 0. The guard needs the full history (`git fetch --unshallow`, or
  * `fetch-depth: 0` in CI) because it asks Git for a merge base.
@@ -35,6 +39,11 @@ export const MIGRATIONS_DIRECTORY = 'apps/api/migrations';
 const JOURNAL = `${MIGRATIONS_DIRECTORY}/meta/_journal.json`;
 const MAIN_REFS = ['refs/remotes/origin/main', 'refs/heads/main'] as const;
 const ZERO_REVISION = /^0{40}$/;
+
+/** Whether this is a CI run: GitHub Actions sets `CI=true`, and a developer's shell does not. */
+export function inCi(env: NodeJS.ProcessEnv): boolean {
+  return env.CI === 'true';
+}
 
 /** The guard could not decide (exit 2): what is missing, and what to do about it. */
 export class MigrationImmutabilityError extends Error {
@@ -289,7 +298,11 @@ function main(argv: readonly string[]): number {
   } catch (error) {
     if (error instanceof MigrationImmutabilityError) {
       process.stderr.write(`Cannot tell whether a migration was changed: ${error.message}\n`);
-      return 2;
+      if (inCi(process.env)) return 2;
+      process.stderr.write(
+        'Warning, not a failure: this is not a CI run (CI is not "true"), so nothing was held and the precheck goes on. CI has the whole history and fails on this. Name a revision of this tree with MELARC_MIGRATION_BASE or --base to hold the migrations here.\n',
+      );
+      return 0;
     }
     throw error;
   }
