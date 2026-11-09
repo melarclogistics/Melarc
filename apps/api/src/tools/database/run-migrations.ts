@@ -11,12 +11,7 @@ import {
   readMigrationFolder,
   type AppliedMigration,
 } from './migration-history.js';
-import {
-  MigrationLockOrderError,
-  policyKeysOfRun,
-  scanPolicyKeys,
-  type PolicyKeys,
-} from './policy-keys.js';
+import { MigrationLockOrderError, policyKeysOfFiles, type PolicyKeys } from './policy-keys.js';
 import { assertMigrationIdentity } from './safety.js';
 
 /** The one canonical migration history (DEVELOPMENT_EXECUTION_PLAN.md section 5). */
@@ -165,8 +160,9 @@ async function appliedMigrations(client: pg.Client): Promise<AppliedMigration[]>
 }
 
 /**
- * Whether the primitive of the policy keys exists (`melarc.lock_policy_keys`, migration 0017). A database that does not have it yet has no policy tables and no
- * session, so nothing the application does can wait for the migrator: the run then has no key to take first.
+ * Whether the primitive of the policy keys exists (`melarc.lock_policy_keys`, migration 0017). The policy tables it takes keys for are older (migration 0003 made
+ * `role_bundle`, `role_bundle_grant` and `fixed_permission_policy`), so a database below 0017 has the tables and not the primitive: the run has no key to take first
+ * there, and no file of it can call a primitive that does not exist yet.
  */
 async function hasPolicyKeyPrimitive(client: pg.Client): Promise<boolean> {
   const { rows } = await client.query<{ present: boolean }>(
@@ -292,13 +288,12 @@ async function applyPending(
   if (pending.length === 0) return { keysHeldMs: 0, keyAttempts: 0 };
 
   const tagOf = new Map(named.map((migration) => [migration.when, migration.tag]));
-  const scans = pending.map((migration) => ({
+  const files = pending.map((migration) => ({
     tag: tagOf.get(migration.folderMillis) ?? String(migration.folderMillis),
-    scan: scanPolicyKeys(migration.sql),
+    sql: migration.sql,
   }));
-  const unsaid = scans.flatMap(({ tag, scan }) => scan.unresolved.map((call) => `${tag}: ${call}`));
-  if (unsaid.length > 0) throw new MigrationLockOrderError(unsaid);
-  const keys = policyKeysOfRun(scans.map(({ scan }) => scan));
+  // Fails closed: a mention of a policy key that the runner cannot place refuses the run, naming the file, before anything is applied.
+  const keys = policyKeysOfFiles(files);
 
   // The first statements of the run: every key its files name, in the canonical order, before any file runs; bounded, and tried again a few times (`beginAndTakeKeys`). They
   // are held until the commit, and that is how long the application's sign-ins and mutations wait (`keysHeldMs`). A database below 0017 has no primitive and no session that
@@ -322,7 +317,7 @@ async function applyPending(
       const extra = [...(await policyKeysHeld(client))].filter((key) => !taken.has(key));
       if (extra.length > 0) {
         throw new MigrationLockOrderError([
-          `${scans[index]?.tag ?? 'a migration'} took ${String(extra.length)} policy key(s) the run had not taken first (${extra.join(', ')})`,
+          `${files[index]?.tag ?? 'a migration'} took ${String(extra.length)} policy key(s) the run had not taken first (${extra.join(', ')})`,
         ]);
       }
     }

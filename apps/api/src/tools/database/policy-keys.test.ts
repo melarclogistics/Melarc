@@ -1,7 +1,12 @@
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { describe, expect, it } from 'vitest';
 
-import { policyKeysOfRun, scanPolicyKeys } from './policy-keys.js';
+import {
+  MigrationLockOrderError,
+  policyKeysOfFiles,
+  policyKeysOfRun,
+  scanPolicyKeys,
+} from './policy-keys.js';
 import { MIGRATIONS_FOLDER } from './run-migrations.js';
 
 /**
@@ -193,5 +198,143 @@ describe('the keys of a run (policyKeysOfRun)', () => {
       bundleIds: [],
       fixedTypes: [],
     });
+  });
+});
+
+/**
+ * The reader fails closed (run 5, Stage 1.5). Run 4 said that a use of a key it could not read refuses the run; this holds it to that for the forms in which the old reader
+ * saw nothing at all: it took away comments with no knowledge of dollar quotes, of `E''` strings or of quoted identifiers, skipped a whole chunk that began with a function
+ * being defined, and read only `melarc.<name>(` in plain letters. A file that mentions a key function in a form the runner cannot place refuses the run with the file's name,
+ * before anything is applied; a mention it can place (a comment, a message, a statement about the function's signature) does not.
+ */
+describe('what the runner cannot place refuses the run, with the name of the file', () => {
+  const FILE = '0074_a_new_one';
+  const VARIABLE = 'melarc.lock_policy_keys(some_ids, ARRAY[]::text[])';
+  const LITERAL = `ARRAY['${BUNDLE_1}']::uuid[], ARRAY[]::text[]`;
+
+  // Break caught: each form below hid the call from the reader that cut comments out with no knowledge of SQL's quoting, or did not match it at all, so that the file
+  // took its key in the middle of the run, which only the check after the file would have noticed. Every one is refused now, and says which file.
+  const FORMS: readonly (readonly [string, readonly string[], RegExp])[] = [
+    [
+      'a call after a dollar-quoted string that holds a line comment marker',
+      [`DO $x$ BEGIN PERFORM $q$ -- $q$, ${VARIABLE}; END $x$;`],
+      /lock_policy_keys\(some_ids/,
+    ],
+    [
+      'a call after a dollar-quoted string that holds a block comment marker',
+      [`DO $x$ BEGIN PERFORM $q$ /* $q$, ${VARIABLE}; END $x$;`],
+      /lock_policy_keys\(some_ids/,
+    ],
+    [
+      'a call after an E string whose escaped quote hides a comment marker',
+      [String.raw`SELECT E'\' -- ', ${VARIABLE};`],
+      /lock_policy_keys\(some_ids/,
+    ],
+    [
+      'a function being defined and a call in one chunk',
+      [`CREATE FUNCTION f() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$; SELECT ${VARIABLE};`],
+      /lock_policy_keys\(some_ids/,
+    ],
+    [
+      'a quoted schema and name',
+      [`SELECT "melarc"."lock_policy_keys"(${LITERAL});`],
+      /quoted identifier/,
+    ],
+    ['a quoted name', [`SELECT melarc."lock_policy_keys"(${LITERAL});`], /quoted identifier/],
+    [
+      'a quoted schema',
+      [`SELECT "melarc".lock_policy_keys(${LITERAL});`],
+      /qualifier other than an unquoted melarc/,
+    ],
+    ['an unqualified call', [`SELECT lock_policy_keys(${LITERAL});`], /no melarc\. before it/],
+    [
+      'a call in another schema',
+      [`SELECT public.lock_policy_keys(${LITERAL});`],
+      /qualifier other than an unquoted melarc/,
+    ],
+    [
+      'an unqualified change of a bundle',
+      [`SELECT change_role_bundle('${BUNDLE_1}', NULL, '[]'::jsonb, 'release#a');`],
+      /change_role_bundle is called with no melarc\./,
+    ],
+    [
+      'a name in a string of a statement that executes strings',
+      [`DO $x$ BEGIN EXECUTE 'select melarc.lock_policy_keys(' || ids || ')'; END $x$;`],
+      /lock_policy_keys is named in a string of a statement that EXECUTEs/,
+    ],
+    [
+      'a dollar quote that is never closed',
+      [`DO $x$ BEGIN PERFORM ${VARIABLE.replace('some_ids', `ARRAY['${BUNDLE_1}']::uuid[]`)};`],
+      /dollar quote \$x\$ that is never closed/,
+    ],
+    [
+      'a string that is never closed',
+      [`SELECT 'a message, melarc.lock_policy_keys(${LITERAL});`],
+      /a string that is never closed/,
+    ],
+  ];
+
+  it.each(FORMS)('says so for %s', (_form, sql, words) => {
+    const found = scanPolicyKeys(sql);
+
+    expect(found.unresolved.length).toBeGreaterThan(0);
+    expect(found.unresolved.join('\n')).toMatch(words);
+  });
+
+  it.each(FORMS)('refuses the run, naming the file, for %s', (_form, sql) => {
+    const refusal = (() => {
+      try {
+        return policyKeysOfFiles([
+          { tag: '0073_fine', sql: ['SELECT 1;'] },
+          { tag: FILE, sql },
+        ]);
+      } catch (error) {
+        return error;
+      }
+    })();
+
+    expect(refusal).toBeInstanceOf(MigrationLockOrderError);
+    expect((refusal as MigrationLockOrderError).message).toContain(`${FILE}: `);
+    expect((refusal as MigrationLockOrderError).message).not.toContain('0073_fine');
+  });
+
+  // Break caught: a reader so careful that it refuses what the files really contain: the headers of 0043 to 0079 say lock_policy_keys over and over, 0017 and
+  // later migrations grant, revoke and comment on the functions, and a message may name one. None of these is a call, so none refuses the run.
+  it.each([
+    ['a comment', [`-- takes melarc.lock_policy_keys first\nSELECT 1;`]],
+    ['a block comment', [`/* lock_policy_keys(a), change_role_bundle(b) */ SELECT 1;`]],
+    ['a message', [`DO $x$ BEGIN RAISE NOTICE 'call melarc.lock_policy_keys first'; END $x$;`]],
+    [
+      'a comment on the function and a grant, in one chunk',
+      [
+        `COMMENT ON FUNCTION melarc.lock_policy_keys(uuid[], text[]) IS 'takes lock_policy_keys first'; GRANT EXECUTE ON FUNCTION melarc.lock_policy_keys(uuid[], text[]) TO melarc_owner;`,
+      ],
+    ],
+    ['a drop if exists', [`DROP FUNCTION IF EXISTS melarc.lock_policy_keys(uuid[], text[]);`]],
+    [
+      'a function defined and its signature granted in one chunk',
+      [
+        `CREATE FUNCTION melarc.x() RETURNS void LANGUAGE sql AS $$ SELECT melarc.lock_policy_bundle(b) $$; REVOKE ALL ON FUNCTION melarc.lock_policy_bundle(uuid) FROM PUBLIC;`,
+      ],
+    ],
+    [
+      'an unqualified signature',
+      [`ALTER FUNCTION lock_policy_keys(uuid[], text[]) OWNER TO melarc_owner;`],
+    ],
+  ])('does not refuse %s', (_what, sql) => {
+    expect(scanPolicyKeys(sql).unresolved).toEqual([]);
+  });
+
+  // Break caught: the lexer losing a call it used to read, in the shapes the real files use after a string or a comment: a call after a message that holds a comment
+  // marker, and one in a body that holds a block comment of its own.
+  it('still reads a call that follows a string with a comment marker in it, and a body with its own comments', () => {
+    const found = scanPolicyKeys([
+      `DO $x$ BEGIN RAISE NOTICE 'a -- b /* c'; /* one */ PERFORM melarc.lock_policy_keys(${LITERAL}); -- two\nEND $x$;`,
+      String.raw`SELECT E'it\'s', melarc.lock_policy_keys(ARRAY['${BUNDLE_2}']::uuid[], ARRAY['RIDER']::text[]);`,
+    ]);
+
+    expect(found.unresolved).toEqual([]);
+    expect(found.bundleIds).toEqual([BUNDLE_1, BUNDLE_2]);
+    expect(found.fixedTypes).toEqual(['RIDER']);
   });
 });

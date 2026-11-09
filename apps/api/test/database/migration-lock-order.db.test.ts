@@ -42,6 +42,41 @@ async function until(
   }
 }
 
+/**
+ * What the schema is, as the catalogue says it, section by section (tables with their owner, row-level security and privileges, columns, constraints, indexes, policies,
+ * grants, triggers, functions with their privileges, types), as one JSON line for each row in a fixed order. The data is not in it.
+ */
+const SCHEMAS = "('public', 'melarc', 'drizzle')";
+const SCHEMA_SECTIONS: Readonly<Record<string, string>> = {
+  tables: `select n.nspname, c.relname, c.relkind, c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) as owner, c.relacl::text as acl
+             from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname in ${SCHEMAS} and c.relkind in ('r', 'p', 'v', 'm', 'S') order by 1, 2`,
+  columns: `select table_schema, table_name, column_name, ordinal_position, data_type, udt_name, is_nullable, column_default, is_generated, generation_expression
+              from information_schema.columns where table_schema in ${SCHEMAS} order by 1, 2, 4`,
+  constraints: `select c.conrelid::regclass::text as on_table, c.conname, c.contype, pg_get_constraintdef(c.oid) as definition
+                  from pg_constraint c join pg_namespace n on n.oid = c.connamespace where n.nspname in ${SCHEMAS} order by 1, 2`,
+  indexes: `select schemaname, tablename, indexname, indexdef from pg_indexes where schemaname in ${SCHEMAS} order by 1, 2, 3`,
+  policies: `select schemaname, tablename, policyname, permissive, roles::text as roles, cmd, qual, with_check
+               from pg_policies where schemaname in ${SCHEMAS} order by 1, 2, 3`,
+  grants: `select grantee, table_schema, table_name, privilege_type from information_schema.role_table_grants where table_schema in ${SCHEMAS} order by 1, 2, 3, 4`,
+  columnGrants: `select grantee, table_schema, table_name, column_name, privilege_type from information_schema.role_column_grants where table_schema in ${SCHEMAS} order by 1, 2, 3, 4, 5`,
+  triggers: `select t.tgrelid::regclass::text as on_table, t.tgname, pg_get_triggerdef(t.oid) as definition from pg_trigger t where not t.tgisinternal order by 1, 2`,
+  functions: `select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) as arguments, pg_get_functiondef(p.oid) as definition, p.proacl::text as acl, pg_get_userbyid(p.proowner) as owner
+                from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ${SCHEMAS} and p.prokind in ('f', 'p') order by 1, 2, 3`,
+  types: `select n.nspname, t.typname, t.typtype, (select string_agg(e.enumlabel, ',' order by e.enumsortorder) from pg_enum e where e.enumtypid = t.oid) as labels
+            from pg_type t join pg_namespace n on n.oid = t.typnamespace
+           where n.nspname in ${SCHEMAS} and t.typtype in ('e', 'd') order by 1, 2`,
+};
+
+async function schemaOf(client: pg.Client): Promise<Record<string, string[]>> {
+  const sections: Record<string, string[]> = {};
+  for (const [section, text] of Object.entries(SCHEMA_SECTIONS)) {
+    const { rows } = await client.query<Record<string, unknown>>(text);
+    sections[section] = rows.map((row) => JSON.stringify(row));
+  }
+  return sections;
+}
+
 describe('the chain applied from a database at 0073', () => {
   let built: Built;
   beforeEach(async () => {
@@ -64,15 +99,24 @@ describe('the chain applied from a database at 0073', () => {
     const current = await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) });
     expect(current).toMatchObject({ applied: 0, keysHeldMs: 0, keyAttempts: 0 });
     expect((await runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) })).applied).toBe(0);
-    const fingerprint = `select md5(coalesce(string_agg(pg_get_functiondef(p.oid) || coalesce(p.proacl::text, ''), ';' order by p.proname), ''))
-        from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'melarc'`;
+    // The whole schema, not only the functions (run 5, Stage 1.5): a migration that left a table, a column, an index, a policy, a grant or a trigger different from what
+    // the files build in one go would not have been seen by a comparison of the functions.
     const fromNothing = await createTestDatabase();
     try {
-      const now = await scalar(built.admin, fingerprint);
-      const then = await withClient(fromNothing.urlFor('postgres'), (client) =>
-        scalar(client, fingerprint),
-      );
-      expect(now).toBe(then);
+      const now = await schemaOf(built.admin);
+      const then = await withClient(fromNothing.urlFor('postgres'), (client) => schemaOf(client));
+      for (const [section, rows] of Object.entries(then)) {
+        expect(now[section], `the ${section} of the database that was upgraded`).toEqual(rows);
+      }
+      // A comparison of nothing with nothing passes: every section holds what a schema of this size holds.
+      expect(then.tables?.length).toBeGreaterThan(35);
+      expect(then.columns?.length).toBeGreaterThan(400);
+      expect(then.indexes?.length).toBeGreaterThan(100);
+      expect(then.policies?.length).toBeGreaterThan(150);
+      expect(then.grants?.length).toBeGreaterThan(250);
+      expect(then.triggers?.length).toBeGreaterThan(40);
+      expect(then.functions?.length).toBeGreaterThan(80);
+      expect(then.constraints?.length).toBeGreaterThan(400);
     } finally {
       await fromNothing.drop();
     }
@@ -227,11 +271,44 @@ describe('a run whose files take a key it was not told of', () => {
     expect(await tableExists()).toBe(false);
   }, 120_000);
 
-  // Break caught: a key taken in a way the reader cannot see (the schema in quotes), so that the run's first statements did not take it. The run notices that the
-  // file took a key it had not taken first, and takes everything back.
+  // Break caught (run 5, Stage 1.5): the reader failing open. A file whose chunk begins with a function being defined was skipped whole, and a call after it in the same
+  // chunk (or one written with a quoted name) was never seen: the file took its key in the middle of the run. The run is refused before anything is applied, with the name
+  // of the file. Each form has its own unit test in policy-keys.test.ts; this is the wiring in the real runner.
+  it.each([
+    [
+      'a function being defined and a call in one chunk',
+      `CREATE TABLE public.a_new_table (id integer);--> statement-breakpoint\nCREATE FUNCTION public.a_new_function() RETURNS void LANGUAGE sql AS $f$ SELECT 1 $f$; DO $new$ BEGIN PERFORM melarc.lock_policy_keys(ARRAY['${SEEDED_BUNDLE}', gen_random_uuid()]::uuid[], ARRAY[]::text[]); END $new$;`,
+    ],
+    [
+      'a call written with a quoted name',
+      `CREATE TABLE public.a_new_table (id integer);--> statement-breakpoint\nDO $new$ BEGIN PERFORM "melarc"."lock_policy_keys"(ARRAY['${SEEDED_BUNDLE}']::uuid[], ARRAY[]::text[]); END $new$;`,
+    ],
+  ])(
+    'is refused before anything is applied, with the name of the file, for %s',
+    async (_form, sql) => {
+      withNewMigration(sql);
+
+      const failure = await runMigrations({
+        url: built.target.urlFor(MIGRATION_ROLE),
+        folder,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(MigrationLockOrderError);
+      expect((failure as MigrationLockOrderError).message).toContain('0074_a_new_one: ');
+      expect(await tableExists()).toBe(false);
+      expect(
+        await scalar<string>(built.admin, 'select count(*) from drizzle.__drizzle_migrations'),
+      ).toBe(String(FIRST_NEW));
+    },
+    120_000,
+  );
+
+  // Break caught: a key taken in a way the reader cannot see (the function's name built at run time, so that the text never says it), so that the run's first statements
+  // did not take it. The run notices after the file that it took a key it had not taken first, and takes everything back. (This used to be written with a quoted schema;
+  // the reader refuses that form up front now, and the check after the file is what remains for the forms nothing can read.)
   it('takes everything back when a file takes a key the run had not taken first', async () => {
     withNewMigration(
-      `CREATE TABLE public.a_new_table (id integer);--> statement-breakpoint\nDO $new$ BEGIN PERFORM "melarc"."lock_policy_bundle"('${SEEDED_BUNDLE}'); END $new$;`,
+      `CREATE TABLE public.a_new_table (id integer);--> statement-breakpoint\nDO $new$ BEGIN EXECUTE format('select %I.%I(%L::uuid)', 'melarc', 'lock_policy_' || 'bundle', '${SEEDED_BUNDLE}'); END $new$;`,
     );
 
     const failure = await runMigrations({
