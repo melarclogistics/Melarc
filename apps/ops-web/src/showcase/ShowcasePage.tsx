@@ -423,7 +423,7 @@ function ForbiddenStates() {
     <Section title="Forbidden states">
       <div className="showcase-stack">
         {FORBIDDEN_KINDS.map((kind) => (
-          <ForbiddenState key={kind} kind={kind} permission="demo.permission.read" />
+          <ForbiddenState key={kind} kind={kind} permission="pickup.read" />
         ))}
       </div>
     </Section>

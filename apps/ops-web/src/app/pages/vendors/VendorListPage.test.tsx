@@ -9,6 +9,7 @@ import {
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { VENDOR_HUB_ID, vendorAccountFixture } from '../../../test-support/vendor-fixture';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/vendors` (`listVendorAccounts`; S0.52b). The vendor accounts the session's grant reaches: identifier, organisation, status, whether a
@@ -164,7 +165,7 @@ describeInterfaceStates('The vendor list', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/vendor\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('vendor.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
     },
   },

@@ -88,10 +88,15 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     const { api } = await open(page, LOG, { permissions: ['pickup.read'] });
 
-    await expect(page.locator('code', { hasText: 'notification.read' }).first()).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see the message log. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('notification.read');
     await expect(menuEntry(page, 'Message log')).toHaveCount(0);
     expect(lists(api)).toEqual([]);
   });
@@ -425,10 +430,15 @@ test.describe('when the messages cannot be had', () => {
     await expect(page.getByRole('rowheader')).toHaveCount(11);
   });
 
-  test('names the key when the server refuses it, and no role', async ({ page }) => {
+  test('says what the account cannot do when the server refuses it, and names no key or role', async ({
+    page,
+  }) => {
     await open(page, LOG, { listFails: { status: 403, code: 'PERMISSION_DENIED' } });
 
-    await expect(page.locator('code', { hasText: 'notification.read' }).first()).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see the message log. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('notification.read');
     await expect(page.locator('body')).not.toContainText(
       /Ops Staff|Senior Ops|Platform Admin|Finance/,
     );

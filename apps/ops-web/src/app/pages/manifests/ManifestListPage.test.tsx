@@ -14,6 +14,7 @@ import {
 import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests` (`listPickupManifests`; S1.25). The manifests of the session's hubs, as the server lists them: oldest first, never filtered by
@@ -581,7 +582,7 @@ describeInterfaceStates('the manifest list', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
     },
   },
 });

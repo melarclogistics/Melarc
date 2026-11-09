@@ -28,6 +28,7 @@ import { formatInstant } from '../../../platform/time/format-time';
 import { NothingAtHub } from '../NothingAtHub';
 import { hubNameOf } from '../staff/staff-presentation';
 import { actorText, isSelf, packagesText, PICKUP_STATE_MAP } from './pickup-presentation';
+import { cannotText } from '../../../platform/problem/capability-words';
 import './pickup-pages.css';
 
 /** A row of the queue: a request and the exception it waits on (the query refuses a page where a request carries none in that state). */
@@ -154,9 +155,7 @@ export function ApprovalsPage() {
             Approve
           </Button>
         ) : (
-          <>
-            Approving needs the permission <code>pickup.exception.approve</code>.
-          </>
+          cannotText('pickup.exception.approve')
         ),
     },
   ];

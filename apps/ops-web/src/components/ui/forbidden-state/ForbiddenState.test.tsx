@@ -27,19 +27,35 @@ describe('ForbiddenState', () => {
     expect(new Set(sentences).size).toBe(KINDS.length);
   });
 
-  // Break caught: the permission missing from the refusal. "The page names the permission, never a role" (ops-portal.md section 7).
-  it('names the permission the refusal is about, as text', () => {
+  // Break caught (the review of 5edada2, PRODUCT_DESIGN_DIRECTION section 6.5): a refusal that draws the permission key ("This needs the permission staff.read"), as text or as a
+  // `<code>`. It says what the account cannot do, in plain words, and what to do about it.
+  it('says what the account cannot do in plain words, and never draws the key', () => {
     render(<ForbiddenState kind="permission-missing" permission="staff.read" />);
 
-    expect(screen.getByText('staff.read')).toBeVisible();
-    expect(screen.getByText('staff.read').tagName).toBe('CODE');
+    expect(
+      screen.getByText('Your account can’t see staff profiles. Ask an administrator for access.'),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('staff.read');
+    expect(document.querySelector('code')).toBeNull();
   });
 
-  it('reads an approval as an approver who holds the permission deciding it', () => {
+  // Break caught: a key told in a refusal of another kind (the key a person was never meant to read, in a tooltip, an attribute or the text).
+  it.each(KINDS)('draws no permission key, in the text or in an attribute, for %s', (kind) => {
+    const { container } = render(
+      <ForbiddenState
+        {...(kind === 'permission-missing' ? { kind, permission: KEY } : { kind, permission: KEY })}
+      />,
+    );
+
+    expect(container.textContent).not.toMatch(/[a-z]+(?:.[a-z_]+){1,3}/);
+    expect(container.innerHTML).not.toContain(KEY);
+  });
+
+  it('reads an approval as a different approver deciding it', () => {
     render(<ForbiddenState kind="approval-required" permission={KEY} />);
 
-    expect(screen.getByText(KEY)).toBeVisible();
-    expect(document.body.textContent).toMatch(/approver/i);
+    expect(screen.getByText('A different approver decides this.')).toBeVisible();
+    expect(document.body.textContent).not.toContain(KEY);
     expect(document.body.textContent).not.toMatch(/you lack access|do not have access/i);
   });
 
@@ -59,17 +75,23 @@ describe('ForbiddenState', () => {
             : { kind, ...(permission === undefined ? {} : { permission }) })}
         />,
       );
-      expect(container.textContent).not.toMatch(/admin|role|bundle|officer|senior ops|ops staff/i);
+      // "An administrator" is the Product Owner's own word for who to ask (PRODUCT_DESIGN_DIRECTION section 6.5); a role's name is not told.
+      expect(container.textContent).not.toMatch(
+        /role|bundle|officer|senior ops|ops staff|platform admin/i,
+      );
       unmount();
     }
   });
 
-  // Break caught: a permission key taken for markup, or one that lets a hostile string into the page as anything but text.
-  it('shows a key as text, whatever it holds', () => {
+  // Break caught: a permission key taken for markup, or one that lets a hostile string into the page as anything but nothing: a key with no words is told as "do this".
+  it('draws no key, whatever it holds, and tells a key with no words as "do this"', () => {
     const hostile = '<img src=x onerror="document.title=1">';
     const { container } = render(<ForbiddenState kind="permission-missing" permission={hostile} />);
 
-    expect(screen.getByText(hostile)).toBeVisible();
+    expect(
+      screen.getByText('Your account can’t do this. Ask an administrator for access.'),
+    ).toBeVisible();
+    expect(container.textContent).not.toContain('onerror');
     expect(container.querySelector('img')).toBeNull();
   });
 
@@ -83,7 +105,7 @@ describe('ForbiddenState', () => {
 
     rerender(<ForbiddenState kind="permission-missing" permission="staff.read" announce />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('staff.read');
+    expect(screen.getByRole('alert')).toHaveTextContent('see staff profiles');
   });
 
   it('requires the permission for a missing permission and for nothing else', () => {
@@ -124,7 +146,9 @@ describe('ForbiddenPage', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(
+      screen.getByText('Your account can’t see staff profiles. Ask an administrator for access.'),
+    ).toBeVisible();
   });
 
   it('says what is wrong in the heading for a record outside the hubs', () => {

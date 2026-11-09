@@ -26,6 +26,7 @@ import {
   trustedBrowserFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -263,7 +264,7 @@ describe('the profile: when it cannot be had', () => {
     open(KEYS.approver, { [RECORD]: () => refusal(403, 'PERMISSION_DENIED') });
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
   });
 
   // Break caught: an address that is not an id sent to the server.
@@ -390,7 +391,7 @@ describe('the profile: who may decide', () => {
     open(KEYS.reader);
     await heading('Kofi Boateng');
 
-    expect(screen.getByText('staff.identity.approve')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.identity.approve'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Approve profile' })).toBeNull();
   });
 
@@ -489,7 +490,7 @@ describe('the profile: approving', () => {
     [
       'PERMISSION_DENIED',
       403,
-      'Your session does not hold the permission to approve or reject profiles (staff.identity.approve).',
+      'Your account can’t approve or reject profiles. Ask an administrator for access.',
     ],
     [
       'CREDENTIAL_DELIVERY_FAILED',

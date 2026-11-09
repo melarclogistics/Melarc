@@ -17,6 +17,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}` (`getRider`; S0.60a; AC-SLICE-000-113). One rider: status, whether a PIN is set and a device is active, and every device the rider has held.
@@ -231,7 +232,7 @@ describe('the rider: the acts it offers', () => {
       [RECORD]: () => json(200, riderDetailFixture(unboundRider(), []), etag('v1')),
     });
 
-    expect(await screen.findByText(/staff\.device\.register/)).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.register'))).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });
 
@@ -276,7 +277,7 @@ describe('the rider: the acts it offers', () => {
   it('names the permission revoking needs, and offers nothing, to a session without it', async () => {
     open(REGISTERER);
 
-    expect(await screen.findByText(/staff\.device\.revoke/)).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.revoke'))).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Revoke or replace the device' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });
@@ -362,7 +363,7 @@ describe('the rider: a record that cannot be shown', () => {
   it('is a page of its own for a session whose key is refused by the server', async () => {
     open(READER, { [RECORD]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
 
@@ -443,7 +444,7 @@ describeInterfaceStates('The rider', {
   'permission-restricted': {
     test: async () => {
       open(['staff.read']);
-      expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
       expect(screen.queryByRole('heading', { name: 'Kwame Mensah' })).toBeNull();
     },
   },

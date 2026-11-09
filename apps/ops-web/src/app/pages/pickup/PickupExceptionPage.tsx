@@ -107,8 +107,8 @@ function Requested({ id }: { readonly id: string }) {
       <Alert variant="success">
         <h2 className="pickup-booked__heading">The exception is requested</h2>
         <p>
-          It waits for a holder of <code>pickup.exception.approve</code> to decide it. The request
-          stays pending until then, and is confirmed once the exception is approved.
+          It waits for an approver to decide it. The request stays pending until then, and is
+          confirmed once the exception is approved.
         </p>
       </Alert>
       <div className="pickup-act__buttons">
@@ -198,10 +198,10 @@ function ExceptionForm({
     >
       <p className="pickup-form-note">
         A single package is collected only by exception. The recipient’s details travel with it, and
-        the delivery address makes the estimate exact. A holder of{' '}
-        <code>pickup.exception.approve</code> decides it. Whoever asks for an exception cannot also
-        approve it, unless they approve at the platform’s highest tier: the server checks this. The
-        single-package pickup fee becomes due once the exception is approved.
+        the delivery address makes the estimate exact. An approver decides it. Whoever asks for an
+        exception cannot also approve it, unless they approve at the platform’s highest tier: the
+        server checks this. The single-package pickup fee becomes due once the exception is
+        approved.
       </p>
       {request.one_package_exception?.state === 'REJECTED' ? (
         <p className="pickup-form-note">

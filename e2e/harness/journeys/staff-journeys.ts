@@ -300,10 +300,13 @@ async function opsStaffSetUpAndSignIn({ page, context, stack }: JourneyContext):
   expect(await setPassword(page, kofi.password)).toBe('sign-in');
   await page.getByRole('link', { name: 'Go to sign-in' }).click();
   await signInAs(page, kofi);
-  // Ops Staff hold neither staff.read nor the approval: the menu has no entry for the staff pages, and the page names the permission.
+  // Ops Staff hold neither staff.read nor the approval: the menu has no entry for the staff pages, and the page says what the account cannot do, in plain words and not by the key.
   await expect(page.getByRole('link', { name: 'Staff', exact: true })).toHaveCount(0);
   await page.goto('/admin/staff');
-  await expect(page.getByText('staff.read').first()).toBeVisible();
+  await expect(
+    page.getByText('Your account can’t see staff profiles. Ask an administrator for access.'),
+  ).toBeVisible();
+  await expect(page.getByRole('main')).not.toContainText('staff.read');
   await signOut(page);
 }
 

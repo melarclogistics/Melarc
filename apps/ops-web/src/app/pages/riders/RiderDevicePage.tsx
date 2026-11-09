@@ -29,6 +29,7 @@ import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNoAccess, RiderNotFound, RiderOutsideHubs } from './RiderDetailPage';
 import { deviceSentence, mayBindDevice, RIDER_STATUS_MAP } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
+import { cannotText } from '../../../platform/problem/capability-words';
 import '../staff/staff-pages.css';
 import './riders.css';
 
@@ -320,10 +321,7 @@ function Device({
       <section className="staff-actions" aria-labelledby="rider-replace">
         <h2 id="rider-replace">Replace the handset</h2>
         {!holdsReregister ? (
-          <p className="staff-action__text">
-            Registering a replacement handset needs the permission staff.device.reregister, which
-            your session does not hold.
-          </p>
+          <p className="staff-action__text">{cannotText('staff.device.reregister')}</p>
         ) : !mayBindDevice(rider.status) ? (
           <p className="staff-action__text">
             A replacement handset cannot be registered while this rider’s access has ended.

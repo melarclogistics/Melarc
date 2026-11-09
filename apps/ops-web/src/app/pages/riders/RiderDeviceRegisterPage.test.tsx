@@ -22,6 +22,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}/device/register` (`registerRiderDevice`; S0.60b; the render clause of AC-SLICE-000-40, and -124). The first binding of a rider's device, in person:
@@ -1250,7 +1251,7 @@ describe('the first binding: when the API refuses', () => {
       'STATE_CONFLICT',
       /A first device cannot be registered for this rider\. The rider already has an active device/,
     ],
-    [403, 'PERMISSION_DENIED', /staff\.device\.register/],
+    [403, 'PERMISSION_DENIED', /can’t register a rider’s first device/],
     [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
   ])('words a %s %s for what it is', async (status, code, words) => {
@@ -1371,7 +1372,7 @@ describeInterfaceStates('The first binding', {
   'permission-restricted': {
     test: async () => {
       await open(['dispatch.read']);
-      expect(await screen.findByText(/staff\.device\.register/)).toBeVisible();
+      expect(await screen.findByText(cannotText('staff.device.register'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Show the QR code' })).toBeNull();
     },
   },

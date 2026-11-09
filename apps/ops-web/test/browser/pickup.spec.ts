@@ -91,10 +91,15 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     await open(page, '/pickup-requests', { permissions: ['staff.read'] });
 
-    await expect(page.getByText('pickup.read')).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see pickup requests. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.read');
     await expect(menuEntry(page, 'Requests')).toHaveCount(0);
   });
 });
@@ -1050,7 +1055,8 @@ test.describe('one request', () => {
     const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
 
     await expect(dialog).toContainText('No cancellation reason is configured yet');
-    await expect(dialog).toContainText('settings.reason.manage');
+    await expect(dialog).toContainText('An administrator adds the reasons to the reason catalogue');
+    await expect(dialog).not.toContainText('settings.reason.manage');
     await expect(dialog.getByRole('button', { name: 'Cancel the request' })).toBeDisabled();
     expect(posts(api)).toEqual([]);
   });
@@ -1246,7 +1252,7 @@ test.describe('the approver’s queue', () => {
     await dialog.getByRole('button', { name: 'Approve the exception' }).click();
 
     await expect(dialog).toContainText(
-      'You requested this exception yourself, so another holder of pickup.exception.approve has to approve it.',
+      'You requested this exception yourself, so a different approver has to decide it.',
     );
     expect(posts(api)).toHaveLength(1);
     await page.getByRole('button', { name: 'Cancel' }).click();
@@ -1255,11 +1261,18 @@ test.describe('the approver’s queue', () => {
     ).toBeVisible();
   });
 
-  // Break caught: the queue or its entry offered to a session that may not decide, or a refusal that does not name the key.
-  test('names the key to a session without it, and offers it no entry', async ({ page }) => {
+  // Break caught: the queue or its entry offered to a session that may not decide, or a refusal that names the key instead of what the account cannot do.
+  test('says what a session without the key cannot do, and offers it no entry', async ({
+    page,
+  }) => {
     await open(page, '/approvals', { permissions: ['pickup.read'] });
 
-    await expect(page.getByText('pickup.exception.approve')).toBeVisible();
+    await expect(
+      page.getByText(
+        'Your account can’t decide a one-package exception. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.exception.approve');
     await expect(menuEntry(page, 'Decisions')).toHaveCount(0);
   });
 

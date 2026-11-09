@@ -93,7 +93,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'createPickupRequest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to book a pickup (pickup.request.create).',
+    text: 'Your account can’t book a pickup. Ask an administrator for access.',
   },
   { operation: 'createPickupRequest', code: 'PICKUP_MINIMUM_NOT_MET', text: SINGLE_PACKAGE },
   { operation: 'createPickupRequest', code: 'SERVICE_DATE_NOT_PERMITTED', text: SERVICE_DAYS },
@@ -135,7 +135,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'confirmPickupRequest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to confirm a pickup (pickup.request.confirm).',
+    text: 'Your account can’t confirm a pickup. Ask an administrator for access.',
   },
   { operation: 'confirmPickupRequest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'confirmPickupRequest', code: 'STATE_CONFLICT', text: CHANGED },
@@ -155,7 +155,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'cancelPickupRequest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission this cancellation needs: pickup.request.cancel, and pickup.request.cancel_chargeable as well once a rider is assigned to the request’s run.',
+    text: 'Your account can’t make this cancellation: once a rider is assigned to the request’s run it needs a further kind of access. Ask an administrator for access.',
   },
   { operation: 'cancelPickupRequest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'cancelPickupRequest', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -199,7 +199,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
     operation: 'cancelPickupRequest',
     context: 'extend-not-held',
     code: 'PICKUP_ATTEMPT_LIMIT_REACHED',
-    text: 'One further attempt needs an extension by a holder of pickup.attempt.extend. Until then it can be escalated, or cancelled without a new attempt.',
+    text: 'One further attempt needs an extension that an approver gives. Until then it can be escalated, or cancelled without a new attempt.',
   },
 
   // A late booking.
@@ -207,7 +207,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'resolveCutoffException',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to resolve a late booking (pickup.request.confirm).',
+    text: 'Your account can’t resolve a late booking. Ask an administrator for access.',
   },
   { operation: 'resolveCutoffException', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -222,7 +222,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'escalatePickupRequest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to escalate a pickup (pickup.failure.resolve).',
+    text: 'Your account can’t escalate a pickup. Ask an administrator for access.',
   },
   { operation: 'escalatePickupRequest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'escalatePickupRequest', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -241,7 +241,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'extendPickupAttempts',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to extend the attempts of a pickup (pickup.attempt.extend).',
+    text: 'Your account can’t extend the attempts of a pickup. Ask an administrator for access.',
   },
   { operation: 'extendPickupAttempts', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'extendPickupAttempts', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -258,7 +258,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'waiveCancellationCharge',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to waive a cancellation charge (pickup.cancellation_charge.waive).',
+    text: 'Your account can’t waive a cancellation charge. Ask an administrator for access.',
   },
   { operation: 'waiveCancellationCharge', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -274,7 +274,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'requestOnePackageException',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to request a one-package exception (pickup.exception.request).',
+    text: 'Your account can’t request a one-package exception. Ask an administrator for access.',
   },
   { operation: 'requestOnePackageException', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'requestOnePackageException', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -297,7 +297,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'requestOnePackageException',
     context: 'unknown-outcome',
-    text: 'We could not confirm whether the exception was requested. Check the request before you send it again: one that reached the server shows there, waiting for a holder of pickup.exception.approve.',
+    text: 'We could not confirm whether the exception was requested. Check the request before you send it again: one that reached the server shows there, waiting for an approver.',
   },
 
   // The one-package exception, checker's half (`/approvals`). The maker-checker rule is the server's, and its refusal is the rule itself.
@@ -305,7 +305,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'approveOnePackageException',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to approve a one-package exception (pickup.exception.approve).',
+    text: 'Your account can’t approve a one-package exception. Ask an administrator for access.',
   },
   { operation: 'approveOnePackageException', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'approveOnePackageException', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -317,6 +317,6 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'approveOnePackageException',
     code: 'SELF_APPROVAL_FORBIDDEN',
-    text: 'You requested this exception yourself, so another holder of pickup.exception.approve has to approve it.',
+    text: 'You requested this exception yourself, so a different approver has to decide it.',
   },
 ];

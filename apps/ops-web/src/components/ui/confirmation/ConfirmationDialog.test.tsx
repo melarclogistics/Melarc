@@ -390,7 +390,7 @@ describeInterfaceStates('ConfirmationDialog', {
       await view.user.click(confirm());
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Your session does not hold the permission this needs.',
+        'Your account can’t do this. Ask an administrator for access.',
       );
     },
   },

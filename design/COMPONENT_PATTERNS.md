@@ -1013,18 +1013,21 @@ bugs with different fixes ([errors-and-enums.md](../contracts/errors-and-enums.m
 
 ### 15.2 Kinds
 
-| Kind | Meaning | Names |
+| Kind | Meaning | Says |
 |---|---|---|
-| `permission-missing` | The session does not hold the permission the page or part needs (`PERMISSION_DENIED`) | the permission key (required) |
-| `insufficient-authority` | It holds the key, and this target or state needs a higher authority (`INSUFFICIENT_AUTHORITY`) | the key, if one can be told |
-| `outside-hubs` | The record exists in a hub the session does not act in (`HUB_SCOPE_VIOLATION`) | nothing |
-| `approval-required` | A different approver, one who holds the permission, decides this (`SELF_APPROVAL_FORBIDDEN`) | the key, if one can be told |
-| `unavailable-here` | The act is not available for this record as it stands | nothing |
+| `permission-missing` | The session does not hold the permission the page or part needs (`PERMISSION_DENIED`) | what the account cannot do, in the plain words of the permission: *Your account can’t see pickup requests. Ask an administrator for access.* |
+| `insufficient-authority` | It holds the key, and this target or state needs a higher authority (`INSUFFICIENT_AUTHORITY`) | that a higher authority is needed |
+| `outside-hubs` | The record exists in a hub the session does not act in (`HUB_SCOPE_VIOLATION`) | that the record belongs to a hub the session does not act in |
+| `approval-required` | A different approver decides this (`SELF_APPROVAL_FORBIDDEN`) | that a different approver decides |
+| `unavailable-here` | The act is not available for this record as it stands | that it cannot be done as the record stands |
 
 ### 15.3 Rules
 
-- It names the **permission key** and never a role ([surfaces/ops-portal.md](../surfaces/ops-portal.md) §7). A refusal for a missing
-  permission cannot be drawn without the key: the type requires it.
+- It says **what the account cannot do, in plain words**, and never draws the permission key or a role ([PRODUCT_DESIGN_DIRECTION §6.5](PRODUCT_DESIGN_DIRECTION.md#65-on-screen-language),
+  the Product Owner’s decision of 5 November 2026; [surfaces/ops-portal.md](../surfaces/ops-portal.md) §7). The words of every permission are one table,
+  `platform/problem/capability-words.ts`, and a test holds it to the catalogue and to the keys the portal names: a key a screen names has its words, and a word is not kept
+  for a key no screen names. A refusal for a missing permission is still given the key (the words are looked up by it, and the type requires it), but never draws it; a key with no
+  words is told as *do this*, never as the key.
 - Two forms, by composition: `ForbiddenState` is an Alert in the page, for a part of a page that cannot be had (the reason list
   that a session may not read); `ForbiddenPage` is a whole page, with its own title and the page's one level-one heading, for a
   route the session may not open. `RequirePermission` renders the second and does not render the page at all.
@@ -1777,8 +1780,8 @@ it is never rendered. The feature maps the error's machine code
 the generic copy of the error pattern (§13). Customer-facing wording is a Product Owner input; until it is supplied,
 the generic copy is used and no wording is invented here.
 
-Copy belongs with the feature or presentation layer. A message about permission or approval names the permission or the
-deciding capability, never a role ([surfaces/ops-portal.md](../surfaces/ops-portal.md) §7, §8).
+Copy belongs with the feature or presentation layer. A message about permission or approval says what the account cannot do, or who decides, in plain words:
+never a role and never the permission key ([PRODUCT_DESIGN_DIRECTION §6.5](PRODUCT_DESIGN_DIRECTION.md#65-on-screen-language); [surfaces/ops-portal.md](../surfaces/ops-portal.md) §7, §8).
 
 Copy is keyed by **operation, context and error code**, field errors included, in one place per surface: one global
 message per code is often not enough (a `VALIDATION_FAILED` on a password field and on a reason select say different
@@ -1800,7 +1803,7 @@ This table only says where each is presented.
 | `offline` | **not applicable** | the Ops Portal has no offline mode: lost connectivity is an `error`. Do not build an offline queue or a deferred-write interface |
 | `stale / conflict` | an Alert (§9), written by the feature | `STATE_CONFLICT` explains what changed; the feature adapter owns it, not Button or Alert |
 | `success` | an Alert, or the changed state of the page | confirms the state reached, not only that a request returned |
-| `permission-restricted` | ForbiddenState (§15) | a clear refusal that names the permission; hiding a control is not enforcement |
+| `permission-restricted` | ForbiddenState (§15) | a clear refusal that says what the account cannot do, in plain words and not by the key; hiding a control is not enforcement |
 
 ### 33.2 Retry, rejection and unknown outcomes
 
@@ -1924,7 +1927,7 @@ Before accepting the initial UI-foundation implementation:
 - [ ] sign-out reads as done for `204` and `SESSION_INVALID`, and otherwise leaves the person signed in with a retry.
 
 ### ForbiddenState, EmptyState, Skeleton, StatusBadge (S0.40)
-- [ ] a refusal names the permission and no role, in every kind;
+- [ ] a refusal says what the account cannot do in plain words, and names neither the permission key nor a role, in every kind;
 - [ ] none and filtered-to-nothing look and read differently, and a filtered one has its way out;
 - [ ] a skeleton is hidden from assistive technology, stands beside a loading indicator and stops under reduced motion;
 - [ ] a status is words in a tone, the mapping covers the whole enum, and an unknown value is neutral and not echoed.
@@ -2556,7 +2559,7 @@ showcase (`test/browser/components.spec.ts`, `secrets.spec.ts`) in the engines `
 | CodeInput | `components/ui/code-input/` | Numeric keyboard, `autocomplete="one-time-code"`; keeps digits only and at most `length` (6). The change handler hears the cleaned value. A text field on purpose: a code is used once and seeing it catches a slip |
 | OneTimeSecret | `components/ui/one-time-secret/` | A read-only field in a Field, grouped in fours. No `name` (a form around it never submits it), `autocomplete="off"`, no copy button (clipboard history keeps what is copied), no link. The owner holds the secret with `useTransientSecret` (`platform/secrets/`): gone at completion, expiry (at most 15 minutes), navigation and `pagehide` |
 | QrCode | `components/ui/qr-code/` | An inline SVG computed from the matrix of `uqr` (behind `qr-matrix.ts` alone): no remote service, canvas or image file, nothing a strict CSP refuses. Error correction `M`, a four-module quiet zone, four CSS pixels to a module (the picture shrinks proportionally, and only, when its container is narrower than it: at 320 px the largest code, version 12, is drawn a little under four; the browser test asserts four (its one-pixel border included) where there is room and at least three at 320 px for the demo payload, and no floor below three is claimed), up to version 12. Black on white even under forced colours. The payload is in no attribute, title or text; a payload that cannot be drawn throws a `QrCodeError` that does not contain it. Verified by decoding what is drawn with an independent library (`jsqr`, test-only) in jsdom and, from a screenshot, in each engine |
-| Session guards | `platform/session/` | `RequireSession` (loading, sign-in redirect that replaces the entry, or an error with an explicit retry) and `RequirePermission` (a refusal that names the permission key, never a role). The full ForbiddenState (§15) is S0.40's |
+| Session guards | `platform/session/` | `RequireSession` (loading, sign-in redirect that replaces the entry, or an error with an explicit retry) and `RequirePermission` (a refusal that says what the account cannot do in plain words, never the permission key and never a role). The full ForbiddenState (§15) is S0.40's |
 
 ### 42.5 What the identity slice's read states, dialogs and shell added (S0.40 to S0.42, 24 October 2026)
 

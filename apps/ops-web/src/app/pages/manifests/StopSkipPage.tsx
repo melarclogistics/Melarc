@@ -288,8 +288,8 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
                 stop was skipped, and why.
               </p>
               <p className="pickup-form-note">
-                This is not the way to clear a failed pickup. A failed pickup is decided by a holder
-                of <code>pickup.failure.resolve</code>.
+                This is not the way to clear a failed pickup. A failed pickup is decided in the
+                pickup request itself, by someone who can escalate or reschedule it.
               </p>
               <ReadState<readonly AttributedReason[]>
                 query={reasons}
@@ -302,8 +302,7 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
                   <Alert variant="danger">
                     <p>
                       No reason for skipping a stop is configured yet, so a stop cannot be skipped
-                      here. The reasons are added to the reason catalogue by a holder of{' '}
-                      <code>settings.reason.manage</code>.
+                      here. An administrator adds the reasons to the reason catalogue.
                     </p>
                   </Alert>
                 }

@@ -549,15 +549,22 @@ test.describe('the table and the state components in a browser', () => {
     ).toBeVisible();
   });
 
-  test('names the permission in every refusal and no role', async ({ page }) => {
+  // Break caught: a refusal that draws the permission key (the finding of the review of 5edada2), or a role, instead of what the account cannot do.
+  test('says what the account cannot do in a refusal, and never a key or a role', async ({
+    page,
+  }) => {
     await openShowcase(page);
 
-    const refusals = page.locator('.ui-alert--danger', { has: page.locator('code') });
-    await expect(refusals).toHaveCount(3);
+    const section = page.locator('section', { hasText: 'Forbidden states' });
+    await expect(section.locator('.ui-alert--danger')).toHaveCount(5);
+    await expect(
+      section.getByText('Your account can’t see pickup requests. Ask an administrator for access.'),
+    ).toBeVisible();
     await expect(page.getByText('This is outside your hubs')).toBeVisible();
-    const text =
-      (await page.locator('section', { hasText: 'Forbidden states' }).textContent()) ?? '';
-    expect(text).not.toMatch(/admin|role|bundle|officer|senior ops|ops staff/i);
+    await expect(section.locator('code')).toHaveCount(0);
+    const text = (await section.textContent()) ?? '';
+    expect(text).not.toContain('pickup.read');
+    expect(text).not.toMatch(/\brole\b|bundle|officer|senior ops|ops staff|platform admin/i);
   });
 
   // Break caught: a skeleton that keeps pulsing for a person who asked for less motion, or one that a screen reader reads.

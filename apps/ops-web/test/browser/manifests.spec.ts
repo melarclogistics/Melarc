@@ -116,10 +116,15 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     await open(page, '/manifests', { permissions: ['staff.read'] });
 
-    await expect(page.getByText('pickup.read')).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see pickup requests. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.read');
     await expect(menuEntry(page, 'Pickup runs')).toHaveCount(0);
   });
 

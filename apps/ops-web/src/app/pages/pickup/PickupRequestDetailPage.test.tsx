@@ -23,6 +23,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/{id}` (`getPickupRequest` and the acts on one request; S1.19). Every act sends the version the page read and, where its
@@ -612,7 +613,10 @@ describe('cancelling', () => {
     expect(
       await within(dialog).findByText(/No cancellation reason is configured yet/),
     ).toBeVisible();
-    expect(within(dialog).getByText('settings.reason.manage')).toBeVisible();
+    expect(
+      within(dialog).getByText(/An administrator adds the reasons to the reason catalogue/),
+    ).toBeVisible();
+    expect(dialog.textContent).not.toContain('settings.reason.manage');
     expect(within(dialog).queryByRole('combobox')).toBeNull();
     const confirm = within(dialog).getByRole('button', { name: 'Cancel the request' });
     expect(confirm).toBeDisabled();
@@ -815,7 +819,7 @@ describe('cancelling', () => {
       within(charge).getByRole('radio', { name: 'Apply the cancellation charge' }),
     ).toBeDisabled();
     expect(within(charge).getByRole('radio', { name: 'Do not apply a charge' })).not.toBeChecked();
-    expect(within(charge).getByText(/pickup\.request\.cancel_chargeable/)).toBeVisible();
+    expect(within(charge).getByText(cannotText('pickup.request.cancel_chargeable'))).toBeVisible();
 
     await user.click(within(charge).getByRole('radio', { name: 'Do not apply a charge' }));
     await user.selectOptions(
@@ -909,7 +913,7 @@ describe('cancelling', () => {
   // S1.18: the next attempt past the cap is refused and nothing is cancelled; the way on is an extension, offered to the person who can make
   // it, and told by its key to the person who cannot, with what else they can do: never a dead end.
   it.each([
-    ['cannot extend', OFFICER, /a holder of pickup\.attempt\.extend/, /^Extend the attempts/],
+    ['cannot extend', OFFICER, /an extension that an approver gives/, /^Extend the attempts/],
     ['can extend', SENIOR, /^Extend the attempts on this page/, /a holder of/],
   ] as const)(
     'says nothing was cancelled when a reschedule passes the limit, to a person who %s',
@@ -1307,7 +1311,7 @@ describeInterfaceStates('The pickup request', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
       expect(reads()).toHaveLength(0);
     },
   },

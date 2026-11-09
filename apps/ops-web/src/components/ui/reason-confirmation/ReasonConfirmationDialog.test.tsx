@@ -13,6 +13,7 @@ import { reasonFixture } from '../../../test-support/reason-fixture';
 import { renderWithProviders } from '../../../test-support/render-providers';
 import { wcagViolations } from '../../../test-support/wcag';
 import { ReasonConfirmationDialog } from './ReasonConfirmationDialog';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -315,7 +316,7 @@ describe('ReasonConfirmationDialog: the reasons cannot be had', () => {
   it('names settings.reason.read when the session lacks it, and the act cannot be confirmed', async () => {
     const { send } = setup({}, () => errorResponse(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText('settings.reason.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
     expect(confirm()).toBeDisabled();
     expect(send).not.toHaveBeenCalled();
   });
@@ -720,7 +721,7 @@ describeInterfaceStates('ReasonConfirmationDialog', {
     test: async () => {
       setup({}, () => errorResponse(403, 'PERMISSION_DENIED'));
 
-      expect(await screen.findByText('settings.reason.read')).toBeVisible();
+      expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
       expect(confirm()).toBeDisabled();
     },
   },

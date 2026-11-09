@@ -18,6 +18,7 @@ import { wcagViolations } from '../../../test-support/wcag';
 import { EmptyState } from '../empty-state/EmptyState';
 import { Skeleton } from '../skeleton/Skeleton';
 import { ReadState, type ReadQuery } from './ReadState';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -178,7 +179,7 @@ describeInterfaceStates('ReadState', {
       api.on(`GET ${LIST}`, () => errorResponse(403, 'PERMISSION_DENIED'));
       renderWithProviders(<Reasons />);
 
-      expect(await screen.findByText('settings.reason.read')).toBeVisible();
+      expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
       expect(screen.queryByRole('list')).toBeNull();
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
@@ -324,7 +325,7 @@ describe('ReadState: the other refusals', () => {
 
     api.on(`GET ${LIST}`, () => errorResponse(403, 'PERMISSION_DENIED'));
     const refused = renderWithProviders(<Reasons />);
-    await screen.findByText('settings.reason.read');
+    await screen.findByText(cannotText('settings.reason.read'));
     expect(await wcagViolations(refused.container)).toEqual([]);
     refused.unmount();
 
@@ -419,7 +420,7 @@ describe('ReadState: a way out that a retry is not', () => {
       ),
     );
 
-    expect(screen.getByText(/pickup\.read/)).toBeVisible();
+    expect(screen.getByText(cannotText('pickup.read'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Back to the start' })).toBeNull();
   });
 

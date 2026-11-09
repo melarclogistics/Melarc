@@ -28,6 +28,7 @@ import {
   RIDER_STATUS_MAP,
   statusSentence,
 } from './rider-presentation';
+import { cannotText } from '../../../platform/problem/capability-words';
 import '../staff/staff-pages.css';
 
 function BackToRiders() {
@@ -135,10 +136,7 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
                 </div>
               </>
             ) : (
-              <p className="staff-action__text">
-                Registering a rider’s first device needs the permission staff.device.register, which
-                your session does not hold.
-              </p>
+              <p className="staff-action__text">{cannotText('staff.device.register')}</p>
             )}
           </div>
         ) : (
@@ -157,10 +155,7 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
                 </div>
               </>
             ) : (
-              <p className="staff-action__text">
-                Revoking or replacing a rider’s device needs the permission staff.device.revoke,
-                which your session does not hold.
-              </p>
+              <p className="staff-action__text">{cannotText('staff.device.revoke')}</p>
             )}
           </div>
         )}

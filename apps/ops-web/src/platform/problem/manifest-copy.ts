@@ -89,7 +89,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'createPickupManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to make a manifest (pickup.manifest.create).',
+    text: 'Your account can’t make a manifest. Ask an administrator for access.',
   },
   {
     operation: 'createPickupManifest',
@@ -122,7 +122,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'setManifestStopOrder',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to order the stops (pickup.manifest.create).',
+    text: 'Your account can’t order the stops. Ask an administrator for access.',
   },
   { operation: 'setManifestStopOrder', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'setManifestStopOrder', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -142,7 +142,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'assignRider',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to assign a rider (pickup.manifest.assign).',
+    text: 'Your account can’t assign a rider. Ask an administrator for access.',
   },
   { operation: 'assignRider', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'assignRider', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -168,7 +168,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'dispatchManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to dispatch a manifest (pickup.manifest.dispatch).',
+    text: 'Your account can’t dispatch a manifest. Ask an administrator for access.',
   },
   { operation: 'dispatchManifest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'dispatchManifest', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -206,7 +206,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'cancelPickupManifest',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to cancel a manifest (pickup.manifest.create).',
+    text: 'Your account can’t cancel a manifest. Ask an administrator for access.',
   },
   { operation: 'cancelPickupManifest', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'cancelPickupManifest', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -228,7 +228,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'skipPickupStop',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to skip a stop (pickup.stop.skip).',
+    text: 'Your account can’t skip a stop. Ask an administrator for access.',
   },
   { operation: 'skipPickupStop', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_STOP },
   { operation: 'skipPickupStop', code: 'NOT_FOUND', text: 'This stop could not be found.' },
@@ -261,7 +261,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'initiateRunCustodyHandover',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to open a custody handover (fleet.custody.initiate).',
+    text: 'Your account can’t open a custody handover. Ask an administrator for access.',
   },
   { operation: 'initiateRunCustodyHandover', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'initiateRunCustodyHandover', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -328,7 +328,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'acceptRunCustodyHandover',
     code: 'PERMISSION_DENIED',
-    text: 'Ops accepts only a handover to the hub, and only with the permission fleet.custody.accept. A handover to a rider is the rider’s to accept.',
+    text: 'Ops accepts only a handover to the hub, and only an account that can accept a custody handover can. A handover to a rider is the rider’s to accept.',
   },
   { operation: 'acceptRunCustodyHandover', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'acceptRunCustodyHandover', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -346,7 +346,7 @@ export const MANIFEST_COPY: readonly CopyRule[] = [
   {
     operation: 'failRunCustodyHandover',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to mark a custody handover as failed (fleet.custody.initiate).',
+    text: 'Your account can’t mark a custody handover as failed. Ask an administrator for access.',
   },
   { operation: 'failRunCustodyHandover', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'failRunCustodyHandover', code: 'NOT_FOUND', text: NOT_FOUND },

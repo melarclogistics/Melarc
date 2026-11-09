@@ -25,6 +25,7 @@ import {
 import { useSessionRecords, useStaffIdentity } from '../../../platform/staff/use-staff-queries';
 import { formatInstant } from '../../../platform/time/format-time';
 import { UUID } from './WithProfile';
+import { cannotText } from '../../../platform/problem/capability-words';
 import './staff-pages.css';
 
 /** What a person is called in the words of this page when only their kind is known. */
@@ -185,10 +186,7 @@ function Sessions({
                 rowKey={(row) => row.id}
               />
               {canRevoke ? null : (
-                <p className="staff-note">
-                  Ending a session needs the permission <code>staff.session.revoke</code>, which
-                  your session does not hold.
-                </p>
+                <p className="staff-note">{cannotText('staff.session.revoke')}</p>
               )}
             </>
           )}

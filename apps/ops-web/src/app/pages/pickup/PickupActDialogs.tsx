@@ -18,6 +18,7 @@ import type { CancellationFields } from '../../../platform/pickup/pickup-command
 import type { AttributedReason, CutoffDecision } from '../../../platform/pickup/pickup-shape';
 import { usePickupReasons } from '../../../platform/pickup/use-pickup-queries';
 import { copyFor, type Problem } from '../../../platform/problem/problem-copy';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * The dialogs of the acts on one pickup request (S1.19), each over `useConfirmedCommand`, so that a lost answer never becomes a second act and
@@ -386,8 +387,7 @@ interface CancelErrors {
 
 const DECIDE_CHARGE = 'Decide whether to apply the charge.';
 const WHY_CHARGE = 'Choose why the charge was or was not applied.';
-const CHARGE_NEEDS_KEY =
-  'Applying the charge needs the permission pickup.request.cancel_chargeable, which your session does not hold.';
+const CHARGE_NEEDS_KEY = cannotText('pickup.request.cancel_chargeable');
 
 /** The fields a refusal of a cancellation is about, in the words of each field, from the places the API named and from its code. */
 function refusedCancelFields(problem: Problem | undefined): CancelErrors {
@@ -578,8 +578,8 @@ function OpenCancel<Result>({
             <Alert variant="danger">
               <p>
                 No cancellation reason is configured yet, so a request cannot be{' '}
-                {reschedule ? 'rescheduled' : 'cancelled'} here. The reasons are added to the reason
-                catalogue by a holder of <code>settings.reason.manage</code>.
+                {reschedule ? 'rescheduled' : 'cancelled'} here. An administrator adds the reasons
+                to the reason catalogue.
               </p>
             </Alert>
           }

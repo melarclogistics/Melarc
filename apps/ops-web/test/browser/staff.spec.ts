@@ -140,7 +140,10 @@ test.describe('moving through the screens', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    await expect(page.getByText('staff.read', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see staff profiles. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('staff.read');
     await expect(
       page
         .getByRole('navigation', { name: 'Primary' })

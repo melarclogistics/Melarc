@@ -24,6 +24,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}/device` (`revokeRiderDevice`, `reregisterRiderDevice`; S0.60b; AC-SLICE-000-74, -108 and -112). Two acts, two keys. **Revoking** is the
@@ -376,7 +377,7 @@ describe('the device page: reporting a lost or stolen device', () => {
 
   // Break caught: a refusal worded as the operation's general failure, which would hide what the officer can do about it.
   it.each([
-    [403, 'PERMISSION_DENIED', /staff\.device\.revoke/],
+    [403, 'PERMISSION_DENIED', /can’t revoke a rider’s device/],
     [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
     [403, 'CSRF_VALIDATION_FAILED', /The device could not be revoked\. Try again/],
@@ -398,7 +399,7 @@ describe('the device page: replacing the handset', () => {
   it('names the permission a replacement needs, and offers no form, to a session without it', async () => {
     await open(REVOKER);
 
-    expect(await screen.findByText(/staff\.device\.reregister/)).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.reregister'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Show the QR code' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: NOTE_NAME })).toBeNull();
   });
@@ -716,7 +717,7 @@ describe('the device page: when the replacement is refused or in doubt', () => {
 
   // Break caught: a refusal worded as the operation's general failure, which would hide what the officer can do about it.
   it.each([
-    [403, 'PERMISSION_DENIED', /staff\.device\.reregister/],
+    [403, 'PERMISSION_DENIED', /can’t register a replacement handset/],
     [
       403,
       'HUB_SCOPE_VIOLATION',
@@ -1162,7 +1163,7 @@ describeInterfaceStates('The device page', {
   'permission-restricted': {
     test: async () => {
       await open(['dispatch.read', 'staff.device.register']);
-      expect(await screen.findByText(/staff\.device\.revoke/)).toBeVisible();
+      expect(await screen.findByText(cannotText('staff.device.revoke'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Revoke the device' })).toBeNull();
     },
   },

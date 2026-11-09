@@ -69,12 +69,18 @@ describe('the words of the acts on a rider’s device', () => {
     ['registerRiderDevice', 'staff.device.register'],
     ['reregisterRiderDevice', 'staff.device.reregister'],
     ['revokeRiderDevice', 'staff.device.revoke'],
-  ])('tells a refusal of %s as the lack of %s', (operation, key) => {
-    const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
+  ])(
+    'tells a refusal of %s as what the account cannot do, without the key %s',
+    (operation, key) => {
+      const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
 
-    expect(problem.message).toContain(`(${key})`);
-    expect(problem.message).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
-  });
+      expect(problem.message).toMatch(
+        /^Your account can’t .+\. Ask an administrator for access\.$/,
+      );
+      expect(problem.message).not.toContain(key);
+      expect(problem.message).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
+    },
+  );
 
   it.each(OPERATIONS.slice(2))('tells a rider in another hub as that, for %s', (operation) => {
     const problem = problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation });

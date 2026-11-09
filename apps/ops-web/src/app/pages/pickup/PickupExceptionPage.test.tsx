@@ -15,6 +15,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/{id}/exception` (`requestOnePackageException`; S1.19; AC-SLICE-001-03): the maker's half of the one-package exception,
@@ -65,14 +66,15 @@ async function fill(user: ReturnType<typeof renderApp>['user']) {
 }
 
 describe('the exception: asking for it', () => {
-  it('names the request and the key that decides, and no role', async () => {
+  it('names the request and says an approver decides it, with no key and no role', async () => {
     open();
 
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Request a one-package exception' }),
     ).toBeVisible();
     expect(await screen.findByText('For ACC-PR-7KQ2MZ.')).toBeVisible();
-    expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+    expect(screen.getByText(/An approver decides it\./)).toBeVisible();
+    expect(screen.getByRole('main').textContent).not.toContain('pickup.exception.approve');
     expect(screen.getByRole('main').textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
     // The maker-checker rule is said in plain words, and decided by the server.
     expect(screen.getByText(/Whoever asks for an exception cannot also approve it/)).toBeVisible();
@@ -285,13 +287,14 @@ describeInterfaceStates('The one-package exception', {
     },
   },
   'permission-restricted': {
-    // ops-portal.md section 7: the refusal reads as who decides, by the key (pickup.exception.approve), and not as "you lack access".
+    // ops-portal.md section 7, PRODUCT_DESIGN_DIRECTION section 6.5: the refusal reads as who decides, in plain words and with no key, and not as "you lack access".
     test: async () => {
       open(undefined, ['pickup.read']);
       expect(
         await screen.findByRole('heading', { level: 1, name: 'Approval is needed' }),
       ).toBeVisible();
-      expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+      expect(screen.getByText('A different approver decides this.')).toBeVisible();
+      expect(screen.getByRole('main').textContent).not.toContain('pickup.exception.approve');
       expect(screen.getByRole('main').textContent).not.toMatch(
         /do not have access|Ops Staff|Senior Ops|Platform Admin/,
       );

@@ -22,6 +22,7 @@ import {
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { vendorAccountFixture } from '../../../test-support/vendor-fixture';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/new` (`createPickupRequest`; S1.19; AC-SLICE-001-69 to 72, 81). The intent is chosen first and decides the rest; the
@@ -239,7 +240,7 @@ describe('booking a vendor’s own packages', () => {
     const { user } = open(['pickup.request.create']);
     await chooseIntent(user, 'A vendor’s own packages');
 
-    expect(await screen.findByText(/vendor\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('vendor.read'))).toBeVisible();
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
@@ -251,7 +252,7 @@ describe('booking a vendor’s own packages', () => {
     expect(
       await screen.findByText('The request uses the vendor’s default saved location.'),
     ).toBeVisible();
-    expect(screen.getByText('vendor.pickup_location.manage')).toBeVisible();
+    expect(screen.getByText(cannotText('vendor.pickup_location.manage'))).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Saved location' })).toBeNull();
   });
 });
@@ -858,7 +859,7 @@ describeInterfaceStates('The booking', {
   'permission-restricted': {
     test: async () => {
       open(['pickup.read']);
-      expect(await screen.findByText(/pickup\.request\.create/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.request.create'))).toBeVisible();
       expect(screen.queryByRole('radio')).toBeNull();
     },
   },

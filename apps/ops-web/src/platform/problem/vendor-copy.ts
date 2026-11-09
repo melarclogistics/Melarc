@@ -25,7 +25,7 @@ export const VENDOR_COPY: readonly CopyRule[] = [
   {
     operation: 'reissueVendorCredentialSetup',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to send a vendor a setup link (vendor.organization.approve).',
+    text: 'Your account can’t send a vendor a setup link. Ask an administrator for access.',
   },
   { operation: 'reissueVendorCredentialSetup', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -48,7 +48,7 @@ export const VENDOR_COPY: readonly CopyRule[] = [
   {
     operation: 'recoverVendorCredential',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to start a vendor’s recovery (vendor.credential.recover).',
+    text: 'Your account can’t start a vendor’s recovery. Ask an administrator for access.',
   },
   {
     operation: 'recoverVendorCredential',

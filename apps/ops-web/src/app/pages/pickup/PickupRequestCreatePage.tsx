@@ -52,6 +52,7 @@ import {
   serviceDateText,
   weekdayOf,
 } from './pickup-presentation';
+import { cannotText } from '../../../platform/problem/capability-words';
 import './pickup-pages.css';
 
 const OPERATION = 'createPickupRequest';
@@ -628,10 +629,7 @@ function SavedLocations({
     return (
       <>
         {children([])}
-        <p className="pickup-form-note">
-          Choosing another of the vendor’s saved locations needs the permission{' '}
-          <code>{LOCATIONS_READ}</code>, which your session does not hold.
-        </p>
+        <p className="pickup-form-note">{cannotText(LOCATIONS_READ)}</p>
       </>
     );
   }

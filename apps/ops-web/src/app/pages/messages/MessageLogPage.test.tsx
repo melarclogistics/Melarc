@@ -23,6 +23,7 @@ import {
 } from '../../../test-support/notification-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/messages` (`listNotifications`; S1.12e). The message log: every message the platform raised about an act, newest first, and what became of
@@ -1044,7 +1045,7 @@ describe('the log: when it cannot be had', () => {
   it('names the key a session without it lacks, and no role', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText(/notification\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('notification.read'))).toBeVisible();
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance/);
   });
 
@@ -1137,7 +1138,7 @@ describeInterfaceStates('The message log', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['pickup.read']);
-      expect(await screen.findByText(/notification\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('notification.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
       expect(listRequests()).toHaveLength(0);
       // No entry in the menu either, although hiding it is not what keeps the page shut.

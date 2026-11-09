@@ -15,6 +15,7 @@ import {
   vendorAccountFixture,
   vendorDeviceFixture,
 } from '../../../test-support/vendor-fixture';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/vendors/{id}` (`getVendorAccount`, `reissueVendorCredentialSetup`, `recoverVendorCredential`; S0.52b; AC-SLICE-000-15). One account,
@@ -366,7 +367,7 @@ describeInterfaceStates('The vendor account', {
   'permission-restricted': {
     test: async () => {
       open(['staff.read']);
-      expect(await screen.findByText(/vendor\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('vendor.read'))).toBeVisible();
       expect(screen.queryByRole('heading', { name: 'K7M2Q9X4' })).toBeNull();
     },
   },

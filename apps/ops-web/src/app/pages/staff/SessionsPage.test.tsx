@@ -16,6 +16,7 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -225,7 +226,7 @@ describe('the sessions: who may end one', () => {
 
     await screen.findByRole('table', { name: 'Open sessions' });
 
-    expect(screen.getByText('staff.session.revoke')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.session.revoke'))).toBeVisible();
     expect(screen.queryByRole('button', { name: /^End session/ })).toBeNull();
   });
 });
@@ -410,7 +411,7 @@ describe('the sessions: when it cannot be had', () => {
   it('names staff.read when the server refuses the key', async () => {
     open(KEYS.approver, { [LIST]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText('staff.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.read'))).toBeVisible();
   });
 
   it('says a person in a hub the session does not act in is outside its hubs', async () => {
@@ -446,7 +447,7 @@ describe('the sessions: when it cannot be had', () => {
     open(KEYS.maker);
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
     expect(lists()).toHaveLength(0);
   });
 });

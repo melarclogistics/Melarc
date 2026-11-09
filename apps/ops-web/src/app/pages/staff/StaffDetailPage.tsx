@@ -21,6 +21,7 @@ import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf, roleNameOf, STAFF_STATUS_MAP } from './staff-presentation';
 import { TrustedBrowsersSection } from './TrustedBrowsersSection';
 import { WithProfile } from './WithProfile';
+import { cannotText } from '../../../platform/problem/capability-words';
 import './staff-pages.css';
 
 const BUNDLE_READ = 'permission.assignable_bundle.read';
@@ -155,10 +156,7 @@ function Profile({
           {waiting ? (
             <div>
               {!canApprove ? (
-                <p className="staff-note">
-                  Approving or rejecting a profile needs the permission{' '}
-                  <code>staff.identity.approve</code>, which your session does not hold.
-                </p>
+                <p className="staff-note">{cannotText('staff.identity.approve')}</p>
               ) : (
                 <>
                   <p className="staff-action__text">

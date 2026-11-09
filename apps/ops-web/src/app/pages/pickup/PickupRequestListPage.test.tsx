@@ -15,6 +15,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests` (`listPickupRequests`; S1.19). The queue of the requests at the session's hubs, filtered by state and service date, and
@@ -516,7 +517,7 @@ describe('the queue: one panel', () => {
 
     const refused = await alertSaying('Your account cannot read pickup requests.');
     expect(panelOf(refused)).toContainElement(filters());
-    expect(within(screen.getByRole('main')).queryByText(/pickup\.read/)).toBeNull();
+    expect(within(screen.getByRole('main')).queryByText(cannotText('pickup.read'))).toBeNull();
   });
 });
 
@@ -873,7 +874,7 @@ describe('the queue: when it cannot be had', () => {
     await alertSaying(
       'Your account cannot read pickup requests. Ask an administrator to give you access.',
     );
-    expect(within(screen.getByRole('main')).queryByText(/pickup\.read/)).toBeNull();
+    expect(within(screen.getByRole('main')).queryByText(cannotText('pickup.read'))).toBeNull();
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });
 });
@@ -1113,7 +1114,7 @@ describeInterfaceStates('The pickup queue', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
       expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
       expect(listRequests()).toHaveLength(0);

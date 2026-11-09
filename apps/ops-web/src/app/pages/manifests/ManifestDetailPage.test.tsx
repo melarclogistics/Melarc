@@ -28,6 +28,7 @@ import {
 import { renderApp } from '../../../test-support/render-app';
 import { RIDER_ID, riderFixture } from '../../../test-support/rider-fixture';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests/{id}` (`getPickupManifest` and the acts on one run; S1.25). The record: where the run stands, the rider, the stops in their
@@ -686,8 +687,8 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
 
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dispatch the manifest' })).toBeNull();
-    expect(screen.getByText('pickup.manifest.assign')).toBeVisible();
-    expect(screen.getByText('pickup.manifest.dispatch')).toBeVisible();
+    expect(screen.getByText(cannotText('pickup.manifest.assign'))).toBeVisible();
+    expect(screen.getByText(cannotText('pickup.manifest.dispatch'))).toBeVisible();
   });
 
   it('says a rider cannot be changed once the manifest is dispatched, and offers neither act', async () => {
@@ -857,7 +858,7 @@ describeInterfaceStates('the manifest page', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
     },
   },
 });

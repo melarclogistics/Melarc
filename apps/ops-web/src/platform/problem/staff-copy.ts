@@ -66,7 +66,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'revokeStaffTrustedBrowsers',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to remove trusted browsers (staff.session.revoke).',
+    text: 'Your account can’t remove trusted browsers. Ask an administrator for access.',
   },
   {
     operation: 'revokeStaffTrustedBrowsers',
@@ -131,7 +131,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'createStaffIdentity',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to create profiles (staff.identity.create).',
+    text: 'Your account can’t create profiles. Ask an administrator for access.',
   },
 
   // Approving or rejecting.
@@ -148,7 +148,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'approveStaffIdentity',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to approve or reject profiles (staff.identity.approve).',
+    text: 'Your account can’t approve or reject profiles. Ask an administrator for access.',
   },
   { operation: 'approveStaffIdentity', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -166,7 +166,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'reissueStaffCredentialSetup',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to send setup links (staff.identity.approve).',
+    text: 'Your account can’t send setup links. Ask an administrator for access.',
   },
   { operation: 'reissueStaffCredentialSetup', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -189,7 +189,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'resetStaffMfa',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to reset authenticators (staff.mfa.reset).',
+    text: 'Your account can’t reset authenticators. Ask an administrator for access.',
   },
   {
     operation: 'resetStaffMfa',
@@ -206,7 +206,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'recoverStaffCredential',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to start a password recovery (staff.credential.recover).',
+    text: 'Your account can’t start a password recovery. Ask an administrator for access.',
   },
   {
     operation: 'recoverStaffCredential',
@@ -228,7 +228,7 @@ export const STAFF_COPY: readonly CopyRule[] = [
   {
     operation: 'revokeSession',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to end sessions (staff.session.revoke).',
+    text: 'Your account can’t end sessions. Ask an administrator for access.',
   },
   {
     operation: 'revokeSession',

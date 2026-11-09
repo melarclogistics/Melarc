@@ -29,7 +29,7 @@ export const RIDER_COPY: readonly CopyRule[] = [
   {
     operation: 'registerRiderDevice',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to register a rider’s first device (staff.device.register).',
+    text: 'Your account can’t register a rider’s first device. Ask an administrator for access.',
   },
   { operation: 'registerRiderDevice', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'registerRiderDevice', code: 'NOT_FOUND', text: NOT_FOUND },
@@ -58,7 +58,7 @@ export const RIDER_COPY: readonly CopyRule[] = [
   {
     operation: 'reregisterRiderDevice',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to register a replacement handset (staff.device.reregister).',
+    text: 'Your account can’t register a replacement handset. Ask an administrator for access.',
   },
   {
     operation: 'reregisterRiderDevice',
@@ -97,7 +97,7 @@ export const RIDER_COPY: readonly CopyRule[] = [
   {
     operation: 'revokeRiderDevice',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to revoke a rider’s device (staff.device.revoke).',
+    text: 'Your account can’t revoke a rider’s device. Ask an administrator for access.',
   },
   { operation: 'revokeRiderDevice', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   { operation: 'revokeRiderDevice', code: 'NOT_FOUND', text: NOT_FOUND },

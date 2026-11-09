@@ -293,7 +293,7 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
 };
 
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {
-  'permission-missing': 'Your session does not hold the permission this needs.',
+  'permission-missing': 'Your account can’t do this. Ask an administrator for access.',
   'insufficient-authority': 'This needs a higher authority than your session has.',
   'outside-hubs': 'This record belongs to a hub your session does not act in.',
   'approval-required': 'A different approver is required.',

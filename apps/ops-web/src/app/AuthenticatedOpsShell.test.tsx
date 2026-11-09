@@ -8,6 +8,7 @@ import { sessionFixture } from '../test-support/session-fixture';
 import { wcagViolations } from '../test-support/wcag';
 import { dismissToast, showToast } from '../components/ui/toast/Toast';
 import { ANY_SIGNED_IN_SESSION, type SignedInRoute } from './navigation/route-registry';
+import { cannotText } from '../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -290,7 +291,7 @@ describe('the authenticated Ops shell: the entries come from the keys the sessio
     expect(
       await screen.findByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
     expect(entries()).toEqual(['Home', 'Vendor accounts']);
   });
 

@@ -15,6 +15,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders` (`listRiders`; S0.60a; AC-SLICE-000-113). The riders the session's grant reaches: name, phone, status, hub, whether a PIN is set and whether a
@@ -373,7 +374,7 @@ describe('the rider list: when it cannot be had', () => {
   it('says that a session without the key lacks it, by key and not by role', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
@@ -448,7 +449,7 @@ describeInterfaceStates('The rider list', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
     },
   },

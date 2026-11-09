@@ -23,6 +23,7 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -167,7 +168,7 @@ describe('the staff creation form: the roles', () => {
   it('asks nothing of the server and shows no form for a session that does not list the key to read roles', async () => {
     open(['staff.identity.create']);
 
-    expect(await screen.findByText('permission.assignable_bundle.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('permission.assignable_bundle.read'))).toBeVisible();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(exceptSummary(api.requests)).toHaveLength(1);
   });
@@ -175,7 +176,7 @@ describe('the staff creation form: the roles', () => {
   it('names the key and shows no form when the server refuses the read', async () => {
     open(KEYS.approver, { [BUNDLES]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText('permission.assignable_bundle.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('permission.assignable_bundle.read'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Create profile' })).toBeNull();
   });
 
@@ -618,7 +619,7 @@ describe('the staff creation form: a refusal', () => {
     await view.user.click(submit());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Your session does not hold the permission to create profiles (staff.identity.create).',
+      'Your account can’t create profiles. Ask an administrator for access.',
     );
     expect(screen.getByText(/Reference: req-test-1/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
@@ -831,7 +832,7 @@ describeInterfaceStates('The staff creation form', {
           name: 'You do not have access to this page',
         }),
       ).toBeVisible();
-      expect(screen.getByText('staff.identity.create')).toBeVisible();
+      expect(screen.getByText(cannotText('staff.identity.create'))).toBeVisible();
     },
   },
 });

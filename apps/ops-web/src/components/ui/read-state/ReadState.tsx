@@ -28,7 +28,7 @@ export interface ReadStateProps<Data> {
   readonly loadingLabel?: string;
   /** A placeholder for the shape of the content, shown beside the loading indicator. Decoration only. */
   readonly skeleton?: ReactNode;
-  /** The permission key the read needs. A refusal names it. */
+  /** The permission key the read needs. A refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key. */
   readonly permission?: string;
   /** The `operationId` of the read, so that its failures are worded for it. */
   readonly operation?: string;
@@ -57,7 +57,7 @@ function RefusalOrFailure({
 
   if (problem.kind === 'forbidden' && problem.forbidden !== undefined) {
     const kind = problem.forbidden;
-    // A refusal for want of a permission names it; with no key to name, the refusal is told in the generic words, as any other.
+    // A refusal for want of a permission tells what the account cannot do, in the words of the key; with no key to go by, it is told in the generic words, as any other.
     if (kind !== 'permission-missing') {
       return (
         <ForbiddenState
@@ -102,7 +102,7 @@ function RefusalOrFailure({
 /**
  * A read of the API, in every state the screen owes (COMPONENT_PATTERNS section 33.1): loading (a loading indicator and, if the screen
  * wants one, a skeleton), the error in approved words with a retry that is a control beside the error and not part of it, the refusals of
- * authority (naming the permission), nothing at all, and the content. It shows nothing for a session that has ended or a stale answer,
+ * authority (told in plain words, never by the key), nothing at all, and the content. It shows nothing for a session that has ended or a stale answer,
  * because the session boundary has already taken the person away. It never shows the diagnostic `message`, and it never shows data from an
  * earlier answer beside a failed refresh: the person is told it failed, and may try again.
  *

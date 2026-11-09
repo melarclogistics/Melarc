@@ -164,7 +164,10 @@ test.describe('moving through the screens', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    await expect(page.getByText('dispatch.read', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see riders. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('dispatch.read');
     await expect(
       page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Riders' }),
     ).toHaveCount(0);

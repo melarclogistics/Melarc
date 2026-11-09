@@ -23,6 +23,7 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -482,7 +483,7 @@ describe('the staff list: when it cannot be had', () => {
   it('names staff.read when the server refuses the key', async () => {
     open('/admin/staff', KEYS.approver, { [LIST]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText('staff.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.read'))).toBeVisible();
     expect(screen.queryByRole('table')).toBeNull();
   });
 
@@ -513,7 +514,7 @@ describe('the staff list: the guard', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
     expect(listRequests()).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });
@@ -602,7 +603,7 @@ describeInterfaceStates('The staff list', {
     test: async () => {
       open('/admin/staff', KEYS.maker);
 
-      expect(await screen.findByText('staff.read')).toBeVisible();
+      expect(await screen.findByText(cannotText('staff.read'))).toBeVisible();
     },
   },
 });

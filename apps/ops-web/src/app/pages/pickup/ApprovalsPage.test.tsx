@@ -18,6 +18,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/approvals` (`listPickupRequests` with `one_package_exception_state=REQUESTED`, and `approveOnePackageException`; S1.19): the approver's
@@ -243,7 +244,7 @@ describe('approving', () => {
 
     expect(
       await within(dialog).findByText(
-        'You requested this exception yourself, so another holder of pickup.exception.approve has to approve it.',
+        'You requested this exception yourself, so a different approver has to decide it.',
       ),
     ).toBeVisible();
     expect(approvals()).toHaveLength(1);
@@ -274,7 +275,7 @@ describe('approving', () => {
 
     expect(
       await within(dialog).findByText(
-        'Your session does not hold the permission to approve a one-package exception (pickup.exception.approve).',
+        'Your account can’t approve a one-package exception. Ask an administrator for access.',
       ),
     ).toBeVisible();
   });
@@ -400,7 +401,7 @@ describeInterfaceStates('The exceptions to approve', {
     },
   },
   'permission-restricted': {
-    // ops-portal.md section 7: forbidden only where the session does not hold the key, which the page names; never a role.
+    // ops-portal.md section 7: forbidden only where the session does not hold the key, which the page tells as what the account cannot do; never the key and never a role.
     test: async () => {
       open(undefined, ['pickup.read', 'pickup.exception.request']);
       expect(
@@ -409,7 +410,7 @@ describeInterfaceStates('The exceptions to approve', {
           name: 'You do not have access to this page',
         }),
       ).toBeVisible();
-      expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+      expect(screen.getByText(cannotText('pickup.exception.approve'))).toBeVisible();
       expect(screen.getByRole('main').textContent).not.toMatch(
         /Ops Staff|Senior Ops|Platform Admin/,
       );

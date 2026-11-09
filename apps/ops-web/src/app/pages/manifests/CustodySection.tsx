@@ -22,6 +22,7 @@ import { NoteActDialog } from '../pickup/PickupActDialogs';
 import { ActBlock } from './ActBlock';
 import { AcceptHandoverDialog, InitiateHandoverDialog } from './ManifestActDialogs';
 import { HANDOVER_STATE_MAP } from './manifest-presentation';
+import { cannotText } from '../../../platform/problem/capability-words';
 import '../pickup/pickup-pages.css';
 import './manifests-pages.css';
 
@@ -113,10 +114,7 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
     <section className="pickup-section" aria-labelledby="manifest-custody">
       <h2 id="manifest-custody">Custody of the parcels</h2>
       {!canRead ? (
-        <p className="pickup-act__text">
-          Seeing a custody handover needs the permission <code>fleet.custody.read</code>, which your
-          session does not hold.
-        </p>
+        <p className="pickup-act__text">{cannotText('fleet.custody.read')}</p>
       ) : (
         <ReadState<HandoverRecord | null>
           query={pending}

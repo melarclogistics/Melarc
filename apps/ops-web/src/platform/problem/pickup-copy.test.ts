@@ -62,29 +62,38 @@ describe('the words of the refusals of authority', () => {
     ['waiveCancellationCharge', 'pickup.cancellation_charge.waive'],
     ['requestOnePackageException', 'pickup.exception.request'],
     ['approveOnePackageException', 'pickup.exception.approve'],
-  ])('tells a refusal of %s as the lack of %s', (operation, key) => {
-    const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
+  ])(
+    'tells a refusal of %s as what the account cannot do, in plain words and without the key %s',
+    (operation, key) => {
+      const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
 
-    expect(problem.kind).toBe('forbidden');
-    expect(problem.message).toContain(key);
+      expect(problem.kind).toBe('forbidden');
+      expect(problem.message).toMatch(
+        /^Your account can’t .+\. Ask an administrator for access\.$/,
+      );
+      expect(problem.message).not.toContain(key);
+    },
+  );
+
+  it('tells a post-assignment cancellation without its further access as that, and never by a key', () => {
+    const { message } = problemOf(refused('PERMISSION_DENIED', 403), {
+      operation: 'cancelPickupRequest',
+    });
+
+    expect(message).toMatch(/once a rider is assigned/);
+    expect(message).not.toMatch(/pickup\.request\./);
   });
 
-  it('tells a post-assignment cancellation without its key by the key it needs', () => {
-    expect(
-      problemOf(refused('PERMISSION_DENIED', 403), { operation: 'cancelPickupRequest' }).message,
-    ).toContain('pickup.request.cancel_chargeable');
-  });
-
-  // Break caught (permissions.md section 6): the maker-checker refusal told as a lack of access, or by a role, instead of as the rule with the
-  // key of whoever can approve instead.
-  it('tells an approval of one’s own exception as the rule, and who approves instead, by the key', () => {
+  // Break caught (permissions.md section 6): the maker-checker refusal told as a lack of access, or by a role or a key, instead of as the rule: a different
+  // approver decides.
+  it('tells an approval of one’s own exception as the rule, and that a different approver decides', () => {
     const problem = problemOf(refused('SELF_APPROVAL_FORBIDDEN', 422), {
       operation: 'approveOnePackageException',
     });
 
     expect(problem).toMatchObject({ kind: 'forbidden', forbidden: 'approval-required' });
     expect(problem.message).toBe(
-      'You requested this exception yourself, so another holder of pickup.exception.approve has to approve it.',
+      'You requested this exception yourself, so a different approver has to decide it.',
     );
   });
 
@@ -136,7 +145,8 @@ describe('the words of the rules', () => {
 
     expect(next('extend-held')).toMatch(/^Extend the attempts on this page/);
     expect(next('extend-not-held')).not.toMatch(/^Extend/);
-    expect(next('extend-not-held')).toMatch(/a holder of pickup\.attempt\.extend/);
+    expect(next('extend-not-held')).toMatch(/an extension that an approver gives/);
+    expect(next('extend-not-held')).not.toMatch(/pickup\.attempt\.extend/);
     for (const context of ['extend-held', 'extend-not-held']) {
       expect(next(context)).toMatch(/escalated, or cancelled without a new attempt/);
     }
@@ -186,7 +196,8 @@ describe('the words of the rules', () => {
   it('does not tell a lost exception request to try again blindly', () => {
     const text = copyFor({ operation: 'requestOnePackageException', context: 'unknown-outcome' });
     expect(text).toMatch(/Check the request before you send it again/);
-    expect(text).toContain('pickup.exception.approve');
+    expect(text).toMatch(/waiting for an approver/);
+    expect(text).not.toContain('pickup.exception.approve');
   });
 });
 

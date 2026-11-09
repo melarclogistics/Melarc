@@ -23,6 +23,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests/{id}/stops/{stopId}/skip` (`getPickupStop`, `listReasonDefinitions`, `skipPickupStop`; S1.25). Ops skips a stop with a reason
@@ -123,12 +124,13 @@ describe('the skip: what the page says and asks', () => {
   });
 
   // Break caught: the skip offered as a way to clear a failed pickup, which is another permission's page.
-  it('says this is not the way to clear a failed pickup, and names the key that is', async () => {
+  it('says this is not the way to clear a failed pickup, and where that is decided', async () => {
     open();
     await form();
 
     expect(screen.getByText(/not the way to clear a failed pickup/)).toBeVisible();
-    expect(screen.getByText('pickup.failure.resolve')).toBeVisible();
+    expect(screen.getByText(/decided in the pickup request itself/)).toBeVisible();
+    expect(document.body.textContent).not.toContain('pickup.failure.resolve');
   });
 
   // Break caught: reason codes written into the page, which would offer a code the catalogue has retired.
@@ -171,13 +173,16 @@ describe('the skip: what the page says and asks', () => {
     expect(screen.getByRole('textbox', { name: /Note/ })).not.toBeRequired();
   });
 
-  it('says plainly that no skip reason is configured, naming the key that adds one', async () => {
+  it('says plainly that no skip reason is configured, and who adds one', async () => {
     open({ [REASONS]: () => json(200, []) });
 
     expect(
       await screen.findByText(/No reason for skipping a stop is configured yet/),
     ).toBeVisible();
-    expect(screen.getByText('settings.reason.manage')).toBeVisible();
+    expect(
+      screen.getByText(/An administrator adds the reasons to the reason catalogue/),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('settings.reason.manage');
     expect(screen.queryByRole('button', { name: 'Skip this stop' })).toBeNull();
   });
 
@@ -271,7 +276,7 @@ describe('the skip: doing it', () => {
     ['STATE_CONFLICT', 409, /can no longer be skipped/],
     ['REASON_NOT_ACTIVE', 422, /can no longer be used to skip a stop/],
     ['REASON_REQUIRED', 422, /a reason, or the note the reason asks for/],
-    ['PERMISSION_DENIED', 403, /pickup\.stop\.skip/],
+    ['PERMISSION_DENIED', 403, /can’t skip a stop/],
     ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
   ])('tells %s in the officer’s words, and shows no diagnostic', async (code, status, words) => {
     const { user } = open({ [SKIP]: () => refusal(status, code) });
@@ -477,7 +482,7 @@ describeInterfaceStates('the skip page', {
   'permission-restricted': {
     test: async () => {
       open({ [STOP]: () => refusal(403, 'PERMISSION_DENIED') });
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
     },
   },
 });

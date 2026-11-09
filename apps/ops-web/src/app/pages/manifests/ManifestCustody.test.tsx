@@ -15,6 +15,7 @@ import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { OTHER_RIDER_ID, RIDER_ID, riderFixture } from '../../../test-support/rider-fixture';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * The Ops side of a run's custody handover, on `/manifests/{id}` while the run is in progress (S1.25; the contract of S1.24). The custody
@@ -132,8 +133,7 @@ describe('custody: when the section is there', () => {
       KEYS.filter((key) => key !== 'fleet.custody.read'),
     );
 
-    expect(await screen.findByText(/needs the permission/)).toBeVisible();
-    expect(screen.getByText('fleet.custody.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('fleet.custody.read'))).toBeVisible();
     expect(api.requests.some((request) => request.url.includes('run-custody-handovers'))).toBe(
       false,
     );
@@ -241,7 +241,7 @@ describe('custody: opening a handover', () => {
   it.each([
     ['STATE_CONFLICT', 409, /A handover cannot be opened now/],
     ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
-    ['PERMISSION_DENIED', 403, /fleet\.custody\.initiate/],
+    ['PERMISSION_DENIED', 403, /can’t open a custody handover/],
   ])('tells %s in the officer’s words', async (code, status, words) => {
     const { user } = open({ [LIST]: none, [INITIATE]: () => refusal(status, code) });
     const dialog = await openDialog(user);
@@ -280,7 +280,9 @@ describe('custody: opening a handover', () => {
 
     await section();
     expect(screen.queryByRole('button', { name: 'Open a custody handover' })).toBeNull();
-    expect((await screen.findAllByText('fleet.custody.initiate')).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText(cannotText('fleet.custody.initiate'))).length,
+    ).toBeGreaterThan(0);
   });
 });
 

@@ -11,6 +11,7 @@ import { renderApp } from '../../../test-support/render-app';
 import { etag, KEYS, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { HUB_ID, STAFF_ID, staffIdentityFixture } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -319,7 +320,7 @@ describe('the reset of an authenticator: a refusal', () => {
     [
       'PERMISSION_DENIED',
       403,
-      'Your session does not hold the permission to reset authenticators (staff.mfa.reset).',
+      'Your account can’t reset authenticators. Ask an administrator for access.',
     ],
     [
       'CREDENTIAL_DELIVERY_FAILED',
@@ -389,7 +390,7 @@ describe('the reset of an authenticator: when it cannot be had', () => {
     open(KEYS.approver);
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.mfa.reset')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.mfa.reset'))).toBeVisible();
     expect(api.requests.filter((request) => request.url.includes('staff-identities'))).toHaveLength(
       0,
     );

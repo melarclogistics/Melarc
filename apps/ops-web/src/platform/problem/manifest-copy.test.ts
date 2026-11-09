@@ -64,7 +64,8 @@ describe('the words of the table', () => {
 });
 
 describe('the words of the refusals of authority', () => {
-  // Break caught (ops-portal.md section 7): a refusal that names the wrong key, so an administrator is asked to grant the wrong permission.
+  // Break caught (ops-portal.md section 7, PRODUCT_DESIGN_DIRECTION section 6.5): a refusal that names a key (the review of 5edada2), or the wrong act, so that an administrator
+  // is asked to grant the wrong access.
   it.each([
     ['createPickupManifest', 'pickup.manifest.create'],
     ['setManifestStopOrder', 'pickup.manifest.create'],
@@ -75,12 +76,16 @@ describe('the words of the refusals of authority', () => {
     ['initiateRunCustodyHandover', 'fleet.custody.initiate'],
     ['acceptRunCustodyHandover', 'fleet.custody.accept'],
     ['failRunCustodyHandover', 'fleet.custody.initiate'],
-  ])('tells a refusal of %s as the lack of %s', (operation, key) => {
-    const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
+  ])(
+    'tells a refusal of %s as what the account cannot do, without the key %s',
+    (operation, key) => {
+      const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
 
-    expect(problem.kind).toBe('forbidden');
-    expect(problem.message).toContain(key);
-  });
+      expect(problem.kind).toBe('forbidden');
+      expect(problem.message).toMatch(/Ask an administrator for access\.$|handover to a rider/);
+      expect(problem.message).not.toContain(key);
+    },
+  );
 
   // Break caught: Ops told that a handover to a rider is theirs to accept by a message that names the wrong rule.
   it('tells Ops that a handover to a rider is the rider’s to accept', () => {
