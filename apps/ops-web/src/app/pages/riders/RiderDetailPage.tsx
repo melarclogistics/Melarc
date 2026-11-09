@@ -159,8 +159,6 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
           <Panel title="The rider" headingLevel={2}>
             <div className="rider-facts-groups">
               <DescriptionList
-                heading="Rider"
-                headingLevel={3}
                 items={[
                   { label: 'Phone', value: rider.phone },
                   {

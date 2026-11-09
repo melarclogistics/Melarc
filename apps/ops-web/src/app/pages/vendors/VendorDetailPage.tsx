@@ -218,8 +218,6 @@ function Account({
             <Panel title="The account" headingLevel={2}>
               <div className="vendor-facts-groups">
                 <DescriptionList
-                  heading="Account"
-                  headingLevel={3}
                   items={[
                     { label: 'Organisation', value: account.legal_name },
                     {
