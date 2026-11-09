@@ -286,6 +286,10 @@ test.describe('the filters', () => {
     await status.focus();
     await page.keyboard.type('Held');
     await expect(page).toHaveURL(/[?&]state=SUPPRESSED(&|$)/);
+    // The choice is drawn (its chip) before the next is made: the address changes before the page is drawn again, and a choice made in that moment is made over the log as it was.
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: Status: Held back' }),
+    ).toBeVisible();
     // The two messages that were held back.
     await expect(page.getByRole('rowheader')).toHaveCount(2);
     await expect(status).toBeFocused();
@@ -294,12 +298,18 @@ test.describe('the filters', () => {
     await expect(audience).toBeFocused();
     await page.keyboard.type('Ad');
     await expect(page).toHaveURL(/audience=AD_HOC_SENDER/);
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: For: Ad-hoc sender' }),
+    ).toBeVisible();
     await expect(page.getByRole('rowheader')).toHaveCount(2);
 
     await page.keyboard.press('Tab');
     await expect(channel).toBeFocused();
     await page.keyboard.type('In');
     await expect(page).toHaveURL(/channel=FEED/);
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: Channel: In-app feed' }),
+    ).toBeVisible();
     // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the empty state's action.
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
 

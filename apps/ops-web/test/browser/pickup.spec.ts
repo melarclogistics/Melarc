@@ -254,7 +254,7 @@ test.describe('the queue, drawn for the room it has', () => {
       await open(page, '/pickup-requests');
       await expect(opener(page, CODE)).toBeVisible();
 
-      await page.getByRole('button', { name: 'Filter' }).focus();
+      await page.getByRole('button', { name: 'Filter', exact: true }).focus();
       for (let step = 0; step < 12; step += 1) {
         if (await opener(page, CODE).evaluate((element) => element === document.activeElement))
           break;
@@ -1284,11 +1284,11 @@ test.describe('the queue: coming back from a request', () => {
 
     await backLink(page).click();
     await expect(page.getByText('Loading pickup requests')).toBeAttached();
-    await page.getByRole('button', { name: 'Filter' }).focus();
+    await page.getByRole('button', { name: 'Filter', exact: true }).focus();
     release();
 
     await expect(opener(page, opened)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Filter' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
   });
 
   test('shows the focus ring on the request when the officer came and went by keyboard', async ({

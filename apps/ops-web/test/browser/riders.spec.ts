@@ -764,14 +764,20 @@ test.describe('replacing the handset', () => {
     expect(await whereIsTheCode(page)).toEqual([]);
   });
 
-  test('the replacement is not offered to a session without its key, which is told by name', async ({
+  test('the replacement is not offered to a session without its key, which is told in words', async ({
     page,
   }) => {
     await open(page, DEVICE, {
       permissions: ['dispatch.read', 'staff.device.revoke', 'settings.reason.read'],
     });
 
-    await expect(page.getByText(/staff\.device\.reregister/)).toBeVisible();
+    // What the account cannot do, in plain words (PRODUCT_DESIGN_DIRECTION section 6.5): never the permission key.
+    await expect(
+      page.getByText(
+        'Your account can’t register a replacement handset. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('staff.device.reregister');
     await expect(page.getByRole('textbox', { name: /How you verified/ })).toHaveCount(0);
   });
 });

@@ -195,7 +195,7 @@ test.describe('the counts of the queues in a browser', () => {
 
     await expect(page).toHaveURL(/\/pickup-requests\?state=CONFIRMED$/);
     // The chip that took the filter off is gone: focus is on what stays in the filter row (the Filter button), and not lost to the page.
-    await expect(page.getByRole('button', { name: 'Filter' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
     await expect(page.getByText('Only late bookings waiting for a cut-off decision')).toHaveCount(
       0,
     );
