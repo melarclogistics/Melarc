@@ -18,7 +18,7 @@ import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/
 import { useApiClient } from '../../../platform/api/api-client';
 import { skipPickupStop, type StopRecord } from '../../../platform/manifest/manifest-commands';
 import type { StopView } from '../../../platform/manifest/manifest-shape';
-import { useStop } from '../../../platform/manifest/use-manifest-queries';
+import { useManifest, useStop } from '../../../platform/manifest/use-manifest-queries';
 import type { AttributedReason } from '../../../platform/pickup/pickup-shape';
 import { usePickupReasons, usePickupRequest } from '../../../platform/pickup/use-pickup-queries';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
@@ -247,6 +247,11 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
     stop !== undefined && stop.pickup_summary === undefined,
   );
   const reasons = usePickupReasons('PICKUP_STOP_SKIP', stop !== undefined && isToBeWorked(stop));
+  // The run is read for its code, which the way back names (a stop carries only the run's id). A run that cannot be read leaves the words: the page does not wait for it or depend on it.
+  const run = useManifest(
+    manifestId,
+    stop?.pickup_manifest_id.toLowerCase() === manifestId.toLowerCase(),
+  );
 
   if (stopQuery.status === 'error') {
     const problem = problemOf(stopQuery.error, { operation: 'getPickupStop' });
@@ -278,7 +283,7 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
         }),
     breadcrumb: [
       { label: 'Pickup runs', to: '/manifests' },
-      { label: 'The pickup run', to: `/manifests/${manifestId}` },
+      { label: run.data?.manifest.code ?? 'The pickup run', to: `/manifests/${manifestId}` },
     ],
   };
   // The form is shown once the stop is read, waits to be worked and the catalogue has a reason: the task form draws the header then, and every other state (loading, a failure, a stop

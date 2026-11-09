@@ -345,6 +345,8 @@ export function ApprovalsPage() {
   };
 
   const approvedBy = approved?.approval.approved_by;
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
   return (
     <>
       <title>One-package exceptions to approve · Melarc Ops Portal</title>
@@ -355,6 +357,13 @@ export function ApprovalsPage() {
             title: 'One-package exceptions to approve',
             description:
               'Single-package pickups at your hubs that wait for an approval before they can be confirmed.',
+            freshness: {
+              state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+              ...(updatedAt === undefined ? {} : { updatedAt }),
+              onRefresh: () => {
+                void refresh();
+              },
+            },
           }}
           notice={
             approved === undefined ? undefined : (

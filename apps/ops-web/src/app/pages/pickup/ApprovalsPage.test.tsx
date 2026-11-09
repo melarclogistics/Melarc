@@ -102,15 +102,24 @@ async function openApproval(user: ReturnType<typeof renderApp>['user']) {
 }
 
 describe('the queue: what it shows', () => {
-  // Break caught (the Product Owner, 9 November 2026): a paragraph of rules above the table, and an empty band left in its place. The rules are in the question of the approval, where the
-  // choice is made.
-  it('draws no paragraph of rules and no empty band above the table', async () => {
-    open();
+  // Break caught (the Product Owner, 9 November 2026): a paragraph of rules above the table, and an empty band left in its place; a queue that does not say when it was read or offer to read
+  // it again, as the other queues do. The rules are in the question of the approval, where the choice is made.
+  it('draws no paragraph of rules and no empty band above the table, and tells when it was updated with the way to refresh it', async () => {
+    const { user } = open();
 
     await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ });
     expect(document.querySelectorAll('.pickup-form-note')).toHaveLength(0);
     expect(document.querySelectorAll('.ui-queue-workspace__notice')).toHaveLength(0);
     expect(screen.queryByText(/highest tier|the server checks/)).toBeNull();
+    const line = (await screen.findByText(/^Updated /)).parentElement;
+    if (line === null) throw new Error('no freshness line');
+    const reads = lists().length;
+
+    await user.click(within(line).getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(lists().length).toBeGreaterThan(reads);
+    });
   });
 
   it('shows each exception waiting: the request, sender, packages, recipient, why, who asked and when, and the hub', async () => {

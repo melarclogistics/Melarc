@@ -81,6 +81,8 @@ function open(handlers: Record<string, Handler> = {}, keys: readonly string[] = 
       {
         [STOP]: () => json(200, waitingStop(), etag('s1')),
         [REASONS]: () => json(200, CATALOGUE),
+        // The run the stop belongs to, read for its code (the way back names it).
+        [MANIFEST]: () => json(200, manifestFixture(), etag('m1')),
         ...handlers,
       },
     ),
@@ -141,6 +143,28 @@ describe('the skip: what the page says and asks', () => {
     await form();
 
     expect(screen.getByRole('heading', { level: 1, name: 'Skip a stop' })).toHaveFocus();
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): a way back that calls every run "The pickup run", so that an officer with two runs open cannot tell which this is.
+  it('names the pickup run by its code in the way back', async () => {
+    open();
+
+    const link = await screen.findByRole('link', { name: 'ACC-MF-Q92422' });
+    expect(link).toHaveAttribute('href', `/manifests/${MANIFEST_ID}`);
+    expect(screen.queryByRole('link', { name: 'The pickup run' })).toBeNull();
+    expect(link.closest('nav')).toHaveAccessibleName(/./);
+  });
+
+  // Break caught: a run that cannot be read taking the page down, or leaving a way back that goes nowhere: the words stay, and the form is as before.
+  it('says "The pickup run" in the way back when the run cannot be read, and the form is as before', async () => {
+    open({ [MANIFEST]: () => refusal(500, 'INTERNAL_ERROR') });
+
+    await form();
+    expect(await screen.findByRole('link', { name: 'The pickup run' })).toHaveAttribute(
+      'href',
+      `/manifests/${MANIFEST_ID}`,
+    );
+    expect(screen.getByRole('button', { name: 'Skip this stop' })).toBeVisible();
   });
 
   // Break caught: the skip offered as a way to clear a failed pickup, which is another permission's page.
@@ -289,7 +313,8 @@ describe('the skip: doing it', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'ACC-MF-Q92422' })).toBeVisible();
     expect(screen.getByText(/The stop is skipped and the vendor is told\./)).toBeVisible();
-    expect(sent(MANIFEST)).toHaveLength(1);
+    // Once on the skip page (the way back names the run by its code) and once more on arrival: the run is read again, and never kept from before the skip.
+    expect(sent(MANIFEST)).toHaveLength(2);
   });
 
   it.each([
