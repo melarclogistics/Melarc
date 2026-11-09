@@ -17,7 +17,6 @@ import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
-import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests` (`listPickupManifests`; S1.25; R7a). The pickup runs of the session's hubs, as the server lists them: oldest first, never filtered by

@@ -1201,7 +1201,7 @@ describe('the queue: the request beside it', () => {
       await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
 
       // The queue is being read again; the person moves to the filter.
-      const filter = screen.getByRole('button', { name: 'Filter', exact: true });
+      const filter = screen.getByRole('button', { name: 'Filter' });
       filter.focus();
       await reads.answer(page([pending, late]));
       await waitFor(() => {
