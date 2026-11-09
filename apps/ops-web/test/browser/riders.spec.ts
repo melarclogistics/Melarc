@@ -156,7 +156,7 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a person who cannot read the roster sees no entry for it, and is told which key the page needs', async ({
+  test('a person who cannot read the roster sees no entry for it, and is told what the account cannot do', async ({
     page,
   }) => {
     await open(page, '/admin/riders', { permissions: ['staff.read'] });

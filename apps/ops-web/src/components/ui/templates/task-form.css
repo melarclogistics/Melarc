@@ -106,7 +106,7 @@
   gap: var(--space-3) var(--space-4);
 }
 
-/* The rail stays in view while the sections scroll beside it (where the page has 60rem, which leaves the form 36rem; below that it follows them). */
+/* The rail stays in view while the sections scroll beside it, below the top bar (where the page has 60rem, which leaves the form 36rem; below that it follows them). */
 .ui-task-form__rail {
   min-width: 0;
 }
@@ -114,6 +114,6 @@
 @container task-form (min-width: 60rem) {
   .ui-task-form__rail {
     position: sticky;
-    top: var(--space-4);
+    top: var(--sticky-top);
   }
 }

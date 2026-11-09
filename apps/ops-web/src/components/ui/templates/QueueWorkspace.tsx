@@ -7,6 +7,7 @@ import { FilterBar, type FilterBarProps } from '../filter-bar/FilterBar';
 import { PageHeader, type PageHeaderProps } from '../page-header/PageHeader';
 import { Panel } from '../panel/Panel';
 import { SidePanel, type SidePanelProps } from '../side-panel/SidePanel';
+import { SHEET_QUERY, useMediaQuery } from '../side-panel/use-media-query';
 import { ViewTabs, type ViewTabsProps } from '../view-tabs/ViewTabs';
 import './queue-workspace.css';
 
@@ -142,7 +143,8 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
  * what a view counts, which acts are offered and what the server refused are the page's and the server's, and a figure that was not given is not drawn (never as 0).
  *
  * What it carries from the kit, so that a page does not wire it again: column priority (the table's own box narrows when the panel opens, so a column the page marked lesser
- * goes and the table never scrolls sideways at 1440px), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
+ * goes and the table never scrolls sideways at 1440px; with no panel beside it the cards take over where a column would go, so no fact is dropped where nothing else shows
+ * it), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
  * came from (`table.initialScroll`, `table.onScrollChange`, `table.focusRowId`), and the panel becoming a full-screen sheet at 768px and below. **Every state is told:** loading
  * (rows of the table's own shape), nothing yet, nothing that fits the filters, nothing at the chosen hub (with *Show all hubs*), a failure with a way to try again, and stale rows with
  * a way to read again.
@@ -176,6 +178,10 @@ export function QueueWorkspace<Item>({
   // and, once the layout has settled, focus that the swap dropped is put back (never focus the person has moved to a control of their own).
   const open = panel?.open === true;
   const wasOpen = useRef(false);
+  // A panel that is docked beside the table shows what the columns the page marked lesser would hold, so the table may drop them; with none (nothing is open, or the panel is the full-screen
+  // sheet of a tablet, which covers the table) nothing else shows them, and the table is cards where it would drop a column: every fact, as the old cards showed.
+  const sheet = useMediaQuery(SHEET_QUERY);
+  const docked = open && !sheet;
   useEffect(() => {
     if (open) {
       wasOpen.current = true;
@@ -203,6 +209,7 @@ export function QueueWorkspace<Item>({
   const grid = (
     <DataTable<Item>
       {...table}
+      crowded={table.crowded ?? (docked ? 'drop' : 'cards')}
       {...(onOpen === undefined
         ? {}
         : {

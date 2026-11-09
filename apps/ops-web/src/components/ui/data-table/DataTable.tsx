@@ -134,8 +134,14 @@ export interface DataTableProps<Item> {
    * table at every width and scrolls sideways.
    */
   readonly card?: (item: Item) => ReactNode;
-  /** `auto` (the default) draws cards when the table's own box is under 40rem; `table` and `cards` fix it, for a screen that knows better and for a test. */
+  /** `auto` (the default) draws cards when the table's own box is under 40rem (see `crowded`); `table` and `cards` fix it, for a screen that knows better and for a test. */
   readonly layout?: 'auto' | 'table' | 'cards';
+  /**
+   * What an `auto` table does when its box is too narrow for every column, which is under 64rem for one that has columns the screen marked lesser (`priority`): `drop` (the default) keeps the
+   * table and takes those columns away, which is right where what they hold is at hand beside the table (a panel that shows the record is open); `cards` draws the cards instead, which
+   * show every fact, which is right where nothing else does (the review of 5edada2, M6: no fact the old cards showed is lost). Without `card` there are no cards and the columns drop.
+   */
+  readonly crowded?: 'drop' | 'cards';
 
   /** Rows that changed since the last read: each is highlighted and the highlight fades over `motion.highlight`. A cue for the eye only: say it in words where it matters. */
   readonly changedIds?: readonly string[];
@@ -196,8 +202,30 @@ export function RowTitle({ code, name }: RowTitleProps) {
 /** Under this width of the table's own box, in rem (so that enlarged text turns the table into cards sooner), the rows are drawn as cards. */
 export const CARDS_BELOW_REM = 40;
 
+/** At this width of the table's own box and under, in rem, the first of the columns the screen marked lesser goes (the stylesheet's first container query). */
+export const COLUMNS_GO_AT_REM = 64;
+
+/**
+ * Whether a table whose box is `widthRem` wide is drawn as cards. By default that is under `CARDS_BELOW_REM`. A table that has lesser columns and is `crowded: 'cards'` takes the cards as soon as
+ * its first lesser column would go, so that a fact is never dropped where nothing else shows it.
+ */
+export function drawsCards(
+  widthRem: number,
+  crowded: 'drop' | 'cards',
+  hasLesserColumns: boolean,
+): boolean {
+  return crowded === 'cards' && hasLesserColumns
+    ? widthRem <= COLUMNS_GO_AT_REM
+    : widthRem < CARDS_BELOW_REM;
+}
+
 /** Whether the table's box is narrow enough for cards: measured as the box changes, and left as it was where nothing can be measured (no layout, a hidden box). */
-function useNarrow(root: RefObject<HTMLDivElement | null>, layout: 'auto' | 'table' | 'cards') {
+function useNarrow(
+  root: RefObject<HTMLDivElement | null>,
+  layout: 'auto' | 'table' | 'cards',
+  crowded: 'drop' | 'cards',
+  hasLesserColumns: boolean,
+) {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const element = root.current;
@@ -206,7 +234,7 @@ function useNarrow(root: RefObject<HTMLDivElement | null>, layout: 'auto' | 'tab
       const width = element.clientWidth;
       if (width === 0) return;
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      setNarrow(width < CARDS_BELOW_REM * rem);
+      setNarrow(drawsCards(width / rem, crowded, hasLesserColumns));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -214,7 +242,7 @@ function useNarrow(root: RefObject<HTMLDivElement | null>, layout: 'auto' | 'tab
     return () => {
       observer.disconnect();
     };
-  }, [root, layout]);
+  }, [root, layout, crowded, hasLesserColumns]);
   return layout === 'cards' ? true : layout === 'table' ? false : narrow;
 }
 
@@ -248,6 +276,7 @@ export function DataTable<Item>({
   rowAction,
   card,
   layout = 'auto',
+  crowded = 'drop',
   changedIds,
   sort,
   onSortChange,
@@ -268,7 +297,8 @@ export function DataTable<Item>({
   const root = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
-  const narrow = useNarrow(root, layout);
+  const hasLesserColumns = columns.some((column) => (column.priority ?? 1) > 1);
+  const narrow = useNarrow(root, layout, crowded, hasLesserColumns);
   const cards = card !== undefined && narrow;
   /** The controls of each row, found again when focus is to be put on one: the arrows land on its button that opens it, else its checkbox, else its action. */
   const controls = useRef(

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
-import { DataTable, RowTitle, type DataColumn, type DataTableProps } from './DataTable';
+import { DataTable, drawsCards, RowTitle, type DataColumn, type DataTableProps } from './DataTable';
 
 interface Request {
   readonly id: string;
@@ -1123,5 +1123,24 @@ describe('DataTable: cards where the table is narrow (task R5.2, M12)', () => {
     view.rerender(<Table card={cardOf} layout="table" />);
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+  });
+});
+
+describe('DataTable: the room a table has (the review of 5edada2, M6)', () => {
+  // Break caught: a queue with nothing beside it that drops the columns it marked lesser, so that at 768px it shows less than the cards it replaced did; and the other way, a queue with
+  // a panel open beside it that turns to cards at once, which hides the table the panel was opened beside.
+  it('is cards at the width where a lesser column would go, when nothing beside it shows what the column holds', () => {
+    expect(drawsCards(45, 'cards', true)).toBe(true);
+    expect(drawsCards(64, 'cards', true)).toBe(true);
+    expect(drawsCards(64.5, 'cards', true)).toBe(false);
+    expect(drawsCards(45, 'drop', true)).toBe(false);
+    expect(drawsCards(44, 'drop', true)).toBe(false);
+  });
+
+  it('keeps the old width for the cards when there is no lesser column to drop, and when the columns may drop', () => {
+    expect(drawsCards(45, 'cards', false)).toBe(false);
+    expect(drawsCards(39.9, 'cards', false)).toBe(true);
+    expect(drawsCards(39.9, 'drop', true)).toBe(true);
+    expect(drawsCards(40, 'drop', true)).toBe(false);
   });
 });

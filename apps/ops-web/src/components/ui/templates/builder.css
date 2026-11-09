@@ -36,9 +36,38 @@
     grid-template-columns: minmax(0, 1fr) 24rem;
   }
 
+  /*
+   * The run stays in view beside the pool, **below the top bar** (`--sticky-top`, base.css), and is bounded to the room the window has there (`--sticky-room`): its card is a column
+   * whose body scrolls inside it (the rows chosen and the entries the run asks for beside them, such as a reason for each carried-over request), and its actions stay at the foot
+   * of the card, so that the one Create and the reasons are always in reach however long the run is.
+   */
   .ui-builder__run {
     position: sticky;
-    top: var(--space-4);
+    top: var(--sticky-top);
+    display: flex;
+    flex-direction: column;
+    max-height: var(--sticky-room);
+  }
+
+  .ui-builder__run > .ui-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ui-builder__run .ui-panel__body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* The room around what scrolls is the ring's: a focus ring at the edge of a box that scrolls would be cut. */
+  .ui-builder__run-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: calc(-1 * var(--space-2));
+    padding: var(--space-2);
+    overflow-y: auto;
   }
 
   /* Beside the pool the run is in view: the way to jump to it is only for the one-column layout. */
@@ -80,11 +109,6 @@
   font-size: var(--text-heading-sm-size);
   font-weight: var(--text-heading-sm-weight);
   line-height: var(--text-heading-sm-line-height);
-}
-
-.ui-builder__run-title:focus-visible {
-  outline: var(--focus-width) solid var(--focus-ring);
-  outline-offset: var(--focus-offset-width);
 }
 
 .ui-builder__summary {

@@ -97,11 +97,22 @@ function Dash({ means }: { readonly means: string }) {
   );
 }
 
-/** Two facts that belong together, the first as it is and the second quieter beneath it. */
-function Pair({ first, second }: { readonly first: string; readonly second: string }) {
+/**
+ * Two facts that belong together, the first as it is and the second quieter beneath it. Both wrap at their words, a long address and a long booking type alike; `oneLine` keeps the first
+ * to a line (a count is never broken in the middle).
+ */
+function Pair({
+  first,
+  second,
+  oneLine = false,
+}: {
+  readonly first: string;
+  readonly second: string;
+  readonly oneLine?: boolean;
+}) {
   return (
     <span className="pickup-lines">
-      <span>{first}</span>
+      <span className={oneLine ? 'pickup-nowrap' : undefined}>{first}</span>
       <span className="pickup-support">{second}</span>
     </span>
   );
@@ -149,7 +160,7 @@ export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
     id: 'packages',
     header: 'Packages / booking type',
     priority: 3,
-    cell: (row) => <Pair first={row.packages} second={row.bookedAs} />,
+    cell: (row) => <Pair first={row.packages} second={row.bookedAs} oneLine />,
   },
   { id: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
 ];

@@ -130,7 +130,7 @@ test.describe('moving through the screens', () => {
     await expect(page.getByText('Choose a person first')).toBeVisible();
   });
 
-  test('a person who cannot read staff sees no entry for it, and is told which key the page needs', async ({
+  test('a person who cannot read staff sees no entry for it, and is told what the account cannot do', async ({
     page,
   }) => {
     await open(page, '/admin/staff', {

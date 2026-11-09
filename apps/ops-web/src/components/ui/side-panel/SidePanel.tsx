@@ -6,11 +6,8 @@ import { IconButton } from '../icon-button/IconButton';
 import { Link } from '../link/Link';
 import { AnimatePresence, motion, useMotion } from '../motion/motion';
 import { InSidePanel } from './side-panel-context';
-import { useMediaQuery } from './use-media-query';
+import { SHEET_QUERY, useMediaQuery } from './use-media-query';
 import './side-panel.css';
-
-/** At this width and below the panel is a full-screen sheet: the tablet, and the phone (768px is `breakpoint.md`, in rem). */
-const SHEET_QUERY = '(max-width: 48rem)';
 
 export interface SidePanelProps {
   readonly open: boolean;

@@ -410,6 +410,166 @@ test.describe('the queue, drawn for the room it has', () => {
   }
 });
 
+/**
+ * The parts that stay in view, the long text and the room the queue has (run 4, Stage 2; the review of 5edada2, M2, M5 and M6). Forty requests make the queue taller than the window.
+ */
+/** The characters an operational code is made of: none that can be confused when read aloud (no 0, 1, I, L or O). */
+const CODE_CHARACTERS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const TALL = Array.from({ length: 40 }, (_, index) =>
+  pickup({
+    id: `5e0b0000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    code: `ACC-PR-${CODE_CHARACTERS.charAt(index % 31)}${CODE_CHARACTERS.charAt(Math.floor(index / 31))}22QX`,
+    scheduled_service_date: '2026-11-03',
+  }),
+);
+
+/** What in the queue is wider than its own box: a cell, a card or the box of the rows itself, cut off or scrolling where its words should wrap. */
+function overflowingInQueue(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        '.ui-data-table__scroller, .ui-data-table__scroller th, .ui-data-table__scroller td, .ui-data-table__card',
+      ),
+    ]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => element.scrollWidth > element.clientWidth + 1)
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} ${(element.textContent ?? '').trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
+      ),
+  );
+}
+
+/** What in the queue is cut off with an ellipsis: nothing that is a name, an address or a note may be. */
+function ellipsisedInQueue(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.ui-data-table__scroller *')]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => getComputedStyle(element).textOverflow === 'ellipsis')
+      .map((element) => (element.textContent ?? '').trim().slice(0, 30)),
+  );
+}
+
+test.describe('the queue: the parts that stay in view, long text and the room it has', () => {
+  // Break caught: a panel that sticks 16px from the top of the window, under the sticky top bar, so that its header (the code, "Open full page", the close button) is covered once the
+  // queue has scrolled; and a panel taller than the room below the bar, whose last act cannot be reached.
+  test('keeps the panel below the top bar and whole in the window while the queue scrolls, its last act in reach', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await open(page, '/pickup-requests', { requests: TALL });
+    const code = TALL[0]?.code ?? '';
+    await opener(page, code).click();
+    const panel = page.getByRole('dialog', { name: code });
+    await expect(panel).toBeVisible();
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+
+    const bar = await page.getByRole('banner').boundingBox();
+    const box = await panel.boundingBox();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    expect(barBottom).toBeGreaterThan(40);
+    // Its top is not under the bar, and the whole of it is in the window.
+    expect(box?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(640 + 1);
+    await expect(panel.getByRole('link', { name: 'Open full page' })).toBeInViewport({ ratio: 1 });
+    await expect(panel.getByRole('button', { name: 'Close the panel' })).toBeInViewport({
+      ratio: 1,
+    });
+    // The act of the panel is reached by scrolling the panel, never by scrolling the page out from under it.
+    const confirm = panel.getByRole('button', { name: 'Confirm pickup' });
+    await confirm.scrollIntoViewIfNeeded();
+    await expect(confirm).toBeInViewport({ ratio: 1 });
+    const after = await confirm.boundingBox();
+    expect(after?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+  });
+
+  // Break caught (the review of 5edada2, M5): a cell that never wraps, so that a long address or a long name runs out of its box, is cut with an ellipsis or makes the box scroll sideways
+  // (the old table's guards, which run 3 removed): the text is on the page whole, in the box it has, at every width and with the panel open.
+  for (const size of [WIDE, { width: 1280, height: 800 }, { width: 768, height: 1024 }]) {
+    test(`wraps a long address, name and note whole, and never cuts it off or scrolls the box sideways, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests', longWorld());
+
+      const address = page.getByText(LONG_ADDRESS).locator('visible=true');
+      await expect(address).toHaveCount(2);
+      await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
+      expect(await overflowingInQueue(page)).toEqual([]);
+      expect(await ellipsisedInQueue(page)).toEqual([]);
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      // Wrapped, not truncated: the address takes more than one line and the box holds it.
+      const box = await address.first().boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThan(30);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
+    });
+  }
+
+  test('keeps a long name and address whole with a request open beside the queue', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests', longWorld());
+    await opener(page, CODE).click();
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+
+    await expect(page.getByText(LONG_SENDER).locator('visible=true').first()).toBeVisible();
+    expect(await overflowingInQueue(page)).toEqual([]);
+    expect(await ellipsisedInQueue(page)).toEqual([]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (the review of 5edada2, M6): a queue with nothing beside it that drops the columns it marked lesser, so that at 768px it showed less than the cards it replaced.
+  test('draws cards with every fact at 768px with no request open, where the table would drop columns', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/pickup-requests');
+
+    const cards = queueCards(page);
+    await expect(cards).toBeVisible();
+    await expect(queueTable(page)).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    for (const fact of [
+      CODE,
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+      'Accra Central',
+      '3 packages',
+      'A vendor’s own packages',
+    ]) {
+      await expect(first).toContainText(fact);
+    }
+  });
+
+  test('keeps the table, without its lesser columns, with a request open beside it at 1440px', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    await expect(queueTable(page)).toBeVisible();
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Service date' }),
+    ).toBeVisible();
+
+    await opener(page, CODE).click();
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+
+    // What the columns of lesser weight hold is in the panel, so the table gives them up and does not scroll sideways.
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueTable(page).getByRole('columnheader', { name: 'State' })).toBeVisible();
+    await expect(queueTable(page).getByRole('columnheader', { name: 'Service date' })).toHaveCount(
+      0,
+    );
+    expect(await overflowingInQueue(page)).toEqual([]);
+  });
+});
+
 const LIST = /\/api\/v1\/pickup-requests(\?.*)?$/;
 
 /** Opens the queue with its read answered by `answer` instead of by the stand-in: a failure, a refusal, or an answer that never comes. */

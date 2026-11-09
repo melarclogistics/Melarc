@@ -8,6 +8,7 @@ import {
   checkTokenFile,
   documentedTokens,
   failingPairings,
+  FOCUS_EXCEPTIONS,
   focusRulesWithoutOutline,
   parseCustomProperties,
   parseThemes,
@@ -716,6 +717,48 @@ describe('colours and focus in the application sources', () => {
     assert.equal(probe('.x:focus-visible { outline: none; }').length, 1);
     assert.equal(probe('.x:focus:not(:focus-visible) { outline: none; }').length, 0);
     assert.equal(probe('.x { outline: 2px solid var(--focus-ring); }').length, 0);
+  });
+
+  // Break caught: the review of 5edada2 (8 November 2026) asked that a heading that takes focus so that focus lands on what is new draw no ring, and that the date field draw one ring and
+  // not two. Each is one named rule with its exact selector: the exception is neither a pattern that a control could fall under nor a rule that is missing from the styles it is named for.
+  it('allow the named exceptions to the ring, by their exact selectors, and no rule like them', () => {
+    const probe = (text: string): string[] => outlineRemovalProblems([{ path: 'a.css', text }]);
+    const noRing = (selector: string): string => `${selector} { outline: none; box-shadow: none; }`;
+    assert.equal(FOCUS_EXCEPTIONS.length, 2);
+    for (const exception of FOCUS_EXCEPTIONS) {
+      assert.deepEqual(probe(noRing(exception.selector)), [], exception.selector);
+      assert.deepEqual(
+        focusRulesWithoutOutline([{ path: 'a.css', text: noRing(exception.selector) }]),
+        [],
+        exception.selector,
+      );
+      assert.ok(exception.reason.length > 40, `${exception.selector} says why it is an exception`);
+    }
+    // What is not them: the same removal by another selector, for a heading with a class, a bare focus target, a control, or the heading rule with another state.
+    for (const selector of [
+      'h2:focus',
+      "[tabindex='-1']:focus",
+      '.ui-side-panel__heading:focus-visible',
+      ":is(h1, h2, h3, h4, h5, h6)[tabindex='-1']:focus-visible",
+      ":is(h1, h2)[tabindex='-1']:focus",
+      '.ui-date-picker__button:focus-visible',
+      '.ui-date-picker__input',
+      '.ui-input:focus-visible',
+    ]) {
+      assert.equal(probe(noRing(selector)).length, 1, `${selector} is not an exception`);
+    }
+    // The exceptions are in the styles they are named for, so that one that has gone is not left allowed.
+    const styles = applicationSources()
+      .filter((file) => file.path.endsWith('.css'))
+      .map((file) => file.text)
+      .join('\n')
+      .replace(/\s+/g, ' ');
+    for (const exception of FOCUS_EXCEPTIONS) {
+      assert.ok(
+        styles.includes(`${exception.selector} {`),
+        `no stylesheet has ${exception.selector}`,
+      );
+    }
   });
 
   // Break caught: a mistyped token name. CSS gives `var(--color-text-prmary)` no value and no error, so the text

@@ -8,7 +8,8 @@
   flex-direction: column;
   box-sizing: border-box;
   width: clamp(22.5rem, 28vw, 26.25rem);
-  max-height: calc(100dvh - 2rem);
+  /* The room below the top bar (base.css): the header stays where it is and the body scrolls inside, so the panel's last act is always in reach. */
+  max-height: var(--sticky-room, calc(100dvh - 2rem));
   overflow: hidden;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
@@ -26,17 +27,12 @@
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-/* The code is the heading: 18px, in the monospaced face by the code's own rule. It takes focus when the panel opens, and shows no ring for it: it is not a control. */
+/* The code is the heading: 18px, in the monospaced face by the code's own rule. It takes focus when the panel opens, and shows no ring for it: it is not a control (the named exception of base.css). */
 .ui-side-panel__heading {
   margin: 0;
   font-size: var(--text-heading-sm-size);
   font-weight: var(--text-heading-sm-weight);
   line-height: var(--text-heading-sm-line-height);
-}
-
-.ui-side-panel__heading:focus-visible {
-  outline: var(--focus-width) solid var(--focus-ring);
-  outline-offset: var(--focus-offset-width);
 }
 
 .ui-side-panel__status {

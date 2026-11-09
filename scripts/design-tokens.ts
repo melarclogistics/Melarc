@@ -535,9 +535,31 @@ export function rawColourProblems(files: readonly SourceFile[], tokenFile: strin
 }
 
 /**
+ * The named exceptions to the ring (the Product Owner's review of 5edada2, 8 November 2026): each is the exact selector of the one rule that may take a ring away, and why. A rule that
+ * removes a ring by any other selector is reported, and a rule that styles focus with no ring is reported unless it is one of these.
+ */
+export const FOCUS_EXCEPTIONS: readonly { readonly selector: string; readonly reason: string }[] = [
+  {
+    selector: ":is(h1, h2, h3, h4, h5, h6)[tabindex='-1']:focus",
+    reason:
+      'a heading given tabindex="-1" so that focus lands on what is new is not a control: nothing is pressed on it, so it draws no ring (base.css)',
+  },
+  {
+    selector: '.ui-date-picker__input:focus-visible',
+    reason:
+      "the text of the date field: the field's box draws the one ring (`:has(.ui-date-picker__input:focus-visible)`), and a second inside the first is what the rule avoids (date-picker.css)",
+  },
+];
+
+/** Whether a rule's selector, as written, is one of the named exceptions. */
+const isFocusException = (selector: string): boolean =>
+  FOCUS_EXCEPTIONS.some((exception) => exception.selector === selector);
+
+/**
  * An outline removed by any rule. The global `:focus-visible` rule draws the ring, and a component rule of the same
  * specificity that loads later (`.ui-input { outline: none }`) would silently take it away, so no rule may. Only the
- * mouse-only pattern `:focus:not(:focus-visible)` may, because the keyboard ring stays.
+ * mouse-only pattern `:focus:not(:focus-visible)` may, because the keyboard ring stays, and the rules named in
+ * `FOCUS_EXCEPTIONS`.
  */
 export function outlineRemovalProblems(files: readonly SourceFile[]): string[] {
   const problems: string[] = [];
@@ -547,7 +569,7 @@ export function outlineRemovalProblems(files: readonly SourceFile[]): string[] {
     for (const match of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const selector = (match[1] ?? '').trim().replace(/\s+/g, ' ');
       const body = match[2] ?? '';
-      if (selector.includes(':focus:not(:focus-visible)')) continue;
+      if (selector.includes(':focus:not(:focus-visible)') || isFocusException(selector)) continue;
       if (/\boutline(?:-style)?\s*:\s*(?:none|0)(?![\w.%-])/i.test(body)) {
         problems.push(`${path}: "${selector}" removes the outline`);
       }
@@ -663,9 +685,10 @@ export function focusRulesWithoutOutline(files: readonly SourceFile[]): string[]
   for (const { path, text } of files) {
     const code = text.replace(/\/\*[\s\S]*?\*\//g, '');
     for (const match of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      const selector = match[1]?.trim() ?? '';
+      const selector = (match[1]?.trim() ?? '').replace(/\s+/g, ' ');
       const body = match[2] ?? '';
       if (!/:focus(-visible)?\b/.test(selector) || selector.includes(':focus-within')) continue;
+      if (isFocusException(selector)) continue;
       // `outline` or `outline-style` with a value that draws something: an offset alone draws nothing, and `none` or `0`
       // removes the ring.
       if (!/\boutline(?:-style)?\s*:\s*(?!none\b|0\s*[;}]|0\s*$)[^;}\s]/.test(body)) {

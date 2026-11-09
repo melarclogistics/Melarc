@@ -36,6 +36,16 @@ p {
   box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
 }
 
+/*
+ * The one named exception to the ring (`FOCUS_EXCEPTIONS` in scripts/design-tokens.ts, held by scripts/design-tokens.test.ts): a heading given `tabindex="-1"` so that focus can land
+ * on what is new (the title of a page after a move, the code of a record, the heading of a panel) is not a control. Nothing is pressed on it, so it draws no ring; anything else that
+ * takes focus, a control or a region that scrolls, keeps the ring above.
+ */
+:is(h1, h2, h3, h4, h5, h6)[tabindex='-1']:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .skip-link {
   position: absolute;
   top: -4rem;
@@ -171,6 +181,17 @@ p {
  */
 html:has(.app-frame--sidebar) {
   scroll-padding-top: calc(var(--topbar-measured-height, var(--topbar-height)) + var(--space-2));
+}
+
+/*
+ * Where a part of a page that sticks to the top of the window stops (the panel beside a queue, the run of a builder, the summary of a form): under the top bar, as it is
+ * measured above, and a space below it, so that it never slides under the bar (the review of 5edada2, M2). `--sticky-room` is the height such a part may have: the window
+ * below that offset, less a space at the foot. A part taller than its room scrolls inside itself and is never cut at the bottom of the window. These are derived from the tokens
+ * and give no new value, which is why they are here and not in the token file.
+ */
+:root {
+  --sticky-top: calc(var(--topbar-measured-height, var(--topbar-height)) + var(--space-4));
+  --sticky-room: calc(100dvh - var(--sticky-top) - var(--space-4));
 }
 
 /*

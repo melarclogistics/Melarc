@@ -109,6 +109,10 @@ const chosenOf = (request: PickupRequestView): Chosen => ({
 const isFinishedDate = (date: string | null): date is string =>
   date !== null && calendarDateOf(date) !== undefined && Number(date.slice(0, 4)) >= 1000;
 
+/**
+ * The pool's columns: **none is marked lesser** (the review of 5edada2, M6). Nothing stands beside the pool that shows what a request holds (the run lists only what was chosen), so the
+ * pool keeps the address and the count where the room is the pool's beside the run at 1440px, and wraps what is long; it is the cards, with every fact, where it is too narrow for the columns.
+ */
 const POOL_COLUMNS = (
   isCarriedOver: (promised: string) => boolean,
   hubs: readonly { readonly id: string; readonly display_name: string }[],
@@ -134,7 +138,6 @@ const POOL_COLUMNS = (
   {
     id: 'where',
     header: 'Pickup address / hub',
-    priority: 2,
     cell: (row) => (
       <span className="manifest-lines">
         <span>{row.resolved_pickup_location?.address ?? NOT_RECORDED}</span>
@@ -142,7 +145,11 @@ const POOL_COLUMNS = (
       </span>
     ),
   },
-  { id: 'packages', header: 'Packages', priority: 3, cell: (row) => packagesText(row) },
+  {
+    id: 'packages',
+    header: 'Packages',
+    cell: (row) => <span className="manifest-nowrap">{packagesText(row)}</span>,
+  },
 ];
 
 /** A request of the pool as a card, for a pool too narrow for the columns: the table draws the card's one control (the box that chooses it), so the card holds none. */

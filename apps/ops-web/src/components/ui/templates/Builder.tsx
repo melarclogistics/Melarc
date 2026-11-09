@@ -215,21 +215,23 @@ export function Builder({
             </section>
             <section className="ui-builder__run" aria-labelledby={`${runId}-run`}>
               <Panel variant="page">
-                <h2
-                  id={`${runId}-run`}
-                  ref={runHeading}
-                  tabIndex={-1}
-                  className="ui-builder__run-title"
-                >
-                  {panes.run.title}
-                </h2>
-                <p role="status" className="ui-builder__summary">
-                  {panes.run.summary}
-                </p>
-                {panes.run.totals === undefined ? null : (
-                  <DescriptionList items={panes.run.totals} />
-                )}
-                {panes.run.children}
+                <div className="ui-builder__run-body">
+                  <h2
+                    id={`${runId}-run`}
+                    ref={runHeading}
+                    tabIndex={-1}
+                    className="ui-builder__run-title"
+                  >
+                    {panes.run.title}
+                  </h2>
+                  <p role="status" className="ui-builder__summary">
+                    {panes.run.summary}
+                  </p>
+                  {panes.run.totals === undefined ? null : (
+                    <DescriptionList items={panes.run.totals} />
+                  )}
+                  {panes.run.children}
+                </div>
                 <div className="ui-builder__actions">{panes.run.actions}</div>
               </Panel>
             </section>

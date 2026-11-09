@@ -26,10 +26,13 @@
   min-width: 0;
 }
 
-/* The panel stays in view while the queue scrolls beside it: it scrolls inside itself (its own height is bounded by the viewport). */
+/*
+ * The panel stays in view while the queue scrolls beside it, **below the top bar** (`--sticky-top`, base.css) and never past the foot of the window: its own height is bounded
+ * (`--sticky-room`, side-panel.css), and what it holds scrolls inside it, under its header.
+ */
 .ui-queue-workspace__aside {
   position: sticky;
-  top: var(--space-4);
+  top: var(--sticky-top);
 }
 
 /* The views sit inside the page card with its padding; the table beneath them runs to the card's edges. */

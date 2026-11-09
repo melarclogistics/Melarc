@@ -1,8 +1,8 @@
 /*
  * DatePicker (design/COMPONENT_PATTERNS.md section 22a): one text field for DD/MM/YYYY and a calendar button, in the portal's look, with the calendar of the
  * shadcn/ui primitives in a popover. The control is the Input's recipe (DESIGN_SYSTEM section 4.6): its boundary is border.control, 3:1 on every light surface,
- * and its height is a minimum in rem so enlarged text grows it. Every colour, size, space and time comes from tokens.css. Focus is the global ring of base.css, on
- * each part that takes it: the field, the calendar button and a day.
+ * and its height is a minimum in rem so enlarged text grows it. Every colour, size, space and time comes from tokens.css. Focus is the global ring of base.css on the
+ * calendar button and on a day, and one ring on the field's box for its text (below).
  */
 .ui-date-picker {
   display: block;
@@ -70,6 +70,21 @@
   color: inherit;
   font: inherit;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * One ring, on the box that looks like the field, when its text takes focus: the text draws none of its own inside the box (a second ring inside the first; one of the two named
+ * exceptions to the ring, `FOCUS_EXCEPTIONS` in scripts/design-tokens.ts). The calendar button is a control of its own and keeps the global ring.
+ */
+.ui-date-picker__control:has(.ui-date-picker__input:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
+}
+
+.ui-date-picker__input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* The muted text colour is for the default surface only (DESIGN_SYSTEM section 4.6); a read-only date is on the subtle one, where the secondary text reads. */

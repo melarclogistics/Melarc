@@ -121,6 +121,8 @@ test.describe('the date field in a browser: keyboard and pointer', () => {
 
 interface FocusRing {
   readonly name: string;
+  /** What the focused element itself draws: for the field's text, nothing (its box draws the one ring). */
+  readonly ownOutlineStyle: string;
   readonly outlineStyle: string;
   readonly outlineWidth: number;
   readonly outlineOffset: number;
@@ -132,7 +134,11 @@ async function focusRing(page: Page): Promise<FocusRing | null> {
   return page.evaluate(() => {
     const element = document.activeElement;
     if (element === null || element === document.body) return null;
-    const style = getComputedStyle(element);
+    // The text of the field draws no ring inside the box: the box draws one (the review of 5edada2: one ring, not two), so its ring is the one read.
+    const box = element.classList.contains('ui-date-picker__input')
+      ? element.closest('.ui-date-picker__control')
+      : null;
+    const style = getComputedStyle(box ?? element);
     const probe = document.createElement('span');
     probe.style.color = 'var(--focus-ring)';
     document.body.append(probe);
@@ -145,6 +151,7 @@ async function focusRing(page: Page): Promise<FocusRing | null> {
         element.getAttribute('placeholder') ??
         element.textContent
       ).trim(),
+      ownOutlineStyle: getComputedStyle(element).outlineStyle,
       outlineStyle: style.outlineStyle,
       outlineWidth: parseFloat(style.outlineWidth),
       outlineOffset: parseFloat(style.outlineOffset),
@@ -155,8 +162,8 @@ async function focusRing(page: Page): Promise<FocusRing | null> {
 }
 
 test.describe('the date field in a browser: focus and accessibility', () => {
-  // Break caught: a stop of the date a keyboard user reaches with no visible focus, or with a ring other than the design system's. (The earlier control had three stops before
-  // the button, one for each of day, month and year; this one has the field.)
+  // Break caught: a stop of the date a keyboard user reaches with no visible focus, or with a ring other than the design system's, or with two rings, one inside the other. (The earlier
+  // control had three stops before the button, one for each of day, month and year; this one has the field.)
   test('Tab walks the field and the calendar button, each with the specified focus ring', async ({
     page,
   }) => {
@@ -172,6 +179,9 @@ test.describe('the date field in a browser: focus and accessibility', () => {
     }
 
     expect(stops.map((stop) => stop.name)).toEqual(['dd/mm/yyyy', 'Calendar']);
+    // One ring on the field: its box draws it, and the text inside draws none (a second ring inside the first); the button is a control of its own and draws its own.
+    expect(stops[0]?.ownOutlineStyle).toBe('none');
+    expect(stops[1]?.ownOutlineStyle).toBe('solid');
     for (const stop of stops) {
       expect(stop.outlineStyle, stop.name).toBe('solid');
       expect(stop.outlineWidth, stop.name).toBe(2);

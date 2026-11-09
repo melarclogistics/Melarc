@@ -233,6 +233,64 @@ test.describe('building a manifest', () => {
   });
 });
 
+test.describe('the builder in a short window (run 4, Stage 2; the review of 5edada2, M2 and M6)', () => {
+  // Break caught: the run beside the pool sticking 16px from the top of the window, under the sticky top bar, and a run taller than the room below it, so that its Create and the reasons
+  // of the carried-over requests cannot be reached.
+  test('keeps the run below the top bar and whole in the window, with its reasons and its Create in reach', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 520 });
+    await open(page, '/manifests/new');
+    for (const code of ['ACC-PR-9WXH4T', 'ACC-PR-7KQ2MZ', 'ACC-PR-ZYU26H']) {
+      await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
+    }
+    await typeDate(page, '04112026');
+    const reason = page.getByRole('combobox', { name: /Why it is carried over/ });
+    await expect(reason.first()).toBeVisible();
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+
+    const bar = await page.getByRole('banner').boundingBox();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    const run = await page.getByRole('region', { name: 'Review' }).boundingBox();
+    expect(barBottom).toBeGreaterThan(40);
+    expect(run?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+    expect((run?.y ?? 0) + (run?.height ?? 0)).toBeLessThanOrEqual(520 + 1);
+
+    // The Create is at the foot of the run and in the window at once, however many requests are chosen: the rows scroll inside the run, the actions do not.
+    const create = page.getByRole('button', { name: /^Create the / });
+    await expect(create).toBeInViewport({ ratio: 1 });
+    const button = await create.boundingBox();
+    expect(button?.y ?? 0).toBeGreaterThanOrEqual(barBottom);
+    // And a reason is reached by scrolling the run, with the Create still in view.
+    await reason.first().scrollIntoViewIfNeeded();
+    await expect(reason.first()).toBeInViewport({ ratio: 1 });
+    await expect(create).toBeInViewport({ ratio: 1 });
+  });
+
+  // Break caught: the pool dropping its address and its count beside the run, where nothing else shows them: the choice is made on what a request holds.
+  test('shows the address and the count of each request in the pool at 1440px, wrapped and whole', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/manifests/new');
+
+    await expect(poolTable(page)).toBeVisible();
+    await expect(
+      poolTable(page).getByRole('columnheader', { name: 'Pickup address / hub' }),
+    ).toBeVisible();
+    await expect(poolTable(page).getByRole('columnheader', { name: 'Packages' })).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? 0 : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(1);
+  });
+});
+
 test.describe('ordering, assigning and dispatching a run', () => {
   // Break caught: a reordering control that works with a pointer alone, or whose focus is lost with every move.
   test('moves a stop by the keyboard alone, keeping focus on it, and saves the whole order', async ({

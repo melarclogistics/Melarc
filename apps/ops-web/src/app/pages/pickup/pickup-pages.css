@@ -181,7 +181,7 @@
   line-height: var(--text-label-md-line-height);
 }
 
-/* A code, a date: a short line in a table that scrolls sideways rather than breaks in the middle. */
+/* A code, a date, a count: a short line that is never broken in the middle (the other words of a table's cell wrap, and the row grows to hold them). */
 .pickup-nowrap {
   white-space: nowrap;
 }
@@ -190,45 +190,6 @@
 .pickup-lines {
   display: grid;
   gap: var(--space-1);
-}
-
-/*
- * The queue's table: six columns that keep their places from one page of requests to the next (a fixed layout), where a long address or note
- * wraps in its own column and never takes the room of the others. The widths follow `QUEUE_COLUMNS` in order (pickup-queue-view.tsx) and add up
- * to 100%. They are tuned to the narrowest room the table is drawn in (64rem, queue-table.css), where "Packages / booking type", the longest
- * header, still fits its column, a code and a date keep to a line, and "Late booking to decide" fits the last. A header may wrap if a font
- * is wider than the one measured.
- */
-.pickup-queue .ui-table__table {
-  table-layout: fixed;
-}
-
-.pickup-queue .ui-table__table thead th {
-  white-space: normal;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(1) {
-  width: 15%;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(2) {
-  width: 14%;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(3) {
-  width: 14%;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(4) {
-  width: 19%;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(5) {
-  width: 19%;
-}
-
-.pickup-queue .ui-table__table thead th:nth-child(6) {
-  width: 19%;
 }
 
 /* A second line under the first, quieter: the sender under the code, the hub under the address, the booking type under the packages. */

@@ -36,6 +36,8 @@
   container-type: inline-size;
   container-name: ui-data-table;
   overflow: auto;
+  /* The box does not move what is in view when rows come and go above it: a read that keeps its rows and a row that changes must not shift the one the person is on by a line (the review of 5edada2: a measured height of 199 for 200 under load). */
+  overflow-anchor: none;
   background: var(--color-surface-default);
   scroll-padding-block-start: var(--density-row-compact);
 }
@@ -65,9 +67,15 @@
   vertical-align: middle;
 }
 
-/* A row is one line (or two, a code over a name): what does not fit is reached by scrolling the box sideways, not by wrapping into a taller row. */
+/*
+ * A cell wraps where its words do (an address, a name, what a request needs) and the row grows to hold the lines, so that no word is cut off and none is left to a tooltip: the
+ * text is on the page whole (the review of 5edada2, M5). A code, a date and a count keep to a line: the screen marks them (`white-space: nowrap` on the span that holds them).
+ * A cell's own height is its density's at least, and its words have room above and below them when they take more than one line. (The row-header cell, which holds the button
+ * that opens the row, is not padded: the button is the row's height and takes the room itself, below.)
+ */
 .ui-data-table__table tbody td {
-  white-space: nowrap;
+  padding-block: var(--space-2);
+  white-space: normal;
 }
 
 .ui-data-table__table thead th {
@@ -129,7 +137,8 @@
   /* The cell's own bottom border is part of the row's height, so the button is a pixel shorter than the row: a row is exactly the height of its density. */
   min-height: calc(var(--ui-data-table-row) - 1px);
   margin: 0;
-  padding: 0;
+  /* Room above and below the words, for the row that grows because a name wraps; the minimum height above already counts it, so a row of one line is no taller. */
+  padding: var(--space-2) 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -238,14 +247,13 @@
   line-height: var(--text-caption-line-height);
 }
 
+/* The name is whole: it wraps under the code and is never cut off with an ellipsis (a name is how an officer tells two requests apart). */
 .ui-data-table__name {
-  overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--text-caption-size);
   font-weight: var(--text-caption-weight);
   line-height: var(--text-caption-line-height);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* The muted text is for the default surface only (DESIGN_SYSTEM section 4.6): on the tint of a chosen row it is 4.2 to 1, under the 4.5 to 1 that text needs, so the name takes the secondary text there (found by the axe scan of the table with rows chosen). */
