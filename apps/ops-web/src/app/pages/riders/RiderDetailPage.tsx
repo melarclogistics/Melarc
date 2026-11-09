@@ -1,16 +1,17 @@
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
-import { PageHeading } from '../../../components/PageHeading';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
-import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
+import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
+import { RecordPage } from '../../../components/ui/templates/RecordPage';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import type { RiderDeviceView } from '../../../platform/rider/rider-shape';
 import { useRider, type RiderRecord } from '../../../platform/rider/use-rider-queries';
@@ -28,16 +29,10 @@ import {
   RIDER_STATUS_MAP,
   statusSentence,
 } from './rider-presentation';
-import { cannotText } from '../../../platform/problem/capability-words';
-import '../staff/staff-pages.css';
+import './riders.css';
 
-function BackToRiders() {
-  return (
-    <p className="staff-back">
-      <Link to="/admin/riders">Back to riders</Link>
-    </p>
-  );
-}
+/** The way up from the rider's header and from its other states: the roster. */
+const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
 
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
 function useFocusFallenToHeading(): void {
@@ -53,9 +48,8 @@ export function RiderNotFound() {
   return (
     <>
       <title>Rider not found · Melarc Ops Portal</title>
-      <PageHeading>Rider not found</PageHeading>
+      <PageHeader title="Rider not found" breadcrumb={WAY_UP} />
       <p>{copyFor({ operation: 'getRider', code: 'NOT_FOUND' })}</p>
-      <BackToRiders />
     </>
   );
 }
@@ -70,112 +64,141 @@ export function RiderNoAccess() {
   return <ForbiddenPage kind="permission-missing" permission="dispatch.read" />;
 }
 
+/** One device of the rider as a card, for a room too narrow for the columns: its status, then the facts, each under its name. */
+function DeviceCard({ device }: { readonly device: RiderDeviceView }) {
+  return (
+    <>
+      <div className="rider-card__head">
+        <StatusBadge status={device.status} map={RIDER_DEVICE_STATUS_MAP} wraps />
+      </div>
+      <dl className="rider-card__facts">
+        <div className="rider-card__fact">
+          <dt>Registered</dt>
+          <dd>{registeredAt(device)}</dd>
+        </div>
+        <div className="rider-card__fact">
+          <dt>Registered by</dt>
+          <dd>{registeredBySentence(device)}</dd>
+        </div>
+      </dl>
+    </>
+  );
+}
+
+const registeredAt = (device: RiderDeviceView): string =>
+  device.registered_at === undefined
+    ? 'Not recorded'
+    : (formatInstant(device.registered_at) ?? 'Not recorded');
+
+const DEVICE_COLUMNS: readonly DataColumn<RiderDeviceView>[] = [
+  {
+    id: 'status',
+    header: 'Status',
+    rowHeader: true,
+    cell: (row) => <StatusBadge status={row.status} map={RIDER_DEVICE_STATUS_MAP} wraps />,
+  },
+  { id: 'registered', header: 'Registered', cell: (row) => registeredAt(row) },
+  { id: 'by', header: 'Registered by', cell: (row) => registeredBySentence(row) },
+];
+
 /** The rider that was read, and what the session may do with it. It is given the read itself and does not ask again. */
 function Rider({ id, record }: { readonly id: string; readonly record: RiderRecord }) {
   const me = useSignedInSession();
+  // The page draws its own heading once the rider is read (the one the wrapper drew while it loaded is gone): focus is put on it, as on any record page.
+  useFocusFallenToHeading();
   if (me === undefined) return null;
   const { rider, devices } = record;
+  const noDevice = devices.length === 0;
   const mayBind = mayBindDevice(rider.status);
   const holdsRegister = me.holds('staff.device.register');
   const holdsRevoke = me.holds('staff.device.revoke');
 
-  const columns: TableColumn<RiderDeviceView>[] = [
-    {
-      key: 'status',
-      header: 'Status',
-      rowHeader: true,
-      cell: (row) => <StatusBadge status={row.status} map={RIDER_DEVICE_STATUS_MAP} />,
-    },
-    {
-      key: 'registered',
-      header: 'Registered',
-      cell: (row) =>
-        row.registered_at === undefined ? 'Not recorded' : formatInstant(row.registered_at),
-    },
-    { key: 'by', header: 'Registered by', cell: (row) => registeredBySentence(row) },
-  ];
+  // The acts follow the held keys and what the record says and decide nothing (the server checks every request): the first binding for a rider who has held no device, revoking or
+  // replacing for one who has. What the session cannot do is told in one muted line in plain words, and the explanation of each act is on its own page.
+  const note: ReactNode =
+    noDevice && !mayBind
+      ? 'A device cannot be registered while this rider’s access has ended.'
+      : noDevice && !holdsRegister
+        ? cannotText('staff.device.register')
+        : !noDevice && !holdsRevoke
+          ? cannotText('staff.device.revoke')
+          : undefined;
 
   return (
-    <>
-      <p className="staff-status">
-        <StatusBadge status={rider.status} map={RIDER_STATUS_MAP} />{' '}
-        <span>{statusSentence(rider.status)}</span>
-      </p>
-
-      <dl className="staff-facts">
-        <dt>Phone</dt>
-        <dd>{rider.phone}</dd>
-        <dt>Hub</dt>
-        <dd>{hubNameOf(rider.primary_hub_id, me.session.authorized_hubs)}</dd>
-        <dt>PIN</dt>
-        <dd>{pinSentence(rider)}</dd>
-        <dt>Device</dt>
-        <dd>{deviceSentence(rider)}</dd>
-        <dt>Readiness</dt>
-        <dd>{readinessSentence(rider)}</dd>
-      </dl>
-
-      <section className="staff-actions" aria-labelledby="rider-actions">
-        <h2 id="rider-actions">What you can do</h2>
-        {devices.length === 0 ? (
-          <div>
-            {!mayBind ? (
-              <p className="staff-action__text">
-                A device cannot be registered while this rider’s access has ended.
-              </p>
-            ) : holdsRegister ? (
-              <>
-                <p className="staff-action__text">
-                  This rider has no device yet. Register their first one in person: they scan a code
-                  with the Melarc Rider app on the handset they will use, and set their own PIN.
-                </p>
-                <div className="staff-action__buttons">
-                  <ButtonLink to={`/admin/riders/${id}/device/register`} variant="secondary">
-                    Register the first device
-                  </ButtonLink>
-                </div>
-              </>
-            ) : (
-              <p className="staff-action__text">{cannotText('staff.device.register')}</p>
-            )}
-          </div>
-        ) : (
-          <div>
-            {holdsRevoke ? (
-              <>
-                <p className="staff-action__text">
-                  If the handset is lost or stolen, revoke it at once: the rider’s session ends with
-                  it. To give the rider a new handset, replace it in person once you have verified
-                  who they are.
-                </p>
-                <div className="staff-action__buttons">
-                  <ButtonLink to={`/admin/riders/${id}/device`} variant="secondary">
-                    Revoke or replace the device
-                  </ButtonLink>
-                </div>
-              </>
-            ) : (
-              <p className="staff-action__text">{cannotText('staff.device.revoke')}</p>
-            )}
-          </div>
-        )}
-      </section>
-
-      <section aria-labelledby="rider-devices">
-        <h2 id="rider-devices">Devices</h2>
-        {devices.length === 0 ? (
-          <p>No device has been registered for this rider.</p>
-        ) : (
-          <Table
-            caption="Devices of the rider"
-            hideCaption
-            columns={columns}
-            rows={devices}
-            rowKey={(row) => row.id}
-          />
-        )}
-      </section>
-    </>
+    <RecordPage
+      breadcrumb={WAY_UP}
+      header={{
+        code: rider.full_name,
+        titleKind: 'name',
+        status: <StatusBadge status={rider.status} map={RIDER_STATUS_MAP} />,
+        sentence: statusSentence(rider.status),
+      }}
+      acts={{
+        ...(noDevice && mayBind && holdsRegister
+          ? {
+              primary: (
+                <ButtonLink to={`/admin/riders/${id}/device/register`}>
+                  Register the first device
+                </ButtonLink>
+              ),
+            }
+          : {}),
+        ...(!noDevice && holdsRevoke
+          ? {
+              secondary: (
+                <ButtonLink to={`/admin/riders/${id}/device`} variant="secondary">
+                  Revoke or replace the device
+                </ButtonLink>
+              ),
+            }
+          : {}),
+      }}
+      notice={note === undefined ? undefined : <p className="rider-note">{note}</p>}
+      main={
+        <>
+          <Panel title="The rider" headingLevel={2}>
+            <div className="rider-facts-groups">
+              <DescriptionList
+                heading="Rider"
+                headingLevel={3}
+                items={[
+                  { label: 'Phone', value: rider.phone },
+                  {
+                    label: 'Hub',
+                    value: hubNameOf(rider.primary_hub_id, me.session.authorized_hubs),
+                  },
+                ]}
+              />
+              <DescriptionList
+                heading="Sign-in"
+                headingLevel={3}
+                items={[
+                  { label: 'PIN', value: pinSentence(rider) },
+                  { label: 'Device', value: deviceSentence(rider) },
+                  { label: 'Readiness', value: readinessSentence(rider) },
+                ]}
+              />
+            </div>
+          </Panel>
+          {noDevice ? (
+            <Panel title="Devices" headingLevel={2}>
+              <p>No device has been registered for this rider.</p>
+            </Panel>
+          ) : (
+            <Panel title="Devices" headingLevel={2} padding="none">
+              <DataTable<RiderDeviceView>
+                label="Devices of the rider"
+                columns={DEVICE_COLUMNS}
+                rows={devices}
+                rowId={(row) => row.id}
+                card={(row) => <DeviceCard device={row} />}
+                cardHeadingLevel={3}
+              />
+            </Panel>
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -195,36 +218,35 @@ function Reading({ id }: { readonly id: string }) {
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
-      <BackToRiders />
-      <PageHeader
-        title={title}
-        {...(query.data === undefined ? {} : { description: query.data.rider.phone })}
-      />
       {query.status === 'success' ? (
         <Rider id={id} record={query.data} />
       ) : (
-        <ReadState<RiderRecord>
-          query={query}
-          isEmpty={() => false}
-          empty={null}
-          loadingLabel="Loading the rider…"
-          skeleton={<Skeleton lines={4} />}
-          permission="dispatch.read"
-          operation="getRider"
-        >
-          {() => null}
-        </ReadState>
+        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way up, and says what is happening.
+        <>
+          <PageHeader title="Rider" breadcrumb={WAY_UP} />
+          <ReadState<RiderRecord>
+            query={query}
+            isEmpty={() => false}
+            empty={null}
+            loadingLabel="Loading the rider…"
+            skeleton={<Skeleton lines={4} />}
+            permission="dispatch.read"
+            operation="getRider"
+          >
+            {() => null}
+          </ReadState>
+        </>
       )}
     </>
   );
 }
 
 /**
- * One rider (surfaces/ops-portal.md section 7, `/admin/riders/{id}`; S0.60a): the rider's status, whether a PIN is set and a device is active, and
- * the devices the rider has held. The two device pages are entered from here, and the page offers the one that fits the rider: the **first
- * binding** for a rider who has held no device, and revoking or replacing for one who has. **A PIN, a hash and a key are never shown**: no answer
- * holds one and the page has no field for one. A rider in a hub the session does not act in and one that does not exist are pages of their own.
- * Only what can be done is offered, and a hint is not the authority: the server checks the key and the hub on every request.
+ * One rider (surfaces/ops-portal.md section 7, `/admin/riders/{id}`; S0.60a; redesign step R7b, the record template, as the pickup run's page is): the rider's name for its heading, the
+ * administrative status in the header, whether a PIN is set and a device is active (readiness, told as facts and apart from the status), and the devices the rider has held. The two
+ * device pages are entered from the header, and the page offers the one that fits the rider: the **first binding** for a rider who has held no device, and revoking or replacing for one
+ * who has. **A PIN, a hash and a key are never shown**: no answer holds one and the page has no field for one. A rider in a hub the session does not act in and one that does not exist are
+ * pages of their own. Only what can be done is offered, and a hint is not the authority: the server checks the key and the hub on every request.
  */
 export function RiderDetailPage() {
   const { id = '' } = useParams();

@@ -36,6 +36,7 @@ const VIEWPORTS = [
 ] as const;
 
 const QR_NAME = 'QR code for the rider’s handset';
+const LONG_NAME = 'Kwabena Owusu-Ansah Boateng Mensah-Darko the Third of Kumasi and Accra Central';
 const REGISTER = `/admin/riders/${IDS.esi}/device/register`;
 const DEVICE = `/admin/riders/${IDS.kwame}/device`;
 
@@ -291,6 +292,55 @@ test.describe('moving through the screens', () => {
     await page.getByRole('button', { name: 'Previous page' }).click();
     await expect(page.getByText('Showing 2 riders. More follow on the next page.')).toBeVisible();
   });
+
+  // The rider is drawn by the record template: the name is the heading (in the heading face, wrapping: a long name never pushes the page sideways), the status is the header's and the
+  // readiness is facts apart from it, and the devices are a table where the table's own box has room (40rem) and cards under that, never both.
+  for (const [shown, size] of [
+    ['a table', { width: 1280, height: 800 }],
+    ['a table or cards, one of them', { width: 768, height: 1024 }],
+    ['cards', { width: 390, height: 844 }],
+    ['cards', { width: 320, height: 640 }],
+  ] as const) {
+    // Break caught: a name drawn as a code (monospaced, never broken), a fact the record forgets, devices drawn twice or not at all, or a page wider than a phone.
+    test(`the rider is a record with a long name wrapped in its heading and its devices as ${shown}, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, `/admin/riders/${IDS.kwame}`, {
+        riders: [rider({ full_name: LONG_NAME })],
+      });
+
+      const heading = page.getByRole('heading', { level: 1, name: LONG_NAME });
+      await expect(heading).toBeVisible();
+      await expect(heading.locator('.ui-code')).toHaveCount(0);
+      await expect(page.getByText('This rider is active.')).toBeVisible();
+      for (const [term, value] of [
+        ['Phone', '+233201234567'],
+        ['Hub', 'Accra Central'],
+        ['PIN', 'Set'],
+        ['Device', 'One active device'],
+        ['Readiness', 'Ready to sign in.'],
+      ] as const) {
+        await expect(page.locator(`dt:text-is("${term}") + dd`)).toHaveText(value);
+      }
+      const table = page.getByRole('table', { name: 'Devices of the rider' });
+      const cards = page.getByRole('list', { name: 'Devices of the rider' });
+      if (shown === 'a table') {
+        await expect(table).toBeVisible();
+        await expect(cards).toHaveCount(0);
+      } else if (shown === 'cards') {
+        await expect(cards).toBeVisible();
+        await expect(table).toHaveCount(0);
+      } else {
+        expect((await table.count()) + (await cards.count())).toBe(1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
 
   test('a rider of another hub and a rider that does not exist are pages of their own', async ({
     page,
