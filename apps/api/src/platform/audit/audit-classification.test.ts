@@ -115,6 +115,36 @@ describe('the tier of each event is the catalogue’s, read from the document (G
     expect(stated(/\*\*(\d+) are Standard\*\*/)).toBe(standard);
   });
 
+  // Break caught (run 5, Stage 1.5): an old statement of a count surviving beside the new one, because the patterns above read one wording in one case. Line 523 once said
+  // "81 are Enhanced" and, a few words on, "80 are enhanced ... 116 are ordinary", and the test read only the first. Every place the document says a number of the
+  // tiers, in any case and in either of the words it has used for them, must say the derived number.
+  it('has no statement of a count of the tiers, in any wording or case, that is not the derived count', () => {
+    const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
+    const derived = {
+      enhanced: tiers.filter((tier) => tier === 'ENHANCED').length,
+      conditional: tiers.filter((tier) => tier === 'CONDITIONAL').length,
+      standard: tiers.filter((tier) => tier === 'STANDARD').length,
+    };
+    const statements: readonly [string, RegExp, number][] = [
+      ['enhanced', /\b(\d+) are enhanced\b(?! or standard)/gi, derived.enhanced],
+      [
+        'conditional',
+        /\b(\d+) (?:are enhanced or standard by the act|depend on the act)\b/gi,
+        derived.conditional,
+      ],
+      ['standard', /\b(\d+) are (?:standard|ordinary)\b/gi, derived.standard],
+    ];
+    for (const [tier, pattern, count] of statements) {
+      const found = [...AUDIT_MD.matchAll(pattern)].map((match) => Number(match[1]));
+      // A check over nothing passes: the document states each of the three.
+      expect(found.length, `the document states a count of the ${tier} codes`).toBeGreaterThan(0);
+      expect(
+        found.filter((number) => number !== count),
+        `statements of the ${tier} count other than ${String(count)}`,
+      ).toEqual([]);
+    }
+  });
+
   // Break caught: the document's count of its own codes going stale again (it read 188 when there were 190).
   it('states the number of codes the catalogue holds', () => {
     const stated = /\*\*(\d+) codes\b/.exec(AUDIT_MD)?.[1];
