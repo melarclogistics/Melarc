@@ -102,12 +102,14 @@ function stagesOf(manifest: ManifestView): {
 }
 
 /**
- * What the record itself says happened, with when: a rider assigned, dispatched, started, completed. **Only the dated facts of the record, and nothing invented**: the read carries no
- * moment of the run's making or of its cancellation (a cancelled run says so in its state and its words), and a fuller history would need a read of the run's audit trail, which the
- * pickup API does not offer to an Ops session. Oldest first, the latest marked.
+ * What the record itself says happened, with when: the run made (`created_at`, contract 5.100.0), a rider assigned, dispatched, started, completed. **Only the dated facts of the record,
+ * and nothing invented**: the read carries no moment of the run's cancellation (a cancelled run says so in its state and its words; the moment is an open item of the manifests slice,
+ * OB-S1-79), and a history that names who did each act would need a read of the run's audit trail, which the pickup API does not offer to an Ops session (a later contract task,
+ * IMPLEMENTATION_PLAN section 3a). Oldest first, the latest marked.
  */
 function historyOf(manifest: ManifestView): readonly TimelineEntry[] {
   const facts = [
+    ['made', 'Made', manifest.created_at],
     ['assigned', 'Assigned', manifest.assigned_at],
     ['dispatched', 'Dispatched', manifest.dispatched_at],
     ['started', 'Started', manifest.started_at],

@@ -170,6 +170,31 @@ describe('the manifest: what it shows', () => {
     ).toBeVisible();
   });
 
+  // Break caught (owner item c of the Product Owner, 9 November 2026): a history that begins with the first thing the record says of the run's progress and says nothing of when the run was made,
+  // though the read states it (`created_at`, contract 5.100.0). "Made" is the first entry, a draft has a history at once, and the latest entry is still the one marked.
+  it('tells the history of the run from the moment it was made, oldest first', async () => {
+    open(() =>
+      answer(manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' })),
+    );
+    await ready();
+
+    const history = screen.getByRole('list', { name: 'History of this pickup run, oldest first' });
+    const steps = within(history).getAllByRole('listitem');
+    expect(steps.map((step) => step.textContent)).toEqual(['Made2 Nov, 09:00', 'Assigned3 Nov, 08:00']);
+    expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    expect(steps[0]).not.toHaveAttribute('aria-current');
+  });
+
+  it('has a history at once for a run that was only made', async () => {
+    open();
+    await ready();
+
+    const history = screen.getByRole('list', { name: 'History of this pickup run, oldest first' });
+    expect(within(history).getAllByRole('listitem').map((step) => step.textContent)).toEqual([
+      'Made2 Nov, 09:00',
+    ]);
+  });
+
   it('names the rider by name when the roster can say it', async () => {
     open(() =>
       answer(manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' })),
