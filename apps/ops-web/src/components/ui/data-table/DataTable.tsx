@@ -165,9 +165,11 @@ export interface DataTableProps<Item> {
   /**
    * What an `auto` table does when its box is too narrow for every column, which is under 64rem for one that has columns the screen marked lesser (`priority`): `drop` (the default) keeps the
    * table and takes those columns away, which is right where what they hold is at hand beside the table (a panel that shows the record is open); `cards` draws the cards instead, which
-   * show every fact, which is right where nothing else does (the review of 5edada2, M6: no fact the old cards showed is lost). Without `card` there are no cards and the columns drop.
+   * show every fact, which is right where nothing else does (the review of 5edada2, M6: no fact the old cards showed is lost); `keep` keeps the table **and every column** until the box is under
+   * 40rem, the cells wrapping to the room they have, which is right where nothing is beside the table and the room is a laptop's (the review of 499399c: a queue at 1280px with the menu open, a box of
+   * about 61rem, is a table). Without `card` there are no cards and the columns drop (`keep` keeps them).
    */
-  readonly crowded?: 'drop' | 'cards';
+  readonly crowded?: 'drop' | 'cards' | 'keep';
 
   /** Rows that changed since the last read: each is highlighted and the highlight fades over `motion.highlight`. A cue for the eye only: say it in words where it matters. */
   readonly changedIds?: readonly string[];
@@ -256,12 +258,12 @@ export const CARDS_BELOW_REM = 40;
 export const COLUMNS_GO_AT_REM = 64;
 
 /**
- * Whether a table whose box is `widthRem` wide is drawn as cards. By default that is under `CARDS_BELOW_REM`. A table that has lesser columns and is `crowded: 'cards'` takes the cards as soon as
- * its first lesser column would go, so that a fact is never dropped where nothing else shows it.
+ * Whether a table whose box is `widthRem` wide is drawn as cards. By default that is under `CARDS_BELOW_REM`, and so it is for `crowded: 'keep'`, which also keeps every column down to there.
+ * A table that has lesser columns and is `crowded: 'cards'` takes the cards as soon as its first lesser column would go, so that a fact is never dropped where nothing else shows it.
  */
 export function drawsCards(
   widthRem: number,
-  crowded: 'drop' | 'cards',
+  crowded: 'drop' | 'cards' | 'keep',
   hasLesserColumns: boolean,
 ): boolean {
   return crowded === 'cards' && hasLesserColumns
@@ -273,7 +275,7 @@ export function drawsCards(
 function useNarrow(
   root: RefObject<HTMLDivElement | null>,
   layout: 'auto' | 'table' | 'cards',
-  crowded: 'drop' | 'cards',
+  crowded: 'drop' | 'cards' | 'keep',
   hasLesserColumns: boolean,
 ) {
   const [narrow, setNarrow] = useState(false);
@@ -695,6 +697,7 @@ export function DataTable<Item>({
       className="ui-data-table"
       data-density={density}
       data-layout={cards ? 'cards' : 'table'}
+      data-crowded={crowded}
     >
       {/* The regions that speak are in the page before they have anything to say (a region that arrives with its words is not announced by most screen readers): one for the
           state of the rows (stale, loading) and one for a failure; the words come into them, and the visible ones draw beside. */}

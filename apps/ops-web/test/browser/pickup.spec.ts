@@ -140,6 +140,17 @@ const CODE = 'ACC-PR-7KQ2MZ';
 const queueTable = (page: Page) => page.getByRole('table', { name: 'Pickup requests' });
 const queueCards = (page: Page) => page.getByRole('list', { name: 'Pickup requests' });
 
+/** The columns of the queue's table, in order, for a session that may confirm (the last is the row's own act). */
+const QUEUE_COLUMNS = [
+  'Request / sender',
+  'State',
+  'Service date',
+  'Pickup address / hub',
+  'Packages / booking type',
+  'Needs',
+  'Actions',
+];
+
 /** The button that opens a request, which the table draws in its row and the cards in each card. */
 const opener = (page: Page, code: string) =>
   page.getByRole('button', { name: new RegExp(`^Open ${code}, `) });
@@ -191,16 +202,7 @@ test.describe('the queue, drawn for the room it has', () => {
     const { api, watch } = await open(page, '/pickup-requests');
 
     await expect(queueTable(page)).toBeVisible();
-    await expect(queueTable(page).getByRole('columnheader')).toHaveText([
-      'Request / sender',
-      'State',
-      'Service date',
-      'Pickup address / hub',
-      'Packages / booking type',
-      'Needs',
-      // The row's own act, for a session that may confirm.
-      'Actions',
-    ]);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
     await expect(queueCards(page)).toHaveCount(0);
     await expect(opener(page, CODE)).toHaveCount(1);
     await expect(page.getByRole('main').getByRole('link', { name: 'Book a pickup' })).toBeVisible();
@@ -208,6 +210,22 @@ test.describe('the queue, drawn for the room it has', () => {
     const asked = api.calls.filter((call) => call.path === '/api/v1/pickup-requests');
     expect(asked.length).toBeGreaterThan(0);
     expect(new Set(asked.map((call) => call.search))).toEqual(new Set(['']));
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (the review of 499399c): the queue drawn as cards at 1280 px with the menu open, a box of about 61rem, though its table has room for every column: a table that
+  // keeps every column from 40rem up, its cells wrapping, and is cards only under that.
+  test('keeps the table, with every column, at 1280 px with the menu open, and no cards', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { watch } = await open(page, '/pickup-requests');
+
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    await expect(queueCards(page)).toHaveCount(0);
+    await expect(opener(page, CODE)).toHaveCount(1);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     expect(watch.problems).toEqual([]);
   });
 
@@ -447,6 +465,26 @@ function overflowingInQueue(page: Page): Promise<string[]> {
   );
 }
 
+/**
+ * What in the queue's rows is wider than its own cell or card, cut off where its words should wrap: the cells and the cards, and not the box of the rows, which may scroll sideways
+ * while the table keeps every column in a room narrower than the columns need (a box of 41rem at 768px).
+ */
+function clippedCellsInQueue(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        '.ui-data-table__scroller th, .ui-data-table__scroller td, .ui-data-table__card',
+      ),
+    ]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => element.scrollWidth > element.clientWidth + 1)
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} ${element.textContent.trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
+      ),
+  );
+}
+
 /** What in the queue is cut off with an ellipsis: nothing that is a name, an address or a note may be. */
 function ellipsisedInQueue(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -506,7 +544,11 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       const address = page.getByText(LONG_ADDRESS).locator('visible=true');
       await expect(address).toHaveCount(2);
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
-      expect(await overflowingInQueue(page)).toEqual([]);
+      // A table in a box as wide as its columns needs scrolls nowhere. At 768px the box is 41rem and the table keeps every column (the review of 499399c: cards only under 40rem), which
+      // needs more: its box scrolls sideways, and what must hold is that no cell cuts its words off and that the page itself never scrolls.
+      expect(
+        size.width > 768 ? await overflowingInQueue(page) : await clippedCellsInQueue(page),
+      ).toEqual([]);
       expect(await ellipsisedInQueue(page)).toEqual([]);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
       // Wrapped, not truncated: the address takes more than one line and the box holds it.
@@ -530,11 +572,37 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 
-  // Break caught (the review of 5edada2, M6): a queue with nothing beside it that drops the columns it marked lesser, so that at 768px it showed less than the cards it replaced.
-  test('draws cards with every fact at 768px with no request open, where the table would drop columns', async ({
+  // Break caught (the review of 5edada2, M6, and the Product Owner's decision of 9 November 2026 that replaced its answer): a queue with nothing beside it that drops the columns it marked
+  // lesser, so that at 768px it showed less than the cards it replaced. It does not: it keeps the table and every column from 40rem up (a box of 41rem at 768px, scrolling inside itself),
+  // so every fact of a request is in its row; and it is cards under 40rem, with every fact (640px, a box of 38rem).
+  test('keeps the table, with every column and every fact of a request, at 768px with no request open', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/pickup-requests');
+
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueCards(page)).toHaveCount(0);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    const row = queueTable(page).getByRole('row').filter({ hasText: CODE });
+    for (const fact of [
+      CODE,
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+      'Accra Central',
+      '3 packages',
+      'A vendor’s own packages',
+    ]) {
+      await expect(row).toContainText(fact);
+    }
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('draws cards with every fact under 40rem with no request open, at 640px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 640, height: 900 });
     await open(page, '/pickup-requests');
 
     const cards = queueCards(page);
@@ -555,6 +623,7 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     ]) {
       await expect(first).toContainText(fact);
     }
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 
   test('keeps the table, without its lesser columns, with a request open beside it at 1440px', async ({
@@ -1697,6 +1766,31 @@ test.describe('the approver’s queue', () => {
     await expect(
       page.getByRole('heading', { name: 'No exceptions waiting for approval yet' }),
     ).toBeVisible();
+  });
+
+  // Break caught (the review of 499399c): the approver's queue drawn as cards at 1280 px with the menu open, though its table has room for every column.
+  test('keeps the table, with every column, at 1280 px with the menu open, and no cards', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Request / sender',
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+      'Request state',
+      'Actions',
+    ]);
+    await expect(
+      page.getByRole('list', { name: 'One-package exceptions waiting for approval' }),
+    ).toHaveCount(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 });
 

@@ -1153,6 +1153,28 @@ describe('DataTable: the room a table has (the review of 5edada2, M6)', () => {
     expect(drawsCards(39.9, 'drop', true)).toBe(true);
     expect(drawsCards(40, 'drop', true)).toBe(false);
   });
+
+  // Break caught (the review of 499399c): a queue with nothing open beside it drawn as cards at 1280px with the menu open, a box of about 61rem, where the table has room for every column.
+  // `keep` is the table with every column, and only a box under 40rem is cards.
+  it('keeps the table, with every column, from 40rem up when it is told to keep its columns', () => {
+    expect(drawsCards(61.5, 'keep', true)).toBe(false);
+    expect(drawsCards(64, 'keep', true)).toBe(false);
+    expect(drawsCards(40.5, 'keep', true)).toBe(false);
+    expect(drawsCards(40, 'keep', true)).toBe(false);
+    expect(drawsCards(39.9, 'keep', true)).toBe(true);
+  });
+
+  // Break caught: a stylesheet that drops a lesser column at 64rem whatever the page said, which a table told to keep its columns must not suffer; the attribute is what the stylesheet reads.
+  it('says on its box how it is crowded, `drop` unless it is told otherwise', () => {
+    const { container, rerender } = render(<Table />);
+    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'drop');
+
+    rerender(<Table crowded="keep" />);
+    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'keep');
+
+    rerender(<Table crowded="cards" />);
+    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'cards');
+  });
 });
 
 describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4)', () => {

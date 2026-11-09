@@ -106,15 +106,19 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A column that matters less goes when the table's own box is narrow, the lesser first (`priority` of the column): at 1440px with a side panel open the table needs no sideways scroll. */
+/*
+ * A column that matters less goes when the table's own box is narrow, the lesser first (`priority` of the column): at 1440px with a side panel open the table needs no sideways scroll.
+ * A table that is told to keep its columns (`crowded: 'keep'`, the queue with nothing open beside it) loses none: its cells wrap to the room they have, down to the width where it is
+ * cards (the review of 499399c: a queue at 1280px with the menu open is a table of every column).
+ */
 @container ui-data-table (max-width: 64rem) {
-  .ui-data-table__table [data-priority='3'] {
+  .ui-data-table:not([data-crowded='keep']) .ui-data-table__table [data-priority='3'] {
     display: none;
   }
 }
 
 @container ui-data-table (max-width: 48rem) {
-  .ui-data-table__table [data-priority='2'] {
+  .ui-data-table:not([data-crowded='keep']) .ui-data-table__table [data-priority='2'] {
     display: none;
   }
 }

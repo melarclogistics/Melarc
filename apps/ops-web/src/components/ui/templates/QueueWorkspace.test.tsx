@@ -2,10 +2,11 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef, useState } from 'react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import type { DataColumn } from '../data-table/DataTable';
+import { SHEET_QUERY } from '../side-panel/use-media-query';
 import {
   QueueWorkspace,
   type QueueWorkspaceHandle,
@@ -244,6 +245,48 @@ describe('QueueWorkspace', () => {
       'href',
       '/pickup-requests/a',
     );
+  });
+
+  // Break caught (the review of 499399c): a queue with nothing open beside it told to take cards where a lesser column would go, so that at 1280px with the menu open (a box of
+  // about 61rem) it drew cards though its table had room for every column. With no panel the table keeps every column from 40rem up; a panel docked beside it lets the lesser
+  // columns go (the record shows what they held); a panel that is a sheet covers the table, and the table under it is cards.
+  describe('the room the table is given', () => {
+    const crowded = (container: HTMLElement) =>
+      container.querySelector('.ui-data-table')?.getAttribute('data-crowded');
+    const panel = {
+      open: true,
+      onClose: () => undefined,
+      code: 'ACC-PR-7KQ2MZ',
+      children: <p>The record.</p>,
+    } as const;
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('keeps the table and every column while nothing is open beside it', () => {
+      expect(crowded(renderQueue().container)).toBe('keep');
+    });
+
+    it('lets the lesser columns go while a record is docked beside the table', () => {
+      expect(crowded(renderQueue({ panel }).container)).toBe('drop');
+    });
+
+    it('draws cards under a panel that is a sheet over the table', () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === SHEET_QUERY,
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }));
+
+      expect(crowded(renderQueue({ panel }).container)).toBe('cards');
+    });
+
+    it('keeps the table of a page that asks for its own crowding', () => {
+      const { container } = renderQueue({ table: { ...props().table, crowded: 'drop' } });
+      expect(crowded(container)).toBe('drop');
+    });
   });
 
   // Break caught: a panel that closes and leaves focus on nothing, because the row button it was opened from is not the one that is drawn now (the table and its cards swap when
