@@ -1,23 +1,30 @@
 import type { UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type SubmitEvent,
+} from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { FormPage } from '../../../components/FormPage';
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { ReasonSelect } from '../../../components/ui/reason-select/ReasonSelect';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { useApiClient } from '../../../platform/api/api-client';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { copyFor, problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useReasonDefinitions } from '../../../platform/reasons/reason-definitions';
 import { reregisterRiderDevice, revokeRiderDevice } from '../../../platform/rider/rider-commands';
@@ -29,12 +36,26 @@ import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNoAccess, RiderNotFound, RiderOutsideHubs } from './RiderDetailPage';
 import { deviceSentence, mayBindDevice, RIDER_STATUS_MAP } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
-import { cannotText } from '../../../platform/problem/capability-words';
-import '../staff/staff-pages.css';
 import './riders.css';
 
 /** The longest the verification note may be: the audit's own bound for a note, which the server checks. */
 const NOTE_LIMIT = 1000;
+
+/** The way up from the page: the roster. The way to the rider is the link above the heading, which every state of the page keeps. */
+const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
+
+/** What the replacement is, in two short sentences under its title: it is done in person, and a code comes of it. */
+const REPLACE_INTRO =
+  'Do this in person, once you have verified who the rider is. A code appears for the rider to scan with the new handset.';
+
+/** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
+function useFocusFallenToHeading(): void {
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (active === null || active === document.body)
+      document.querySelector<HTMLElement>('h1')?.focus();
+  }, []);
+}
 
 interface Replacement {
   readonly reasonCode: string;
@@ -76,15 +97,24 @@ function serverFieldErrors(problem: Problem | undefined): FieldErrors {
   return { ...(reason === undefined ? {} : { reason }), ...(note === undefined ? {} : { note }) };
 }
 
-/** The replacement of a handset: a reason, how the rider was verified in person, and the code the new handset scans. */
+/**
+ * The replacement of a handset, which is the form of the page: a reason, how the rider was verified in person, and the code the new handset scans. The report of a loss is the form's
+ * first section (it is `revoke`, drawn by the page) and has its own dialog outside the form.
+ */
 function ReplaceDevice({
   id,
   record,
   query,
+  header,
+  alerts,
+  revoke,
 }: {
   readonly id: string;
   readonly record: RiderRecord;
   readonly query: UseQueryResult<RiderRecord>;
+  readonly header: PageHeaderProps;
+  readonly alerts: ReactNode;
+  readonly revoke: ReactNode;
 }) {
   const client = useApiClient();
   const navigate = useNavigate();
@@ -160,95 +190,132 @@ function ReplaceDevice({
     void command.submit({ reasonCode: choice, verificationNote: note.trim() });
   }
 
-  if (code.grant !== undefined) {
-    return (
-      <EnrolmentCode
-        grant={code.grant}
-        onFinish={() => {
-          code.clear();
-          void navigate(`/admin/riders/${id}`);
-        }}
-        onNew={asked}
-      />
-    );
-  }
-  if (code.status === 'expired') return <LapsedCode onNew={asked} />;
+  const showing = code.grant !== undefined;
+  const lapsed = !showing && code.status === 'expired';
+  const asks = !showing && !lapsed;
 
   return (
-    <form
-      ref={form}
-      noValidate
-      className="rider-form"
-      aria-busy={command.phase === 'sending' ? true : undefined}
+    <TaskForm
+      header={header}
+      formRef={form}
+      busy={command.phase === 'sending'}
       onSubmit={submit}
+      alerts={
+        <>
+          {alerts}
+          {asks && code.withdrawn ? <WithdrawnCode /> : null}
+          {asks ? (
+            <CommandOutcomeNotice
+              command={command}
+              unknownText={copyFor({
+                operation: 'reregisterRiderDevice',
+                context: 'unknown-outcome',
+              })}
+            />
+          ) : null}
+        </>
+      }
+      actions={
+        asks ? (
+          <>
+            {/*
+              Each branch has a key of its own. Without one, React reuses the button it has for the next branch and changes its type: a click on
+              "Reload the rider" would turn that very button into the form's submit button before the browser acts on the click, and the browser
+              would submit the form, asking for a code nobody asked for. A key makes the old button go and a new one come.
+            */}
+            {command.phase === 'unknown' ? (
+              <CodeRecovery key="recovery" command={command} />
+            ) : command.phase === 'conflict' ? (
+              <Button key="reload" type="button" data-recovery onClick={command.checkRecord}>
+                Reload the rider
+              </Button>
+            ) : (
+              <Button
+                key="submit"
+                type="submit"
+                disabled={!loaded}
+                loading={command.phase === 'sending'}
+              >
+                Show the QR code
+              </Button>
+            )}
+            <p className="rider-note rider-actions-note">
+              Nothing changes for the old device until the new handset is registered.
+            </p>
+          </>
+        ) : null
+      }
     >
-      {code.withdrawn ? <WithdrawnCode /> : null}
-      <ReasonSelect
-        query={reasons}
-        value={choice}
-        disabled={command.locked}
-        {...(reasonError === undefined ? {} : { error: reasonError })}
-        onChange={(next) => {
-          setReasonCode(next);
-          setInvalid((current) => ({ ...current, reason: undefined }));
-          command.dismiss();
-        }}
-      />
-      {loaded ? (
-        <Field
-          label="How you verified the rider in person"
-          required
-          help="One line, up to 1000 characters. Leave out email addresses and telephone numbers."
-          {...(noteError === undefined ? {} : { error: noteError })}
-        >
-          <Textarea
-            name="verification-note"
-            value={note}
-            maxLength={NOTE_LIMIT}
-            autoComplete="off"
-            readOnly={command.locked}
-            onChange={(event) => {
-              setNote(event.target.value);
-              setInvalid((current) => ({ ...current, note: undefined }));
-              command.dismiss();
-            }}
-          />
-        </Field>
-      ) : null}
-
-      <CommandOutcomeNotice
-        command={command}
-        unknownText={copyFor({ operation: 'reregisterRiderDevice', context: 'unknown-outcome' })}
-      />
-
-      <div className="staff-action__buttons">
-        {/*
-          Each branch has a key of its own. Without one, React reuses the button it has for the next branch and changes its type: a click on
-          "Reload the rider" would turn that very button into the form's submit button before the browser acts on the click, and the browser
-          would submit the form, asking for a code nobody asked for. A key makes the old button go and a new one come.
-        */}
-        {command.phase === 'unknown' ? (
-          <CodeRecovery key="recovery" command={command} />
-        ) : command.phase === 'conflict' ? (
-          <Button key="reload" type="button" data-recovery onClick={command.checkRecord}>
-            Reload the rider
-          </Button>
+      {revoke}
+      <TaskFormSection
+        title="Replace the handset"
+        {...(asks ? { description: REPLACE_INTRO } : {})}
+      >
+        {showing ? (
+          <TaskFormWide>
+            <EnrolmentCode
+              grant={code.grant}
+              onFinish={() => {
+                code.clear();
+                void navigate(`/admin/riders/${id}`);
+              }}
+              onNew={asked}
+            />
+          </TaskFormWide>
+        ) : lapsed ? (
+          <TaskFormWide>
+            <LapsedCode onNew={asked} />
+          </TaskFormWide>
         ) : (
-          <Button
-            key="submit"
-            type="submit"
-            disabled={!loaded}
-            loading={command.phase === 'sending'}
-          >
-            Show the QR code
-          </Button>
+          <>
+            <TaskFormWide>
+              <ReasonSelect
+                query={reasons}
+                value={choice}
+                disabled={command.locked}
+                {...(reasonError === undefined ? {} : { error: reasonError })}
+                onChange={(next) => {
+                  setReasonCode(next);
+                  setInvalid((current) => ({ ...current, reason: undefined }));
+                  command.dismiss();
+                }}
+              />
+            </TaskFormWide>
+            {loaded ? (
+              <TaskFormWide>
+                <Field
+                  label="How you verified the rider in person"
+                  required
+                  help="One line, up to 1000 characters. Leave out email addresses and telephone numbers."
+                  {...(noteError === undefined ? {} : { error: noteError })}
+                >
+                  <Textarea
+                    name="verification-note"
+                    value={note}
+                    maxLength={NOTE_LIMIT}
+                    autoComplete="off"
+                    readOnly={command.locked}
+                    onChange={(event) => {
+                      setNote(event.target.value);
+                      setInvalid((current) => ({ ...current, note: undefined }));
+                      command.dismiss();
+                    }}
+                  />
+                </Field>
+              </TaskFormWide>
+            ) : null}
+          </>
         )}
-      </div>
-    </form>
+      </TaskFormSection>
+    </TaskForm>
   );
 }
 
-/** The rider that was read: the report of a loss, and the replacement of a handset. It is given the read itself and does not ask again. */
+/**
+ * The rider that was read: the report of a loss, and the replacement of a handset, as the two sections of one task form. It is given the read itself and does not ask again. What the
+ * session cannot do is said in the section of the act, in plain words, and the dialog of the report of a loss stands outside the form, so that its own submission never reaches the
+ * replacement's.
+ */
 function Device({
   id,
   record,
@@ -266,6 +333,8 @@ function Device({
   useEffect(() => {
     if (notice !== undefined) noticeBox.current?.focus();
   }, [notice]);
+  // The page draws its own heading once the rider is read (the one the wrapper drew while it loaded is gone): focus is put on it, as on a record page.
+  useFocusFallenToHeading();
   if (me === undefined) return null;
   const { rider, devices } = record;
   const holdsReregister = me.holds('staff.device.reregister');
@@ -276,75 +345,92 @@ function Device({
     return query.refetch();
   }
 
-  return (
-    <>
-      {notice === undefined ? null : (
-        <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
-          <Alert variant="success">
-            <p>{notice}</p>
-          </Alert>
-        </div>
-      )}
-
-      <p className="staff-status">
-        <StatusBadge status={rider.status} map={RIDER_STATUS_MAP} />{' '}
-        <span>{deviceSentence(rider)}.</span>
-      </p>
-
-      <section className="staff-actions" aria-labelledby="rider-revoke">
-        <h2 id="rider-revoke">Report a lost or stolen device</h2>
+  const header: PageHeaderProps = {
+    title: 'Revoke or replace a device',
+    description: `For ${rider.full_name}.`,
+    breadcrumb: WAY_UP,
+  };
+  const news =
+    notice === undefined ? null : (
+      <div className="rider-notice" ref={noticeBox} tabIndex={-1}>
+        <Alert variant="success">
+          <p>{notice}</p>
+        </Alert>
+      </div>
+    );
+  const revoke = (
+    <TaskFormSection title="Report a lost or stolen device">
+      <TaskFormWide>
+        <p className="rider-status-line">
+          <StatusBadge status={rider.status} map={RIDER_STATUS_MAP} />{' '}
+          <span>{deviceSentence(rider)}.</span>
+        </p>
+      </TaskFormWide>
+      <TaskFormWide>
         {rider.has_active_device ? (
           <div>
-            <p className="staff-action__text">
-              Revoke the device at once. The rider’s session ends with it, and the handset can no
-              longer sign in. No check of who is asking is made, so that a loss is never reported
-              late. A new handset is registered afterwards, in person.
-            </p>
-            <div className="staff-action__buttons">
-              <Button
-                type="button"
-                variant="danger"
-                loading={query.isFetching}
-                onClick={() => {
-                  setRevoking(true);
-                }}
-              >
-                Revoke the device
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="danger"
+              loading={query.isFetching}
+              onClick={() => {
+                setRevoking(true);
+              }}
+            >
+              Revoke the device
+            </Button>
           </div>
         ) : (
-          <p className="staff-action__text">This rider has no active device to revoke.</p>
+          <p className="rider-note">This rider has no active device to revoke.</p>
         )}
-      </section>
+      </TaskFormWide>
+    </TaskFormSection>
+  );
 
-      <section className="staff-actions" aria-labelledby="rider-replace">
-        <h2 id="rider-replace">Replace the handset</h2>
-        {!holdsReregister ? (
-          <p className="staff-action__text">{cannotText('staff.device.reregister')}</p>
-        ) : !mayBindDevice(rider.status) ? (
-          <p className="staff-action__text">
-            A replacement handset cannot be registered while this rider’s access has ended.
-          </p>
-        ) : devices.length === 0 ? (
-          <p className="staff-action__text">
-            This rider has held no device, so there is nothing to replace.{' '}
-            {holdsRegister ? (
-              <Link to={`/admin/riders/${id}/device/register`}>Register a first device.</Link>
-            ) : null}
-          </p>
-        ) : (
-          <FormPage>
-            <p className="staff-action__text">
-              Do this in person, once you have verified who the rider is. A code appears here; the
-              rider scans it with the Melarc Rider app on the new handset, which makes its own key
-              and asks for a new PIN. The old device then stops working. Nothing about the old
-              device changes until the new handset is registered.
-            </p>
-            <ReplaceDevice id={id} record={record} query={query} />
-          </FormPage>
-        )}
-      </section>
+  // The replacement is a form only for a session that may replace, for a rider whose access has not ended and who has held a device: the server checks it all the same.
+  const replaces = holdsReregister && mayBindDevice(rider.status) && devices.length > 0;
+
+  return (
+    <>
+      {replaces ? (
+        <ReplaceDevice
+          id={id}
+          record={record}
+          query={query}
+          header={header}
+          alerts={news}
+          revoke={revoke}
+        />
+      ) : (
+        <TaskForm
+          header={header}
+          alerts={news}
+          actions={null}
+          onSubmit={(event: SubmitEvent<HTMLFormElement>) => {
+            event.preventDefault();
+          }}
+        >
+          {revoke}
+          <TaskFormSection title="Replace the handset">
+            <TaskFormWide>
+              {!holdsReregister ? (
+                <p className="rider-note">{cannotText('staff.device.reregister')}</p>
+              ) : !mayBindDevice(rider.status) ? (
+                <p className="rider-note">
+                  A replacement handset cannot be registered while this rider’s access has ended.
+                </p>
+              ) : (
+                <p className="rider-note">
+                  This rider has held no device, so there is nothing to replace.{' '}
+                  {holdsRegister ? (
+                    <Link to={`/admin/riders/${id}/device/register`}>Register a first device.</Link>
+                  ) : null}
+                </p>
+              )}
+            </TaskFormWide>
+          </TaskFormSection>
+        </TaskForm>
+      )}
 
       <ReasonConfirmationDialog
         open={revoking}
@@ -390,35 +476,35 @@ function Reading({ id }: { readonly id: string }) {
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
-      <p className="staff-back">
+      <p className="rider-back">
         <Link to={`/admin/riders/${id}`}>Back to the rider</Link>
       </p>
-      <PageHeader
-        title={title}
-        {...(query.data === undefined ? {} : { description: `For ${query.data.rider.full_name}.` })}
-      />
       {query.status === 'success' ? (
         <Device id={id} record={query.data} query={query} />
       ) : (
-        <ReadState<RiderRecord>
-          query={query}
-          isEmpty={() => false}
-          empty={null}
-          loadingLabel="Loading the rider…"
-          skeleton={<Skeleton lines={4} />}
-          permission="dispatch.read"
-          operation="getRider"
-        >
-          {() => null}
-        </ReadState>
+        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way up, and says what is happening.
+        <>
+          <PageHeader title={title} breadcrumb={WAY_UP} />
+          <ReadState<RiderRecord>
+            query={query}
+            isEmpty={() => false}
+            empty={null}
+            loadingLabel="Loading the rider…"
+            skeleton={<Skeleton lines={4} />}
+            permission="dispatch.read"
+            operation="getRider"
+          >
+            {() => null}
+          </ReadState>
+        </>
       )}
     </>
   );
 }
 
 /**
- * The device of a rider (surfaces/ops-portal.md section 7, `/admin/riders/{id}/device`; S0.60b): **two actions, two keys**, and the page
- * names the permission each needs and never a role. **Revoke** is the report of a lost or stolen handset: a reason and a confirmation, no
+ * The device of a rider (surfaces/ops-portal.md section 7, `/admin/riders/{id}/device`; S0.60b; redesign step R7b, the task form): **two actions, two keys**, and the page
+ * names the capability each needs in plain words and never a permission key or a role. **Revoke** is the report of a lost or stolen handset: a reason and a confirmation, no
  * version and no verification, and it ends the rider's live session. **Replace the handset** takes a reason, a mandatory note on how the
  * rider's identity was verified in person (a `Textarea`) and the version the roster read (`If-Match`), and shows the same QR handoff as the first
  * registration, with the same rule for the code: in memory only, gone on navigation, completion, expiry. The page opens for a holder of

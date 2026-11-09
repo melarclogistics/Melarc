@@ -192,6 +192,25 @@ describe('the device page: what it shows', () => {
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Riders',
+      }),
+    ).toHaveAttribute('href', '/admin/riders');
+    // The two acts are two sections of the form, each under a heading of its own.
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Report a lost or stolen device' }),
+    ).toBeVisible();
+    expect(screen.getByRole('heading', { level: 2, name: 'Replace the handset' })).toBeVisible();
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs of rules above the content. What revoking does is told in the question of its dialog.
+  it('has no paragraph that explains the revoke: it is told in the dialog', async () => {
+    await open();
+    await screen.findByRole('button', { name: 'Revoke the device' });
+
+    expect(screen.queryByText(/No check of who is asking is made/)).toBeNull();
+    expect(screen.queryByText(/A new handset is registered afterwards, in person/)).toBeNull();
   });
 
   // Break caught: a revoke offered for a rider with no active device, which would be reported as done.
@@ -436,12 +455,20 @@ describe('the device page: replacing the handset', () => {
   it('asks for a reason from its own catalogue and how the rider was verified, and says what happens', async () => {
     await open(REPLACER);
 
-    expect(
-      await screen.findByText(/Do this in person, once you have verified who the rider is/),
-    ).toBeVisible();
+    const intro = await screen.findByText(
+      /Do this in person, once you have verified who the rider is/,
+    );
+    expect(intro).toBeVisible();
+    // Break caught (the PO's decision of 9 November 2026): a task form keeps at most two short sentences under its title, and the rest is told where the choice is made.
+    expect(intro.textContent.split(/(?<=\.)\s+/)).toHaveLength(2);
+    expect(screen.queryByText(/which makes its own key and asks for a new PIN/)).toBeNull();
     await screen.findByRole('combobox', { name: 'Reason (required)' });
     expect(screen.getByRole('textbox', { name: NOTE_NAME })).toBeVisible();
     expect(screen.getByText(/One line, up to 1000 characters/)).toBeVisible();
+    // The one line that changes whether to act now, under the actions.
+    expect(
+      screen.getByText('Nothing changes for the old device until the new handset is registered.'),
+    ).toBeVisible();
     const asked = new URL(
       api.requests.find((request) => request.url.includes('/reason-definitions'))?.url ??
         'http://x',

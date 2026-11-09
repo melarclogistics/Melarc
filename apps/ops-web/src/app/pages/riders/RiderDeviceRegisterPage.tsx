@@ -7,7 +7,7 @@ import { Button } from '../../../components/ui/button/Button';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
-import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
+import { TaskForm, TaskFormSection } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { copyFor } from '../../../platform/problem/problem-copy';
 import { registerRiderDevice } from '../../../platform/rider/rider-commands';
@@ -182,17 +182,16 @@ function Registering({ id }: { readonly id: string }) {
           ) : null
         }
       >
-        <TaskFormSection title="The first device" {...(asks ? { description: INTRO } : {})}>
-          {showing ? (
-            <TaskFormWide>
-              <EnrolmentCode grant={code.grant} onFinish={finish} onNew={asking} />
-            </TaskFormWide>
-          ) : lapsed ? (
-            <TaskFormWide>
-              <LapsedCode onNew={asking} />
-            </TaskFormWide>
-          ) : null}
-        </TaskFormSection>
+        {/* The code, and the screen of a code that has lapsed, are sections of their own, each under its own heading: the section of the task is not drawn around them. */}
+        {showing ? (
+          <EnrolmentCode grant={code.grant} onFinish={finish} onNew={asking} />
+        ) : lapsed ? (
+          <LapsedCode onNew={asking} />
+        ) : (
+          <TaskFormSection title="The first device" description={INTRO}>
+            {null}
+          </TaskFormSection>
+        )}
       </TaskForm>
     </>
   );
