@@ -123,6 +123,21 @@ describe('the skip: what the page says and asks', () => {
     expect(screen.getByText(/uses up no pickup attempt/)).toBeVisible();
   });
 
+  // Break caught: the heading the page had while the stop was read replaced by the form's own, so that the focus the frame put on it falls to the document and a keyboard user is left
+  // at the top of the page (found by the browser spec of the run's final affected run: it depends on which comes first, the frame's move of focus or the stop's answer).
+  it('keeps focus on the heading when the form replaces the page that was loading', async () => {
+    const held = byHand();
+    open({ [STOP]: held.handler });
+    const loading = await screen.findByRole('heading', { level: 1, name: 'Skip a stop' });
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    await held.answer(json(200, waitingStop(), etag('s1')));
+    await form();
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Skip a stop' })).toHaveFocus();
+  });
+
   // Break caught: the skip offered as a way to clear a failed pickup, which is another permission's page.
   it('says this is not the way to clear a failed pickup, and where that is decided', async () => {
     open();

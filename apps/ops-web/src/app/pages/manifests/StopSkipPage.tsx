@@ -92,6 +92,8 @@ function Form({
 }) {
   const client = useApiClient();
   const navigate = useNavigate();
+  // The task form draws the page's heading once the stop is read, a new element in place of the one the page had while it was read: focus the frame put on that one is put on this one.
+  useFocusFallenToHeading();
   const stop = record.stop;
   const [values, setValues] = useState<Fields>({ reasonCode: '', note: '' });
   const [invalid, setInvalid] = useState<{ reason?: string; note?: string }>({});
