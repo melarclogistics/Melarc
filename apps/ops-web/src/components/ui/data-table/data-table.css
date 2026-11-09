@@ -70,12 +70,16 @@
 /*
  * A cell wraps where its words do (an address, a name, what a request needs) and the row grows to hold the lines, so that no word is cut off and none is left to a tooltip: the
  * text is on the page whole (the review of 5edada2, M5). A code, a date and a count keep to a line: the screen marks them (`white-space: nowrap` on the span that holds them).
- * A cell's own height is its density's at least, and its words have room above and below them when they take more than one line. (The row-header cell, which holds the button
- * that opens the row, is not padded: the button is the row's height and takes the room itself, below.)
+ * A cell's height is its density's at least and takes no padding of its own, so a row of one line (or of two, a code over a name) is exactly 36px or 52px, and a row grows only
+ * where its words wrap: the lines have their own leading above and below them.
  */
 .ui-data-table__table tbody td {
-  padding-block: var(--space-2);
   white-space: normal;
+}
+
+/* What the screen marks to keep to one line (`NoWrap`): a code, a date, a count. */
+.ui-data-table__nowrap {
+  white-space: nowrap;
 }
 
 .ui-data-table__table thead th {
@@ -137,8 +141,7 @@
   /* The cell's own bottom border is part of the row's height, so the button is a pixel shorter than the row: a row is exactly the height of its density. */
   min-height: calc(var(--ui-data-table-row) - 1px);
   margin: 0;
-  /* Room above and below the words, for the row that grows because a name wraps; the minimum height above already counts it, so a row of one line is no taller. */
-  padding: var(--space-2) 0;
+  padding: 0;
   border: 0;
   background: transparent;
   color: inherit;

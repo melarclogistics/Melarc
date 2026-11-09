@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { NoWrap, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { PickupRequestView, PickupState } from '../../../platform/pickup/pickup-shape';
@@ -112,7 +112,7 @@ function Pair({
 }) {
   return (
     <span className="pickup-lines">
-      <span className={oneLine ? 'pickup-nowrap' : undefined}>{first}</span>
+      <span>{oneLine ? <NoWrap>{first}</NoWrap> : first}</span>
       <span className="pickup-support">{second}</span>
     </span>
   );
@@ -148,7 +148,7 @@ export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
     id: 'date',
     header: 'Service date',
     priority: 2,
-    cell: (row) => <span className="pickup-nowrap">{row.date}</span>,
+    cell: (row) => <NoWrap>{row.date}</NoWrap>,
   },
   {
     id: 'where',

@@ -1424,9 +1424,9 @@ test.describe('the composed examples in a browser', () => {
     await expect(row).toBeFocused();
   });
 
-  // Break caught: a table whose square corners are drawn over the rounded corners of its card (the card does not cut what runs to its edges), or whose cells
-  // wrap into a taller row (a row is one line, or a code over a name; what does not fit is scrolled to).
-  test('the queue cuts its table to the corners of its card and keeps a cell on one line', async ({
+  // Break caught: a table whose square corners are drawn over the rounded corners of its card (the card does not cut what runs to its edges), or a date broken in the middle
+  // where the screen marked it to stay on a line, or a cell that cannot wrap (the review of 5edada2, M5: a cell wraps at its words, and what a screen marks stays on one line).
+  test('the queue cuts its table to the corners of its card, keeps a marked cell on one line and lets another wrap', async ({
     page,
   }) => {
     await openKit(page, 'example-queue', { width: 1440 });
@@ -1446,10 +1446,12 @@ test.describe('the composed examples in a browser', () => {
       .locator('tbody tr')
       .first()
       .getByRole('cell', { name: 'Mon 9 Nov 2026' });
-    expect(await date.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('nowrap');
-    // The text of the date is on one line: the height of the text is one line of the table's text, whatever the row's height.
+    // The cell wraps at its words; the date is marked, so its words stay on one line: one line of the table's text, whatever the row's height.
+    expect(await date.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('normal');
+    const words = date.getByText('Mon 9 Nov 2026');
+    expect(await words.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe('nowrap');
     expect(
-      await date.evaluate((element) => {
+      await words.evaluate((element) => {
         const range = document.createRange();
         range.selectNodeContents(element);
         return range.getClientRects().length;

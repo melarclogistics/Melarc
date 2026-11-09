@@ -43,7 +43,11 @@ async function focusStop(page: Page): Promise<FocusStop | null> {
   return page.evaluate(() => {
     const element = document.activeElement;
     if (element === null || element === document.body) return null;
-    const style = getComputedStyle(element);
+    // The text of the date field draws no ring inside its box: the box draws the one ring (the review of 5edada2), so that is the ring read for it.
+    const drawing = element.classList.contains('ui-date-picker__input')
+      ? (element.closest('.ui-date-picker__control') ?? element)
+      : element;
+    const style = getComputedStyle(drawing);
     const probe = document.createElement('span');
     probe.style.color = 'var(--focus-ring)';
     document.body.append(probe);

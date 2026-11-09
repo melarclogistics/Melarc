@@ -4,6 +4,7 @@ import { PICKUP_STATE_MAP, serviceDateText } from '../../app/pages/pickup/pickup
 import { Button } from '../../components/ui/button/Button';
 import {
   DataTable,
+  NoWrap,
   RowTitle,
   type DataColumn,
   type DataSort,
@@ -40,7 +41,7 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
       id: 'date',
       header: 'Service date',
       sortable: true,
-      cell: (request) => serviceDateText(request.scheduled_service_date),
+      cell: (request) => <NoWrap>{serviceDateText(request.scheduled_service_date)}</NoWrap>,
     },
     {
       id: 'packages',
@@ -48,7 +49,7 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
       align: 'end',
       // The column that goes first when the table's own box is narrow: the date and the state are what a queue is read by.
       priority: 3,
-      cell: (request) => String(request.declared_package_count),
+      cell: (request) => <NoWrap>{String(request.declared_package_count)}</NoWrap>,
     },
   ];
 }

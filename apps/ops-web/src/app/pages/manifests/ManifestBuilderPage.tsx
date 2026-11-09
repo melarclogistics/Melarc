@@ -5,7 +5,12 @@ import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { AlertDialog } from '../../../components/ui/dialog/AlertDialog';
-import { DataTable, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import {
+  DataTable,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
@@ -128,7 +133,7 @@ const POOL_COLUMNS = (
     header: 'Promised for',
     cell: (row) => (
       <span className="manifest-lines">
-        <span className="manifest-nowrap">{serviceDateText(row.scheduled_service_date)}</span>
+        <NoWrap>{serviceDateText(row.scheduled_service_date)}</NoWrap>
         {isCarriedOver(row.scheduled_service_date) ? (
           <span className="manifest-support">Carried over: promised for an earlier day</span>
         ) : null}
@@ -148,7 +153,7 @@ const POOL_COLUMNS = (
   {
     id: 'packages',
     header: 'Packages',
-    cell: (row) => <span className="manifest-nowrap">{packagesText(row)}</span>,
+    cell: (row) => <NoWrap>{packagesText(row)}</NoWrap>,
   },
 ];
 

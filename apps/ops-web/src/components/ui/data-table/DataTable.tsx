@@ -199,6 +199,14 @@ export function RowTitle({ code, name }: RowTitleProps) {
   );
 }
 
+/**
+ * What a cell keeps to one line: a code, a date, a count. A table's cells wrap at their words (the row grows to hold them), so a screen marks the words that must never be broken in the
+ * middle, and the kit gives it the mark, so that no page keeps a class of its own for it.
+ */
+export function NoWrap({ children }: { readonly children: ReactNode }) {
+  return <span className="ui-data-table__nowrap">{children}</span>;
+}
+
 /** Under this width of the table's own box, in rem (so that enlarged text turns the table into cards sooner), the rows are drawn as cards. */
 export const CARDS_BELOW_REM = 40;
 
