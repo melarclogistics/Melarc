@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
@@ -571,6 +571,99 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       0,
     );
     expect(await overflowingInQueue(page)).toEqual([]);
+  });
+});
+
+/**
+ * Confirming from the queue (run 4, Stage 3.1 to 3.3; the review of 5edada2): the row's Confirm opens the request in the panel with focus on the panel's own Confirm, and the panel
+ * confirms with the version of the read it shows. A request that changed since is told as changed, in the panel, with the way to read it again; after a confirmation the rows stay,
+ * the row that changed is told, focus is on it and the panel shows the state from the answer.
+ */
+test.describe('the queue: confirming in the panel', () => {
+  const rowButton = (page: Page) => opener(page, CODE);
+  const READ = `/api/v1/pickup-requests/${IDS.pending}`;
+
+  // Break caught: the queue's Confirm that read the request again just before it confirmed, so that a request changed in the meantime was confirmed at a version the officer never saw.
+  test('opens the panel on the row’s Confirm, asks first, confirms on the version the panel read, and shows what happened', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api, watch } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+
+    const panel = page.getByRole('dialog', { name: CODE });
+    const confirm = panel.getByRole('button', { name: 'Confirm pickup' });
+    await expect(confirm).toBeFocused();
+    expect(posts(api)).toEqual([]);
+
+    await confirm.click();
+    const question = page.getByRole('alertdialog', { name: 'Confirm this pickup?' });
+    await expect(question.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await question.getByRole('button', { name: 'Confirm the pickup' }).click();
+
+    // The request was read once, for the panel, and the act carries that read's version: it is not read again for the act.
+    await expect.poll(() => posts(api).length).toBe(1);
+    expect(posts(api)[0]?.ifMatch).toBe('"v1"');
+    expect(api.calls.filter((call) => call.method === 'GET' && call.path === READ)).toHaveLength(1);
+    // What the officer sees: the panel shows the state from the answer, the row that changed is told, and focus is on it.
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Confirm pickup' })).toHaveCount(0);
+    await expect(rowButton(page)).toBeFocused();
+    await expect(rowButton(page)).toHaveAccessibleDescription('Updated');
+    await expect(page.getByText(`${CODE} is confirmed.`)).toBeVisible();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  test('tells a request that changed since the panel read it as changed, in the panel, and confirms on the new version once it is read again', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+    // Someone else changed the request after the panel read it: the version the panel holds is no longer the record's.
+    const row = api.world.requests.find((each) => each.id === IDS.pending);
+    if (row !== undefined) row.version += 1;
+    const question = page.getByRole('alertdialog', { name: 'Confirm this pickup?' });
+    await question.getByRole('button', { name: 'Confirm the pickup' }).click();
+    await expect(question).toContainText('changed after you opened it');
+
+    // Dismissing the question leaves the panel saying so, with the way to read the request again.
+    await question.getByRole('button', { name: 'Cancel' }).click();
+    const banner = panel.getByRole('alert');
+    await expect(banner).toContainText('changed');
+    expect(posts(api)).toHaveLength(1);
+    await banner.getByRole('button', { name: 'Reload' }).click();
+    await expect(banner).toHaveCount(0);
+
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(2);
+    expect(posts(api)[1]?.ifMatch).toBe('"v2"');
+  });
+
+  // Break caught: the queue header's booking link taking the one primary of the view from the panel's act.
+  test('has one primary act in view: the panel’s Confirm, and the booking link as a secondary', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel.getByRole('button', { name: 'Confirm pickup' })).toBeVisible();
+
+    const colourOf = (locator: Locator) =>
+      locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const book = page.getByRole('main').getByRole('link', { name: 'Book a pickup' });
+    await expect(book).toBeVisible();
+    expect(await colourOf(book)).not.toBe(
+      await colourOf(panel.getByRole('button', { name: 'Confirm pickup' })),
+    );
+    await expect(book).toHaveClass(/ui-button--secondary/);
   });
 });
 

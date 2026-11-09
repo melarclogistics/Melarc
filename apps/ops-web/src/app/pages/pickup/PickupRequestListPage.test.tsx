@@ -883,9 +883,40 @@ describe('the queue: when it cannot be had', () => {
  * What the panel beside the queue holds (redesign step R6): a request opens in it from its row, with its summary read as the request's own page reads it, its state in words, the
  * link to its own page, and, for a session that may confirm it, the one act the queue offers. The panel never takes the queue's place: the rows stay.
  */
-describe('the queue: the request beside it', () => {
-  const CONFIRMER = ['pickup.read', 'pickup.request.confirm'];
+const CONFIRMER = ['pickup.read', 'pickup.request.confirm'];
+const CONFIRM = `POST /pickup-requests/${REQUEST_ID}/confirm`;
 
+/**
+ * A session that may confirm. The request is read as often as the panel reads it, and **each read is a new version** ("v1", then "v2"): a screen that confirmed at a version it read
+ * just before, instead of the one the panel shows, would send the second.
+ */
+function openConfirmer(
+  confirm: Handler = () => json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer')),
+  record?: Handler,
+  list: Handler = () => page([pending, late]),
+) {
+  let reads = 0;
+  api = installFakeApi(
+    staffApi(
+      sessionWith(CONFIRMER, {
+        authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+      }),
+      {
+        [LIST]: list,
+        [RECORD]:
+          record ??
+          (() => {
+            reads += 1;
+            return json(200, pending, etag(`v${String(reads)}`));
+          }),
+        [CONFIRM]: confirm,
+      },
+    ),
+  );
+  return renderApp('/pickup-requests');
+}
+
+describe('the queue: the request beside it', () => {
   it('opens a request in a panel beside the queue, with its summary and the link to its page', async () => {
     const { user } = open();
     await queueTable();
@@ -980,27 +1011,6 @@ describe('the queue: the request beside it', () => {
   });
 
   describe('confirming', () => {
-    const CONFIRM = `POST /pickup-requests/${REQUEST_ID}/confirm`;
-
-    /** A session that may confirm, with the read of the request and the act it takes: the queue only ever reads the version of the request it confirms. */
-    function openConfirmer(
-      confirm: Handler = () => json(200, { ...pending, state: 'CONFIRMED' }, etag('v2')),
-    ) {
-      api = installFakeApi(
-        staffApi(
-          sessionWith(CONFIRMER, {
-            authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
-          }),
-          {
-            [LIST]: () => page([pending, late]),
-            [RECORD]: () => json(200, pending, etag('v1')),
-            [CONFIRM]: confirm,
-          },
-        ),
-      );
-      return renderApp('/pickup-requests');
-    }
-
     it('offers the act on the row of a request that waits, and not on one that is confirmed already', async () => {
       openConfirmer();
 
@@ -1033,27 +1043,63 @@ describe('the queue: the request beside it', () => {
       expect(screen.queryByRole('button', { name: /^Confirm ACC-PR/ })).toBeNull();
     });
 
-    it('asks first, reads the version of that one request, confirms it with that version, and says so', async () => {
+    // Break caught (the review of 5edada2): the queue's Confirm that read the request again just before it confirmed, so that a request changed in the meantime (its date, its hub, its
+    // packages) was confirmed at a version the officer never saw. The row's Confirm opens the panel; the panel confirms with the version of the read it shows.
+    it('opens the panel on the row’s Confirm with focus on the panel’s, asks first, and confirms with the version of the read the panel shows', async () => {
       const view = openConfirmer();
       await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
 
-      const question = await screen.findByRole('alertdialog', { name: 'Confirm ACC-PR-7KQ2MZ?' });
-      // Nothing was sent by pressing the row's act: the question comes first, with the safe answer.
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      const confirm = await within(panel).findByRole('button', { name: 'Confirm pickup' });
+      await waitFor(() => {
+        expect(confirm).toHaveFocus();
+      });
+      // Nothing was sent by pressing the row's act: the question comes first.
       expect(api.requests.some((request) => request.method === 'POST')).toBe(false);
+      await view.user.click(confirm);
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      expect(within(question).getByRole('button', { name: 'Cancel' })).toBeVisible();
       await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
 
       await waitFor(() => {
         expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
       });
       const confirmation = api.requests.find((request) => request.method === 'POST');
+      // The panel read the request once, at "v1": that is the version the act carries, and the request was not read again for it.
       expect(confirmation?.headers.get('If-Match')).toBe('"v1"');
+      expect(
+        api.requests.filter(
+          (request) =>
+            request.url.endsWith(`/pickup-requests/${REQUEST_ID}`) && request.method === 'GET',
+        ),
+      ).toHaveLength(1);
       expect(await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/)).toBeVisible();
     });
 
+    it('opens the same panel, with focus on the panel’s heading and not on its act, from the button that opens the request', async () => {
+      const view = openConfirmer();
+      await queueTable();
+      await view.user.click(
+        await screen.findByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      );
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      const confirm = await within(panel).findByRole('button', { name: 'Confirm pickup' });
+
+      await waitFor(() => {
+        expect(
+          within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }),
+        ).toHaveFocus();
+      });
+      expect(confirm).not.toHaveFocus();
+    });
+
+    // Break caught: a refusal drawn nowhere, or in the API's words.
     it('tells a refusal in the question, in approved words, and keeps the question', async () => {
-      const view = openConfirmer(() => refusal(409, 'STATE_CONFLICT'));
+      const view = openConfirmer(() => refusal(403, 'PERMISSION_DENIED'));
       await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
-      const question = await screen.findByRole('alertdialog', { name: 'Confirm ACC-PR-7KQ2MZ?' });
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
 
       await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
 
@@ -1061,19 +1107,118 @@ describe('the queue: the request beside it', () => {
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     });
 
-    it('confirms from the panel as well, with the same question', async () => {
-      const view = openConfirmer();
-      await queueTable();
-      await view.user.click(
-        await screen.findByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
-      );
+    // Break caught (the review of 5edada2): a request that changed since the panel read it, told nowhere but in the question the person may dismiss, or confirmed at a newer version.
+    it('tells a request that changed since it was read as changed, in the panel, with the way to read it again, and confirms nothing', async () => {
+      const view = openConfirmer(() => refusal(412, 'STATE_CONFLICT'));
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
       const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
-
       await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
-      const question = await screen.findByRole('alertdialog', { name: 'Confirm ACC-PR-7KQ2MZ?' });
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
       await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      expect(await within(question).findByRole('alert')).toBeVisible();
 
-      expect(await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/)).toBeVisible();
+      // The person dismisses the question: the panel says the record changed, and offers to read it again.
+      await view.user.click(within(question).getByRole('button', { name: 'Cancel' }));
+      expect(await within(panel).findByRole('alert')).toHaveTextContent(/changed/i);
+      expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+
+      const reads = api.requests.filter(
+        (request) =>
+          request.method === 'GET' && request.url.endsWith(`/pickup-requests/${REQUEST_ID}`),
+      ).length;
+      await view.user.click(within(panel).getByRole('button', { name: 'Reload' }));
+
+      await waitFor(() => {
+        expect(
+          api.requests.filter(
+            (request) =>
+              request.method === 'GET' && request.url.endsWith(`/pickup-requests/${REQUEST_ID}`),
+          ),
+        ).toHaveLength(reads + 1);
+      });
+      await waitFor(() => {
+        expect(within(panel).queryByRole('alert')).toBeNull();
+      });
+      // A new question over the new version, which is the second read's.
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      await view.user.click(
+        within(await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' })).getByRole(
+          'button',
+          { name: 'Confirm the pickup' },
+        ),
+      );
+      await waitFor(() => {
+        expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(2);
+      });
+      expect(
+        api.requests.filter((request) => request.method === 'POST')[1]?.headers.get('If-Match'),
+      ).toBe('"v2"');
+    });
+
+    // Break caught (the review of 5edada2): rows that turn into loading rows after an act, so that the officer loses their place and the row that changed; a changed row that is not marked;
+    // focus left on nothing; a panel that goes on showing the state it had before the act.
+    it('keeps the rows, marks the row that changed, returns focus to it and shows the state from the answer', async () => {
+      let confirmed = false;
+      let release: (response: Response) => void = () => undefined;
+      const view = openConfirmer(
+        () => {
+          confirmed = true;
+          return json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer'));
+        },
+        undefined,
+        () => {
+          // The read after the act is held, so that what the queue shows while it is under way can be seen.
+          if (!confirmed) return page([pending, late]);
+          return new Promise<Response>((resolve) => {
+            release = resolve;
+          });
+        },
+      );
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      await view.user.click(
+        within(await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' })).getByRole(
+          'button',
+          { name: 'Confirm the pickup' },
+        ),
+      );
+
+      // While the page is read again after the act, the rows stay and the table says it is busy; the panel already shows the state from the answer.
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveAttribute(
+          'aria-busy',
+          'true',
+        );
+      });
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+      expect(screen.queryByText('Loading pickup requests')).toBeNull();
+      const header = within(panel).getByRole('heading', {
+        level: 2,
+        name: 'ACC-PR-7KQ2MZ',
+      }).parentElement;
+      expect(header).not.toBeNull();
+      expect(header).toHaveTextContent('Confirmed');
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+
+      await act(async () => {
+        release(page([{ ...pending, state: 'CONFIRMED' }, late]));
+        await Promise.resolve();
+      });
+
+      // The row that changed is told in words and focus is on its button.
+      const row = await screen.findByRole('button', {
+        name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd',
+      });
+      await waitFor(() => {
+        expect(row).toHaveFocus();
+      });
+      expect(row).toHaveAccessibleDescription('Updated');
+      expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+        'aria-busy',
+      );
     });
   });
 });
@@ -1139,8 +1284,23 @@ describeInterfaceStates('The pickup queue', {
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
   'stale / conflict': {
-    inapplicable:
-      'The queue changes nothing and carries no version; a request that moved is read again from its own page, where every act sends the version it read.',
+    test: async () => {
+      // The queue confirms with the version of the panel's own read: a request that changed since is told as changed, in the panel, with the way to read it again.
+      const view = openConfirmer(() => refusal(412, 'STATE_CONFLICT'));
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await view.user.click(
+        await within(question).findByRole('button', { name: 'Reload the record' }),
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+      });
+      expect(await within(panel).findByRole('button', { name: 'Confirm pickup' })).toBeVisible();
+    },
   },
   success: {
     test: async () => {

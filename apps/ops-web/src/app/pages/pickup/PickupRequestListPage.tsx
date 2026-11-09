@@ -21,6 +21,7 @@ import {
   calendarDateOf,
   PICKUP_STATES,
   type CutoffExceptionState,
+  type PickupRequestView,
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
@@ -30,7 +31,7 @@ import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queu
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER, serviceDateText } from './pickup-presentation';
-import { PickupQueuePanel, ConfirmPickupDialog, useConfirmedNews } from './PickupQueuePanel';
+import { PickupQueuePanel, useConfirmedNews } from './PickupQueuePanel';
 import {
   openLabelOf,
   QUEUE_COLUMNS,
@@ -128,11 +129,24 @@ export function PickupRequestListPage() {
   const dateShown = typed.over === serviceDate ? typed.value : (serviceDate ?? null);
   const [interacted, setInteracted] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  /** The request open in the panel beside the queue, and the one whose confirmation is being asked. */
+  /** The request open in the panel beside the queue. A confirmation is made in the panel, with the version of the read the panel shows, and nowhere else on this page. */
   const [opened, setOpened] = useState<QueueFacts | undefined>();
-  const [confirming, setConfirming] = useState<QueueFacts | undefined>();
+  /** How many times the row's own Confirm has asked for focus on the panel's (0: the panel was opened by the row's button that opens it, which asks for none). */
+  const [confirmAsk, setConfirmAsk] = useState(0);
   /** The panel's own read of the request open beside the queue: its header and its body are drawn from it, and never from the list's row, which is older. */
   const panelRead = usePickupRequest(opened?.id ?? '', opened !== undefined);
+  // What an act in the panel came to (the server's answer for the request it made), and what the queue does about it: the rows stay while they are read again, the row that changed is
+  // marked, and focus returns to it once they are drawn (the review of 5edada2).
+  const [answer, setAnswer] = useState<
+    { readonly id: string; readonly request: PickupRequestView } | undefined
+  >();
+  const [changed, setChanged] = useState<
+    { readonly visit: number; readonly ids: readonly string[] } | undefined
+  >();
+  const [afterAct, setAfterAct] = useState(false);
+  const returnTo = useRef<string | undefined>(undefined);
+  const answered = answer?.id === opened?.id ? answer?.request : undefined;
+  const shown = answered ?? panelRead.data?.request;
 
   // Refresh page: the page now shown is read again, by the same query (its filters and its cursor). One read at a time: the header's Refresh says it is
   // busy and ignores a press, and a press that gets here while a read is under way (before the screen has drawn the busy line) is given that
@@ -167,6 +181,26 @@ export function PickupRequestListPage() {
   // request they opened, else the results). Only if the page is still the one they came back to: not after a change of filter or of page.
   const workspace = useRef<QueueWorkspaceHandle>(null);
   const restored = useRef(arrival === undefined);
+
+  // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
+  useEffect(() => {
+    if (afterAct || returnTo.current === undefined) return;
+    const id = returnTo.current;
+    returnTo.current = undefined;
+    if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
+  }, [afterAct, list.dataUpdatedAt]);
+
+  /** The act of the panel was answered: say so, show the answer in the panel at once, mark the row, and read the page again with its rows kept. */
+  function confirmedInPanel(request: PickupRequestView): void {
+    announceConfirmed(request);
+    setAnswer({ id: request.id, request });
+    setChanged({ visit: visit.id, ids: [request.id] });
+    returnTo.current = request.id;
+    setAfterAct(true);
+    void list.refetch().finally(() => {
+      setAfterAct(false);
+    });
+  }
   const settled = !list.isFetching && (list.isSuccess || list.isError);
   const stillThere =
     signature === arrival?.signature &&
@@ -262,10 +296,11 @@ export function PickupRequestListPage() {
   const filtering = state !== undefined || cutoff !== undefined || serviceDate !== undefined;
 
   const result: QueueResult<QueueFacts> = (() => {
-    // While a page that was read is read again, the rows of the earlier read are not drawn as if they answered it: the loading treatment takes
-    // their place (as for a first read), and a failure takes their place if the read fails.
-    if (list.status === 'pending' || (list.isFetching && list.status === 'success')) {
-      return { status: 'loading' };
+    if (list.status === 'pending') return { status: 'loading' };
+    if (list.isFetching && list.status === 'success') {
+      // After an act the rows stay: the officer keeps their place, their focus and the row that changed (the table says it is busy). Any other read again (a refresh asked for, a
+      // page, a filter) is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if the read fails.
+      return afterAct ? { status: 'ready', rows, refreshing: true } : { status: 'loading' };
     }
     if (list.status === 'error') {
       const problem = problemOf(list.error, {
@@ -420,8 +455,12 @@ export function PickupRequestListPage() {
             columns: QUEUE_COLUMNS,
             rowId: (row) => row.id,
             density: 'two-line',
-            onOpen: setOpened,
+            onOpen: (row: QueueFacts) => {
+              setConfirmAsk(0);
+              setOpened(row);
+            },
             openLabel: openLabelOf,
+            changedIds: changed?.visit === visit.id ? changed.ids : [],
             card: (row) => <QueueCard facts={row} />,
             ...(canConfirm
               ? {
@@ -429,7 +468,11 @@ export function PickupRequestListPage() {
                     label: 'Confirm',
                     ariaLabel: (row: QueueFacts) => `Confirm ${row.code}`,
                     isAvailable: (row: QueueFacts) => row.confirmable,
-                    onRun: setConfirming,
+                    // The row's Confirm opens the request in the panel with focus on the panel's own Confirm: the question is asked there, over the version the panel read.
+                    onRun: (row: QueueFacts) => {
+                      setConfirmAsk((count) => count + 1);
+                      setOpened(row);
+                    },
                   },
                 }
               : {}),
@@ -456,6 +499,7 @@ export function PickupRequestListPage() {
           panel={{
             open: opened !== undefined,
             onClose: () => {
+              setConfirmAsk(0);
               setOpened(undefined);
             },
             code: opened?.code ?? '',
@@ -463,16 +507,9 @@ export function PickupRequestListPage() {
               ? {}
               : {
                   // The state in the header is the panel's own read: until it has answered the header shows none, and never the list's row, which is older than the panel's answer.
-                  ...(panelRead.isSuccess
-                    ? {
-                        status: (
-                          <StatusBadge
-                            status={panelRead.data.request.state}
-                            map={PICKUP_STATE_MAP}
-                          />
-                        ),
-                      }
-                    : {}),
+                  ...(shown === undefined
+                    ? {}
+                    : { status: <StatusBadge status={shown.state} map={PICKUP_STATE_MAP} /> }),
                   fullPage: { to: opened.href },
                 }),
             children:
@@ -480,31 +517,16 @@ export function PickupRequestListPage() {
                 <PickupQueuePanel
                   key={opened.id}
                   record={panelRead}
+                  answered={answered}
                   hubs={hubs}
                   canConfirm={canConfirm}
-                  onConfirmed={(request) => {
-                    announceConfirmed(request);
-                    void list.refetch();
-                  }}
+                  confirmAsk={confirmAsk}
+                  onConfirmed={confirmedInPanel}
                 />
               ),
           }}
         />
       </div>
-      <ConfirmPickupDialog
-        open={confirming !== undefined}
-        id={confirming?.id ?? ''}
-        code={confirming?.code ?? ''}
-        onDone={(request) => {
-          setConfirming(undefined);
-          announceConfirmed(request);
-          void list.refetch();
-        }}
-        onCancel={() => {
-          setConfirming(undefined);
-        }}
-        onReload={() => list.refetch()}
-      />
     </>
   );
 }

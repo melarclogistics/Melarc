@@ -6,7 +6,6 @@ import type { ActionMenuItem } from '../../../components/ui/action-menu/ActionMe
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
-import { ConfirmationDialog } from '../../../components/ui/confirmation/ConfirmationDialog';
 import {
   DescriptionList,
   type DescriptionItem,
@@ -20,7 +19,6 @@ import { useApiClient } from '../../../platform/api/api-client';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
 import {
   cancelPickupRequest,
-  confirmPickupRequest,
   escalatePickupRequest,
   extendPickupAttempts,
   resolveCutoffException,
@@ -39,6 +37,7 @@ import { hubNameOf } from '../staff/staff-presentation';
 import { AttemptChain } from './AttemptChain';
 import { EstimateSummary } from './EstimateSummary';
 import { CancelRequestDialog, CutoffDialog, NoteActDialog } from './PickupActDialogs';
+import { ConfirmPickupDialog } from './PickupQueuePanel';
 import {
   actorText,
   cancelledByText,
@@ -682,20 +681,10 @@ function Request({
           : {})}
       />
 
-      <ConfirmationDialog<PickupRequestView>
+      <ConfirmPickupDialog
         open={open === 'confirm'}
-        title="Confirm this pickup?"
-        consequence={
-          <p>
-            The request joins the pool of confirmed pickups waiting for a run. Nothing is charged
-            and no credit is reserved. A request booked after the hub’s cut-off is confirmed all the
-            same, and waits for an Ops decision on the late booking.
-          </p>
-        }
-        confirmLabel="Confirm the pickup"
-        operation="confirmPickupRequest"
+        id={id}
         version={etag}
-        send={(command) => confirmPickupRequest(client, id, command.version ?? etag)}
         onDone={(answer) => {
           done('The request is confirmed. It waits in the pool for a pickup run.', answer);
         }}

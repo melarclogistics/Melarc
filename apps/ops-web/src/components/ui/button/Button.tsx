@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef } from 'react';
+import type { ComponentPropsWithoutRef, Ref } from 'react';
 
 import { Spinner } from '../loading/Spinner';
 import './button.css';
@@ -11,6 +11,8 @@ export interface ButtonProps extends Omit<
 > {
   /** Always stated: a button inside a form submits it unless it says it does not. */
   readonly type: 'button' | 'submit' | 'reset';
+  /** The button's own element, for a screen that gives focus to it. */
+  readonly ref?: Ref<HTMLButtonElement>;
   /**
    * `primary` is the main action of a surface, `secondary` an alternate, and `danger` the act that does harm (DESIGN_SYSTEM section 16):
    * an outline in the danger colour, never a fill, whose label names the consequence. The confirmation dialog uses it to confirm.

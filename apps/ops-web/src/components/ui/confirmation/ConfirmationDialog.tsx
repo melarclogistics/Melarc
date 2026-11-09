@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import type { ButtonVariant } from '../button/Button';
@@ -41,6 +41,11 @@ export interface ConfirmationDialogProps<Result> {
   readonly onCancel: () => void;
   /** The person asks for the record to be read again (after a conflict, or to find out whether an act was done). */
   readonly onReload: () => unknown;
+  /**
+   * The server said the record is not as the person saw it (`STATE_CONFLICT`, a version that no longer holds). The dialog says so itself and offers the read again; a screen that draws the record
+   * says it there too (a banner with *Reload*), so that the person who dismisses the dialog is not left looking at a record that is out of date.
+   */
+  readonly onConflict?: () => void;
 }
 
 /**
@@ -72,8 +77,13 @@ function OpenConfirmation<Result>({
   onDone,
   onCancel,
   onReload,
+  onConflict,
 }: ConfirmationDialogProps<Result>) {
   const form = useRef<HTMLFormElement>(null);
+  const conflicted = useRef(onConflict);
+  useLayoutEffect(() => {
+    conflicted.current = onConflict;
+  });
   const command = useConfirmedCommand<PlainCommand, Result>({
     send,
     onDone,
@@ -87,6 +97,7 @@ function OpenConfirmation<Result>({
     if (command.phase === 'unknown' || command.phase === 'conflict') {
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();
     }
+    if (command.phase === 'conflict') conflicted.current?.();
   }, [command.phase]);
 
   return (

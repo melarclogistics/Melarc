@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
@@ -12,40 +12,41 @@ import { showToast } from '../../../components/ui/toast/Toast';
 import { useApiClient } from '../../../platform/api/api-client';
 import { confirmPickupRequest } from '../../../platform/pickup/pickup-commands';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
-import {
-  readPickupRequest,
-  type PickupRecord,
-  type PickupRecordRead,
-} from '../../../platform/pickup/use-pickup-queries';
+import type { PickupRecord, PickupRecordRead } from '../../../platform/pickup/use-pickup-queries';
 import { canBeConfirmed, PICKUP_STATE_MAP, STATE_SENTENCES } from './pickup-presentation';
 import { queueFactsOf } from './pickup-queue-view';
 
 /**
- * The confirmation of a request from the queue (`confirmPickupRequest`): the question, its consequence and the two buttons of the kit's `ConfirmationDialog`, over the same
- * machinery as the request's own page, so that a refusal, a conflict and an answer that is lost are told the same way. **It reads the request just before it confirms it**, because
- * the version the act takes (`If-Match`) is the `ETag` of a read of that one request, and the queue's list carries none: a request that has moved on since the list was read is
- * refused by the server (`STATE_CONFLICT`), and the dialog says so. The queue summary is read again by the API client when the act is answered.
+ * The question that confirms a request (`confirmPickupRequest`), **one question for the queue's panel and for the request's own page**: the same title, the same consequence and the same two
+ * buttons (COMPONENT_PATTERNS: the dismiss button is "Cancel", for confirming is not itself a cancellation). It confirms with **the version of the read the screen shows** (`version`, the `ETag`
+ * of that read, sent as `If-Match`), and never with a version read just before: a request that changed since the person saw it (its date, its hub, its packages) is refused by the server
+ * (`STATE_CONFLICT`) and the person is told it changed, not confirmed at a version they never saw (the review of 5edada2). A refusal, a conflict and an answer that is lost are told the same way
+ * on both screens, over the kit's `ConfirmationDialog`. The queue summary is read again by the API client when the act is answered.
  */
 export function ConfirmPickupDialog({
   open,
   id,
-  code,
+  version,
   onDone,
   onCancel,
+  onConflict,
   onReload,
 }: {
   readonly open: boolean;
   readonly id: string;
-  readonly code: string;
+  /** The `ETag` of the read the screen shows. */
+  readonly version: string;
   readonly onDone: (request: PickupRequestView) => void;
   readonly onCancel: () => void;
+  /** The server said the request is not as the person saw it: the screen says so where the record is drawn (a banner with the way to read it again). */
+  readonly onConflict?: () => void;
   readonly onReload: () => unknown;
 }) {
   const client = useApiClient();
   return (
     <ConfirmationDialog<PickupRequestView>
       open={open}
-      title={`Confirm ${code}?`}
+      title="Confirm this pickup?"
       consequence={
         <p>
           The request joins the pool of confirmed pickups waiting for a run. Nothing is charged and
@@ -54,14 +55,12 @@ export function ConfirmPickupDialog({
         </p>
       }
       confirmLabel="Confirm the pickup"
-      cancelLabel="Go back"
       operation="confirmPickupRequest"
-      send={async () => {
-        const { etag } = await readPickupRequest(client, id);
-        return confirmPickupRequest(client, id, etag);
-      }}
+      version={version}
+      send={(command) => confirmPickupRequest(client, id, command.version ?? version)}
       onDone={onDone}
       onCancel={onCancel}
+      {...(onConflict === undefined ? {} : { onConflict })}
       onReload={onReload}
     />
   );
@@ -86,29 +85,47 @@ export function useConfirmedNews(): (request: PickupRequestView) => void {
 
 function Summary({
   record,
+  answered,
   hubs,
   canConfirm,
+  confirmAsk,
   onConfirmed,
   onReload,
 }: {
   readonly record: PickupRecord;
+  readonly answered: PickupRequestView | undefined;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
+  readonly confirmAsk: number;
   readonly onConfirmed: (request: PickupRequestView) => void;
   readonly onReload: () => unknown;
 }) {
-  const { request } = record;
+  // What the panel shows is the state of the server's last word on it: the answer of the act the person just made, until the panel is read again.
+  const request = answered ?? record.request;
   const facts = queueFactsOf(request, hubs);
   const [confirming, setConfirming] = useState(false);
+  const [conflicted, setConflicted] = useState(false);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  // The row's Confirm opens the panel with focus on the panel's own: once the panel has drawn it (the panel's own move of focus to its heading comes first, and is not the person's choice).
+  useEffect(() => {
+    if (confirmAsk === 0) return;
+    const frame = requestAnimationFrame(() => {
+      confirmButton.current?.focus();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [confirmAsk]);
   return (
     <>
       <RecordPage
         header={{ code: request.code, sentence: STATE_SENTENCES[request.state] }}
         acts={
-          canConfirm && canBeConfirmed(request)
+          canConfirm && answered === undefined && canBeConfirmed(request)
             ? {
                 primary: (
                   <Button
+                    ref={confirmButton}
                     type="button"
                     onClick={() => {
                       setConfirming(true);
@@ -120,6 +137,16 @@ function Summary({
               }
             : {}
         }
+        {...(conflicted
+          ? {
+              conflict: {
+                onReload: () => {
+                  setConflicted(false);
+                  void onReload();
+                },
+              },
+            }
+          : {})}
         main={
           <DescriptionList
             items={[
@@ -142,16 +169,22 @@ function Summary({
       <ConfirmPickupDialog
         open={confirming}
         id={request.id}
-        code={request.code}
+        version={record.etag}
         onDone={(answer) => {
           setConfirming(false);
           onConfirmed(answer);
-          void onReload();
         }}
         onCancel={() => {
           setConfirming(false);
         }}
-        onReload={onReload}
+        onConflict={() => {
+          setConflicted(true);
+        }}
+        onReload={() => {
+          setConfirming(false);
+          setConflicted(false);
+          return onReload();
+        }}
       />
     </>
   );
@@ -163,17 +196,23 @@ function Summary({
  * every act, is "Open full page".
  *
  * **The read is the page's, handed in** (`record`): the panel's header (its state badge) and its body are drawn from the same read, and never from the row of the list, which is the
- * last page read and is older than the panel's own answer (the review of 5edada2).
+ * last page read and is older than the panel's own answer (the review of 5edada2). **The act confirms with the version of this read**, so that a request that changed since the person saw it
+ * is refused and told as changed (a banner with the way to read it again), and never confirmed at a version they never saw. `answered` is the answer of the act just made, which the panel
+ * shows at once, and `confirmAsk` counts the times the row's own Confirm asked for focus on the panel's.
  */
 export function PickupQueuePanel({
   record,
+  answered,
   hubs,
   canConfirm,
+  confirmAsk,
   onConfirmed,
 }: {
   readonly record: PickupRecordRead;
+  readonly answered: PickupRequestView | undefined;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
+  readonly confirmAsk: number;
   readonly onConfirmed: (request: PickupRequestView) => void;
 }) {
   return (
@@ -189,8 +228,10 @@ export function PickupQueuePanel({
       {(data) => (
         <Summary
           record={data}
+          answered={answered}
           hubs={hubs}
           canConfirm={canConfirm}
+          confirmAsk={confirmAsk}
           onConfirmed={onConfirmed}
           onReload={() => record.refetch()}
         />
