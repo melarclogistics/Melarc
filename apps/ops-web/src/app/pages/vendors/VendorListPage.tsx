@@ -1,38 +1,132 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Button } from '../../../components/ui/button/Button';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
+import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { Field } from '../../../components/ui/field/Field';
-import { Icon } from '../../../components/ui/icon/Icon';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
+import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
-import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
+import {
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
+import { cannotText } from '../../../platform/problem/capability-words';
+import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { formatInstant } from '../../../platform/time/format-time';
 import { useVendorAccounts } from '../../../platform/vendor/use-vendor-queries';
-import type {
-  VendorAccountPageView,
-  VendorAccountView,
-} from '../../../platform/vendor/vendor-shape';
-import { NothingAtHub } from '../NothingAtHub';
+import type { VendorAccountView } from '../../../platform/vendor/vendor-shape';
 import { hubNameOf } from '../staff/staff-presentation';
 import { secretSentence, VENDOR_STATUS_MAP } from './vendor-presentation';
-import '../staff/staff-pages.css';
+import './vendors.css';
 
 /** The longest search the server accepts (`listVendorAccounts`, `q`). */
 const SEARCH_LIMIT = 128;
 
 /**
- * Vendor accounts (surfaces/ops-portal.md section 7, `/admin/vendors`; S0.52b): the identifier, the organisation, the status, whether a secret
- * exists and how many browsers are active, for every account the session's grant reaches. **Never a credential or a recovery address**: the
- * screen has nowhere to show either. Which accounts the session may see is the server's decision (each organisation's responsible hub); the
- * search is in the address, the page of results is not.
+ * What the list tells of a vendor account, made once from the record so that the row and the card cannot tell different things. **Never a credential or a recovery address**:
+ * the answer carries neither, `vendor-shape.ts` reads neither, and this has nowhere to hold one.
+ */
+interface AccountFacts {
+  readonly id: string;
+  readonly code: string;
+  readonly organisation: string;
+  readonly href: string;
+  readonly status: VendorAccountView['status'];
+  readonly secret: string;
+  readonly browsers: string;
+  readonly hub: string;
+}
+
+function factsOf(
+  account: VendorAccountView,
+  hubs: readonly { readonly id: string; readonly display_name: string }[],
+): AccountFacts {
+  return {
+    id: account.id,
+    code: account.account_identifier,
+    organisation: account.legal_name,
+    href: `/admin/vendors/${account.id}`,
+    status: account.status,
+    secret: secretSentence(account),
+    browsers: String(account.active_device_count),
+    hub: hubNameOf(account.responsible_hub_id, hubs),
+  };
+}
+
+/** The status as a badge that wraps at its words in a narrow column, instead of making the column as wide as the longest status. */
+function State({ status }: { readonly status: AccountFacts['status'] }) {
+  return <StatusBadge status={status} map={VENDOR_STATUS_MAP} wraps />;
+}
+
+/**
+ * The five facts of an account in five columns: the identifier over the organisation (the identifier is the row's header, and **a link to the account's own page**: a row opens a page
+ * and not a panel, so there is no button over the row, and a keyboard, a middle click and a new tab all use the link), where the account stands, whether the vendor has set its
+ * shared secret (said, never shown), how many browsers are active, and the hub.
+ */
+const COLUMNS: readonly DataColumn<AccountFacts>[] = [
+  {
+    id: 'account',
+    header: 'Account / organisation',
+    rowHeader: true,
+    cell: (row) => <RowTitle code={row.code} name={row.organisation} to={row.href} />,
+  },
+  { id: 'status', header: 'Status', cell: (row) => <State status={row.status} /> },
+  { id: 'secret', header: 'Secret', cell: (row) => row.secret },
+  { id: 'browsers', header: 'Active browsers', align: 'end', cell: (row) => row.browsers },
+  { id: 'hub', header: 'Hub', cell: (row) => row.hub },
+];
+
+function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <div className="vendor-card__fact">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * An account as a card, for a room too narrow for the columns: the status, then the facts in the order a person reads them, each under the name of its column. It holds **no control**:
+ * its identifier is the card's heading, outside the card, and the link to the account.
+ */
+function AccountCard({ facts }: { readonly facts: AccountFacts }) {
+  return (
+    <>
+      <div className="vendor-card__head">
+        <State status={facts.status} />
+      </div>
+      <dl className="vendor-card__facts">
+        <Fact label="Organisation">{facts.organisation}</Fact>
+        <Fact label="Secret">{facts.secret}</Fact>
+        <Fact label="Active browsers">{facts.browsers}</Fact>
+        <Fact label="Hub">{facts.hub}</Fact>
+      </dl>
+    </>
+  );
+}
+
+/** A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that. */
+function refusalWords(problem: Problem): string {
+  return problem.forbidden === 'outside-hubs'
+    ? 'These vendor accounts are at a hub your account does not work in.'
+    : cannotText('vendor.read');
+}
+
+/**
+ * Vendor accounts (surfaces/ops-portal.md section 7, `/admin/vendors`; S0.52b; redesign step R7b): the identifier, the organisation, the status, whether a secret exists and how many
+ * browsers are active, for every account the session's grant reaches, drawn by the queue workspace template (the reference pattern: the pickup run list, `/manifests`). **Never a
+ * credential or a recovery address**: the screen has nowhere to show either. Which accounts the session may see is the server's decision (each organisation's responsible hub); **the server
+ * searches** (the text is sent as `q`, and is in the address, so that a reload keeps it) **and pages** (by token, for the search it was made with): the screen draws what comes back, whole.
+ * The search is a field in the filter row's popover and shows as a chip that can be taken off; an empty list is told as no accounts at all, as a search that hides everything, or as nothing
+ * at the chosen hub, and a failed read stays a failure with the search in place.
  */
 export function VendorListPage() {
   const me = useSignedInSession();
@@ -42,31 +136,41 @@ export function VendorListPage() {
   const hubId = useActiveHub();
   const { hub, showAllHubs } = useHubScope();
   const signature = `${q}|${hubId ?? ''}`;
-  const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
-    signature,
-    tokens: [],
-  });
-  const tokens = paging.signature === signature ? paging.tokens : [];
-  const pageToken = tokens.at(-1);
+  // A page token belongs to the filters it was made with: a change of any of them starts again at the first page.
+  const paging = useQueuePaging(signature);
   const list = useVendorAccounts({
     ...(hubId === undefined ? {} : { hubId }),
     q,
-    ...(pageToken === undefined ? {} : { pageToken }),
+    ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
+  const workspace = useRef<QueueWorkspaceHandle>(null);
   const [typing, setTyping] = useState({ over: q, text: q });
   const draft = typing.over === q ? typing.text : q;
   const [interacted, setInteracted] = useState(false);
-  const results = useRef<HTMLDivElement>(null);
-  const focusResults = useRef(false);
-  useEffect(() => {
-    if (focusResults.current && list.status === 'success') {
-      focusResults.current = false;
-      results.current?.focus();
-    }
-  }, [list.status, list.data]);
+  const [filterOpen, setFilterOpen] = useState(false);
 
-  if (me === undefined) return null;
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
+  // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
+  const settled = !list.isFetching && (list.isSuccess || list.isError);
+  const { takeFocus } = paging;
+  useEffect(() => {
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
+
+  const hubs = me?.session.authorized_hubs;
+  const rows = useMemo(
+    () =>
+      list.isSuccess && hubs !== undefined
+        ? list.data.items.map((account) => factsOf(account, hubs))
+        : [],
+    [list.isSuccess, list.data, hubs],
+  );
+
+  if (me === undefined || hubs === undefined) return null;
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
 
   function search(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -75,157 +179,139 @@ export function VendorListPage() {
     setParams(next === '' ? new URLSearchParams() : new URLSearchParams({ q: next }), {
       replace: true,
     });
+    setFilterOpen(false);
   }
 
-  const columns: TableColumn<VendorAccountView>[] = [
-    {
-      key: 'identifier',
-      header: 'Account',
-      rowHeader: true,
-      cell: (row) => (
-        <span className="staff-nowrap">
-          <Link to={`/admin/vendors/${row.id}`}>{row.account_identifier}</Link>
-        </span>
-      ),
-    },
-    { key: 'organisation', header: 'Organisation', cell: (row) => row.legal_name },
-    {
-      key: 'status',
-      header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} map={VENDOR_STATUS_MAP} />,
-    },
-    { key: 'secret', header: 'Secret', cell: (row) => secretSentence(row) },
-    { key: 'browsers', header: 'Active browsers', cell: (row) => String(row.active_device_count) },
-    {
-      key: 'hub',
-      header: 'Hub',
-      cell: (row) => hubNameOf(row.responsible_hub_id, me.session.authorized_hubs),
-    },
-  ];
+  function clearSearch(): void {
+    setInteracted(true);
+    setParams(new URLSearchParams(), { replace: true });
+  }
 
-  const clearSearch = (
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={() => {
-        setInteracted(true);
-        setParams(new URLSearchParams(), { replace: true });
-      }}
-    >
-      Clear the search
-    </Button>
-  );
-  const empty =
-    hub !== undefined ? (
-      // A chosen hub is a filter too (audit B1): no account at this hub says nothing of the others, so it is never "no vendor accounts yet".
-      <NothingAtHub
-        hub={hub}
-        showAllHubs={showAllHubs}
-        what="vendor accounts"
-        filtered={q !== ''}
-        clear={clearSearch}
-      />
-    ) : q === '' ? (
-      <EmptyState kind="none" heading="No vendor accounts yet" announce={interacted}>
-        Accounts of the vendors at your hubs appear here once their organisation is approved.
-      </EmptyState>
-    ) : (
-      <EmptyState
-        kind="filtered"
-        heading="No accounts match"
-        announce={interacted}
-        action={clearSearch}
-      >
-        Nothing fits this search. Clear it to see every account.
-      </EmptyState>
-    );
+  const result: QueueResult<AccountFacts> = (() => {
+    // Any read of the page, a refresh asked for, a page or a search, is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if it fails.
+    if (list.status === 'pending' || (list.isFetching && list.status === 'success')) {
+      return { status: 'loading' };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, { operation: 'listVendorAccounts' });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? refusalWords(problem)
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
+
+  const emptiness = {
+    noun: 'vendor accounts',
+    none: 'Accounts of the vendors at your hubs appear here once their organisation is approved.',
+    announce: interacted,
+    // A chosen hub is a filter too (audit B1): no account at this hub says nothing of the others, so it is never "no vendor accounts yet".
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+  const empty: QueueEmptiness =
+    q === ''
+      ? emptiness
+      : {
+          ...emptiness,
+          filtered: true,
+          onClearFilters: clearSearch,
+          clearLabel: 'Clear the search',
+          filteredText: 'Nothing fits this search. Clear it to see every account.',
+        };
 
   return (
     <>
       <title>Vendors · Melarc Ops Portal</title>
-      <PageHeader title="Vendors" description="The accounts of the vendors your session reaches." />
-      <form className="staff-filters" role="search" noValidate onSubmit={search}>
-        <div className="staff-filters__search">
-          <Field label="Search by organisation or account">
-            <Input
-              type="search"
-              name="q"
-              value={draft}
-              maxLength={SEARCH_LIMIT}
-              autoComplete="off"
-              onChange={(event) => {
-                setTyping({ over: q, text: event.target.value });
-              }}
-            />
-          </Field>
-        </div>
-        <div className="staff-filters__submit">
-          <Button type="submit" variant="secondary">
-            Search
-          </Button>
-        </div>
-      </form>
-
-      <ReadState<VendorAccountPageView>
-        query={list}
-        isEmpty={(data) => data.items.length === 0}
-        empty={empty}
-        loadingLabel="Loading vendor accounts…"
-        skeleton={<Skeleton lines={4} />}
-        permission="vendor.read"
-        operation="listVendorAccounts"
-      >
-        {(data) => {
-          const nextToken = data.nextPageToken;
-          const shown = data.items.length;
-          return (
-            <>
-              <p className="staff-count" role="status">
-                {`Showing ${String(shown)} ${shown === 1 ? 'account' : 'accounts'}${tokens.length > 0 ? ` on page ${String(tokens.length + 1)}` : ''}.${nextToken === null ? '' : ' More follow on the next page.'}`}
-              </p>
-              <div className="staff-results" ref={results} tabIndex={-1}>
-                <Table
-                  caption="Vendor accounts"
-                  hideCaption
-                  columns={columns}
-                  rows={data.items}
-                  rowKey={(row) => row.id}
-                />
-              </div>
-              {tokens.length > 0 || nextToken !== null ? (
-                <nav className="staff-pager" aria-label="Pages">
-                  {tokens.length > 0 ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        focusResults.current = true;
-                        setPaging({ signature, tokens: tokens.slice(0, -1) });
-                      }}
-                    >
-                      <Icon name="previous" size="sm" />
-                      Previous page
-                    </Button>
-                  ) : null}
-                  {nextToken === null ? null : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        focusResults.current = true;
-                        setPaging({ signature, tokens: [...tokens, nextToken] });
-                      }}
-                    >
-                      Next page
-                      <Icon name="next" size="sm" />
-                    </Button>
-                  )}
-                </nav>
-              ) : null}
-            </>
-          );
+      <QueueWorkspace<AccountFacts>
+        ref={workspace}
+        header={{
+          title: 'Vendors',
+          description: 'The accounts of the vendors your session reaches.',
+          freshness: {
+            state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: () => {
+              void list.refetch({ cancelRefetch: false });
+            },
+          },
         }}
-      </ReadState>
+        filters={{
+          label: 'Filter the vendor accounts',
+          chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
+          onRemove: clearSearch,
+          filterOpen,
+          onFilterOpenChange: setFilterOpen,
+          filterPanel: (
+            <form className="vendor-search" role="search" noValidate onSubmit={search}>
+              <Field label="Search by organisation or account">
+                <Input
+                  type="search"
+                  name="q"
+                  value={draft}
+                  maxLength={SEARCH_LIMIT}
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setTyping({ over: q, text: event.target.value });
+                  }}
+                />
+              </Field>
+              <Button type="submit" variant="secondary">
+                Search
+              </Button>
+            </form>
+          ),
+        }}
+        result={result}
+        empty={empty}
+        table={{
+          label: 'Vendor accounts',
+          columns: COLUMNS,
+          rowId: (row) => row.id,
+          density: 'two-line',
+          card: (row) => <AccountCard facts={row} />,
+          // The identifier is the heading of each card, for heading navigation, and the link to the account.
+          cardTitle: (row) => (
+            <Link to={row.href}>
+              <OperationalCode>{row.code}</OperationalCode>
+            </Link>
+          ),
+          // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+          footer: (
+            <QueuePager
+              label="Pages of vendor accounts"
+              noun={{ one: 'account', other: 'accounts' }}
+              shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+              page={paging.page}
+              hasNext={list.isSuccess && list.data.nextPageToken !== null}
+              onNext={() => {
+                if (list.isSuccess && list.data.nextPageToken !== null) {
+                  paging.toNextPage(list.data.nextPageToken);
+                }
+              }}
+              onPrevious={paging.toPreviousPage}
+            />
+          ),
+        }}
+      />
     </>
   );
 }
