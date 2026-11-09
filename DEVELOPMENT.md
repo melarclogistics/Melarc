@@ -367,7 +367,7 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    exits, the same in CI and outside it: `0` held; `1` a migration main has was changed, renamed or removed, or the command was misused (an option it does not know, or a base
    that was named and is empty or is not a commit this clone has); `2` it could not tell (a tree with no main, a shallow clone, a base with no migration in it). **What `2`
    costs is for whoever runs it to say.** The precheck shows it as `warned`, with the script's words in its summary and the count (`No cheap check failed, and 1 warned
-   (migrations)`), and exits 0, so that a source package or a clone that fetched no branch is not stopped but is told that nothing was held; **the gate and CI fail on it**, as
+(migrations)`), and exits 0, so that a source package or a clone that fetched no branch is not stopped but is told that nothing was held; **the gate and CI fail on it**, as
    they fail on any exit but 0. `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the
    migrations to, and then it can decide. A base that is **named and empty** (`MELARC_MIGRATION_BASE=` with nothing after it, a variable that was not filled in, `--base ""`)
    or **mistyped** fails with exit `1` everywhere, and is never read as "none named"; the all-zero revision that a push event names for a new branch is none named. CI names
