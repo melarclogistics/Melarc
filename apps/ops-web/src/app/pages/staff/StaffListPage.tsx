@@ -20,9 +20,11 @@ import {
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { cannotText } from '../../../platform/problem/capability-words';
 import { problemOf } from '../../../platform/problem/problem-copy';
+import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import type { StaffIdentityView, StaffStatus } from '../../../platform/staff/staff-shape';
 import { useAssignableBundles, useStaffList } from '../../../platform/staff/use-staff-queries';
+import { formatInstant } from '../../../platform/time/format-time';
 import {
   defaultViewFor,
   hubNameOf,
@@ -158,6 +160,7 @@ export function StaffListPage() {
     enabled: me !== undefined,
   });
   const bundles = useAssignableBundles(canReadRoles);
+  const refreshSummary = useRefreshQueueSummary();
 
   // What the person typed and has not sent yet. It follows the address when the address changes (Back, a link): what was typed is
   // kept with the search it was typed over, and is the search again as soon as that is not the one in the address.
@@ -198,6 +201,14 @@ export function StaffListPage() {
 
   // The roles are part of what the list shows, so the list is not drawn until they are in, or known not to come.
   const waitingForRoles = canReadRoles && bundles.isPending;
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
+
+  function refreshPage(): void {
+    // The count beside the menu is read again with the page (task C1, `AC-QSUM-09`). One read at a time: a press while a read is under way is that read's.
+    void refreshSummary();
+    void list.refetch({ cancelRefetch: false });
+  }
 
   /** A change of view or of search. The address is their home, and the page starts again. */
   function change(next: { view?: StaffView; q?: string }): void {
@@ -306,6 +317,11 @@ export function StaffListPage() {
         header={{
           title: 'Staff',
           description: 'Everyone with a staff profile at your hubs.',
+          freshness: {
+            state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: refreshPage,
+          },
           ...(wholeQueue
             ? {
                 count: {

@@ -92,6 +92,10 @@ function Sessions({
   const who = name ?? KIND[type];
   const canRevoke = me.holds('staff.session.revoke');
   const mine = target?.id === me.session.id;
+  const updatedAt =
+    sessions.dataUpdatedAt > 0
+      ? formatInstant(new Date(sessions.dataUpdatedAt).toISOString())
+      : undefined;
 
   function refresh(): Promise<unknown> {
     return sessions.refetch();
@@ -179,7 +183,17 @@ function Sessions({
         </p>
       ) : null}
       <QueueWorkspace<SessionRecordView>
-        header={{ title: 'Sessions', description: `Open sessions of ${who}.` }}
+        header={{
+          title: 'Sessions',
+          description: `Open sessions of ${who}.`,
+          freshness: {
+            state: sessions.isFetching ? 'refreshing' : sessions.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: () => {
+              void sessions.refetch({ cancelRefetch: false });
+            },
+          },
+        }}
         notice={
           notice === undefined && canRevoke ? undefined : (
             <>

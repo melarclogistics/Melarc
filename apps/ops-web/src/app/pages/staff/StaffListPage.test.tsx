@@ -99,6 +99,9 @@ const queryOf = (index = -1): URLSearchParams => {
 
 const listRequests = () =>
   api.requests.filter((request) => request.url.includes('/staff-identities'));
+/** The reads of the counts beside the menu (`getQueueSummary`), which the shell makes and a queue's refresh asks for again. */
+const summaryRequests = () =>
+  api.requests.filter((request) => new URL(request.url).pathname.endsWith('/ops/queue-summary'));
 
 describe('the staff list: what it shows', () => {
   it('names the page and the title, and describes what is on it', async () => {
@@ -201,12 +204,31 @@ describe('the staff list: what it shows', () => {
   });
 
   // The order is the server's and the contract states none, so the page says none (the queue workspace says the order only where one is known).
-  it('claims no order for the rows, and draws no freshness line the page never had', async () => {
+  it('claims no order for the rows', async () => {
     open('/admin/staff?view=all', KEYS.approver);
     await table();
 
     expect(screen.queryByText(/first, as the server lists them/i)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
+  // Break caught: a refresh that reads nothing, or one that reads the list and leaves the count beside the menu as it was (AC-QSUM-09: the counts are read again with the queue).
+  it('says when the list was last checked, and Refresh reads the list and the count beside the menu again', async () => {
+    const { user } = open('/admin/staff?view=all', KEYS.approver);
+    await table();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
+    const lists = listRequests().length;
+    const counts = summaryRequests().length;
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(listRequests()).toHaveLength(lists + 1);
+    });
+    await waitFor(() => {
+      expect(summaryRequests()).toHaveLength(counts + 1);
+    });
+    await table();
+    expect(queryOf().has('page_token')).toBe(false);
   });
 });
 

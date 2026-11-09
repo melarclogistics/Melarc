@@ -89,6 +89,27 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
     expect(await table()).toBeVisible();
   });
 
+  // Break caught: a refresh that reads nothing; the list says when it was last checked.
+  it('says when the browsers were last checked, and Refresh reads the person’s own browsers again', async () => {
+    const view = open();
+    await table();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
+    const lists = () =>
+      api.requests.filter(
+        (request) =>
+          request.method === 'GET' && request.url.endsWith('/auth/staff/trusted-browsers'),
+      );
+    const before = lists().length;
+
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(lists()).toHaveLength(before + 1);
+    });
+    await table();
+    expect(deletes()).toHaveLength(0);
+  });
+
   // Break caught: dates that are not words, a browser that is not told from the one in use, or a column that hides when a browser was last used.
   it('shows what each browser is called, when it was added, last used and ends, and which one this is', async () => {
     open();

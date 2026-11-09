@@ -159,6 +159,24 @@ describe('the sessions: what it shows', () => {
     expect(url.searchParams.get('principal_id')).toBe(STAFF_ID);
   });
 
+  // Break caught: a refresh that reads nothing, or one that reads another person's sessions; the list says when it was last checked.
+  it('says when the sessions were last checked, and Refresh reads the same person’s sessions again', async () => {
+    const view = open();
+    await table();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
+    const before = lists().length;
+
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(lists()).toHaveLength(before + 1);
+    });
+    await table();
+    const url = new URL(lists().at(-1)?.url ?? 'http://x');
+    expect(url.searchParams.get('principal_type')).toBe('STAFF');
+    expect(url.searchParams.get('principal_id')).toBe(STAFF_ID);
+  });
+
   it('lists each session with when it started, when it was last used and when it ends, in Accra time', async () => {
     open();
 

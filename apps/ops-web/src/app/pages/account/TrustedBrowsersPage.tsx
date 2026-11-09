@@ -11,6 +11,7 @@ import { problemOf } from '../../../platform/problem/problem-copy';
 import { revokeTrustedBrowser } from '../../../platform/staff/staff-commands';
 import type { TrustedBrowserView } from '../../../platform/staff/staff-shape';
 import { useOwnTrustedBrowsers } from '../../../platform/staff/use-staff-queries';
+import { formatInstant } from '../../../platform/time/format-time';
 import { trustedBrowserRows } from './TrustedBrowserTable';
 import './account-pages.css';
 
@@ -45,6 +46,11 @@ export function TrustedBrowsersPage() {
   function refresh(): Promise<unknown> {
     return browsers.refetch();
   }
+
+  const updatedAt =
+    browsers.dataUpdatedAt > 0
+      ? formatInstant(new Date(browsers.dataUpdatedAt).toISOString())
+      : undefined;
 
   const result: QueueResult<TrustedBrowserView> = (() => {
     if (browsers.status === 'pending') return { status: 'loading' };
@@ -82,6 +88,13 @@ export function TrustedBrowsersPage() {
           title: 'Trusted browsers',
           description:
             'Browsers where you chose not to be asked for an authenticator code. Your password is still asked every time.',
+          freshness: {
+            state: browsers.isFetching ? 'refreshing' : browsers.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: () => {
+              void browsers.refetch({ cancelRefetch: false });
+            },
+          },
         }}
         notice={
           notice === undefined ? undefined : (
