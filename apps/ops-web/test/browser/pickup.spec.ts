@@ -577,6 +577,24 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     expect(await overflowingInQueue(page)).toEqual([]);
     expect(await ellipsisedInQueue(page)).toEqual([]);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+
+    // Wrapped cells are not clamped (the Product Owner, 9 November 2026): with the panel open the sender takes as many lines as its words need, and its cell is as tall as those lines.
+    const sender = queueTable(page).getByText(LONG_SENDER).first();
+    const senderBox = await sender.boundingBox();
+    const cellBox = await sender
+      .locator('xpath=ancestor::*[self::th or self::td][1]')
+      .boundingBox();
+    expect(senderBox?.height ?? 0).toBeGreaterThan(30);
+    expect((senderBox?.y ?? 0) + (senderBox?.height ?? 0)).toBeLessThanOrEqual(
+      (cellBox?.y ?? 0) + (cellBox?.height ?? 0) + 1,
+    );
+    // Nothing is hidden by a line count or a height: neither the text's element nor its cell holds more than it shows.
+    const hidden = await sender.evaluate((element) =>
+      [element, element.closest('th, td')].map((box) =>
+        box === null ? 0 : box.scrollHeight - box.clientHeight,
+      ),
+    );
+    expect(hidden.every((height) => height <= 1)).toBe(true);
   });
 
   // Break caught (the review of 5edada2, M6, and the Product Owner's decision of 9 November 2026 that replaced its answer): a queue with nothing beside it that drops the columns it marked
