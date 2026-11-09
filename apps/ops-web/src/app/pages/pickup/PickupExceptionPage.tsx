@@ -353,7 +353,7 @@ function notAvailable(request: PickupRequestView): string | undefined {
   if (exception?.state === 'REQUESTED') {
     return `The one-package exception of this request was requested on ${
       formatInstant(exception.requested_at) ?? 'an earlier day'
-    }, and waits for a holder of pickup.exception.approve to approve it.`;
+    }, and waits for an approver to decide it.`;
   }
   return undefined;
 }
@@ -412,8 +412,8 @@ function Exception({
 /**
  * Request a one-package exception (surfaces/ops-portal.md section 7, `/pickup-requests/{id}/exception`; S1.19): the maker's half of the exception
  * (`requestOnePackageException`), with the note and **the recipient's name, phone and delivery address, which become mandatory** (§21.1). It is
- * offered for a pending request of one package with no exception waiting or approved, and says why otherwise. The page names the permission
- * that decides it, `pickup.exception.approve`, and no role; the approval itself is made on `/approvals`. The act takes no `Idempotency-Key` and
+ * offered for a pending request of one package with no exception waiting or approved, and says why otherwise. The page says that an approver
+ * decides it, and names neither the permission that decides it nor a role; the approval itself is made on `/approvals`. The act takes no `Idempotency-Key` and
  * no version, so a lost answer is resolved by reading the request again, which shows an exception that reached the server.
  */
 export function PickupExceptionPage() {

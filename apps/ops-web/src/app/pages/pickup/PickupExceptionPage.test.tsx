@@ -153,17 +153,19 @@ describe('the exception: when it does not apply', () => {
       { one_package_exception_id: '6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d' },
       /already approved/,
     ],
-    // The read now shows an exception that was asked for: it is not asked for twice.
+    // The read now shows an exception that was asked for: it is not asked for twice. It waits for an approver, in those words: the key that decides it is on no screen.
     [
       'a request whose exception waits for approval',
       { one_package_exception: exceptionFixture() },
-      /requested on 29 Oct, 08:20, and waits for a holder of pickup\.exception\.approve/,
+      /requested on 29 Oct, 08:20, and waits for an approver to decide it\./,
     ],
   ])('says why for %s, and offers no form', async (_label, change, words) => {
     open(() => json(200, { ...single, ...change }, etag('v1')));
 
     expect(await screen.findByText(words)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Request the exception' })).toBeNull();
+    // Break caught: the reason that names the permission that decides it (the finding of the review of 499399c: a key on a screen).
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.exception\.approve/);
   });
 
   // A refused exception does not block a new one (requestOnePackageException).
