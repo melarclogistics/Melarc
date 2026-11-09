@@ -93,7 +93,7 @@ export interface BulkAction {
  */
 export interface DataTableHandle {
   /**
-   * Puts focus on the control of a row as it is drawn now (the button that opens it, else its box, else its act: the table is a table or cards, whichever it is now), and brings it into view by
+   * Puts focus on the control of a row as it is drawn now (the button that opens it, else its box, else its act, else the link of its code: the table is a table or cards, whichever it is now), and brings it into view by
    * the least scroll, under the top bar and not behind it. `false` when the row is not drawn or has nothing that can take focus. The id is matched without regard to case.
    */
   readonly focusRow: (id: string) => boolean;
@@ -365,6 +365,13 @@ export function DataTable<Item>({
       (node): node is HTMLElement => node !== undefined && isEnabled(node),
     );
   };
+  /** The link of a row as it is drawn now (a row of the table, or a card), for a row that has no control of the table's own. `wanted` is the row's id in lower case. */
+  const linkOf = (wanted: string): HTMLElement | undefined => {
+    const row = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-row-id]') ?? []).find(
+      (candidate) => candidate.dataset.rowId?.toLowerCase() === wanted,
+    );
+    return row?.querySelector<HTMLElement>('a[href]') ?? undefined;
+  };
   const register = (
     id: string,
     kind: 'open' | 'box' | 'action',
@@ -385,9 +392,10 @@ export function DataTable<Item>({
         const key = [...controls.current.keys()].find(
           (candidate) => candidate.toLowerCase() === wanted,
         );
-        const target = key === undefined ? undefined : control(key);
-        if (key === undefined || target === undefined) return false;
-        setActiveId(key);
+        // A row whose code is a link to a page of its own (`RowTitle` with `to`) has no control of the table's: its link is what takes focus.
+        const target = (key === undefined ? undefined : control(key)) ?? linkOf(wanted);
+        if (target === undefined) return false;
+        if (key !== undefined) setActiveId(key);
         target.focus({ preventScroll: true });
         // The least scroll that brings it into view; the page's scroll padding and the control's scroll margin keep it clear of the top bar and of the table's own header.
         target.scrollIntoView({ block: 'nearest', inline: 'nearest' });

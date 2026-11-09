@@ -1,9 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createRef, useState } from 'react';
+import { createRef, useState, type ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
+import { OperationalCode } from '../code/OperationalCode';
+import { Link } from '../link/Link';
 import {
   DataTable,
   drawsCards,
@@ -1196,6 +1199,58 @@ describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4
     await user.keyboard('{ArrowDown}');
 
     expect(screen.getByRole('button', { name: `Open ${THIRD.code}` })).toHaveFocus();
+  });
+
+  describe('a row whose code is a link to a page of its own', () => {
+    const LINK_COLUMNS: readonly DataColumn<Request>[] = [
+      {
+        id: 'request',
+        header: 'Request / sender',
+        rowHeader: true,
+        cell: (row) => <RowTitle code={row.code} name={row.sender} to={`/requests/${row.id}`} />,
+      },
+      { id: 'state', header: 'State', cell: (row) => row.state },
+    ];
+    const linkProps = (overrides: Partial<DataTableProps<Request>> = {}): DataTableProps<Request> =>
+      props({
+        columns: LINK_COLUMNS,
+        onOpen: undefined,
+        openLabel: undefined,
+        card: (row) => row.state,
+        cardTitle: (row) => (
+          <Link to={`/requests/${row.id}`}>
+            <OperationalCode>{row.code}</OperationalCode>
+          </Link>
+        ),
+        ...overrides,
+      });
+    const inRouter = (ui: ReactElement) => <MemoryRouter>{ui}</MemoryRouter>;
+
+    it('draws the code as a link to the record, which a keyboard and a new tab use, and the row no button', () => {
+      render(inRouter(<DataTable<Request> {...linkProps()} />));
+
+      const link = screen.getByRole('link', { name: SECOND.code });
+      expect(link).toHaveAttribute('href', `/requests/${SECOND.id}`);
+      // No row has a button over it: the table has none to draw, for it opens nothing.
+      expect(screen.queryByRole('button')).toBeNull();
+    });
+
+    // Break caught: a page that comes back to a list of links and finds no row to put focus on, so that the officer is left on the results instead of the record they opened.
+    it('puts focus on the link of a row by its id, in the table and in the cards, and says whether it did', () => {
+      const handle = createRef<DataTableHandle>();
+      const view = render(inRouter(<DataTable<Request> {...linkProps()} ref={handle} />));
+
+      expect(handle.current?.focusRow('R2')).toBe(true);
+      expect(screen.getByRole('link', { name: SECOND.code })).toHaveFocus();
+      expect(handle.current?.focusRow('not-there')).toBe(false);
+      expect(screen.getByRole('link', { name: SECOND.code })).toHaveFocus();
+
+      view.rerender(
+        inRouter(<DataTable<Request> {...linkProps({ layout: 'cards' })} ref={handle} />),
+      );
+      expect(handle.current?.focusRow(THIRD.id)).toBe(true);
+      expect(screen.getByRole('link', { name: THIRD.code })).toHaveFocus();
+    });
   });
 
   // Break caught: rows that go to loading rows while they are read again after an act, so that the officer loses the row that changed and their place.
