@@ -716,7 +716,9 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     reach: async (page) => {
       await open(page, `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`);
       // A session is a row of a table or, in a narrow room, a card: the act that ends it is in both.
-      await expect(page.getByRole('button', { name: 'End session started 22 Oct, 07:05' })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'End session started 22 Oct, 07:05' }),
+      ).toBeVisible();
     },
   },
   {
