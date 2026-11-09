@@ -482,6 +482,10 @@ A text field is identified by its boundary, so the boundary must reach 3:1 again
   sidebar itself). A blue ring on Ink is only 2.96:1, so the default recipe is not used there.
 - Draw the indicator with `outline` so that forced-colors mode keeps it (it drops `box-shadow`). Do not clip it with
   `overflow: hidden`, and do not let a sticky region hide the focused control entirely (§14).
+- **Two named exceptions, and no others** (the Product Owner's review of 5edada2, 8 November 2026; `FOCUS_EXCEPTIONS` in `scripts/design-tokens.ts`, held by its test). **A heading
+  given `tabindex="-1"`** so that focus lands on what is new (a page's title after a move, a record's code, a panel's heading) is not a control, and draws no ring. **The text of the date
+  field** draws none of its own: the field's box draws the one ring, and a second inside the first is what this rule avoids; the calendar button, a control of its own, keeps the
+  ring. Any other rule that removes a ring is reported.
 
 ### Focus, dark theme
 
@@ -952,6 +956,11 @@ Owner on 6 October 2026), and leave the formal conformance level to a later Prod
 §40.6). An implementation applies this section and never a weaker reading.
 
 ### Required defaults
+
+**A part of a page that sticks to the top of the window sits below the top bar.** The shell publishes the height the bar has now (`--topbar-measured-height`), and `base.css` derives two
+custom properties from it and the tokens (they give no new value): `--sticky-top`, the bar and a space, which a sticking part takes as its `top` (the panel beside a queue, the run of a
+builder, the rail of a form), and `--sticky-room`, the window below it, which bounds a part that can be taller than its room: it scrolls inside itself, under its own header, and is
+never cut at the foot of the window or left sliding under the bar.
 
 - visible keyboard focus;
 - semantic HTML before custom ARIA;
