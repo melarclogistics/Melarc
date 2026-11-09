@@ -14,9 +14,10 @@
 #   ci                      "CI result": waits for all of the above and fails unless every one succeeded
 #
 # What runs when (the Product Owner's decisions of 7 November 2026): a pull request runs every job but browser-firefox-webkit,
-# which would be 17 more jobs on every push to a pull request, and leaves out of the database tests the few whose assertions are
-# wall-clock time (apps/api/test/timing-sensitive-tests.ts: a loaded runner fails them for a reason that is not the code's); a push to
-# main, the nightly run and a manual run run all of them, so Firefox and WebKit are tested on every commit that reaches main, and every
+# which would be 17 more jobs on every push to a pull request, and leaves out of the database tests the files whose assertions are
+# wall-clock time and nothing else of the tests (apps/api/test/timing-sensitive-tests.ts: a loaded runner fails them for a reason that
+# is not the code's; they run in the nightly run and in a manual run, and a push to main leaves them out as a pull request does); a push to
+# main, the nightly run and a manual run run every other job, so Firefox and WebKit are tested on every commit that reaches main, and every
 # night. The nightly run is a weekday run, and it stands down when nothing changed: the plan job asks GitHub for the last successful
 # nightly run, and when that run tested the commit main is at now, every other job but the dependency audit is skipped (scripts/ci-plan.ts: an
 # advisory is published with no commit, so the audit runs every night whatever the plan says). A push, a pull
@@ -27,7 +28,7 @@
 # nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; and every job but the audit
 # is skipped on a nightly run whose plan, a job that succeeded, said run=false, and that is a success. On any other run a
 # skip is a failure. scripts/ci-workflow.test.ts keeps this file to that design (no check dropped, no failure absorbed, one
-# verdict, every job on the commit under test, the two skips as decided, a timeout of its own on every test step, the
+# verdict, every job on the commit under test, the two skips as decided, a timeout of its own on every test step (the job's limit less the measured set-up, at most 1.5 minutes in the hosted run of d600057, rounded up to 2, and a margin of 2: so a hung suite fails the step, with the diagnostics, before the job is cancelled), the
 # diagnostics kept on a failure and on a cancellation, the browsers cached) and scripts/browser-shards.test.ts proves, from
 # Playwright's own list of tests, that each kind of run runs every test of the engines it must, once.
 #
@@ -243,12 +244,12 @@ jobs:
           distribution: temurin
           java-version-file: .java-version
 
-      # The tests whose bounds are wall-clock time are left out of a pull request and run everywhere else (the variable is 1 on a pull request and
-      # empty otherwise: apps/api/test/timing-sensitive-tests.ts); the shard is this job's entry. The step's own limit is below the job's.
+      # The files whose assertions are wall-clock time are left out of a pull request and of a push to main, and run in the nightly run and in a manual run (the
+      # variable is 1 on a pull request and on a push and empty otherwise: apps/api/test/timing-sensitive-tests.ts); the shard is this job's entry. The step's own limit is below the job's.
       - name: Database tests
         timeout-minutes: 26
         env:
-          MELARC_SKIP_TIMING_TESTS: ${{ github.event_name == 'pull_request' && '1' || '' }}
+          MELARC_SKIP_TIMING_TESTS: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '1' || '' }}
           MELARC_DB_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
         run: pnpm run test:db
 

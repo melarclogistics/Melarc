@@ -34,8 +34,8 @@
  *   - every job tests the commit the run is about, and what is published is described by a manifest of that
  *     commit (scripts/ci-revision.ts);
  *   - a step that fails on purpose to rehearse the pipeline runs only when someone asked for it by hand;
- *   - every step that runs tests has a timeout of its own, at least two minutes below its job's: a hung suite then fails as a step, with
- *     the minutes left for the diagnostics to be kept, and does not take the job down with it, cancelled, with nothing kept;
+ *   - every step that runs tests has a timeout of its own, at most the job's limit less the measured set-up and a margin (`stepLimitFor`, four minutes): a hung suite then fails
+ *     as a step, with the minutes left for the diagnostics to be kept, and does not take the job down with it, cancelled, with nothing kept;
  *   - the diagnostics are uploaded when a job failed or was cancelled (`failure() || cancelled()`), and the browsers Playwright
  *     downloads are cached (`~/.cache/ms-playwright`, keyed by the lockfile and the browsers), so a run does not fetch them again;
  *   - the database job leaves the tests whose bounds are wall-clock time (apps/api/test/timing-sensitive-tests.ts) out of a pull
@@ -1133,8 +1133,24 @@ export const TIMED_COMMANDS: readonly string[] = [
   'pnpm run test:e2e:https',
   'pnpm run verifier:test',
 ];
-/** How many minutes below its job's limit a test step's timeout must be at the most: what the failure upload and the teardown need. */
+/**
+ * What a job spends before its test step starts: the checkout, the toolchain, the JDK or the browsers, the build. **Measured** in the hosted run of the last green push to
+ * main (d600057, 8 November 2026, the 33 jobs of the run, read from GitHub's own record of each step): 0.3 to 1.5 minutes before the test step in every job, the longest the
+ * WebKit shard that restores its browser; rounded up to 2. A job that needs more says so here and the figure is measured again.
+ */
+export const SETUP_MINUTES = 2;
+/**
+ * What follows the test step in the worst case, and a runner that is slow to start or to finish: the diagnostics upload, the post steps of the job (the saves of the caches)
+ * and the teardown.
+ */
 export const STEP_TIMEOUT_MARGIN_MINUTES = 2;
+/**
+ * The longest a test step may be given in a job of `jobMinutes` (run 4, Stage 1, item 7): the job's limit less what the job spends before the step and what it needs after it.
+ * The step starts when the set-up is done, so a limit of the job's less only the margin would end after the job's own and the job would be cancelled, with the diagnostics
+ * of exactly the run that hung lost; at this limit the step fails first, as a step, and the diagnostics are kept in the minutes that are left.
+ */
+export const stepLimitFor = (jobMinutes: number): number =>
+  jobMinutes - SETUP_MINUTES - STEP_TIMEOUT_MARGIN_MINUTES;
 
 /**
  * A hung test run is cut by the job's limit, which cancels the job: whatever the steps after it would keep goes with it. A step that has a
@@ -1154,10 +1170,10 @@ function checkStepTimeouts(jobs: readonly Job[]): WorkflowProblem[] {
           code: 'STEP_TIMEOUT',
           message: `Step "${label}" needs a timeout-minutes of its own, a whole number from 1 and below its job's limit, so a hung run fails as a step and the diagnostics are kept.`,
         });
-      } else if (typeof jobLimit === 'number' && timeout > jobLimit - STEP_TIMEOUT_MARGIN_MINUTES) {
+      } else if (typeof jobLimit === 'number' && timeout > stepLimitFor(jobLimit)) {
         problems.push({
           code: 'STEP_TIMEOUT',
-          message: `Step "${label}" has timeout-minutes ${String(timeout)}, in a job of ${String(jobLimit)}: at most ${String(jobLimit - STEP_TIMEOUT_MARGIN_MINUTES)}, or the job's limit cancels everything before the step's own does.`,
+          message: `Step "${label}" has timeout-minutes ${String(timeout)}, in a job of ${String(jobLimit)}: at most ${String(stepLimitFor(jobLimit))} (the job's limit less ${String(SETUP_MINUTES)} minutes of set-up, measured, and ${String(STEP_TIMEOUT_MARGIN_MINUTES)} of margin), or the job's limit cancels everything before the step's own does.`,
         });
       }
     }
@@ -1208,7 +1224,8 @@ function checkBrowserCaches(jobs: readonly Job[]): WorkflowProblem[] {
 
 /** The variable that leaves the timing tests out (apps/api/test/timing-sensitive-tests.ts), and the one value it may be given in the workflow. */
 export const TIMING_SKIP_VARIABLE = 'MELARC_SKIP_TIMING_TESTS';
-export const TIMING_SKIP_VALUE = "${{ github.event_name == 'pull_request' && '1' || '' }}";
+export const TIMING_SKIP_VALUE =
+  "${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '1' || '' }}";
 /** The variable that cuts the database tests into shards (apps/api/test/database-shard.ts). */
 export const DATABASE_SHARD_VARIABLE = 'MELARC_DB_SHARD';
 export const DATABASE_TESTS = 'pnpm run test:db';
@@ -1339,7 +1356,7 @@ function checkTimingSkip(workflow: unknown, jobs: readonly Job[]): WorkflowProbl
     if (env[TIMING_SKIP_VARIABLE] !== TIMING_SKIP_VALUE) {
       problems.push({
         code: 'TIMING_SKIP_DRIFT',
-        message: `The step that runs "${DATABASE_TESTS}" must set env ${TIMING_SKIP_VARIABLE} to exactly ${TIMING_SKIP_VALUE}: 1 on a pull request, which leaves the timing tests out, and empty on every other run, which runs them.`,
+        message: `The step that runs "${DATABASE_TESTS}" must set env ${TIMING_SKIP_VARIABLE} to exactly ${TIMING_SKIP_VALUE}: 1 on a pull request and on a push to main, which leave the timing tests out, and empty on the nightly and manual runs, which run them.`,
       });
     }
   }

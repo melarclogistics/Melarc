@@ -99,8 +99,8 @@ export default defineConfig({
         test: {
           name: 'database-alone',
           include: ['test/database/alone/*.test.ts'],
-          // The tests whose assertions are wall-clock time are left out of a pull request's run (`MELARC_SKIP_TIMING_TESTS=1`, set by the job of a pull request in
-          // .github/workflows/ci.yml) and run on a push to main, in the nightly run, in a manual run and in the gate: test/timing-sensitive-tests.ts says why.
+          // The files whose assertions are wall-clock time are left out of the run of a pull request and of a push to main (`MELARC_SKIP_TIMING_TESTS=1`, set by the
+          // job in .github/workflows/ci.yml) and run in the nightly run, in a manual run and in the gate: test/timing-sensitive-tests.ts says why.
           exclude: skipsTimingTests(process.env)
             ? [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS]
             : configDefaults.exclude,

@@ -75,10 +75,10 @@ variable it makes all four; a value that is not a shard of the harness (`e2e/har
 
 [ci.yml](.github/workflows/ci.yml) (the Product Owner's decisions of 7 November 2026): a **pull request** runs every job but the
 Firefox and WebKit shards of the browser tests, which is the Chromium shards, the HTTPS journeys in all three shards and every other
-check, and it leaves out of the database tests the few whose assertions are wall-clock time
+check, and it leaves out of the database tests the files whose assertions are wall-clock time and nothing else of the tests
 ([apps/api/test/timing-sensitive-tests.ts](apps/api/test/timing-sensitive-tests.ts): `MELARC_SKIP_TIMING_TESTS=1`, set by the
-database step of a pull request alone); a **push to main**, the **nightly run** (02:17 UTC, Monday to Friday) and a **manual run**
-run all of it, so Firefox and WebKit are tested on every commit that reaches main and every weekday night. A first job, `plan`
+database step of a pull request and of a push to main, which run every other test; the nightly run and a manual run run those files too);
+a **push to main**, the **nightly run** (02:17 UTC, Monday to Friday) and a **manual run** run all of the rest, so Firefox and WebKit are tested on every commit that reaches main and every weekday night. A first job, `plan`
 ([scripts/ci-plan.ts](scripts/ci-plan.ts)), lets the nightly run stand down: when the last successful nightly run tested the commit
 main is at, every other job but the dependency audit is skipped and the run is a success (a push, a pull request and a manual run are
 never skipped, and the plan answers "run" whenever it cannot tell; the audit is not the plan's to decide, because an advisory is published

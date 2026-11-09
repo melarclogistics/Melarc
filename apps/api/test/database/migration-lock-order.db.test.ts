@@ -93,21 +93,23 @@ describe('the chain applied from a database at 0073', () => {
       let run: ReturnType<typeof runMigrations> | undefined;
       try {
         await application.query('begin');
-        await application.query(`select pg_advisory_xact_lock_shared(${key.klass}, ${key.key})`);
+        await application.query(
+          `select pg_advisory_xact_lock_shared(${String(key.klass)}, ${String(key.key)})`,
+        );
 
         run = runMigrations({ url: built.target.urlFor(MIGRATION_ROLE) });
         run.catch(() => undefined);
         await until(
           async () =>
-            (await scalar<boolean>(
+            await scalar<boolean>(
               built.admin,
               `select exists (
                  select 1 from pg_locks l join pg_stat_activity a on a.pid = l.pid
-                  where a.application_name = 'melarc-migrate'
+                  where a.datname = current_database() and a.application_name = 'melarc-migrate'
                     and ((l.locktype = 'advisory' and not l.granted)
                       or (l.locktype = 'relation' and l.granted and l.mode = '${mode}'
                           and l.relation = '${table}'::regclass)))`,
-            )) === true,
+            ),
           'the run to wait for the key or hold the table',
         );
         await application.query(`lock table ${table} in row exclusive mode`);

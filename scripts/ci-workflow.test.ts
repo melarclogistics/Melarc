@@ -12,6 +12,7 @@ import {
   DATABASE_SHARD_VARIABLE,
   PLAN_JOB,
   UNPLANNED_JOBS,
+  stepLimitFor,
   FAILURE_UPLOAD_CONDITION,
   MATRIX_BROWSERS,
   MATRIX_ENGINE,
@@ -59,8 +60,8 @@ const CHECKOUT = {
   with: { ref: GITHUB_SHA, 'persist-credentials': false },
 };
 const SETUP = { name: 'Set up', uses: './.github/actions/setup' };
-/** The limit of a test step's own: two minutes below the 10 of the fixture's jobs, which is the most the rule allows. */
-const STEP_LIMIT = 8;
+/** The limit of a test step's own: `stepLimitFor` the 10 of the fixture's jobs, which is the most the rule allows. */
+const STEP_LIMIT = stepLimitFor(10);
 /** A step that runs a command; a step that runs tests has a timeout of its own, as the rules require. */
 const run = (command: string): Json => ({
   name: command,
@@ -2875,7 +2876,10 @@ describe('the timeout of a test step', () => {
     const jobs = good().jobs as Jobs;
     const commands = new Set(timed(jobs).map(({ step }) => step.run));
     assert.deepEqual([...commands].toSorted(), [...TIMED_COMMANDS].toSorted());
-    assert.ok(timed(jobs).every(({ step, limit }) => step['timeout-minutes'] === limit - 2));
+    assert.ok(
+      timed(jobs).every(({ step, limit }) => step['timeout-minutes'] === stepLimitFor(limit)),
+      'every step is given the limit of its job less the measured set-up and the margin',
+    );
   });
 
   // Break caught: a step with no limit of its own, so that a hung suite is cut by the job's limit, which cancels the job and the steps that
@@ -2888,6 +2892,7 @@ describe('the timeout of a test step', () => {
       ['text', '8'],
       ['true', true],
       ['the job limit less one', 9],
+      ['the job limit less three, which the set-up leaves no room for', 7],
       ['the job limit', 10],
       ['more than the job limit', 30],
     ] as const) {
@@ -2907,8 +2912,8 @@ describe('the timeout of a test step', () => {
       });
     }
 
-    it(`accepts the edges, 1 and the job limit less two, on the step that runs ${command}`, () => {
-      for (const value of [1, 8]) {
+    it(`accepts the edges, 1 and the job limit less four, on the step that runs ${command}`, () => {
+      for (const value of [1, stepLimitFor(10)]) {
         assert.deepEqual(
           codesWith((_, jobs) => {
             for (const { step } of timed(jobs).filter((holder) => holder.step.run === command)) {
@@ -2928,7 +2933,7 @@ describe('the timeout of a test step', () => {
         for (const { step } of timed(jobs).filter(
           (holder) => holder.step.run === 'pnpm run test',
         )) {
-          step['timeout-minutes'] = 18;
+          step['timeout-minutes'] = stepLimitFor(20);
         }
         jobs.unit['timeout-minutes'] = 20;
       }),
