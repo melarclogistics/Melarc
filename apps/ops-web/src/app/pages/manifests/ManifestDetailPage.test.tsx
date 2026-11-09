@@ -180,7 +180,10 @@ describe('the manifest: what it shows', () => {
 
     const history = screen.getByRole('list', { name: 'History of this pickup run, oldest first' });
     const steps = within(history).getAllByRole('listitem');
-    expect(steps.map((step) => step.textContent)).toEqual(['Made2 Nov, 09:00', 'Assigned3 Nov, 08:00']);
+    expect(steps.map((step) => step.textContent)).toEqual([
+      'Made2 Nov, 09:00',
+      'Assigned3 Nov, 08:00',
+    ]);
     expect(steps[1]).toHaveAttribute('aria-current', 'step');
     expect(steps[0]).not.toHaveAttribute('aria-current');
   });
@@ -190,9 +193,11 @@ describe('the manifest: what it shows', () => {
     await ready();
 
     const history = screen.getByRole('list', { name: 'History of this pickup run, oldest first' });
-    expect(within(history).getAllByRole('listitem').map((step) => step.textContent)).toEqual([
-      'Made2 Nov, 09:00',
-    ]);
+    expect(
+      within(history)
+        .getAllByRole('listitem')
+        .map((step) => step.textContent),
+    ).toEqual(['Made2 Nov, 09:00']);
   });
 
   it('names the rider by name when the roster can say it', async () => {
