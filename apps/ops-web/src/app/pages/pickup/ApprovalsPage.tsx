@@ -146,6 +146,9 @@ export function ApprovalsPage() {
   const [approved, setApproved] = useState<Approved | undefined>(undefined);
   /** The queue is read again after an approval, and its rows stay while it is (the officer keeps their place). */
   const [afterAct, setAfterAct] = useState(false);
+  /** The page whose reading again after an approval failed: its rows stay, under a line that says they may be out of date (the review of 499399c). */
+  const [staleAfterAct, setStaleAfterAct] = useState<string | undefined>();
+  const pageKey = `${signature}|${paging.pageToken ?? ''}`;
   const noticeBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (approved !== undefined) noticeBox.current?.focus();
@@ -205,11 +208,18 @@ export function ApprovalsPage() {
   const mayApprove = me.holds('pickup.exception.approve');
   const hubs = me.session.authorized_hubs;
 
+  /** The queue is read again, its rows kept; if that read fails the rows stay with a line that says they may be out of date and the way to read them again. */
   function refresh(): Promise<unknown> {
+    setStaleAfterAct(undefined);
     setAfterAct(true);
-    return list.refetch().finally(() => {
-      setAfterAct(false);
-    });
+    return list
+      .refetch()
+      .then((read) => {
+        if (read.isError) setStaleAfterAct(pageKey);
+      })
+      .finally(() => {
+        setAfterAct(false);
+      });
   }
 
   const columns: DataColumn<Waiting>[] = [
@@ -271,13 +281,32 @@ export function ApprovalsPage() {
     },
   ];
 
-  const rows = list.isSuccess ? rowsOf(list.data) : [];
+  // The rows of the last page that was read, which a failed read again after an approval keeps (the data of a query stays when a later read of it fails).
+  const rows = list.data === undefined ? [] : rowsOf(list.data);
 
   const result: QueueResult<Waiting> = (() => {
     if (list.status === 'pending') return { status: 'loading' };
     if (list.isFetching && list.status === 'success') {
       // After an approval the rows stay while the queue is read again; any other read again takes the loading rows' place.
       return afterAct ? { status: 'ready', rows, refreshing: true } : { status: 'loading' };
+    }
+    // Read again after an approval and failed (or being read once more): the rows the officer was working on stay, under the line that says so.
+    if (
+      list.status === 'error' &&
+      list.data !== undefined &&
+      (afterAct || staleAfterAct === pageKey)
+    ) {
+      return {
+        status: 'ready',
+        rows,
+        refreshing: afterAct,
+        stale: {
+          message: 'The exceptions could not be read again, so these rows may be out of date.',
+          onRefresh: () => {
+            void refresh();
+          },
+        },
+      };
     }
     if (list.status === 'error') {
       const problem = problemOf(list.error, {
@@ -382,11 +411,13 @@ export function ApprovalsPage() {
               <QueuePager
                 label="Pages of exceptions"
                 noun={{ one: 'exception', other: 'exceptions' }}
-                shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+                shown={
+                  result.status === 'ready' && list.data !== undefined ? rows.length : undefined
+                }
                 page={paging.page}
-                hasNext={list.isSuccess && list.data.nextPageToken !== null}
+                hasNext={list.data !== undefined && list.data.nextPageToken !== null}
                 onNext={() => {
-                  if (list.isSuccess && list.data.nextPageToken !== null)
+                  if (list.data !== undefined && list.data.nextPageToken !== null)
                     paging.toNextPage(list.data.nextPageToken);
                 }}
                 onPrevious={paging.toPreviousPage}

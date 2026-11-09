@@ -1155,6 +1155,70 @@ describe('the queue: the request beside it', () => {
       expect(reads).toBe(2);
     });
 
+    // Break caught (the review of 499399c): a queue that cannot be read again after a confirmation, drawn as a failure that takes away the rows the officer was working on, or as if nothing were wrong:
+    // the rows stay, under a line that says they may be out of date, with the way to read them again.
+    it('keeps the rows, with a line that says so, when the queue cannot be read again after a confirmation', async () => {
+      let reads = 0;
+      const view = openConfirmer(undefined, undefined, () => {
+        reads += 1;
+        return reads === 2 ? refusal(500, 'INTERNAL_ERROR') : page([pending, late]);
+      });
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      const line = (await screen.findByText(/could not be read again/)).parentElement;
+      if (line === null) throw new Error('no stale line');
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+      expect(screen.getByRole('button', { name: /^Open ACC-PR-9WXH4T, / })).toBeVisible();
+      expect(screen.queryByText('The pickup requests could not be loaded.')).toBeNull();
+
+      await view.user.click(within(line).getByRole('button', { name: 'Refresh' }));
+      await waitFor(() => {
+        expect(screen.queryByText(/could not be read again/)).toBeNull();
+      });
+      expect(reads).toBe(3);
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+    });
+
+    // Break caught (the review of 499399c): focus taken back to the row that changed from a person who has moved on while the queue was read again.
+    it('does not take focus from a person who has moved it while the queue was read again after a confirmation', async () => {
+      const reads = byHand();
+      let calls = 0;
+      const view = openConfirmer(undefined, undefined, (request) => {
+        calls += 1;
+        return calls === 1 ? page([pending, late]) : reads.handler(request);
+      });
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+
+      // The queue is being read again; the person moves to the filter.
+      const filter = screen.getByRole('button', { name: 'Filter', exact: true });
+      filter.focus();
+      await reads.answer(page([pending, late]));
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+          'aria-busy',
+          'true',
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(filter).toHaveFocus();
+    });
+
     it('opens the same panel, with focus on the panel’s heading and not on its act, from the button that opens the request', async () => {
       const view = openConfirmer();
       await queueTable();

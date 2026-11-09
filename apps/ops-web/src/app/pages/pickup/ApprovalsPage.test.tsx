@@ -306,6 +306,37 @@ describe('approving', () => {
     expect(document.body.textContent).not.toMatch(/GH₵/);
   });
 
+  // Break caught (the review of 499399c): an approval whose queue cannot be read again afterwards, drawn as a failure that takes away the rows the officer was working on, or as if nothing were
+  // wrong: the rows stay, under a line that says they may be out of date, with the way to read them again.
+  it('keeps the rows, with a line that says so, when the queue cannot be read again after an approval', async () => {
+    let reads = 0;
+    const { user } = open(
+      () => {
+        reads += 1;
+        if (reads === 2) return refusal(500, 'INTERNAL_ERROR');
+        return page(reads === 1 ? [waiting] : []);
+      },
+      APPROVER,
+      { [APPROVE]: () => json(200, approvedFixture()) },
+    );
+
+    const dialog = await openApproval(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Approve the exception' }));
+
+    const line = (await screen.findByText(/could not be read again/)).parentElement;
+    if (line === null) throw new Error('no stale line');
+    expect(screen.getByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).toBeVisible();
+    expect(screen.queryByText('The pickup requests could not be loaded.')).toBeNull();
+    expect(screen.getByText(/ACC-PR-7KQ2MZ is approved by you/)).toBeVisible();
+
+    await user.click(within(line).getByRole('button', { name: 'Refresh' }));
+    expect(
+      await screen.findByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
+    expect(screen.queryByText(/could not be read again/)).toBeNull();
+    expect(reads).toBe(3);
+  });
+
   // permissions.md section 6: the requester may not approve their own exception unless the approval is at the highest tier. The page cannot
   // see tiers, so it says the rule, sends the approval, and tells the server's refusal as the rule, naming the key of who approves instead.
   it('sends the approval of the person’s own exception, and tells the refusal as the rule, by the key', async () => {

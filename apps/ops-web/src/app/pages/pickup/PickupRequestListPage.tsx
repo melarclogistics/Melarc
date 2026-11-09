@@ -46,7 +46,7 @@ import {
   queueFactsOf,
   type QueueFacts,
 } from './pickup-queue-view';
-import { requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
+import { isUnclaimed, requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
 import './pickup-pages.css';
 
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
@@ -77,6 +77,10 @@ const LATE_BOOKINGS = 'Only late bookings waiting for a cut-off decision';
 
 /** The views of the queue: every request, and each state a request moves through, in the order it moves. */
 const ALL_VIEW = 'all';
+
+/** What the queue says when it could not be read again after an act and keeps the rows it had: they may be out of date. */
+const STALE_QUEUE =
+  'The pickup requests could not be read again, so these rows may be out of date.';
 
 /**
  * A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5). The server's own answer is the same for a session that may not read
@@ -150,6 +154,8 @@ export function PickupRequestListPage() {
     { readonly visit: number; readonly ids: readonly string[] } | undefined
   >();
   const [afterAct, setAfterAct] = useState(false);
+  /** The page whose reading again after an act failed: its rows stay, under a line that says they may be out of date (the review of 499399c). */
+  const [staleAfterAct, setStaleAfterAct] = useState<string | undefined>();
   const returnTo = useRef<string | undefined>(undefined);
   const shown = panelRead.data?.request;
 
@@ -188,12 +194,31 @@ export function PickupRequestListPage() {
   const restored = useRef(arrival === undefined);
 
   // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
+  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c).
   useEffect(() => {
     if (afterAct || returnTo.current === undefined) return;
     const id = returnTo.current;
     returnTo.current = undefined;
+    if (!isUnclaimed(document.activeElement)) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
   }, [afterAct, list.dataUpdatedAt]);
+
+  /**
+   * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that
+   * fails takes the rows' place, as it always did.
+   */
+  function readAgainAfterAct(): void {
+    setStaleAfterAct(undefined);
+    setAfterAct(true);
+    void list
+      .refetch()
+      .then((read) => {
+        if (read.isError) setStaleAfterAct(pageKey);
+      })
+      .finally(() => {
+        setAfterAct(false);
+      });
+  }
 
   /** The act of the panel was answered: say so, show the answer in the panel at once, mark the row, and read the page again with its rows kept. */
   function confirmedInPanel(request: PickupRequestView): void {
@@ -204,10 +229,7 @@ export function PickupRequestListPage() {
     );
     setChanged({ visit: visit.id, ids: [request.id] });
     returnTo.current = request.id;
-    setAfterAct(true);
-    void list.refetch().finally(() => {
-      setAfterAct(false);
-    });
+    readAgainAfterAct();
   }
   const settled = !list.isFetching && (list.isSuccess || list.isError);
   const stillThere =
@@ -268,12 +290,13 @@ export function PickupRequestListPage() {
     );
 
   const hubs = me?.session.authorized_hubs;
+  // The rows of the last page that was read, which a failed read again after an act keeps (the data of a query stays when a later read of it fails).
   const rows = useMemo(
     () =>
-      list.isSuccess && hubs !== undefined
+      list.data !== undefined && hubs !== undefined
         ? list.data.items.map((request) => queueFactsOf(request, hubs))
         : [],
-    [list.isSuccess, list.data, hubs],
+    [list.data, hubs],
   );
 
   if (me === undefined || hubs === undefined) return null;
@@ -309,6 +332,19 @@ export function PickupRequestListPage() {
       // After an act the rows stay: the officer keeps their place, their focus and the row that changed (the table says it is busy). Any other read again (a refresh asked for, a
       // page, a filter) is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if the read fails.
       return afterAct ? { status: 'ready', rows, refreshing: true } : { status: 'loading' };
+    }
+    // Read again after an act and failed (or being read once more): the rows the person was working on stay, under the line that says so.
+    if (
+      list.status === 'error' &&
+      list.data !== undefined &&
+      (afterAct || staleAfterAct === pageKey)
+    ) {
+      return {
+        status: 'ready',
+        rows,
+        refreshing: afterAct,
+        stale: { message: STALE_QUEUE, onRefresh: readAgainAfterAct },
+      };
     }
     if (list.status === 'error') {
       const problem = problemOf(list.error, {
@@ -498,11 +534,13 @@ export function PickupRequestListPage() {
               <QueuePager
                 label="Pages of pickup requests"
                 noun={{ one: 'request', other: 'requests' }}
-                shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+                shown={
+                  result.status === 'ready' && list.data !== undefined ? rows.length : undefined
+                }
                 page={paging.page}
-                hasNext={list.isSuccess && list.data.nextPageToken !== null}
+                hasNext={list.data !== undefined && list.data.nextPageToken !== null}
                 onNext={() => {
-                  if (list.isSuccess && list.data.nextPageToken !== null) {
+                  if (list.data !== undefined && list.data.nextPageToken !== null) {
                     paging.toNextPage(list.data.nextPageToken);
                   }
                 }}
