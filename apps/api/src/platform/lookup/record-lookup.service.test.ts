@@ -8,6 +8,7 @@ import type { OperationWork } from '../authorization/operation-runner.js';
 import { ManualClock } from '../../test-support/manual-clock.js';
 import { DatabaseDeadlineError } from '../database/database-failures.js';
 import {
+  BudgetClosedError,
   BudgetExpiredError,
   ExecutionBudget,
   currentBudget,
@@ -1176,4 +1177,99 @@ describe('one budget for the whole lookup (AC-LOOKUP-17, task A3.2 of the audit 
       RECORD_LOOKUP_STATEMENT_TIMEOUT_MS,
     ]);
   });
+});
+
+describe('a lookup the request does not outlive (run 4, Stage 1, A4.1 and A4.2)', () => {
+  // Break caught: the slot taken before the child budget is made and outside the `try`. A request whose budget has already finished (the client left while
+  // the limiter's admission was committing) makes `child()` throw `BudgetClosedError` with the slot held, and every later lookup of the session on this
+  // instance is then `429` until the session ends, each of which puts the portal's automatic reads on hold.
+  it('keeps no slot for a lookup that cannot start because the request is already over, and the session’s next lookup is not refused', async () => {
+    const clock = new ManualClock();
+    const over = new ExecutionBudget(clock, 'request', 10_000);
+    const searches: Search[] = [];
+    const { service, reads } = build({
+      sources: [source('PICKUP_REQUEST', 'pickup.read', [], searches)],
+    });
+    const authorized = request(ALL_KEYS);
+    over.finish();
+
+    const failure = await failureOf(
+      runWithBudget(over, () => service.lookup(authorized, 'corr-1', 'ACC-PR-7KQ2MZ')),
+    );
+    expect(failure).toBeInstanceOf(BudgetClosedError);
+    expect(reads.readings, 'nothing was read for it').toHaveLength(0);
+
+    // The next request of the session has a budget of its own: its lookup is answered, not refused with 429.
+    const next = new ExecutionBudget(clock, 'request', 10_000);
+    await expect(
+      runWithBudget(next, () => service.lookup(authorized, 'corr-2', 'ACC-PR-7KQ2MZ')),
+    ).resolves.toEqual({ items: [] });
+    next.finish();
+    expect(service.sessionsInFlight, 'no session holds a slot').toBe(0);
+  });
+
+  // Break caught: finishing the request's budget cancels nothing, so a lookup whose client left kept the session's slot for as long as the statement it was
+  // running (three seconds at most). Here the "statement" is cancelled by the expiry of the budget it runs under, as the database layer cancels one, and the
+  // gate that would let it finish is never opened: the lookup ends because its budget was ended with the request's, and not because the work finished.
+  it(
+    'ends its own budget when the request ends, so that the statement it is running is cancelled and its slot goes back at once',
+    { timeout: 3_000 },
+    async () => {
+      const clock = new ManualClock();
+      const requestBudget = new ExecutionBudget(clock, 'request', 10_000);
+      const seen: ExecutionBudget[] = [];
+      let statements = 0;
+      const statement: RecordLookupSource = {
+        kind: 'PICKUP_REQUEST',
+        readKey: 'pickup.read',
+        answers: () => true,
+        search: () => {
+          statements += 1;
+          // Only the first statement hangs; the session's next lookup (below) finds nothing at once.
+          if (statements > 1) return Promise.resolve([]);
+          return new Promise<readonly LookupHit[]>((_resolve, reject) => {
+            const own = currentBudget();
+            if (own !== undefined) {
+              seen.push(own);
+              // What the database layer does with the budget it runs under: the running statement is cancelled when the budget expires.
+              own.onExpiry((error) => {
+                reject(error);
+              });
+            }
+          });
+        },
+      };
+      const { service } = build({ sources: [statement] });
+      const authorized = request(ALL_KEYS);
+
+      const running = failureOf(
+        runWithBudget(requestBudget, () => service.lookup(authorized, 'corr-1', 'ACC-PR-7KQ2MZ')),
+      );
+      await vi.waitFor(() => {
+        expect(seen).toHaveLength(1);
+      });
+      const refusedWhileRunning = await failureOf(
+        runWithBudget(requestBudget, () => service.lookup(authorized, 'corr-2', 'ACC-PR-7KQ2MZ')),
+      );
+      expect((refusedWhileRunning as ApiException).code, 'the slot is held while it runs').toBe(
+        'RATE_LIMITED',
+      );
+
+      // The client leaves: the response is over, and the pipeline finishes the request's budget.
+      requestBudget.finish();
+      const failure = await running;
+
+      expect(failure).toBeInstanceOf(BudgetExpiredError);
+      expect((failure as BudgetExpiredError).label).toBe('lookupRecords');
+      expect(seen[0]?.expired).toBe(true);
+      expect(service.sessionsInFlight, 'the slot went back with the budget').toBe(0);
+
+      const next = new ExecutionBudget(clock, 'request', 10_000);
+      const later = await failureOf(
+        runWithBudget(next, () => service.lookup(authorized, 'corr-3', 'ACC-PR-7KQ2MZ')),
+      );
+      expect(later, 'the session’s next lookup is not refused').not.toBeInstanceOf(ApiException);
+      next.finish();
+    },
+  );
 });

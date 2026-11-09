@@ -731,6 +731,180 @@ describe('ExecutionBudget: a finished ancestor closes every budget below it (F05
   });
 });
 
+/**
+ * Telling a budget that its line was closed, and ending one at once (run 4, Stage 1, A4.2). Finishing a request's budget is silent and is not expiry, so a
+ * statement already running under a budget below it was cancelled by nobody and ran on to its own bound: an aborted lookup kept its session's slot for up
+ * to three seconds. A holder of a budget below it can now be told of the closure (`onClosed`) and end its own budget at once (`cancel`), which is an expiry
+ * as every listener of one (the database layer's cancel of the running statement among them) understands it.
+ */
+describe('ExecutionBudget: closure is told, and a budget can be ended at once (A4.2)', () => {
+  // Break caught: a closure that is silent (the owner of a budget below the request is never told the request is over), or one told twice.
+  it('tells a listener once when the budget is finished, and not again when it is finished twice', () => {
+    const budget = new ExecutionBudget(clock, 'request', 1_000);
+    const told = vi.fn();
+    budget.onClosed(told);
+    expect(told).not.toHaveBeenCalled();
+
+    budget.finish();
+    budget.finish();
+
+    expect(told).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: a child that stays wired to its parent after it ended (the relay of a lookup that has finished, left in the request's listeners), which
+  // would tell a finished child of a closure that is no longer its concern, and hold it in memory for the life of the request.
+  it('is told once by its own finish, and not again when its parent is finished later', () => {
+    const parent = new ExecutionBudget(clock, 'request', 10_000);
+    const child = parent.child('lookupRecords', 3_000);
+    const told = vi.fn();
+    child.onClosed(told);
+
+    child.finish();
+    expect(told).toHaveBeenCalledTimes(1);
+    parent.finish();
+
+    expect(told).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: closure that stops at the parent, so the budget a lookup makes for itself under the request's is never told the request ended.
+  it('tells the listeners of a child and of a grandchild when an ancestor is finished, and not those of a sibling branch', () => {
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    const child = request.child('lookupRecords', 3_000);
+    const grandchild = child.child('transaction', 1_000);
+    const other = new ExecutionBudget(clock, 'other request', 10_000);
+    const told = { child: vi.fn(), grandchild: vi.fn(), other: vi.fn() };
+    child.onClosed(told.child);
+    grandchild.onClosed(told.grandchild);
+    other.onClosed(told.other);
+
+    request.finish();
+
+    expect(told.child).toHaveBeenCalledTimes(1);
+    expect(told.grandchild).toHaveBeenCalledTimes(1);
+    expect(told.other).not.toHaveBeenCalled();
+    expect(child.closed).toBe(true);
+    expect(child.expired, 'closure is not expiry').toBe(false);
+  });
+
+  // Break caught: a listener added to a budget that is already closed and so never told, which would leave a late holder believing its request is open.
+  it('tells a listener added to a closed budget at once, and only once', () => {
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    const child = request.child('lookupRecords', 3_000);
+    request.finish();
+    const told = vi.fn();
+
+    child.onClosed(told);
+    expect(told).toHaveBeenCalledTimes(1);
+    request.finish();
+
+    expect(told).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: expiry told as closure (a budget that ran out is expired, a different fact), or a listener that is called after it was removed.
+  it('does not tell a listener when the budget expires, and not one that was removed', () => {
+    const expiring = new ExecutionBudget(clock, 'request', 1_000);
+    const removed = new ExecutionBudget(clock, 'request', 1_000);
+    const heard = vi.fn();
+    const forgotten = vi.fn();
+    expiring.onClosed(heard);
+    const remove = removed.onClosed(forgotten);
+    remove();
+
+    pass(1_500);
+    removed.finish();
+
+    expect(expiring.expired).toBe(true);
+    expect(heard).not.toHaveBeenCalled();
+    expect(forgotten).not.toHaveBeenCalled();
+  });
+
+  // Break caught: a listener that throws and stops the others from hearing, as for expiry.
+  it('tells every listener even when one of them throws, and keeps what it threw', () => {
+    const budget = new ExecutionBudget(clock, 'request', 1_000);
+    const heard = vi.fn();
+    budget.onClosed(() => {
+      throw new Error('a listener that fails');
+    });
+    budget.onClosed(heard);
+
+    budget.finish();
+
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(budget.listenerFailures).toHaveLength(1);
+  });
+
+  // Break caught: `cancel` that only marks the budget (the signal is not aborted, the listeners are not run), so the database layer would not cancel the statement.
+  it('ends a running budget at once as an expiry of its own: signal aborted, listeners told, with its label and its time', () => {
+    const budget = new ExecutionBudget(clock, 'lookupRecords', 3_000);
+    const told: BudgetExpiredError[] = [];
+    budget.onExpiry((error) => {
+      told.push(error);
+    });
+
+    budget.cancel();
+
+    expect(budget.expired).toBe(true);
+    expect(budget.signal.aborted).toBe(true);
+    expect(told).toHaveLength(1);
+    expect(told[0]).toBeInstanceOf(BudgetExpiredError);
+    expect(told[0]?.label).toBe('lookupRecords');
+    expect(told[0]?.budgetMilliseconds).toBe(3_000);
+    expect(budget.expiredWith).toBe(told[0]);
+    expect(() => {
+      budget.assertOpen();
+    }).toThrow(BudgetExpiredError);
+  });
+
+  // Break caught: a budget below the one that is ended that keeps running (a transaction's statement is wired to a budget below the lookup's).
+  it('ends the budgets below it too, as any expiry does, and leaves the parent running', () => {
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    const lookup = request.child('lookupRecords', 3_000);
+    const transaction = lookup.child('transaction', 2_000);
+
+    lookup.cancel();
+
+    expect(transaction.expired).toBe(true);
+    expect(transaction.expiredWith?.label).toBe('lookupRecords');
+    expect(request.expired).toBe(false);
+  });
+
+  // Break caught: `cancel` that reopens or re-expires what has ended (a finished budget is not expired afterwards, an expired one keeps its error).
+  it('does nothing to a budget that was finished or has expired', () => {
+    const finished = new ExecutionBudget(clock, 'finished', 1_000);
+    finished.finish();
+    const expired = new ExecutionBudget(clock, 'expired', 1_000);
+    pass(1_500);
+    const before = expired.expiredWith;
+    const told = vi.fn();
+    expired.onExpiry(told);
+    told.mockClear();
+
+    finished.cancel();
+    expired.cancel();
+
+    expect(finished.expired).toBe(false);
+    expect(finished.signal.aborted).toBe(false);
+    expect(expired.expiredWith).toBe(before);
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  // Break caught: a `cancel` that refuses a budget whose request is over, which is the very case it is for (the request finished, the statement runs on).
+  it('can end a budget whose request has finished: closed is not expired, so a running statement can still be cancelled', () => {
+    const request = new ExecutionBudget(clock, 'request', 10_000);
+    const lookup = request.child('lookupRecords', 3_000);
+    const transaction = lookup.child('transaction', 2_000);
+    lookup.onClosed(() => {
+      lookup.cancel();
+    });
+
+    request.finish();
+
+    expect(lookup.expired).toBe(true);
+    expect(transaction.expired).toBe(true);
+    expect(transaction.signal.aborted).toBe(true);
+  });
+});
+
 describe('runWithBudget and currentBudget', () => {
   it('has no budget outside a request', () => {
     expect(currentBudget()).toBeUndefined();

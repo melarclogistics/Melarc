@@ -305,3 +305,32 @@ describe('the response', () => {
     expect(response.status).toBe(302);
   });
 });
+
+describe('a client that leaves (run 4, Stage 1, A4.1)', () => {
+  // Break caught: an abort signal that is not handed to the transport, so that a test of what the server does when the client goes away mid-request (an aborted
+  // lookup) cannot make the client go.
+  it('hands an abort signal to the transport, so that a test can have the client leave', async () => {
+    let handed: AbortSignal | null | undefined;
+    const fetchLike: FetchLike = (_input, init) => {
+      handed = init?.signal;
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const controller = new AbortController();
+
+    await clientFor(fetchLike).post('/api/v1/one', {}, { signal: controller.signal });
+
+    expect(handed).toBe(controller.signal);
+  });
+
+  it('hands none when none was given', async () => {
+    let handed: AbortSignal | null | undefined = null;
+    const fetchLike: FetchLike = (_input, init) => {
+      handed = init?.signal;
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+
+    await clientFor(fetchLike).post('/api/v1/one', {});
+
+    expect(handed).toBeUndefined();
+  });
+});

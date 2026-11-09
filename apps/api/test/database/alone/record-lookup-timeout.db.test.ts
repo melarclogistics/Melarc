@@ -50,7 +50,8 @@ afterAll(async () => {
   await routes.stop();
 });
 
-const ask = (actor: Actor, q: string) => actor.client.post(LOOKUP, { q }, { origin: OPS });
+const ask = (actor: Actor, q: string, signal?: AbortSignal) =>
+  actor.client.post(LOOKUP, { q }, { origin: OPS, ...(signal === undefined ? {} : { signal }) });
 
 const crossingsOf = (actor: Actor) =>
   routes.rows<{ responsible_hub_id: string }>(
@@ -215,5 +216,61 @@ describe('the whole lookup has one budget of three seconds (AC-LOOKUP-17, the au
 
     // Nothing is left over: the next lookup is whole.
     expect((await ask(admin, 'zuko')).status).toBe(200);
+  }, 60_000);
+});
+
+/** Waits until no statement of the test database is waiting on a lock, and says how long that took; fails if one still is after `within` milliseconds. */
+async function waitForNoLockWait(within: number): Promise<number> {
+  const started = performance.now();
+  for (;;) {
+    const [waiting] = await routes.rows<{ waiting: number }>(
+      `select count(*)::int as waiting from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`,
+    );
+    if ((waiting?.waiting ?? 0) === 0) return performance.now() - started;
+    if (performance.now() - started > within) {
+      throw new Error(
+        `a statement was still waiting on a lock ${String(within)} ms after the client left`,
+      );
+    }
+    await sleep(25);
+  }
+}
+
+describe('a client that leaves while its lookup runs (run 4, Stage 1, A4.1 and A4.2)', () => {
+  // Break caught (A4.2): finishing the request's budget cancels no statement, so the search of a lookup whose client had left went on waiting for its lock until
+  // its own three-second bound, and the session kept its slot for that long (every other lookup of the session was a 429, and each 429 puts the portal's
+  // automatic reads on hold). The lock is still held here when the assertion is made: what ends the wait is the cancel of the statement, not the lock being freed.
+  it('cancels the statement the lookup is waiting with as soon as the client leaves, and gives the session its slot back', async () => {
+    const admin = await routes.platformAdmin();
+    await routes.admin.query('begin');
+    let first: Promise<unknown> | undefined;
+    try {
+      await routes.admin.query('lock table pickup_request in access exclusive mode');
+      const leaving = new AbortController();
+      first = ask(admin, 'zuko', leaving.signal).then(
+        (answer) => answer,
+        (error: unknown) => error,
+      );
+      await waitForALockWait();
+      const whileItRuns = await ask(admin, 'zuko');
+      expect(whileItRuns.status, 'the slot is held while the first lookup runs').toBe(429);
+
+      leaving.abort();
+      const took = await waitForNoLockWait(1500);
+
+      // Well inside the three seconds the statement would otherwise have waited (its bound), and with the table still locked.
+      expect(took).toBeLessThan(1500);
+      expect(await crossingsOf(admin), 'nothing was written for the lookup that was left').toEqual(
+        [],
+      );
+    } finally {
+      await routes.admin.query('rollback');
+    }
+
+    await first;
+    // The session's slot is free: the next lookup is whole, and not a 429.
+    const again = await ask(admin, 'zuko');
+    expect(again.status).toBe(200);
   }, 60_000);
 });

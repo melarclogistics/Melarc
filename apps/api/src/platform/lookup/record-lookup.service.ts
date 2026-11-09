@@ -194,20 +194,46 @@ export class RecordLookupService {
     // validation (a request that is not valid is a `400` whatever else the session is doing) and before any work.
     const session = authorized.session.id;
     if (this.#inFlight.has(session)) throw ApiException.rateLimited(RETRY_AFTER_SECONDS);
+    // The slot is taken and given back around everything that can throw after it (run 4, Stage 1, A4.1): the budget below is made inside the `try`, because
+    // a request whose budget has already finished (the client left while the limiter's admission was committing) refuses a child with `BudgetClosedError`,
+    // and a slot taken before that line was never given back, so every later lookup of the session on this instance was a `429` until the session ended.
     this.#inFlight.add(session);
-    // **One budget for the whole lookup** (`AC-LOOKUP-17`): a child of the request's own, so that it also ends with the request's. Every key's transaction runs
-    // under it (the database layer runs a transaction under the budget that is current and cancels the statement that outlasts it), and so does the step
-    // that writes the events. There is no request budget where the application is composed without the pipeline that makes one (the describe composition
-    // has no database): then only the bound on each statement applies.
-    const budget = currentBudget()?.child('lookupRecords', RECORD_LOOKUP_BUDGET_MS);
     try {
-      return budget === undefined
-        ? await this.#search(authorized, correlationId, query, undefined)
-        : await runWithBudget(budget, () => this.#search(authorized, correlationId, query, budget));
+      // **One budget for the whole lookup** (`AC-LOOKUP-17`): a child of the request's own, so that it also ends with the request's. Every key's transaction
+      // runs under it (the database layer runs a transaction under the budget that is current and cancels the statement that outlasts it), and so does the
+      // step that writes the events. There is no request budget where the application is composed without the pipeline that makes one (the describe
+      // composition has no database): then only the bound on each statement applies.
+      const budget = currentBudget()?.child('lookupRecords', RECORD_LOOKUP_BUDGET_MS);
+      // **When the request ends first** (the client left), the lookup's budget is ended with it (run 4, Stage 1, A4.2): finishing the request's budget cancels
+      // no statement, so without this the search that is running went on to its own bound (three seconds) and the session kept its slot for that long. Ended
+      // as an expiry, the budget has the database layer cancel the statement and roll the transaction back, and the lookup ends at once, which gives the slot back.
+      let endWithRequest: (() => void) | undefined;
+      if (budget !== undefined) {
+        endWithRequest = budget.onClosed(() => {
+          budget.cancel();
+        });
+      }
+      try {
+        return budget === undefined
+          ? await this.#search(authorized, correlationId, query, undefined)
+          : await runWithBudget(budget, () =>
+              this.#search(authorized, correlationId, query, budget),
+            );
+      } finally {
+        endWithRequest?.();
+        budget?.finish();
+      }
     } finally {
-      budget?.finish();
       this.#inFlight.delete(session);
     }
+  }
+
+  /**
+   * How many sessions have a lookup running now, for the tests of the slot (`AC-LOOKUP-16`) and for anyone diagnosing a session that is refused: the slots
+   * themselves stay private. A lookup that has ended, however it ended, is not counted.
+   */
+  get sessionsInFlight(): number {
+    return this.#inFlight.size;
   }
 
   /**
