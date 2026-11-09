@@ -212,7 +212,7 @@ const PAGES_OF_C3 = [
     name: 'the pickup runs',
     route: '/manifests',
     path: '/pickup-manifests',
-    title: 'Manifests',
+    title: 'Pickup runs',
     row: listedManifestFixture(),
   },
   {
@@ -330,8 +330,12 @@ describe('the pickup screens, the runs and the messages follow the switcher (tas
  */
 const EMPTY_LISTS = [
   { name: 'the pickup requests', route: '/pickup-requests', plain: 'No pickup requests yet' },
-  { name: 'the one-package exceptions', route: '/approvals', plain: 'No exceptions waiting' },
-  { name: 'the pickup runs', route: '/manifests', plain: 'No manifests yet' },
+  {
+    name: 'the one-package exceptions',
+    route: '/approvals',
+    plain: 'No exceptions waiting for approval yet',
+  },
+  { name: 'the pickup runs', route: '/manifests', plain: 'No pickup runs yet' },
   { name: 'the message log', route: '/messages', plain: 'No messages yet' },
   { name: 'the staff', route: '/admin/staff?view=all', plain: 'No staff profiles yet' },
   { name: 'the riders', route: '/admin/riders', plain: 'No riders yet' },

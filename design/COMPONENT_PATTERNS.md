@@ -2188,7 +2188,7 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `PICKUP_STOP` | `FAILED` | danger | Failed |
 | `PICKUP_STOP` | `SKIPPED` | neutral | Skipped |
 | `PICKUP_STOP` | `SKIPPED_REQUEST_CANCELLED` | neutral | Cancelled with its request |
-| `PICKUP_STOP` | `SKIPPED_MANIFEST_CANCELLED` | neutral | Cancelled with the manifest |
+| `PICKUP_STOP` | `SKIPPED_MANIFEST_CANCELLED` | neutral | Cancelled with the pickup run |
 | `CUSTODY_HANDOVER` | `PENDING` | waiting | Waiting for the receiver |
 | `CUSTODY_HANDOVER` | `COMPLETED` | success | Custody handed over |
 | `CUSTODY_HANDOVER` | `FAILED` | danger | Did not happen |
