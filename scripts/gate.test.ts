@@ -93,6 +93,11 @@ before(() => {
   };
   write('pass.mjs', "console.log('hello from the stage');\n");
   write('fail.mjs', "console.log('the stage failed');\nprocess.exit(3);\n");
+  // A check that could not decide (the migration guard with no main): its words on stderr and exit 2, which the precheck shows as warned and the gate fails on.
+  write(
+    'undecided.mjs',
+    "console.error('Cannot tell whether a migration was changed: There is no main to compare the migrations with.');\nprocess.exit(2);\n",
+  );
   // Writes the time into a file every 40 ms until it is ended: a file that stops moving is a process that is gone.
   write(
     'slow.mjs',
@@ -613,6 +618,27 @@ describe('a gate', () => {
       ['failed', 'skipped'],
     );
     assert.equal(state.verdict, 'FAILED');
+  });
+
+  // Break caught (run 5, Stage 1.4): the gate sharing the precheck's reading of a check that could not decide, and so passing a tree whose migrations it never held. The gate is the
+  // full run: the exit the precheck shows as warned is a failure here, with its exit code recorded, and no test starts.
+  it('fails a check that could not decide, whatever the precheck makes of that exit, and starts no test', async () => {
+    const directory = checkout();
+    const state = finished(
+      await runGate(
+        options(directory, {
+          stages: [
+            { ...stage('migrations', 'static', command('undecided.mjs')), warnOnExit: 2 },
+            stage('tests', 'test', command('pass.mjs')),
+          ],
+        }),
+      ),
+    );
+
+    assert.equal(state.verdict, 'FAILED');
+    assert.equal(statusOf(state, 'migrations'), 'failed');
+    assert.equal(state.stages[0]?.exitCode, 2);
+    assert.equal(statusOf(state, 'tests'), 'not-run');
   });
 
   // Break caught: a command that is not there reported as a pass, or taking the runner down with it.
@@ -1260,6 +1286,64 @@ describe('the precheck run', () => {
 
     assert.equal(await runPrecheck(given([passing()], lines)), 0);
     assert.match(lines.join('\n'), /Every cheap check passed/);
+  });
+
+  // Break caught (run 5, Stage 1.4): a check that could not decide shown as "passed" with its warning in a log nobody opens (the migration guard on a tree with no main),
+  // which let the precheck say it was all well. A check that marks an exit as "cannot tell" is shown as warned, with its words in the summary and the count, and the
+  // precheck still exits 0; a check that did not mark that exit, or any other exit, is a failure.
+  it('shows an exit a check marks as "cannot tell" as warned, with its message in the summary, and exits 0', async () => {
+    const lines: string[] = [];
+    const run = given(
+      [
+        [
+          { ...stage('migrations', 'static', command('undecided.mjs')), warnOnExit: 2 },
+          stage('other', 'static', command('pass.mjs')),
+        ],
+      ],
+      lines,
+    );
+
+    const exit = await runPrecheck(run);
+
+    assert.equal(exit, 0);
+    const text = lines.join('\n');
+    assert.match(text, /migrations\s+warned/);
+    assert.match(text, /other\s+passed/);
+    assert.match(text, /--- migrations: warned \(exit 2\)/);
+    assert.match(text, /Cannot tell whether a migration was changed: There is no main/);
+    assert.match(text, /1 warned/);
+    assert.doesNotMatch(text, /Every cheap check passed\./, 'a warning is not a pass');
+  });
+
+  // Break caught: the mark read as "any non-zero exit is a warning", so that a check that failed with 2 for its own reasons is let through.
+  it('fails a check that exits 2 without marking that exit, and one that exits something else', async () => {
+    const lines: string[] = [];
+    const unmarked = given([[stage('guard', 'static', command('undecided.mjs'))]], lines);
+    assert.equal(await runPrecheck(unmarked), 1);
+    assert.match(lines.join('\n'), /guard\s+failed/);
+
+    const other: string[] = [];
+    const marked = given(
+      [[{ ...stage('guard', 'static', command('fail.mjs')), warnOnExit: 2 }]],
+      other,
+    );
+    assert.equal(await runPrecheck(marked), 1, 'exit 3 is not the marked exit 2');
+    assert.match(other.join('\n'), /guard\s+failed/);
+  });
+
+  // Break caught: the migration guard marked in the gate's list but not in the precheck's, or the real check not marked at all, so that the precheck says "passed" again.
+  it('marks the migration check, and only it, as one whose exit 2 is a warning', () => {
+    const marked = precheckLanes(false)
+      .flat()
+      .filter((candidate) => candidate.warnOnExit !== undefined)
+      .map((candidate) => [candidate.name, candidate.warnOnExit]);
+
+    assert.deepEqual(marked, [['migrations', 2]]);
+    assert.deepEqual(
+      gateStages('local').filter((candidate) => candidate.warnOnExit !== undefined),
+      [],
+      'the gate marks none: for it every exit but 0 fails',
+    );
   });
 
   // Break caught: a refusal that is only said (the checks run all the same, beside the gate they were refused for).

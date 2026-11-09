@@ -363,10 +363,16 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    a few minutes on cold caches, and exits 0 only when every check passed. It is not a gate and says nothing about a
    test, and it refuses to run while a gate runs. Its one weakness is turbo's cache of lint: a workspace whose files, and whose dependencies' files, did not
    change is not linted again, so a rule that reads something else can hide a finding that the gate's lint from scratch reports.
-   `pnpm run precheck --uncached` runs the real commands. **The migration check** holds the migration files to the merge base of `HEAD` with main. On a tree that has no main
-   (a source package, a clone that fetched no branch) it cannot tell: outside CI it prints a warning and the precheck goes on (CI, which has the whole history, fails on it).
-   `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the migrations to; CI sets it to
-   the revision a push to main came from.
+   `pnpm run precheck --uncached` runs the real commands. **The migration check** holds the migration files to the merge base of `HEAD` with main, and ends with one of three
+   exits, the same in CI and outside it: `0` held; `1` a migration main has was changed, renamed or removed, or the command was misused (an option it does not know, or a base
+   that was named and is empty or is not a commit this clone has); `2` it could not tell (a tree with no main, a shallow clone, a base with no migration in it). **What `2`
+   costs is for whoever runs it to say.** The precheck shows it as `warned`, with the script's words in its summary and the count (`No cheap check failed, and 1 warned
+   (migrations)`), and exits 0, so that a source package or a clone that fetched no branch is not stopped but is told that nothing was held; **the gate and CI fail on it**, as
+   they fail on any exit but 0. `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the
+   migrations to, and then it can decide. A base that is **named and empty** (`MELARC_MIGRATION_BASE=` with nothing after it, a variable that was not filled in, `--base ""`)
+   or **mistyped** fails with exit `1` everywhere, and is never read as "none named"; the all-zero revision that a push event names for a new branch is none named. CI names
+   the revision a push to main came from by writing `MELARC_MIGRATION_BASE` to the environment of its later steps on a push only: an `env:` expression would be empty on a
+   pull request, and the workflow check (`scripts/ci-workflow.ts`) refuses it, as it refuses a step that sets `CI` to anything but `true`.
 3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
    edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
 4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It

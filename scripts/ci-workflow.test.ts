@@ -3089,6 +3089,93 @@ describe('the timing tests a pull request leaves out', () => {
   });
 });
 
+describe('the CI variable and the revision the migrations are held to (run 5, Stage 1.4)', () => {
+  /** Puts `holder.env.CI = value` at one of the three places an `env` can be: the workflow, a job, a step. */
+  const placed: [string, (value: unknown) => (workflow: Json, jobs: Jobs) => void][] = [
+    ['the workflow', (value) => (workflow) => void (workflow.env = { CI: value })],
+    ['a job', (value) => (_, jobs) => void (jobs.unit.env = { CI: value })],
+    ['a step', (value) => (_, jobs) => void (stepAt(jobs.unit, 2).env = { CI: value })],
+  ];
+
+  // Break caught: a step that sets CI to something else than true (`false`, a blank, an expression that can come out as either), so that the scripts that read CI to tell a
+  // developer's shell from CI (the migration guard once did) treat a CI run as a developer's. Only the string `true`, or the YAML true that GitHub turns into it, is CI.
+  for (const [where, set] of placed) {
+    for (const value of [
+      'false',
+      false,
+      '',
+      0,
+      null,
+      'TRUE',
+      '1',
+      "${{ github.event_name == 'push' }}",
+    ]) {
+      it(`refuses CI set to ${JSON.stringify(value)} by ${where}`, () => {
+        assert.deepEqual(codesWith(set(value)), ['CI_NOT_TRUE']);
+      });
+    }
+    for (const value of ['true', true]) {
+      it(`accepts CI set to ${JSON.stringify(value)} by ${where}`, () => {
+        assert.deepEqual(codesWith(set(value)), []);
+      });
+    }
+  }
+
+  // Break caught: the same thing done in a script, which the `env` check does not see: an assignment before a command, an export, a line written to the file that sets
+  // the environment of the steps after it. Another variable that ends in CI is not this one.
+  for (const [script, refused] of [
+    ['CI=false pnpm run lint', true],
+    ['export CI=0', true],
+    ['CI= node scripts/x.ts', true],
+    ['echo "CI=false" >> "$GITHUB_ENV"', true],
+    ["env CI='no' node scripts/x.ts", true],
+    ['CI=true pnpm run lint', false],
+    ['echo "CI=true" >> "$GITHUB_ENV"', false],
+    ['MELARC_CI=false node scripts/x.ts', false],
+    ['echo "the CI result" # CI is a word here', false],
+  ] as const) {
+    it(`${refused ? 'refuses' : 'accepts'} a script that says ${JSON.stringify(script)}`, () => {
+      const found = codesWith((_, jobs) => {
+        stepsOf(jobs.unit).push({ name: 'Anything else', run: script });
+      });
+      assert.deepEqual(found, refused ? ['CI_NOT_TRUE'] : []);
+    });
+  }
+
+  // Break caught: the base of the migration guard named by an `env` expression that comes out empty on a pull request (the guard refuses an empty base, so every pull request
+  // would fail), or by a workflow-wide value that holds one revision for every run. A push names it by writing it to the environment of the steps after it, in a step that
+  // knows the event.
+  for (const [where, set] of [
+    ['the workflow', (workflow: Json) => void (workflow.env = { MELARC_MIGRATION_BASE: '' })],
+    [
+      'a job',
+      (_: Json, jobs: Jobs) =>
+        void (jobs.static.env = { MELARC_MIGRATION_BASE: "${{ github.event.before || '' }}" }),
+    ],
+    [
+      'a step',
+      (_: Json, jobs: Jobs) =>
+        void (stepAt(jobs.static, 2).env = { MELARC_MIGRATION_BASE: '${{ github.event.before }}' }),
+    ],
+  ] as const) {
+    it(`refuses MELARC_MIGRATION_BASE in the env of ${where}`, () => {
+      assert.deepEqual(codesWith(set), ['MIGRATION_BASE_ENV']);
+    });
+  }
+
+  it('accepts the base written to the environment by a script', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        stepsOf(jobs.static).push({
+          name: 'Name the base',
+          run: 'echo "MELARC_MIGRATION_BASE=$BEFORE" >> "$GITHUB_ENV"',
+        });
+      }),
+      [],
+    );
+  });
+});
+
 describe('the database tests, in shards', () => {
   const databaseStep = (jobs: Jobs): Json => stepRunning(jobs.database, 'pnpm run test:db');
   const strategyOf = (jobs: Jobs): Json => jobs.database.strategy as Json;

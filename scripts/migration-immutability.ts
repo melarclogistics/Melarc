@@ -9,11 +9,12 @@
  *   node scripts/migration-immutability.ts [--base <revision>]
  *
  *   exit 0   every migration file the base holds is, in the working tree, what the base holds
- *   exit 1   one is changed, renamed or removed
- *   exit 2   it could not decide: there is no main to compare with, or no history that reaches it (a shallow clone), or the base holds no migration at all.
- *            **Outside CI that is a warning and the exit is 0** (run 4, Stage 1, item 9): a tree with no main (a source package, a clone that fetched no branch)
- *            must not stop the precheck, and says on stderr that nothing was held. **In CI (`CI=true`, which GitHub Actions sets) it stays 2**: CI checks out the whole
- *            history and has main, so there a guard that cannot tell is a failure, and it never passes by having nothing to look at.
+ *   exit 1   one is changed, renamed or removed; or the command was misused: an option it does not know, `--base` with no revision, **a base that was named and is empty or
+ *            is not a commit this clone has** (`MigrationBaseError`; run 5, Stage 1.4)
+ *   exit 2   it could not decide: there is no main to compare with, or no history that reaches it (a shallow clone), or the base holds no migration at all. **It is 2 in CI
+ *            and outside it** (run 5, Stage 1.4; run 4 had made it a warning with exit 0 outside CI, which the precheck showed as "passed"): the script does not read `CI`.
+ *            Whoever runs it says what 2 costs. The precheck shows it as **warned**, with these words in its summary, and goes on, so that a tree with no main (a source
+ *            package, a clone that fetched no branch) is not stopped; **the gate and CI fail on it**, and it never passes by having nothing to look at.
  *
  * **The base.** `--base`, else `MELARC_MIGRATION_BASE` (what a CI job that knows better names: the revision a push to main came from; a developer may set it too, to
  * hold a tree that has no main to a revision it does have: DEVELOPMENT.md), else the merge base of
@@ -40,17 +41,29 @@ const JOURNAL = `${MIGRATIONS_DIRECTORY}/meta/_journal.json`;
 const MAIN_REFS = ['refs/remotes/origin/main', 'refs/heads/main'] as const;
 const ZERO_REVISION = /^0{40}$/;
 
-/** Whether this is a CI run: GitHub Actions sets `CI=true`, and a developer's shell does not. */
-export function inCi(env: NodeJS.ProcessEnv): boolean {
-  return env.CI === 'true';
-}
-
 /** The guard could not decide (exit 2): what is missing, and what to do about it. */
 export class MigrationImmutabilityError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MigrationImmutabilityError';
   }
+}
+
+/**
+ * The base that was named cannot be used: it is empty, or it is not a commit this clone has (run 5, Stage 1.4). That is a mistake of whoever named it and not a guard that
+ * cannot tell, so it ends the command with exit 1 whoever runs it, and is never the exit 2 that the precheck shows as a warning and goes on.
+ */
+export class MigrationBaseError extends MigrationImmutabilityError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MigrationBaseError';
+  }
+}
+
+/** A base somebody named: `--base`, or `MELARC_MIGRATION_BASE`, with where it came from for the words of a refusal. */
+export interface NamedBase {
+  readonly value: string;
+  readonly from: '--base' | 'MELARC_MIGRATION_BASE';
 }
 
 export interface ImmutabilityReport {
@@ -86,20 +99,32 @@ function commitOf(root: string, name: string): string | undefined {
   return run.status === 0 && found !== '' ? found : undefined;
 }
 
-/** The commit the working tree is held to, and how it was chosen. */
+/**
+ * The commit the working tree is held to, and how it was chosen. A base that was named (`explicit`) and is empty, or is not a commit this clone has, is a
+ * `MigrationBaseError`; an all-zero base is what a push event names for a new branch, and is no base named.
+ */
 export function baseOf(
   root: string,
-  explicit: string | undefined,
+  explicit: NamedBase | undefined,
 ): { readonly base: string; readonly baseWas: string } {
-  const named = explicit?.trim();
-  if (named !== undefined && named !== '' && !ZERO_REVISION.test(named)) {
-    const commit = commitOf(root, named);
-    if (commit === undefined) {
-      throw new MigrationImmutabilityError(
-        `The base revision "${named}" is not a commit this clone has. Fetch it (git fetch origin), or name another in MELARC_MIGRATION_BASE or --base.`,
+  if (explicit !== undefined) {
+    const named = explicit.value.trim();
+    if (named === '') {
+      throw new MigrationBaseError(
+        explicit.from === '--base'
+          ? '--base is empty. Name a revision after it (--base <revision>), or leave the option out.'
+          : 'MELARC_MIGRATION_BASE is set but empty. Name a revision in it, or unset it (an empty value is not "none": it is usually a variable that was not filled in).',
       );
     }
-    return { base: commit, baseWas: `the revision named (${named})` };
+    if (!ZERO_REVISION.test(named)) {
+      const commit = commitOf(root, named);
+      if (commit === undefined) {
+        throw new MigrationBaseError(
+          `The base revision "${named}" is not a commit this clone has (it was named by ${explicit.from}). Check it for a typo, fetch it (git fetch origin), or name another.`,
+        );
+      }
+      return { base: commit, baseWas: `the revision named (${named})` };
+    }
   }
 
   const ref = MAIN_REFS.find((candidate) => commitOf(root, candidate) !== undefined);
@@ -217,9 +242,15 @@ export function checkMigrationImmutability(options: {
   readonly env?: NodeJS.ProcessEnv;
 }): ImmutabilityReport {
   const root = resolve(options.root);
+  // The argument wins over the variable; a variable that is not set at all is no base named, and one that is set and empty is a mistake (`baseOf`).
+  const variable = (options.env ?? process.env).MELARC_MIGRATION_BASE;
   const { base, baseWas } = baseOf(
     root,
-    options.base ?? (options.env ?? process.env).MELARC_MIGRATION_BASE,
+    options.base !== undefined
+      ? { value: options.base, from: '--base' }
+      : variable !== undefined
+        ? { value: variable, from: 'MELARC_MIGRATION_BASE' }
+        : undefined,
   );
   const atBase = filesAt(root, base);
   if (atBase.length === 0) {
@@ -268,9 +299,10 @@ export function checkMigrationImmutability(options: {
   };
 }
 
+/** A misuse of the command is exit 1, like a changed migration: exit 2 is "could not tell", which the precheck shows as a warning and goes on. */
 function usage(): never {
   process.stderr.write('Usage: node scripts/migration-immutability.ts [--base <revision>]\n');
-  process.exit(2);
+  process.exit(1);
 }
 
 function main(argv: readonly string[]): number {
@@ -296,13 +328,17 @@ function main(argv: readonly string[]): number {
     );
     return 0;
   } catch (error) {
+    // A base that was named and cannot be used is the caller's mistake, and fails the command whoever runs it.
+    if (error instanceof MigrationBaseError) {
+      process.stderr.write(`The migrations were not checked: ${error.message}\n`);
+      return 1;
+    }
+    // It could not decide: exit 2 in CI and outside it. What 2 costs is for whoever runs it to say: the precheck shows it as warned and goes on, the gate and CI fail.
     if (error instanceof MigrationImmutabilityError) {
-      process.stderr.write(`Cannot tell whether a migration was changed: ${error.message}\n`);
-      if (inCi(process.env)) return 2;
       process.stderr.write(
-        'Warning, not a failure: this is not a CI run (CI is not "true"), so nothing was held and the precheck goes on. CI has the whole history and fails on this. Name a revision of this tree with MELARC_MIGRATION_BASE or --base to hold the migrations here.\n',
+        `Cannot tell whether a migration was changed: ${error.message}\nNothing was held. Name a revision of this tree with MELARC_MIGRATION_BASE or --base to hold the migrations here.\n`,
       );
-      return 0;
+      return 2;
     }
     throw error;
   }

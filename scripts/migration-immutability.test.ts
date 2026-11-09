@@ -7,6 +7,7 @@ import { after, describe, it } from 'node:test';
 
 import {
   MIGRATIONS_DIRECTORY,
+  MigrationBaseError,
   MigrationImmutabilityError,
   checkMigrationImmutability,
 } from './migration-immutability.ts';
@@ -237,6 +238,39 @@ describe('what the guard will not decide', () => {
     assert.equal(report.problems.length, 1, 'the merge base was used instead');
   });
 
+  // Break caught (run 5, Stage 1.4): an empty base ignored, so that `MELARC_MIGRATION_BASE=$BASE` with an unset variable, or `--base ""`, holds the tree to the merge base
+  // and says nothing; and a mistyped base told as "could not tell", which the precheck shows as a warning and goes on. A base that was named and cannot be used is a mistake of
+  // the caller: its own error, which the command ends with exit 1 everywhere.
+  it('refuses a base that is named and empty, or named and not a commit, as a mistake of the caller and not as a guard that cannot tell', () => {
+    const root = repository();
+    const mistake = (error: unknown, words: RegExp): boolean =>
+      error instanceof MigrationBaseError && words.test(error.message);
+
+    for (const empty of ['', '   ', '\t']) {
+      assert.throws(
+        () => checkMigrationImmutability({ root, base: empty }),
+        (error: unknown) => mistake(error, /is empty/),
+        `the argument ${JSON.stringify(empty)}`,
+      );
+      assert.throws(
+        () => checkMigrationImmutability({ root, env: { MELARC_MIGRATION_BASE: empty } }),
+        (error: unknown) => mistake(error, /MELARC_MIGRATION_BASE is set but empty/),
+        `the variable ${JSON.stringify(empty)}`,
+      );
+    }
+    for (const mistyped of ['no-such-revision', '0'.repeat(39), 'a'.repeat(40)]) {
+      assert.throws(
+        () => checkMigrationImmutability({ root, base: mistyped }),
+        (error: unknown) => mistake(error, /is not a commit/),
+        `the base ${mistyped}`,
+      );
+    }
+    // A variable that is not set at all is no base named, and the merge base is used.
+    assert.equal(checkMigrationImmutability({ root, env: {} }).problems.length, 0);
+    // The mistake is not "could not decide" for any caller that tells the two apart.
+    assert.ok(new MigrationBaseError('x') instanceof MigrationImmutabilityError);
+  });
+
   // Break caught: the environment's base ignored (a CI push event names the revision it came from), or preferred over an explicit argument.
   it('takes the base from MELARC_MIGRATION_BASE, and an argument wins over it', () => {
     const root = repository();
@@ -301,30 +335,84 @@ describe('the command', () => {
     assert.match(unknown.stderr, /Cannot tell whether a migration was changed: There is no main/);
   });
 
-  // Break caught (run 4, Stage 1, item 9): a tree with no main (a source package) stopping the precheck, or, the other way, CI passing a guard that held nothing.
-  // Outside CI it says so and exits 0; in CI it is the failure it was.
-  it('is a warning with exit 0 outside CI when it cannot tell, and still exit 2 in CI', () => {
+  // Break caught (run 5, Stage 1.4; it replaces the exit 0 that run 4 gave outside CI): a guard that cannot tell exiting 0 outside CI, so that the precheck said "passed"
+  // and kept the warning in a log nobody opens. It exits 2, in CI and outside it, with the words that say why on stderr and no word of having held anything; whoever
+  // calls it decides what 2 costs (the precheck shows it as warned, the gate and CI fail on it).
+  it('exits 2 when it cannot tell, in CI and outside it, and says nothing was held', () => {
     const undecided = repository({ withMain: false });
 
-    const local = runIn(false, undecided);
-    assert.equal(local.status, 0, local.stderr);
-    assert.match(local.stderr, /Cannot tell whether a migration was changed: There is no main/);
-    assert.match(local.stderr, /Warning, not a failure/);
-    assert.doesNotMatch(
-      local.stdout,
-      /Migrations held/,
-      'nothing was held, and it does not say so',
-    );
-
-    const ci = runIn(true, undecided);
-    assert.equal(ci.status, 2);
-    assert.doesNotMatch(ci.stderr, /Warning, not a failure/);
+    for (const ci of [false, true]) {
+      const result = runIn(ci, undecided);
+      assert.equal(result.status, 2, `${ci ? 'in' : 'outside'} CI: ${result.stderr}`);
+      assert.match(
+        result.stderr,
+        /Cannot tell whether a migration was changed: There is no main to compare/,
+      );
+      assert.doesNotMatch(result.stderr, /Warning, not a failure/);
+      assert.doesNotMatch(result.stdout, /Migrations held/, 'nothing was held');
+    }
 
     // A tree that has a revision to be held to can name it, and then it decides, outside CI as in CI.
     const base = git(undecided, 'rev-parse', 'HEAD');
-    const named = runIn(false, undecided, '--base', base);
-    assert.equal(named.status, 0, named.stderr);
-    assert.match(named.stdout, /Migrations held/);
+    for (const ci of [false, true]) {
+      const named = runIn(ci, undecided, '--base', base);
+      assert.equal(named.status, 0, named.stderr);
+      assert.match(named.stdout, /Migrations held/);
+    }
+  });
+
+  // Break caught (run 5, Stage 1.4): a base that is empty or mistyped treated as none named (CI's expression for a pull request is empty), or as "could not tell" (a warning
+  // in the precheck). It is exit 1 whoever runs it, with a message that names what was wrong, and a base that is all zeros (what a push event names for a new branch) is
+  // still none named.
+  it('fails with exit 1, in CI and outside it, when the base named is empty or is not a commit', () => {
+    const root = repository();
+    const cases: {
+      readonly label: string;
+      readonly args: string[];
+      readonly env: NodeJS.ProcessEnv;
+      readonly words: RegExp;
+    }[] = [
+      {
+        label: 'an empty variable',
+        args: [],
+        env: { MELARC_MIGRATION_BASE: '' },
+        words: /MELARC_MIGRATION_BASE is set but empty/,
+      },
+      {
+        label: 'a blank variable',
+        args: [],
+        env: { MELARC_MIGRATION_BASE: '  ' },
+        words: /MELARC_MIGRATION_BASE is set but empty/,
+      },
+      { label: 'an empty --base', args: ['--base', ''], env: {}, words: /--base is empty/ },
+      {
+        label: 'a mistyped variable',
+        args: [],
+        env: { MELARC_MIGRATION_BASE: 'mian' },
+        words: /"mian" is not a commit/,
+      },
+      {
+        label: 'a mistyped --base',
+        args: ['--base', 'mian'],
+        env: {},
+        words: /"mian" is not a commit/,
+      },
+    ];
+    for (const ci of [false, true]) {
+      for (const { label, args, env, words } of cases) {
+        const result = spawnSync('node', [SCRIPT, ...args], {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...environment(ci), ...env },
+        });
+        assert.equal(result.status, 1, `${label}, ${ci ? 'in' : 'outside'} CI: ${result.stderr}`);
+        assert.match(result.stderr, words, label);
+        assert.doesNotMatch(result.stdout, /Migrations held/, label);
+      }
+    }
+    // The zero revision is no base named: the merge base is used and the guard decides.
+    const zero = runIn(false, root, '--base', '0'.repeat(40));
+    assert.equal(zero.status, 0, zero.stderr);
   });
 
   // Break caught: a change of a migration main has going unnoticed outside CI because the warning's exit 0 was given to every outcome.
@@ -337,11 +425,14 @@ describe('the command', () => {
     assert.equal(failed.status, 1);
   });
 
-  // Break caught: an option the command does not know being ignored, so that a typo of --base compares with the wrong revision without a word.
-  it('refuses an argument it does not know', () => {
+  // Break caught: an option the command does not know being ignored, so that a typo of --base compares with the wrong revision without a word. It is exit 1 and not 2 (run 5,
+  // Stage 1.4): 2 is "could not tell", which the precheck shows as a warning and goes on, and a misuse of the command must stop it.
+  it('refuses an argument it does not know, and --base without a revision, with exit 1', () => {
     const root = repository();
 
-    assert.equal(run(root, '--bsae', 'x').status, 2);
-    assert.equal(run(root, '--base').status, 2);
+    for (const ci of [false, true]) {
+      assert.equal(runIn(ci, root, '--bsae', 'x').status, 1);
+      assert.equal(runIn(ci, root, '--base').status, 1);
+    }
   });
 });

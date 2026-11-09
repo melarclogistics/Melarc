@@ -133,9 +133,18 @@ jobs:
 
       # A migration that main has is never changed, renamed or removed (apps/api/CLAUDE.md, "Migrations only go forward"). A push to main is held to the revision it
       # came from; every other run to the merge base of the revision and main (scripts/migration-immutability.ts says how it behaves while main lacks the files).
-      - name: Check that no migration main has was changed
+      # The guard refuses a base that is named and empty, and an `env:` expression is empty on every run that is not a push, so the base is named only on a push, by
+      # writing it to the environment of the steps after this one (scripts/ci-workflow.ts refuses MELARC_MIGRATION_BASE in an `env:`).
+      - name: Name the revision the migrations are held to on a push
         env:
-          MELARC_MIGRATION_BASE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            echo "MELARC_MIGRATION_BASE=$BEFORE" >> "$GITHUB_ENV"
+          fi
+
+      - name: Check that no migration main has was changed
         run: node scripts/migration-immutability.ts
 
       - name: Check the generated API client is current

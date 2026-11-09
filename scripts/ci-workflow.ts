@@ -1363,6 +1363,75 @@ function checkTimingSkip(workflow: unknown, jobs: readonly Job[]): WorkflowProbl
   return problems;
 }
 
+/** `CI=<value>` as a script writes it: before a command, after `export` or `env`, or in a line written to the file that sets the environment of the steps after it. */
+const CI_ASSIGNMENT = /(?:^|[\s;&|("'])(?:export\s+|env\s+)?CI=("[^"]*"|'[^']*'|[^\s;&|)"']*)/gm;
+
+/** Whether a value written in a workflow is CI's `true`: the string, or the YAML boolean that GitHub turns into it. */
+const isTrue = (value: unknown): boolean => value === 'true' || value === true;
+
+/**
+ * `CI` is `true` wherever the workflow sets it (run 5, Stage 1.4). Scripts tell a developer's shell from a CI run by it (the migration guard did: outside CI it was a
+ * warning), and GitHub Actions sets it to `true` itself, so a step that sets it to anything else (`false`, a blank, an expression that can come out as either) makes a CI
+ * run behave as a developer's. It is looked for in the `env` of the workflow, of a job and of a step, in the steps of the local actions, and in the assignments a script makes.
+ */
+function checkCiIsTrue(workflow: unknown, jobs: readonly Job[]): WorkflowProblem[] {
+  const problems: WorkflowProblem[] = [];
+  const refuse = (where: string, value: unknown): void => {
+    problems.push({
+      code: 'CI_NOT_TRUE',
+      message: `${where} sets CI to ${JSON.stringify(value)}: it is "true" in a CI run (GitHub sets it) and a step that sets it to anything else makes the scripts that read it treat a CI run as a developer's shell. Leave it alone, or set it to true.`,
+    });
+  };
+  const inEnv = (where: string, holder: unknown): void => {
+    if (isRecord(holder) && isRecord(holder.env) && 'CI' in holder.env && !isTrue(holder.env.CI)) {
+      refuse(where, holder.env.CI);
+    }
+  };
+  inEnv('The workflow', workflow);
+  for (const { id, body, expanded } of jobs) {
+    inEnv(`Job ${id}`, body);
+    for (const step of expanded) {
+      const label = `Step "${id}: ${typeof step.name === 'string' ? step.name : '(unnamed step)'}"`;
+      inEnv(label, step);
+      for (const match of scriptOf(step).matchAll(CI_ASSIGNMENT)) {
+        const written = (match[1] ?? '').replace(/^(["'])(.*)\1$/, '$2');
+        if (written !== 'true') refuse(label, written);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * The revision the migration guard is held to is never an `env` (run 5, Stage 1.4). The guard refuses a base that is named and empty, and an `env` expression is empty on
+ * every run that is not a push (`github.event_name == 'push' && github.event.before || ''` was), so every pull request would fail. A push names the base by writing
+ * `MELARC_MIGRATION_BASE=<revision>` to the file that sets the environment of the steps after it, in a step that knows the event; any other run leaves it unset.
+ */
+function checkMigrationBaseIsNotAnEnv(workflow: unknown, jobs: readonly Job[]): WorkflowProblem[] {
+  const sets = (holder: unknown): boolean =>
+    isRecord(holder) && isRecord(holder.env) && 'MELARC_MIGRATION_BASE' in holder.env;
+  const strays = [
+    ...(sets(workflow) ? ['the workflow'] : []),
+    ...jobs.filter(({ body }) => sets(body)).map(({ id }) => `job ${id}`),
+    ...jobs.flatMap(({ id, expanded }) =>
+      expanded
+        .filter((step) => sets(step))
+        .map(
+          (step) =>
+            `a step of job ${id} (${typeof step.name === 'string' ? step.name : 'unnamed'})`,
+        ),
+    ),
+  ];
+  return strays.length === 0
+    ? []
+    : [
+        {
+          code: 'MIGRATION_BASE_ENV',
+          message: `MELARC_MIGRATION_BASE is set in the env of ${strays.join(', ')}: the migration guard refuses a base that is empty, and an env expression is empty on a run that is not a push. Write it to "$GITHUB_ENV" from a step that checks the event, and leave it unset otherwise.`,
+        },
+      ];
+}
+
 function pathsOf(step: Step): string[] {
   const path = inputsOf(step).path;
   return typeof path === 'string' ? linesOf(path).filter((line) => line !== '') : [];
@@ -1491,6 +1560,8 @@ export function findWorkflowProblems(
     ...checkPlan(jobs),
     ...checkStepTimeouts(jobs),
     ...checkTimingSkip(workflow, jobs),
+    ...checkCiIsTrue(workflow, jobs),
+    ...checkMigrationBaseIsNotAnEnv(workflow, jobs),
     ...checkDatabaseShards(workflow, jobs),
     ...checkAggregate(jobs),
     ...checkVerdictName(jobs),

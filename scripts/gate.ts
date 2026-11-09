@@ -76,6 +76,11 @@ export interface Stage {
   readonly command: string;
   /** A stage that must have passed for this one to mean anything (the contract check reads the build). */
   readonly needs?: string;
+  /**
+   * An exit of this check that says it could not decide (the migration guard with no main to compare with): **the precheck** shows it as warned, with the words of its log in
+   * the summary, and goes on. The gate never reads it: for the gate every exit but 0 is a failure, as it is in CI (run 5, Stage 1.4).
+   */
+  readonly warnOnExit?: number;
 }
 
 /** Where `precheck` keeps the caches of prettier and ESLint: below `node_modules`, which Git ignores and nothing ships. */
@@ -92,13 +97,21 @@ interface Check {
   readonly needs?: string;
   /** The lane of `precheck` it runs in: lanes run in parallel, the checks of one lane in order. */
   readonly lane: string;
+  /** The exit that means "could not decide", which `precheck` alone shows as warned (see `Stage`). */
+  readonly warnOnExit?: number;
 }
 
 /** Cheapest first. These are the commands of CI, word for word: the gate and the precheck add nothing to what they prove. */
 const CHECKS: readonly Check[] = [
   { name: 'dbcheck', command: 'pnpm --filter @melarc/api run db:check', lane: 'dbcheck' },
-  // A migration that main has is never changed (task A3.3 of the audit follow-up): the guard holds the working tree to the merge base with main.
-  { name: 'migrations', command: 'node scripts/migration-immutability.ts', lane: 'dbcheck' },
+  // A migration that main has is never changed (task A3.3 of the audit follow-up): the guard holds the working tree to the merge base with main. Its exit 2 means it could not
+  // decide (no main to compare with): the precheck shows it as warned and goes on, and the gate and CI fail on it (run 5, Stage 1.4).
+  {
+    name: 'migrations',
+    command: 'node scripts/migration-immutability.ts',
+    lane: 'dbcheck',
+    warnOnExit: 2,
+  },
   { name: 'client', command: 'pnpm run api-client:check', lane: 'client' },
   {
     name: 'format',
@@ -156,6 +169,7 @@ export function precheckLanes(uncached: boolean): Stage[][] {
       kind: 'static',
       command,
       ...(check.needs === undefined ? {} : { needs: check.needs }),
+      ...(check.warnOnExit === undefined ? {} : { warnOnExit: check.warnOnExit }),
     };
     lanes.set(check.lane, [...(lanes.get(check.lane) ?? []), stage]);
   }
@@ -949,7 +963,8 @@ export function precheckRefusal(base: string): string | undefined {
 interface CheckResult {
   readonly name: string;
   readonly command: string;
-  readonly status: 'passed' | 'failed' | 'skipped';
+  /** `warned`: the check ended with the exit it marks as "could not decide" (`Stage.warnOnExit`). It does not fail the precheck, and it is not a pass. */
+  readonly status: 'passed' | 'warned' | 'failed' | 'skipped';
   readonly durationMs: number;
   readonly log: string;
   readonly note: string | null;
@@ -997,10 +1012,14 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
         sampleMs: 5000,
       }).result;
       const passed = outcome.spawnError === null && outcome.exitCode === 0;
+      const warned =
+        outcome.spawnError === null &&
+        stage.warnOnExit !== undefined &&
+        outcome.exitCode === stage.warnOnExit;
       results.push({
         name: stage.name,
         command: stage.command,
-        status: passed ? 'passed' : 'failed',
+        status: passed ? 'passed' : warned ? 'warned' : 'failed',
         durationMs: Date.now() - at,
         log,
         note:
@@ -1008,7 +1027,9 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
             ? `could not start: ${outcome.spawnError}`
             : passed
               ? null
-              : `exit ${outcome.exitCode === null ? 'by a signal' : String(outcome.exitCode)}`,
+              : warned
+                ? `exit ${String(outcome.exitCode)}: could not decide`
+                : `exit ${outcome.exitCode === null ? 'by a signal' : String(outcome.exitCode)}`,
       });
     }
     return results;
@@ -1033,18 +1054,35 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
       tailOf(result.log, options.tailLines),
     );
   }
+  // A check that could not decide is not a failure of the precheck and is not a pass: its words are in the summary and not only in a log (run 5, Stage 1.4).
+  const warned = all.filter((result) => result.status === 'warned');
+  for (const result of warned) {
+    options.log(
+      '',
+      `--- ${result.name}: warned (${result.note?.split(':')[0] ?? 'it could not decide'}), the end of ${result.log}`,
+      tailOf(result.log, options.tailLines),
+    );
+  }
   if (!options.uncached) {
     options.log(
       '',
       'This was the cached precheck: the gate lints and formats from scratch. A finding hidden by the cache (a type changed in another file) appears there.',
     );
   }
-  options.log(
-    failed.length === 0 && all.every((result) => result.status === 'passed')
-      ? 'Every cheap check passed.'
-      : `${String(all.filter((result) => result.status !== 'passed').length)} of ${String(all.length)} cheap checks did not pass: fix them before a gate. Logs: ${options.dir}`,
+  const notPassed = all.filter(
+    (result) => result.status === 'failed' || result.status === 'skipped',
   );
-  return all.every((result) => result.status === 'passed') ? 0 : 1;
+  const warning = `${String(warned.length)} warned (${warned.map((result) => result.name).join(', ')}): a warning is not a pass, and the gate and CI fail on it`;
+  if (notPassed.length > 0) {
+    options.log(
+      `${String(notPassed.length)} of ${String(all.length)} cheap checks did not pass: fix them before a gate.${warned.length === 0 ? '' : ` ${warning}.`} Logs: ${options.dir}`,
+    );
+  } else if (warned.length > 0) {
+    options.log(`No cheap check failed, and ${warning}: read it above.`);
+  } else {
+    options.log('Every cheap check passed.');
+  }
+  return notPassed.length === 0 ? 0 : 1;
 }
 
 // ------------------------------------------------------------------------------------------------ the command line
