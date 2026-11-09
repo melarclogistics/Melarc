@@ -6,12 +6,26 @@ import { InSidePanel } from '../side-panel/side-panel-context';
 import './record-header.css';
 import { StageTracker, type StageTrackerProps } from './StageTracker';
 
+/** What the title of a record is made of: an operational code (the default), or the name of a person or an organisation, which has no code. */
+export type RecordTitleKind = 'code' | 'name';
+
+/** The text of the title: a code in the code face, never broken; a name as the heading's own text, which wraps like any words. */
+function Title({ text, kind }: { readonly text: string; readonly kind: RecordTitleKind }) {
+  return kind === 'name' ? <>{text}</> : <OperationalCode>{text}</OperationalCode>;
+}
+
 export interface RecordHeaderProps {
   /**
    * The record's code, exactly as the server gave it. It is the record's name: the page's one level-one heading, or a level-two heading beside a list. **Inside a `SidePanel`
-   * it is drawn as text**: the panel's own heading is the same code, and two headings with one name would be read twice (task R5.2, M12).
+   * it is drawn as text**: the panel's own heading is the same code, and two headings with one name would be read twice (task R5.2, M12). For a record that has a name and no code
+   * (a person, an organisation, a rider) it is the name, and `titleKind` says so.
    */
   readonly code: string;
+  /**
+   * `code` (the default) draws the title in the monospaced face of operational codes, which people read aloud on calls and which is never broken; `name` draws it as the plain text of the
+   * heading, for the record of a person or an organisation (redesign step R7b), so that a name is not read as if it were a code.
+   */
+  readonly titleKind?: RecordTitleKind;
   /** `1` for a record's own page (the heading takes focus after a navigation); `2` when the header is in a panel or beside a list. Default 1. */
   readonly level?: 1 | 2;
   /** The record's status as a badge, drawn beside the code. A slot: the page passes the StatusBadge of its mapping. */
@@ -42,6 +56,7 @@ export interface RecordHeaderProps {
  */
 export function RecordHeader({
   code,
+  titleKind = 'code',
   level = 1,
   status,
   sentence,
@@ -61,15 +76,15 @@ export function RecordHeader({
           <div className="ui-record-header__titleline">
             {inPanel ? (
               <p className="ui-record-header__heading">
-                <OperationalCode>{code}</OperationalCode>
+                <Title text={code} kind={titleKind} />
               </p>
             ) : level === 1 ? (
               <PageHeading>
-                <OperationalCode>{code}</OperationalCode>
+                <Title text={code} kind={titleKind} />
               </PageHeading>
             ) : (
               <h2 className="ui-record-header__heading" tabIndex={-1}>
-                <OperationalCode>{code}</OperationalCode>
+                <Title text={code} kind={titleKind} />
               </h2>
             )}
             {status === undefined ? null : (

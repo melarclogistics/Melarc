@@ -49,8 +49,11 @@ export interface RecordActivity {
 export interface RecordPageProps {
   /** The pages above this one. Not drawn inside a panel. */
   readonly breadcrumb?: readonly BreadcrumbEntry[];
-  /** Who the record is and where it stands: its code (the page's one level-one heading), its status as a badge, one plain-words sentence, and the stages. */
-  readonly header: Pick<RecordHeaderProps, 'code' | 'status' | 'sentence' | 'stages'>;
+  /**
+   * Who the record is and where it stands: its code (the page's one level-one heading; for a record that has a name and no code, the name, with `titleKind: 'name'`), its status as a
+   * badge, one plain-words sentence, and the stages.
+   */
+  readonly header: Pick<RecordHeaderProps, 'code' | 'titleKind' | 'status' | 'sentence' | 'stages'>;
   readonly acts?: RecordActs;
   readonly conflict?: RecordConflict;
   /** Banners and notices that belong to the whole record, between the header and the body. */
@@ -152,6 +155,7 @@ export function RecordPage({
       <Panel variant="page">
         <RecordHeader
           code={header.code}
+          {...(header.titleKind === undefined ? {} : { titleKind: header.titleKind })}
           {...(header.status === undefined ? {} : { status: header.status })}
           {...(header.sentence === undefined ? {} : { sentence: header.sentence })}
           {...(header.stages === undefined ? {} : { stages: header.stages })}
