@@ -133,6 +133,9 @@ async function launch(name: string, script: string, database: TestDatabase): Pro
     DATABASE_URL: database.urlFor(API_RUNTIME_ROLE),
   });
   const baseUrl = `http://127.0.0.1:${String(port)}`;
+  // One bound, DEADLINES.ready (20 seconds) from the spawn, as the owner decided; it is not raised. When it passes, the failure says which of the two it was (run 5, Stage 1.6): the
+  // process had not listened (a start that is slow: its contract is prepared, and its modules loaded, on the CPU before it listens) or it listened after N ms and the last
+  // answer of /readyz is given with its status and body.
   await running.waitUntilReady(baseUrl);
   return { name, running, baseUrl };
 }

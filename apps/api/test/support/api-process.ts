@@ -312,6 +312,10 @@ export class RunningProcess {
     deadlineMs: number,
   ): Promise<void> {
     const deadline = Date.now() + deadlineMs;
+    // What a failure can say (run 5, Stage 1.6): the bound is one, counted from here, but a start that is slow and a start that listens and is not ready are different faults. The
+    // process is listening from the first answer of any status (its log line may be written after the answer), and the last answer of the probe is kept, status and body.
+    let listeningAt: number | undefined;
+    let last: { readonly status: number; readonly body: string } | undefined;
     while (Date.now() < deadline) {
       if (this.startFailure !== undefined) throw this.startFailure;
       if (this.done !== undefined) {
@@ -319,18 +323,32 @@ export class RunningProcess {
           `the process exited before it was ${state} (${this.describeExit(this.done)}):\n${this.report('')}`,
         );
       }
+      if (listeningAt === undefined && this.out.includes('api listening')) {
+        listeningAt = Date.now();
+      }
       try {
         const response = await fetch(`${baseUrl}${probe}`, {
           signal: AbortSignal.timeout(DEADLINES.request),
         });
-        await response.text();
+        const body = await response.text();
+        listeningAt ??= Date.now();
+        last = { status: response.status, body: body.slice(0, 400) };
         if (response.status === 200) return;
       } catch {
         // not listening yet, or this request ran out of time
       }
       await sleep(100);
     }
-    const report = this.report(`the process was not ${state} within ${String(deadlineMs)} ms`);
+    const fault =
+      listeningAt === undefined
+        ? 'it was not listening: nothing answered on the port, and "api listening" was not logged'
+        : `it was listening after ${String(listeningAt - this.startedAt)} ms` +
+          (last === undefined
+            ? ', and the last request of ' + probe + ' got no answer in time'
+            : `, and the last answer of ${probe} was ${String(last.status)} ${last.body}`);
+    const report = this.report(
+      `the process was not ${state} within ${String(deadlineMs)} ms: ${fault}`,
+    );
     await this.forceKill();
     throw new Error(report);
   }

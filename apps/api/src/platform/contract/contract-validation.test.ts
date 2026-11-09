@@ -425,6 +425,49 @@ describe('a response that breaks the contract', () => {
     expect(refused.status).toBe(400);
   });
 
+  // Break caught (run 5, Stage 1.6): the start of the API compiling every response schema of every operation in production, where no response is ever validated:
+  // the 18,000 lines of the contract cost seconds of a synchronous start, on a machine that is busy as much as on any other, for validators that nothing calls. In
+  // production only the request side is prepared (the response schemas are proved to compile by the tests of the validator, and by the start of every other
+  // environment); the start says how long the preparation took, so that a slow start can be told from a slow database.
+  it('prepares no response validator in production, and says how long the contract took to prepare', async () => {
+    const app = await start({
+      rootModule: appWith(ValidatedWidgetsModule),
+      contractSource: fixtureSource(),
+      config: { ...TEST_CONFIG, nodeEnv: 'production' },
+    });
+    const service = app.app.get(ContractValidationService);
+
+    expect(service.validatesResponses).toBe(false);
+    expect(() =>
+      service.validator().validateResponse('getWidget', { status: 200, body: {}, headers: {} }),
+    ).toThrow(/without response validators/);
+    const said = app.logs.records().filter((record) => record.msg === 'contract prepared');
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ level: 'info', responseValidators: false });
+    expect(said[0]?.operations).toBeGreaterThan(0);
+    expect(typeof said[0]?.milliseconds).toBe('number');
+    expect(said[0]?.milliseconds).toBeGreaterThanOrEqual(0);
+  });
+
+  // Break caught: the other environments losing their response validators with it, which is how a handler that answers something the contract does not describe is found.
+  it('prepares the response validators outside production, and says so', async () => {
+    const app = await start({
+      rootModule: appWith(ValidatedWidgetsModule),
+      contractSource: fixtureSource(),
+    });
+    const service = app.app.get(ContractValidationService);
+
+    expect(service.validatesResponses).toBe(true);
+    expect(
+      service
+        .validator()
+        .validateResponse('getWidget', { status: 200, body: GOOD_WIDGET, headers: {} }),
+    ).toEqual([]);
+    expect(app.logs.records().find((record) => record.msg === 'contract prepared')).toMatchObject({
+      responseValidators: true,
+    });
+  });
+
   // Break caught: the status the answer will have being guessed wrongly, so a correct answer is judged as an
   // undeclared status. The status is what the router will send: @HttpCode if there is one, else 201 for a
   // POST. Each of the two rules is tested alone, on an operation that declares only the status it produces.
