@@ -273,8 +273,9 @@ describe('what the guard will not decide', () => {
 describe('the command', () => {
   /** The command as a developer's shell runs it (no `CI`) and as CI does (`CI=true`). */
   const environment = (ci: boolean): NodeJS.ProcessEnv => {
-    const { CI: _ignored, ...rest } = process.env;
-    return ci ? { ...rest, CI: 'true' } : rest;
+    const copy: NodeJS.ProcessEnv = { ...process.env };
+    delete copy.CI;
+    return ci ? { ...copy, CI: 'true' } : copy;
   };
   const runIn = (ci: boolean, root: string, ...args: string[]) =>
     spawnSync('node', [SCRIPT, ...args], { cwd: root, encoding: 'utf8', env: environment(ci) });
