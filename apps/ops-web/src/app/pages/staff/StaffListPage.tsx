@@ -1,29 +1,28 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import type { DataColumn } from '../../../components/ui/data-table/DataTable';
+import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
-import { Icon } from '../../../components/ui/icon/Icon';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Select } from '../../../components/ui/select/Select';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
+import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
-import { useSignedInSession } from '../../../platform/session/use-permissions';
-import type {
-  AssignableBundleView,
-  StaffIdentityPageView,
-  StaffIdentityView,
-} from '../../../platform/staff/staff-shape';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
+import {
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
+import { cannotText } from '../../../platform/problem/capability-words';
+import { problemOf } from '../../../platform/problem/problem-copy';
+import { useSignedInSession } from '../../../platform/session/use-permissions';
+import type { StaffIdentityView, StaffStatus } from '../../../platform/staff/staff-shape';
 import { useAssignableBundles, useStaffList } from '../../../platform/staff/use-staff-queries';
-import { NothingAtHub } from '../NothingAtHub';
 import {
   defaultViewFor,
   hubNameOf,
@@ -34,36 +33,103 @@ import {
   viewOf,
   type StaffView,
 } from './staff-presentation';
-import './staff-pages.css';
+import '../pickup/pickup-pages.css';
 
 /** The longest search the server accepts (`listStaffIdentities`, `q`). */
 const SEARCH_LIMIT = 128;
 
 const VIEW_ORDER = Object.keys(STAFF_VIEWS) as StaffView[];
 
-function countText(
-  view: StaffView,
-  searching: boolean,
-  page: number,
-  shown: number,
-  more: boolean,
-): string {
-  const noun = shown === 1 ? 'profile' : 'profiles';
-  // The whole queue is on the page: the count is exact, and it is the number an approver came for.
-  if (view === 'waiting' && !searching && page === 1 && !more) {
-    return `${String(shown)} ${noun} ${shown === 1 ? 'is' : 'are'} waiting for approval.`;
-  }
-  const where = page > 1 ? ` on page ${String(page)}` : '';
-  return `Showing ${String(shown)} ${noun}${where}.${more ? ' More follow on the next page.' : ''}`;
+/**
+ * What the list tells of a person, made once from the record so that the row and the card cannot tell different things. The role is told only to a session that may read the roles:
+ * for anyone else the column is left out, because "Another role" on every row would tell them nothing.
+ */
+interface ProfileFacts {
+  readonly id: string;
+  readonly name: string;
+  readonly href: string;
+  readonly email: string;
+  readonly status: StaffStatus;
+  readonly role: string | undefined;
+  readonly hub: string;
+}
+
+/** Two facts that belong together, the second quieter beneath the first. */
+function Pair({ first, second }: { readonly first: ReactNode; readonly second: string }) {
+  return (
+    <span className="pickup-lines">
+      <span>{first}</span>
+      <span className="pickup-support">{second}</span>
+    </span>
+  );
+}
+
+/** The status as a badge that wraps at its words in a narrow column. */
+function Status({ status }: { readonly status: StaffStatus }) {
+  return <StatusBadge status={status} map={STAFF_STATUS_MAP} wraps />;
+}
+
+function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <div className="pickup-card__fact">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+const PERSON: DataColumn<ProfileFacts> = {
+  id: 'person',
+  header: 'Name / work email',
+  rowHeader: true,
+  // The name is a link to the profile and is the row's header: a row opens a page and not a panel, so there is no button over the row.
+  cell: (row) => <Pair first={<Link to={row.href}>{row.name}</Link>} second={row.email} />,
+};
+const STATUS: DataColumn<ProfileFacts> = {
+  id: 'status',
+  header: 'Status',
+  cell: (row) => <Status status={row.status} />,
+};
+const ROLE: DataColumn<ProfileFacts> = {
+  id: 'role',
+  header: 'Role',
+  cell: (row) => row.role ?? '',
+};
+const HUB: DataColumn<ProfileFacts> = { id: 'hub', header: 'Hub', cell: (row) => row.hub };
+
+/** The facts of a person in four columns, or in three for a session that may not read the roles. */
+const COLUMNS: readonly DataColumn<ProfileFacts>[] = [PERSON, STATUS, ROLE, HUB];
+const COLUMNS_WITHOUT_ROLE: readonly DataColumn<ProfileFacts>[] = [PERSON, STATUS, HUB];
+
+/**
+ * A person as a card, for a room too narrow for the columns: the status, then the facts in the order a person reads them, each under the name of its column. It holds **no control**:
+ * the name is the card's heading, outside the card, and the link to the profile.
+ */
+function ProfileCard({ facts }: { readonly facts: ProfileFacts }) {
+  return (
+    <>
+      <div className="pickup-card__head">
+        <Status status={facts.status} />
+      </div>
+      <dl className="pickup-card__facts">
+        <Fact label="Work email">{facts.email}</Fact>
+        {facts.role === undefined ? null : <Fact label="Role">{facts.role}</Fact>}
+        <Fact label="Hub">{facts.hub}</Fact>
+      </dl>
+    </>
+  );
 }
 
 /**
- * Staff (surfaces/ops-portal.md section 7, `/admin/staff`): the people with a staff profile at the session's hubs, and the approver's queue,
- * which is the same list filtered to the profiles waiting for a decision. A person who can approve opens on the queue, because that is what
- * they came for; anyone else opens on everyone. The view and the search are in the address, so a link (the landing's "Review the queue") and
- * the Back button mean what they say; the page of results is not, because a token the server gave is only good for the list it was given for.
+ * Staff (surfaces/ops-portal.md section 7, `/admin/staff`; redesign step R7b): the people with a staff profile at the session's hubs, and the approver's queue,
+ * which is the same list filtered to the profiles waiting for a decision. It is drawn by the queue workspace template (COMPONENT_PATTERNS, *QueueWorkspace*): the views are
+ * the statuses a profile has, the search by name or email is a field in the filter row's popover and a chip when it is applied, and a person opens on a page of their own
+ * (their name is a link). A person who can approve opens on the queue, because that is what they came for; anyone else opens on everyone. The view and the search are in
+ * the address, so a link (the landing's "Review the queue") and the Back button mean what they say; the page of results is not, because a token the server gave is only
+ * good for the list it was given for.
  *
- * Whom the session may see is the server's decision (scoped to its hubs); what this page hides decides nothing.
+ * Whom the session may see is the server's decision (scoped to its hubs); what this page hides decides nothing. The one count it draws is exact only where it can be: the
+ * whole of the approver's queue on one page.
  */
 export function StaffListPage() {
   const me = useSignedInSession();
@@ -81,20 +147,14 @@ export function StaffListPage() {
 
   // The tokens of the pages visited, for the list they were given for: a token is only good for the filter that produced it.
   const signature = `${view}|${q}|${hubId ?? ''}`;
-  const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
-    signature,
-    tokens: [],
-  });
-  const tokens = paging.signature === signature ? paging.tokens : [];
-  const pageToken = tokens.at(-1);
-  const page = tokens.length + 1;
+  const paging = useQueuePaging(signature);
 
   const status = statusOfView(view);
   const list = useStaffList({
     ...(status === undefined ? {} : { status }),
     ...(hubId === undefined ? {} : { hubId }),
     q,
-    ...(pageToken === undefined ? {} : { pageToken }),
+    ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
   const bundles = useAssignableBundles(canReadRoles);
@@ -103,30 +163,43 @@ export function StaffListPage() {
   // kept with the search it was typed over, and is the search again as soon as that is not the one in the address.
   const [typing, setTyping] = useState({ over: q, text: q });
   const draft = typing.over === q ? typing.text : q;
-
+  const [filterOpen, setFilterOpen] = useState(false);
   const [interacted, setInteracted] = useState(false);
-  const results = useRef<HTMLDivElement>(null);
-  const focusResults = useRef(false);
+
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
+  // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
+  const workspace = useRef<QueueWorkspaceHandle>(null);
+  const settled = !list.isFetching && (list.isSuccess || list.isError);
+  const { takeFocus } = paging;
   useEffect(() => {
-    if (focusResults.current && list.status === 'success') {
-      focusResults.current = false;
-      results.current?.focus();
-    }
-  }, [list.status, list.data]);
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
 
-  if (me === undefined) return null;
+  const hubs = me?.session.authorized_hubs;
+  const roles = bundles.data;
+  const rows = useMemo(
+    () =>
+      list.isSuccess && hubs !== undefined
+        ? list.data.items.map((person: StaffIdentityView): ProfileFacts => ({
+            id: person.id,
+            name: person.full_name,
+            href: `/admin/staff/${person.id}`,
+            email: person.work_email,
+            status: person.status,
+            role: roles === undefined ? undefined : roleNameOf(person.role_bundle_id, roles),
+            hub: hubNameOf(person.primary_hub_id, hubs),
+          }))
+        : [],
+    [list.isSuccess, list.data, hubs, roles],
+  );
 
-  const roles: readonly AssignableBundleView[] | undefined = bundles.data;
+  if (me === undefined || hubs === undefined) return null;
+
   // The roles are part of what the list shows, so the list is not drawn until they are in, or known not to come.
   const waitingForRoles = canReadRoles && bundles.isPending;
-  const query = {
-    status: list.status === 'success' && waitingForRoles ? ('pending' as const) : list.status,
-    data: list.data,
-    error: list.error,
-    refetch: list.refetch,
-    isFetching: list.isFetching,
-  };
 
+  /** A change of view or of search. The address is their home, and the page starts again. */
   function change(next: { view?: StaffView; q?: string }): void {
     setInteracted(true);
     const nextView = next.view ?? view;
@@ -140,199 +213,180 @@ export function StaffListPage() {
   function search(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     change({ q: draft.trim() });
+    setFilterOpen(false);
   }
 
-  const columns: TableColumn<StaffIdentityView>[] = [
-    {
-      key: 'name',
-      header: 'Name',
-      rowHeader: true,
-      cell: (row) => (
-        <span className="staff-nowrap">
-          <Link to={`/admin/staff/${row.id}`}>{row.full_name}</Link>
-        </span>
-      ),
-    },
-    {
-      key: 'email',
-      header: 'Work email',
-      cell: (row) => <span className="staff-nowrap">{row.work_email}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} map={STAFF_STATUS_MAP} />,
-    },
-    ...(roles === undefined
-      ? []
-      : [
-          {
-            key: 'role',
-            header: 'Role',
-            cell: (row: StaffIdentityView) => roleNameOf(row.role_bundle_id, roles),
-          },
-        ]),
-    {
-      key: 'hub',
-      header: 'Hub',
-      cell: (row) => hubNameOf(row.primary_hub_id, me.session.authorized_hubs),
-    },
-  ];
+  function showEveryone(): void {
+    setInteracted(true);
+    setParams(new URLSearchParams({ view: 'all' }), { replace: true });
+  }
 
-  const showEveryone = (
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={() => {
-        setInteracted(true);
-        setParams(new URLSearchParams({ view: 'all' }), { replace: true });
-      }}
-    >
-      Show everyone
-    </Button>
-  );
-  const addProfile = canCreate ? (
-    <ButtonLink to="/admin/staff/new">Add a staff profile</ButtonLink>
-  ) : undefined;
-  const announce = interacted;
+  const result: QueueResult<ProfileFacts> = (() => {
+    // A page being read, or the roles it is to be drawn with: the loading treatment, and not the rows of the page before.
+    if (
+      list.status === 'pending' ||
+      (list.isFetching && list.status === 'success') ||
+      (list.isSuccess && waitingForRoles)
+    ) {
+      return { status: 'loading' };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, { operation: 'listStaffIdentities' });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? cannotText('staff.read')
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
 
-  const empty =
-    hub !== undefined ? (
-      // A chosen hub is a filter too (audit B1): nothing at this hub says nothing of the others, so it is never "nothing is waiting" or "no profiles yet".
-      <NothingAtHub
-        hub={hub}
-        showAllHubs={showAllHubs}
-        what="staff profiles"
-        filtered={q !== '' || view !== 'all'}
-        clear={showEveryone}
-      />
-    ) : q === '' && view === 'waiting' ? (
-      <EmptyState kind="none" heading="Nothing is waiting for approval" announce={announce}>
-        New profiles appear here as soon as someone creates them.
-      </EmptyState>
-    ) : q === '' && view === 'all' ? (
-      <EmptyState kind="none" heading="No staff profiles yet" announce={announce}>
-        Profiles that are created at your hubs appear here.
-      </EmptyState>
-    ) : (
-      <EmptyState
-        kind="filtered"
-        heading="No profiles match"
-        announce={announce}
-        action={showEveryone}
+  const filtering = q !== '' || view !== 'all';
+  const emptiness = {
+    noun: 'staff profiles',
+    none: 'Profiles that are created at your hubs appear here.',
+    announce: interacted,
+    // A chosen hub is a filter too (audit B1): nothing at this hub says nothing of the others, so it is never "nothing is waiting" or "no profiles yet".
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+  const empty: QueueEmptiness = filtering
+    ? {
+        ...emptiness,
+        filtered: true,
+        onClearFilters: showEveryone,
+        clearLabel: 'Show everyone',
+        filteredText: 'Nothing fits this view and search. Show everyone to start again.',
+      }
+    : emptiness;
+  // The approver's queue worked down to nothing is good news and is told as that; a search of it, or a hub, is not.
+  const allClear =
+    hub === undefined && q === '' && view === 'waiting' ? (
+      <EmptyStateV2
+        variant="all-clear"
+        title="Nothing is waiting for approval"
+        headingLevel={3}
+        announce={interacted}
       >
-        Nothing fits this view and search. Show everyone to start again.
-      </EmptyState>
-    );
+        New profiles appear here as soon as someone creates them.
+      </EmptyStateV2>
+    ) : undefined;
 
-  function goTo(nextTokens: readonly string[]): void {
-    focusResults.current = true;
-    setPaging({ signature, tokens: nextTokens });
-  }
+  // The whole queue is on the page: the count is exact, and it is the number an approver came for. Anywhere else the pager says what the page holds and no more.
+  const wholeQueue =
+    result.status === 'ready' &&
+    rows.length > 0 &&
+    view === 'waiting' &&
+    q === '' &&
+    paging.page === 1 &&
+    list.isSuccess &&
+    list.data.nextPageToken === null;
 
   return (
     <>
       <title>Staff · Melarc Ops Portal</title>
-      <PageHeader
-        title="Staff"
-        description="Everyone with a staff profile at your hubs."
-        actions={addProfile}
-      />
-
-      <form className="staff-filters" role="search" noValidate onSubmit={search}>
-        <Field label="Show">
-          <Select
-            value={view}
-            onChange={(event) => {
-              const next = viewOf(event.target.value);
-              if (next !== undefined) change({ view: next });
-            }}
-          >
-            {VIEW_ORDER.map((key) => (
-              <option key={key} value={key}>
-                {STAFF_VIEWS[key].label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <div className="staff-filters__search">
-          <Field label="Search by name or email">
-            <Input
-              type="search"
-              name="q"
-              value={draft}
-              maxLength={SEARCH_LIMIT}
-              autoComplete="off"
-              onChange={(event) => {
-                setTyping({ over: q, text: event.target.value });
-              }}
-            />
-          </Field>
-        </div>
-        <div className="staff-filters__submit">
-          <Button type="submit" variant="secondary">
-            Search
-          </Button>
-        </div>
-      </form>
-
-      <ReadState<StaffIdentityPageView>
-        query={query}
-        isEmpty={(data) => data.items.length === 0}
-        empty={empty}
-        loadingLabel="Loading staff…"
-        skeleton={<Skeleton lines={4} />}
-        permission="staff.read"
-        operation="listStaffIdentities"
-      >
-        {(data) => {
-          const nextToken = data.nextPageToken;
-          return (
-            <>
-              <p className="staff-count" role="status">
-                {countText(view, q !== '', page, data.items.length, data.nextPageToken !== null)}
-              </p>
-              <div className="staff-results" ref={results} tabIndex={-1}>
-                <Table
-                  caption="Staff profiles"
-                  hideCaption
-                  columns={columns}
-                  rows={data.items}
-                  rowKey={(row) => row.id}
-                />
-              </div>
-              {tokens.length > 0 || data.nextPageToken !== null ? (
-                <nav className="staff-pager" aria-label="Pages">
-                  {tokens.length > 0 ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        goTo(tokens.slice(0, -1));
-                      }}
-                    >
-                      <Icon name="previous" size="sm" />
-                      Previous page
-                    </Button>
-                  ) : null}
-                  {nextToken === null ? null : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        goTo([...tokens, nextToken]);
-                      }}
-                    >
-                      Next page
-                      <Icon name="next" size="sm" />
-                    </Button>
-                  )}
-                </nav>
-              ) : null}
-            </>
-          );
+      <QueueWorkspace<ProfileFacts>
+        ref={workspace}
+        header={{
+          title: 'Staff',
+          description: 'Everyone with a staff profile at your hubs.',
+          ...(wholeQueue
+            ? {
+                count: {
+                  value: rows.length,
+                  noun:
+                    rows.length === 1
+                      ? 'profile waiting for approval'
+                      : 'profiles waiting for approval',
+                },
+              }
+            : {}),
+          ...(canCreate
+            ? { actions: <ButtonLink to="/admin/staff/new">Add a staff profile</ButtonLink> }
+            : {}),
         }}
-      </ReadState>
+        views={{
+          label: 'Views of the staff',
+          value: view,
+          onValueChange: (id) => {
+            const next = viewOf(id);
+            if (next !== undefined) change({ view: next });
+          },
+          tabs: VIEW_ORDER.map((key) => ({ id: key, label: STAFF_VIEWS[key].label })),
+        }}
+        filters={{
+          label: 'Filter the staff',
+          chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
+          onRemove: () => {
+            change({ q: '' });
+          },
+          filterOpen,
+          onFilterOpenChange: setFilterOpen,
+          filterPanel: (
+            <form role="search" noValidate onSubmit={search}>
+              <Field label="Search by name or email">
+                <Input
+                  type="search"
+                  name="q"
+                  value={draft}
+                  maxLength={SEARCH_LIMIT}
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setTyping({ over: q, text: event.target.value });
+                  }}
+                />
+              </Field>
+              <Button type="submit" variant="secondary">
+                Search
+              </Button>
+            </form>
+          ),
+        }}
+        result={result}
+        empty={empty}
+        {...(allClear === undefined ? {} : { emptyState: allClear })}
+        table={{
+          label: 'Staff profiles',
+          columns: roles === undefined ? COLUMNS_WITHOUT_ROLE : COLUMNS,
+          rowId: (row) => row.id,
+          density: 'two-line',
+          card: (row) => <ProfileCard facts={row} />,
+          // The name is the heading of each card, for heading navigation, and the link to the profile.
+          cardTitle: (row) => <Link to={row.href}>{row.name}</Link>,
+          // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+          footer: (
+            <QueuePager
+              label="Pages of staff profiles"
+              noun={{ one: 'profile', other: 'profiles' }}
+              shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+              page={paging.page}
+              hasNext={list.isSuccess && list.data.nextPageToken !== null}
+              onNext={() => {
+                if (list.isSuccess && list.data.nextPageToken !== null) {
+                  paging.toNextPage(list.data.nextPageToken);
+                }
+              }}
+              onPrevious={paging.toPreviousPage}
+            />
+          ),
+        }}
+      />
     </>
   );
 }
