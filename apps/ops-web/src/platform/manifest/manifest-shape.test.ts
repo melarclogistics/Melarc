@@ -124,6 +124,8 @@ describe('a manifest', () => {
       code: 'ACC-MF-Q92422',
       state: 'DRAFT',
       service_date: '2026-11-04',
+      // The moment the run was made (contract 5.100.0): read and held, drawn by no screen yet.
+      created_at: '2026-11-02T09:00:00Z',
     });
   });
 
@@ -181,6 +183,10 @@ describe('a manifest', () => {
     ['a service date that does not exist', { service_date: '2026-02-30' }],
     ['a rider that is not an identifier', { assigned_rider_id: 'rider' }],
     ['a moment that is not a time', { dispatched_at: 'yesterday' }],
+    // The moment of creation is the one moment the contract requires of every run (5.100.0): an answer without it is not the API's.
+    ['no moment of creation', { created_at: undefined as never }],
+    ['a moment of creation that is null', { created_at: null as never }],
+    ['a moment of creation that is not a time', { created_at: 'yesterday' }],
   ])('is refused with %s', (_name, overrides) => {
     expect(parseManifest(manifestFixture(overrides), 'required')).toBeUndefined();
   });
@@ -188,6 +194,7 @@ describe('a manifest', () => {
   it('is a page, or nothing when one entry is not a manifest or one is listed twice', () => {
     const page = parseManifestPage({ items: [listedManifestFixture()], next_page_token: 'next' });
     expect(page?.items).toHaveLength(1);
+    expect(page?.items[0]?.created_at).toBe('2026-11-02T09:00:00Z');
     expect(page?.nextPageToken).toBe('next');
 
     expect(

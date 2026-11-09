@@ -53,6 +53,7 @@ function representationOf(view: PickupManifestView): readonly unknown[] {
     dispatched_at: view.dispatched_at,
     started_at: view.started_at,
     completed_at: view.completed_at,
+    created_at: view.created_at,
     stops: view.stops.map((stop) => stopRepresentationOf(stop)),
   };
   return Object.values(fields);

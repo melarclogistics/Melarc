@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.99.0
- *   SHA-256 763687c9dece8602ecdbad5f66acea76a84d842cc29d6e432227566d2eb91c86 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.100.0
+ *   SHA-256 b60e3075bcf713ea842ee512b9ee4e7acb7e0082b0cb6f8d6eb739e35d8e6020 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -9397,6 +9397,11 @@ export interface components {
             stops?: components["schemas"]["PickupStop"][];
             /** Format: date-time */
             completed_at?: string | null;
+            /**
+             * Format: date-time
+             * @description The moment the run was made (contract 5.100.0). It is the table's own column, set once and never changed, so it is on every read, on every item of a list and on every answer that carries a run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
+             */
+            created_at: string;
         };
         /**
          * @description The complete sequence, not a delta. Manual ordering only — Version 1 has no route

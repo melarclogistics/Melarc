@@ -116,6 +116,8 @@ export interface PickupManifestView {
   readonly dispatched_at: string | null;
   readonly started_at: string | null;
   readonly completed_at: string | null;
+  /** The moment the run was made (contract 5.100.0, run 5 Stage 1.7): the table's own column, never null, on a read, a list item and every answer that carries the run. */
+  readonly created_at: string;
   /** The stops in their order, present on a read of one manifest and on its creation; a list of manifests carries none. */
   readonly stops?: readonly PickupStopView[];
 }
@@ -169,8 +171,11 @@ export const STOP_COLUMNS: SQL = sql.raw(`
   CASE WHEN melarc.principal_type() = 'STAFF' THEN skip_snapshot ELSE skip_snapshot - 'note' END AS skip_snapshot,
   pickup_summary`);
 
+const instant = (value: string | Date): string =>
+  (value instanceof Date ? value : new Date(value)).toISOString();
+
 const iso = (value: string | Date | null): string | null =>
-  value === null ? null : (value instanceof Date ? value : new Date(value)).toISOString();
+  value === null ? null : instant(value);
 
 /** The failure as the contract states it: the members it names and no other (the label, the attribution and the contact attempts stay in the table). */
 function failureViewOf(snapshot: StopFailureSnapshot | null): StopFailureView | null {
@@ -247,6 +252,7 @@ export function manifestViewOf(
     dispatched_at: iso(row.dispatched_at),
     started_at: iso(row.started_at),
     completed_at: iso(row.completed_at),
+    created_at: instant(row.created_at),
   };
   return stops === undefined
     ? base

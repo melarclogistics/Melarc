@@ -147,6 +147,8 @@ const manifestWire = (made: Made, withStops = true) => ({
   dispatched_at: null,
   started_at: null,
   completed_at: null,
+  // The moment the run was made (contract 5.100.0): carried, as the API does, and drawn by no screen yet.
+  created_at: '2026-11-02T09:00:00Z',
   ...(withStops
     ? {
         stops: made.requests.map((request, index) => ({

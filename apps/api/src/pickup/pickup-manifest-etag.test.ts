@@ -71,6 +71,7 @@ describe('the ETag of a pickup manifest', () => {
     ['the moment of dispatch', { dispatched_at: '2026-11-02T11:00:00.000Z' }],
     ['the moment it started', { started_at: '2026-11-03T08:00:00.000Z' }],
     ['the moment it finished', { completed_at: '2026-11-03T17:00:00.000Z' }],
+    ['the moment it was made', { created_at: '2026-11-02T08:00:00.000Z' }],
   ] as const)('moves with %s', (_label, change) => {
     expect(pickupManifestEtagOf(view(change), 1)).not.toBe(pickupManifestEtagOf(view(), 1));
   });

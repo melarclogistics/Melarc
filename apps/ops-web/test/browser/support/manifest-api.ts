@@ -311,6 +311,8 @@ function manifestWire(w: World, m: WorldManifest, withStops = true) {
     started_at:
       m.state === 'IN_PROGRESS' || m.state === 'COMPLETED' ? '2026-11-04T07:30:00Z' : null,
     completed_at: m.state === 'COMPLETED' ? '2026-11-04T10:00:00Z' : null,
+    // The moment the run was made (contract 5.100.0): carried, as the API does, and drawn by no screen yet.
+    created_at: '2026-11-02T09:00:00Z',
     ...(withStops ? { stops: m.stops.map((s) => stopWire(w, m, s)) } : {}),
   };
 }

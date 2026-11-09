@@ -1,8 +1,8 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.99.0 with the two pickup-request reads no longer served to a Rider and one lookup in flight per session, 7 November 2026)
-# Date:    7 November 2026 (a working revision: see the implementation plan, section 1.1)
+# Version: see `info.version` below (5.100.0 with the moment a pickup run was made stated on `PickupManifest`, 9 November 2026)
+# Date:    9 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
 #   5.92.0  C2    lookupRecords (global lookup)
@@ -13,6 +13,7 @@
 #   5.97.0  A2    the 429 `RATE_LIMITED` with `Retry-After` declared on every operation the authenticated limiter covers (`RateLimited`); the operations reached before a session exists declare `RateLimitedAnonymous`, which carries none
 #   5.98.0  F     the `hub_id` of `listPickupRequests` is judged as a UUID and ignored for a Rider (a Rider is shown no request, so its page is the one it is given without a hub, whatever hub is named); a staff session's `hub_id` outside its grant is answered at once by the three older lists as by the four (no change of any answer)
 #   5.99.0  A3    `listPickupRequests` and `getPickupRequest` are no longer served to a Rider (their security names the browser session alone: surfaces/rider-android.md, "Not a rider act"); `lookupRecords` takes one lookup in flight per session (a second answers `429` `RATE_LIMITED` with `Retry-After: 1`) and gives the whole lookup one budget of 3 seconds; the text of `RateLimited` says where the `Retry-After` of `requestAdditionalDeviceGrant` comes from
+#   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (its `ETag` moves once for every run, as it does for any member added). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -23,7 +24,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.99.0
+  version: 5.100.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -14498,7 +14499,7 @@ components:
 
     PickupManifest:
       type: object
-      required: [id, code, state, service_date, responsible_hub_id]
+      required: [id, code, state, service_date, responsible_hub_id, created_at]
       properties:
         id: { type: string, format: uuid }
         code: { type: string }
@@ -14534,6 +14535,13 @@ components:
           type: array
           items: { $ref: '#/components/schemas/PickupStop' }
         completed_at: { type: [string, 'null'], format: date-time }
+        created_at:
+          type: string
+          format: date-time
+          description: >-
+            The moment the run was made (contract 5.100.0). It is the table's own column, set once and
+            never changed, so it is on every read, on every item of a list and on every answer that carries
+            a run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
       description: |
         **Hub-scoped, never vendor-scoped** (domain-model §4). A manifest spans vendors, so
         applying a vendor filter to it would leak one vendor's existence to another or return

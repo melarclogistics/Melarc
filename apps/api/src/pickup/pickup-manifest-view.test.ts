@@ -58,6 +58,7 @@ describe('a manifest as a read answers it', () => {
       dispatched_at: '2026-11-02T11:00:00.000Z',
       started_at: null,
       completed_at: null,
+      created_at: '2026-11-02T09:00:00.000Z',
     });
   });
 
@@ -73,8 +74,8 @@ describe('a manifest as a read answers it', () => {
     expect(view.stops?.map((each) => each.sequence)).toEqual([1, 2, 3]);
   });
 
-  // Break caught: a column of the table that the contract does not state (the version, the creator, the moment of creation), or a summary
-  // that no one has mapped (OB-S1-21), leaking into the representation.
+  // Break caught: a column of the table that the contract does not state (the version, the creator), or a summary that no one has mapped (OB-S1-21), leaking into the
+  // representation. The moment of creation is stated since contract 5.100.0 (run 5, Stage 1.7): a run’s history says when it was made.
   it('carries nothing the contract does not state, and no summary of a stop', () => {
     const view = manifestViewOf(MANIFEST, [stop(1)]);
     expect(Object.keys(view).toSorted()).toEqual(
@@ -83,6 +84,7 @@ describe('a manifest as a read answers it', () => {
         'assigned_rider_id',
         'code',
         'completed_at',
+        'created_at',
         'dispatched_at',
         'id',
         'responsible_hub_id',

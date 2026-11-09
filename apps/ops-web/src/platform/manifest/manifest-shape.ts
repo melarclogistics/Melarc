@@ -111,6 +111,8 @@ export interface ManifestView {
   readonly dispatched_at?: string;
   readonly started_at?: string;
   readonly completed_at?: string;
+  /** The moment the run was made (contract 5.100.0): always there, read and held here, and drawn by no screen yet. */
+  readonly created_at: string;
   /** In their sequence. A list of manifests carries none (`getPickupManifest` does), and then this is absent. */
   readonly stops?: readonly StopView[];
 }
@@ -146,7 +148,7 @@ export interface HandoverPageView {
 /** The fields each guard reads, held to the contract by `test/manifest-contract.test.ts`. */
 export const MANIFEST_FIELDS = {
   PickupManifest: {
-    required: ['id', 'code', 'state', 'service_date', 'responsible_hub_id'],
+    required: ['id', 'code', 'state', 'service_date', 'responsible_hub_id', 'created_at'],
     optional: [
       'assigned_rider_id',
       'assigned_at',
@@ -324,6 +326,7 @@ export function parseManifest(
   const dispatchedAt = optional(body.dispatched_at, instantOf);
   const startedAt = optional(body.started_at, instantOf);
   const completedAt = optional(body.completed_at, instantOf);
+  const createdAt = instantOf(body.created_at);
   if (
     id === undefined ||
     hub === undefined ||
@@ -335,7 +338,8 @@ export function parseManifest(
     assignedAt === undefined ||
     dispatchedAt === undefined ||
     startedAt === undefined ||
-    completedAt === undefined
+    completedAt === undefined ||
+    createdAt === undefined
   ) {
     return undefined;
   }
@@ -374,6 +378,7 @@ export function parseManifest(
     ...(dispatchedAt === null ? {} : { dispatched_at: dispatchedAt }),
     ...(startedAt === null ? {} : { started_at: startedAt }),
     ...(completedAt === null ? {} : { completed_at: completedAt }),
+    created_at: createdAt,
     ...(parsedStops === undefined ? {} : { stops: parsedStops }),
   };
 }
