@@ -99,6 +99,63 @@ describe('the staff creation form: what it asks for', () => {
     expect(document.querySelector('input[type="password"]')).toBeNull();
   });
 
+  it('groups what it asks for in two sections, the person and the role and hub', async () => {
+    open();
+    await field(/Full name/);
+
+    const person = screen.getByRole('region', { name: 'The person' });
+    expect(within(person).getByRole('textbox', { name: /Full name/ })).toBeVisible();
+    expect(within(person).getByRole('textbox', { name: /Work email/ })).toBeVisible();
+    expect(within(person).getByRole('textbox', { name: /Phone/ })).toBeVisible();
+    const placing = screen.getByRole('region', { name: 'Role and hub' });
+    expect(within(placing).getByRole('combobox', { name: /Role/ })).toBeVisible();
+    expect(within(placing).getByRole('combobox', { name: /Primary hub/ })).toBeVisible();
+    // The sections are the form's own: the send and the way out are the form's actions, below them.
+    expect(
+      within(screen.getByRole('main')).getAllByRole('button', { name: 'Create profile' }),
+    ).toHaveLength(1);
+  });
+
+  it('names the way up to the staff list for a session that can read it, and none for one that cannot', async () => {
+    const reader = open();
+    await field(/Full name/);
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Staff',
+      }),
+    ).toHaveAttribute('href', '/admin/staff');
+    reader.unmount();
+    api.restore();
+
+    open(KEYS.maker);
+    await field(/Full name/);
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  // Break caught (found in a real browser, kept from the earlier page): the heading replaced when the roles arrive, so that the focus the frame put on it falls to the top
+  // of the document and a screen reader says nothing about the form that has just appeared.
+  it('keeps focus on the heading when the roles arrive and the form replaces the page that waited for them', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open(KEYS.approver, {
+      [BUNDLES]: async () => {
+        await held;
+        return bundlesAnswer();
+      },
+    });
+    const loading = await screen.findByRole('heading', { level: 1, name: 'Add a staff profile' });
+    // The frame puts focus on a page's heading when the address changes; here the page is the first one, so the test does the same.
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    release();
+
+    await field(/Full name/);
+    expect(screen.getByRole('heading', { level: 1, name: 'Add a staff profile' })).toHaveFocus();
+  });
+
   it('marks what is needed as required and what is not as optional by leaving it unmarked', async () => {
     open();
 

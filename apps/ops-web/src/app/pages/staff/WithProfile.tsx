@@ -29,7 +29,7 @@ export function BackToStaff() {
  * does not, the heading that had focus is gone, and focus would fall to the top of the document. It is moved only if it has fallen, so that a
  * person who has already gone elsewhere is not taken back.
  */
-function useFocusFallenToHeading(): void {
+export function useFocusFallenToHeading(): void {
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (active === null || active === document.body) {
