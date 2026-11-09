@@ -105,13 +105,15 @@ function Requested({ id }: { readonly id: string }) {
   }, []);
   return (
     <div className="pickup-booked" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="pickup-booked__heading">The exception is requested</h2>
-        <p>
-          It waits for an approver to decide it. The request stays pending until then, and is
-          confirmed once the exception is approved.
-        </p>
-      </Alert>
+      <div className="pickup-booked__news">
+        <Alert variant="success">
+          <h2 className="pickup-booked__heading">The exception is requested</h2>
+          <p>
+            It waits for an approver to decide it. The request stays pending until then, and is
+            confirmed once the exception is approved.
+          </p>
+        </Alert>
+      </div>
       <div className="pickup-act__buttons">
         <ButtonLink to={`/pickup-requests/${id}`}>Back to the request</ButtonLink>
       </div>

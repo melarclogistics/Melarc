@@ -41,6 +41,11 @@ export interface StatusBadgeProps<Value extends string> {
   readonly map: StatusMap<Value>;
   /** What to call a value the mapping does not know. It is shown neutral, and the value itself is never shown. */
   readonly unknownLabel?: string;
+  /**
+   * The badge may wrap at its words in a table cell, in a narrow column ("Waiting for / confirmation"), instead of making the column as wide as the longest state. A badge in a table keeps to one
+   * line unless it says so (the review of 499399c: a page no longer reaches into the badge to say it).
+   */
+  readonly wraps?: boolean;
 }
 
 /**
@@ -52,12 +57,15 @@ export function StatusBadge<Value extends string>({
   status,
   map,
   unknownLabel = 'Unknown status',
+  wraps = false,
 }: StatusBadgeProps<Value>) {
   const presentation: StatusPresentation = Object.hasOwn(map, status)
     ? map[status as Value]
     : { tone: 'neutral', label: unknownLabel };
   return (
-    <span className={`ui-status-badge ui-status-badge--${pairOf(presentation.tone)}`}>
+    <span
+      className={`ui-status-badge ui-status-badge--${pairOf(presentation.tone)}${wraps ? ' ui-status-badge--wraps' : ''}`}
+    >
       <span className="ui-status-badge__dot" aria-hidden="true" />
       {presentation.label}
     </span>

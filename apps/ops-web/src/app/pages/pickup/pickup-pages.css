@@ -136,12 +136,6 @@
   line-height: var(--text-body-sm-line-height);
 }
 
-/* The state's badge may wrap at its words in a narrow column ("Waiting for / confirmation"); everywhere else it keeps to a line. */
-.pickup-state .ui-status-badge {
-  max-width: 100%;
-  white-space: normal;
-}
-
 /*
  * The dash of a request that needs nothing, and its hidden words (the same device as the message log's, messages-page.css): the words are
  * positioned against their own dash, so that a table scrolled sideways takes them with it. The refresh's announcement uses the same hidden
@@ -219,7 +213,7 @@
   font-weight: var(--text-heading-sm-weight);
 }
 
-.pickup-booked .ui-alert {
+.pickup-booked__news {
   margin-bottom: var(--space-4);
 }
 

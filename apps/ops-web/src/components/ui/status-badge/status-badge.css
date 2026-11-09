@@ -25,6 +25,11 @@ table .ui-status-badge {
   overflow-wrap: normal;
 }
 
+/* A badge that says it may wrap (`wraps`) does so in a table cell, at its words, in a narrow column ("Waiting for / confirmation"). */
+table .ui-status-badge--wraps {
+  white-space: normal;
+}
+
 .ui-status-badge--success {
   border-color: var(--color-status-success-border);
   background: var(--color-status-success-background);

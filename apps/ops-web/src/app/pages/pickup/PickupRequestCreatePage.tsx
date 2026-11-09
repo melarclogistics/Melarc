@@ -1263,14 +1263,16 @@ function Booked({
   }, []);
   return (
     <div className="pickup-booked" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="pickup-booked__heading">Pickup booked</h2>
-        <p>
-          {`${request.code} is booked for ${serviceDateText(request.scheduled_service_date)}. It is ${PICKUP_STATE_MAP[
-            request.state
-          ].label.toLowerCase()}.`}
-        </p>
-      </Alert>
+      <div className="pickup-booked__news">
+        <Alert variant="success">
+          <h2 className="pickup-booked__heading">Pickup booked</h2>
+          <p>
+            {`${request.code} is booked for ${serviceDateText(request.scheduled_service_date)}. It is ${PICKUP_STATE_MAP[
+              request.state
+            ].label.toLowerCase()}.`}
+          </p>
+        </Alert>
+      </div>
       {request.declared_package_count === 1 ? (
         <p className="pickup-act__text">
           It is for a single package: request its one-package exception from the request’s page. It
