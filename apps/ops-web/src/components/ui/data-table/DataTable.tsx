@@ -32,6 +32,7 @@ import {
 } from '../../primitives/table';
 import { OperationalCode } from '../code/OperationalCode';
 import { Icon } from '../icon/Icon';
+import { Link } from '../link/Link';
 import { AnimatePresence, motion, useMotion } from '../motion/motion';
 import { LoadingRow } from '../skeleton/LoadingRow';
 import { VisuallyHidden } from '../visually-hidden/VisuallyHidden';
@@ -217,13 +218,24 @@ interface RowTitleProps {
   readonly code: string;
   /** Under the code, one quiet line: a name. Without it the row is a single line. */
   readonly name?: string;
+  /**
+   * The record's own page: the code is then a link to it. For a table whose rows open a page of their own and not a panel, and so have no button that opens them (the approver's queue):
+   * the link is a real one, which a keyboard, a middle click and a new tab all use.
+   */
+  readonly to?: string;
 }
 
 /** The row-header cell of a queue: the code in the monospaced face over a name in the quiet text. Two lines are a `two-line` density. */
-export function RowTitle({ code, name }: RowTitleProps) {
+export function RowTitle({ code, name, to }: RowTitleProps) {
   return (
     <span className="ui-data-table__title">
-      <OperationalCode>{code}</OperationalCode>
+      {to === undefined ? (
+        <OperationalCode>{code}</OperationalCode>
+      ) : (
+        <Link to={to}>
+          <OperationalCode>{code}</OperationalCode>
+        </Link>
+      )}
       {name === undefined ? null : <span className="ui-data-table__name">{name}</span>}
     </span>
   );

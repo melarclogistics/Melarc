@@ -1639,7 +1639,9 @@ test.describe('the approver’s queue', () => {
     await expect(
       page.getByText('The one-package exception of ACC-PR-7KQ2MZ is approved by you.'),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
     const [approval] = posts(api);
     expect(approval?.path).toBe(
       `/api/v1/pickup-requests/${IDS.pending}/one-package-exception/approve`,
@@ -1692,7 +1694,9 @@ test.describe('the approver’s queue', () => {
   test('says when no exception waits', async ({ page }) => {
     await open(page, '/approvals', { requests: [] });
 
-    await expect(page.getByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
   });
 });
 

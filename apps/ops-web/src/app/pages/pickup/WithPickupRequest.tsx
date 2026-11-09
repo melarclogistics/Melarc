@@ -36,7 +36,7 @@ export function BackToRequests({ requestId }: { readonly requestId?: string }) {
 }
 
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
-function useFocusFallenToHeading(): void {
+export function useFocusFallenToHeading(): void {
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (active === null || active === document.body) {

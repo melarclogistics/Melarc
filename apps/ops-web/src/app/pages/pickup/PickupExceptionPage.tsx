@@ -2,7 +2,6 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useParams } from 'react-router';
 
-import { FormPage } from '../../../components/FormPage';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
@@ -10,6 +9,8 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import {
@@ -26,7 +27,7 @@ import {
   packagesText,
   PICKUP_STATE_MAP,
 } from './pickup-presentation';
-import { WithPickupRequest } from './WithPickupRequest';
+import { useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
 import './pickup-pages.css';
 
 const OPERATION = 'requestOnePackageException';
@@ -118,11 +119,16 @@ function Requested({ id }: { readonly id: string }) {
   );
 }
 
+/** The page's header: what the form is and for which request, with the way up (the task form draws it; every other state of the page draws it itself). */
+type Header = Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
+
 function ExceptionForm({
+  header,
   request,
   query,
   onRequested,
 }: {
+  readonly header: Header;
   readonly request: PickupRequestView;
   readonly query: UseQueryResult<PickupRecord>;
   readonly onRequested: () => void;
@@ -190,60 +196,81 @@ function ExceptionForm({
 
   const locked = command.locked;
   return (
-    <form
-      ref={form}
-      noValidate
-      aria-busy={command.phase === 'sending' ? true : undefined}
+    <TaskForm
+      header={header}
+      formRef={form}
       onSubmit={send}
+      busy={command.phase === 'sending'}
+      alerts={
+        <>
+          {command.phase === 'unknown' ? (
+            <Alert variant="danger" announce>
+              <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
+            </Alert>
+          ) : null}
+          {(command.phase === 'refused' || command.phase === 'conflict') &&
+          command.problem !== undefined &&
+          !belongsToAField ? (
+            <Alert variant="danger" announce>
+              <p>{command.problem.message}</p>
+              {command.problem.reference === undefined ? null : (
+                <p>Reference: {command.problem.reference}</p>
+              )}
+            </Alert>
+          ) : null}
+        </>
+      }
+      actions={
+        recovering ? (
+          <Button key="check" type="button" data-recovery onClick={command.checkRecord}>
+            Check the request
+          </Button>
+        ) : (
+          <>
+            <Button key="submit" type="submit" loading={command.phase === 'sending'}>
+              Request the exception
+            </Button>
+            <Link to={`/pickup-requests/${request.id}`}>Cancel</Link>
+          </>
+        )
+      }
     >
-      <p className="pickup-form-note">
-        A single package is collected only by exception. The recipient’s details travel with it, and
-        the delivery address makes the estimate exact. An approver decides it. Whoever asks for an
-        exception cannot also approve it, unless they approve at the platform’s highest tier: the
-        server checks this. The single-package pickup fee becomes due once the exception is
-        approved.
-      </p>
-      {request.one_package_exception?.state === 'REJECTED' ? (
-        <p className="pickup-form-note">
-          An earlier exception for this request was refused. You can ask again.
-        </p>
-      ) : null}
+      <TaskFormSection title="The exception">
+        <TaskFormWide>
+          <p className="pickup-form-note">
+            A single package is collected only by exception. The recipient’s details travel with it,
+            and the delivery address makes the estimate exact. An approver decides it. Whoever asks
+            for an exception cannot also approve it, unless they approve at the platform’s highest
+            tier: the server checks this. The single-package pickup fee becomes due once the
+            exception is approved.
+          </p>
+          {request.one_package_exception?.state === 'REJECTED' ? (
+            <p className="pickup-form-note">
+              An earlier exception for this request was refused. You can ask again.
+            </p>
+          ) : null}
+        </TaskFormWide>
+        <TaskFormWide>
+          <Field
+            label="Why this single package should be collected"
+            required
+            help="One line, kept with the exception."
+            {...errorOf('note')}
+          >
+            <Input
+              name="note"
+              value={values.note}
+              autoComplete="off"
+              readOnly={locked}
+              onChange={(event) => {
+                change({ note: event.target.value }, 'note');
+              }}
+            />
+          </Field>
+        </TaskFormWide>
+      </TaskFormSection>
 
-      {command.phase === 'unknown' ? (
-        <Alert variant="danger" announce>
-          <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
-        </Alert>
-      ) : null}
-      {(command.phase === 'refused' || command.phase === 'conflict') &&
-      command.problem !== undefined &&
-      !belongsToAField ? (
-        <Alert variant="danger" announce>
-          <p>{command.problem.message}</p>
-          {command.problem.reference === undefined ? null : (
-            <p>Reference: {command.problem.reference}</p>
-          )}
-        </Alert>
-      ) : null}
-
-      <Field
-        label="Why this single package should be collected"
-        required
-        help="One line, kept with the exception."
-        {...errorOf('note')}
-      >
-        <Input
-          name="note"
-          value={values.note}
-          autoComplete="off"
-          readOnly={locked}
-          onChange={(event) => {
-            change({ note: event.target.value }, 'note');
-          }}
-        />
-      </Field>
-
-      <section className="pickup-form-section" aria-labelledby="exception-recipient">
-        <h2 id="exception-recipient">The recipient</h2>
+      <TaskFormSection title="The recipient">
         <Field label="Recipient’s name" required {...errorOf('name')}>
           <Input
             name="recipient-name"
@@ -272,49 +299,38 @@ function ExceptionForm({
             }}
           />
         </Field>
-        <Field label="Delivery address" required {...errorOf('address')}>
-          <Input
-            name="recipient-address"
-            value={values.address}
-            autoComplete="off"
-            readOnly={locked}
-            onChange={(event) => {
-              change({ address: event.target.value }, 'address');
-            }}
-          />
-        </Field>
-        <Field
-          label="Landmark"
-          help="Optional. What people find the address by."
-          {...errorOf('landmark')}
-        >
-          <Input
-            name="recipient-landmark"
-            value={values.landmark}
-            autoComplete="off"
-            readOnly={locked}
-            onChange={(event) => {
-              change({ landmark: event.target.value }, 'landmark');
-            }}
-          />
-        </Field>
-      </section>
-
-      <div className="ui-form-page__actions">
-        {recovering ? (
-          <Button key="check" type="button" data-recovery onClick={command.checkRecord}>
-            Check the request
-          </Button>
-        ) : (
-          <>
-            <Button key="submit" type="submit" loading={command.phase === 'sending'}>
-              Request the exception
-            </Button>
-            <Link to={`/pickup-requests/${request.id}`}>Cancel</Link>
-          </>
-        )}
-      </div>
-    </form>
+        <TaskFormWide>
+          <Field label="Delivery address" required {...errorOf('address')}>
+            <Input
+              name="recipient-address"
+              value={values.address}
+              autoComplete="off"
+              readOnly={locked}
+              onChange={(event) => {
+                change({ address: event.target.value }, 'address');
+              }}
+            />
+          </Field>
+        </TaskFormWide>
+        <TaskFormWide>
+          <Field
+            label="Landmark"
+            help="Optional. What people find the address by."
+            {...errorOf('landmark')}
+          >
+            <Input
+              name="recipient-landmark"
+              value={values.landmark}
+              autoComplete="off"
+              readOnly={locked}
+              onChange={(event) => {
+                change({ landmark: event.target.value }, 'landmark');
+              }}
+            />
+          </Field>
+        </TaskFormWide>
+      </TaskFormSection>
+    </TaskForm>
   );
 }
 
@@ -351,11 +367,29 @@ function Exception({
 }) {
   const [requested, setRequested] = useState(false);
   const { request } = record;
-  if (requested) return <Requested id={request.id} />;
+  // The page draws its own heading once the request is read (the one the wrapper drew while it loaded is gone): focus is put on it, as on a record page.
+  useFocusFallenToHeading();
+  const header: Header = {
+    title: 'Request a one-package exception',
+    description: `For ${request.code}.`,
+    breadcrumb: [
+      { label: 'Pickup requests', to: '/pickup-requests' },
+      { label: request.code, to: `/pickup-requests/${request.id}` },
+    ],
+  };
+  if (requested) {
+    return (
+      <>
+        <PageHeader {...header} />
+        <Requested id={request.id} />
+      </>
+    );
+  }
   const reason = notAvailable(request);
   if (reason !== undefined) {
     return (
       <>
+        <PageHeader {...header} />
         <p className="pickup-act__text">{reason}</p>
         <p>
           <Link to={`/pickup-requests/${request.id}`}>Back to the request</Link>
@@ -364,15 +398,14 @@ function Exception({
     );
   }
   return (
-    <FormPage>
-      <ExceptionForm
-        request={request}
-        query={query}
-        onRequested={() => {
-          setRequested(true);
-        }}
-      />
-    </FormPage>
+    <ExceptionForm
+      header={header}
+      request={request}
+      query={query}
+      onRequested={() => {
+        setRequested(true);
+      }}
+    />
   );
 }
 
@@ -388,16 +421,14 @@ export function PickupExceptionPage() {
   return (
     <WithPickupRequest
       id={id}
+      // The way up is the breadcrumb of the page's own heading, once the request is read, so no other way back is drawn above it.
+      ownsHeading
+      back={null}
       heading={(request) => ({
         title: 'Request a one-package exception',
         ...(request === undefined ? {} : { description: `For ${request.code}.` }),
         documentTitle: 'Request a one-package exception',
       })}
-      back={
-        <p className="pickup-back">
-          <Link to={`/pickup-requests/${id}`}>Back to the request</Link>
-        </p>
-      }
     >
       {(record, query) => <Exception record={record} query={query} />}
     </WithPickupRequest>

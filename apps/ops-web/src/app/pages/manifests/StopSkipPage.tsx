@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { FormPage } from '../../../components/FormPage';
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
@@ -12,10 +9,12 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { skipPickupStop, type StopRecord } from '../../../platform/manifest/manifest-commands';
 import type { StopView } from '../../../platform/manifest/manifest-shape';
@@ -73,6 +72,7 @@ function StopNotFound({ manifestId }: { readonly manifestId: string }) {
 }
 
 function Form({
+  header,
   manifestId,
   record,
   code,
@@ -80,6 +80,8 @@ function Form({
   refetchReasons,
   reloadStop,
 }: {
+  /** The page's header, which the task form draws (every other state of the page draws it itself). */
+  readonly header: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
   readonly manifestId: string;
   readonly record: StopRecord;
   readonly code: string | undefined;
@@ -120,50 +122,72 @@ function Form({
 
   const label = `stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}`;
   return (
-    <FormPage>
-      <form ref={form} noValidate onSubmit={review}>
-        <Field
-          label="Reason"
-          required
-          {...(invalid.reason === undefined ? {} : { error: invalid.reason })}
-        >
-          <Select
-            name="reason"
-            value={reasonDone === undefined ? '' : values.reasonCode}
-            onChange={(event) => {
-              setValues((current) => ({ ...current, reasonCode: event.target.value }));
-              setInvalid((current) => ({ ...current, reason: undefined }));
-            }}
+    <>
+      <TaskForm
+        header={header}
+        formRef={form}
+        onSubmit={review}
+        actions={
+          <>
+            <Button type="submit">Skip this stop</Button>
+            <Link to={`/manifests/${manifestId}`}>Cancel</Link>
+          </>
+        }
+      >
+        <TaskFormSection title="Why it is skipped">
+          <TaskFormWide>
+            <p className="pickup-form-note">
+              Ops skips a stop that cannot be worked, so that the run can close. A skip is Melarc’s
+              decision and not a failed collection: it uses up no pickup attempt, and the request
+              keeps the state it has. <strong>The vendor is always told</strong> that the stop was
+              skipped, and why.
+            </p>
+            <p className="pickup-form-note">
+              This is not the way to clear a failed pickup. A failed pickup is decided in the pickup
+              request itself, by someone who can escalate or reschedule it.
+            </p>
+          </TaskFormWide>
+          <Field
+            label="Reason"
+            required
+            {...(invalid.reason === undefined ? {} : { error: invalid.reason })}
           >
-            <option value="">Choose a reason</option>
-            {reasons.map((reason) => (
-              <option key={reason.code} value={reason.code}>
-                {reason.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label="Note"
-          required={reasonDone?.requiresNote === true}
-          help="One line, kept with the skip and shown to staff only. Leave out phone numbers and email addresses."
-          {...(invalid.note === undefined ? {} : { error: invalid.note })}
-        >
-          <Input
-            name="note"
-            value={values.note}
-            autoComplete="off"
-            onChange={(event) => {
-              setValues((current) => ({ ...current, note: event.target.value }));
-              setInvalid((current) => ({ ...current, note: undefined }));
-            }}
-          />
-        </Field>
-        <div className="ui-form-page__actions">
-          <Button type="submit">Skip this stop</Button>
-          <Link to={`/manifests/${manifestId}`}>Cancel</Link>
-        </div>
-      </form>
+            <Select
+              name="reason"
+              value={reasonDone === undefined ? '' : values.reasonCode}
+              onChange={(event) => {
+                setValues((current) => ({ ...current, reasonCode: event.target.value }));
+                setInvalid((current) => ({ ...current, reason: undefined }));
+              }}
+            >
+              <option value="">Choose a reason</option>
+              {reasons.map((reason) => (
+                <option key={reason.code} value={reason.code}>
+                  {reason.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <TaskFormWide>
+            <Field
+              label="Note"
+              required={reasonDone?.requiresNote === true}
+              help="One line, kept with the skip and shown to staff only. Leave out phone numbers and email addresses."
+              {...(invalid.note === undefined ? {} : { error: invalid.note })}
+            >
+              <Input
+                name="note"
+                value={values.note}
+                autoComplete="off"
+                onChange={(event) => {
+                  setValues((current) => ({ ...current, note: event.target.value }));
+                  setInvalid((current) => ({ ...current, note: undefined }));
+                }}
+              />
+            </Field>
+          </TaskFormWide>
+        </TaskFormSection>
+      </TaskForm>
 
       <ActDialog<{ readonly fields: Fields; readonly version: string }, StopView>
         open={confirming}
@@ -215,7 +239,7 @@ function Form({
           if (problem.code === 'REASON_NOT_ACTIVE') void refetchReasons();
         }}
       />
-    </FormPage>
+    </>
   );
 }
 
@@ -249,18 +273,29 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
   }
 
   const code = stop?.pickup_summary?.reference ?? request.data?.request.code;
+  const header: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'> = {
+    title: 'Skip a stop',
+    ...(stop === undefined
+      ? {}
+      : {
+          description: `Stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}.`,
+        }),
+    breadcrumb: [
+      { label: 'Pickup runs', to: '/manifests' },
+      { label: 'The pickup run', to: `/manifests/${manifestId}` },
+    ],
+  };
+  // The form is shown once the stop is read, waits to be worked and the catalogue has a reason: the task form draws the header then, and every other state (loading, a failure, a stop
+  // that cannot be skipped, no reason configured) draws it here, so that the page has its one heading in each of them.
+  const formShown =
+    stopQuery.isSuccess &&
+    isToBeWorked(stopQuery.data.stop) &&
+    reasons.isSuccess &&
+    reasons.data.length > 0;
   return (
     <>
       <title>Skip a stop · Melarc Ops Portal</title>
-      <BackToRun manifestId={manifestId} />
-      <PageHeader
-        title="Skip a stop"
-        {...(stop === undefined
-          ? {}
-          : {
-              description: `Stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}.`,
-            })}
-      />
+      {formShown ? null : <PageHeader {...header} />}
       <ReadState<StopRecord>
         query={stopQuery}
         isEmpty={() => false}
@@ -281,16 +316,6 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
             </>
           ) : (
             <>
-              <p className="pickup-form-note">
-                Ops skips a stop that cannot be worked, so that the run can close. A skip is
-                Melarc’s decision and not a failed collection: it uses up no pickup attempt, and the
-                request keeps the state it has. <strong>The vendor is always told</strong> that the
-                stop was skipped, and why.
-              </p>
-              <p className="pickup-form-note">
-                This is not the way to clear a failed pickup. A failed pickup is decided in the
-                pickup request itself, by someone who can escalate or reschedule it.
-              </p>
               <ReadState<readonly AttributedReason[]>
                 query={reasons}
                 operation="listReasonDefinitions"
@@ -309,6 +334,7 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
               >
                 {(list) => (
                   <Form
+                    header={header}
                     manifestId={manifestId}
                     record={record}
                     code={code}

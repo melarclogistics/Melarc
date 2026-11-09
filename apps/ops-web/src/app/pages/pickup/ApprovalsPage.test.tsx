@@ -64,6 +64,17 @@ function open(
   return renderApp(PATH);
 }
 
+/** The table tells a failure in its alert; the reference of the answer follows the sentence in the same text, so the sentence is matched as part of it. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+
+/** The rows of requests the table draws: a request's row header is its code. The table's own message (nothing yet, a failure) sits in a cell and is not one. */
+const requestRows = () => screen.queryAllByRole('rowheader');
+
 const lists = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-requests');
 const queryOf = (index = -1) => new URL(lists().at(index)?.url ?? 'http://x/').searchParams;
@@ -96,7 +107,7 @@ describe('the queue: what it shows', () => {
       await screen.findByRole('heading', { level: 1, name: 'One-package exceptions to approve' }),
     ).toBeVisible();
     expect(document.title).toBe('One-package exceptions to approve · Melarc Ops Portal');
-    const row = (await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' })).closest('tr');
+    const row = (await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).closest('tr');
     if (row === null) throw new Error('no row');
     expect(within(row).getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toHaveAttribute(
       'href',
@@ -120,7 +131,7 @@ describe('the queue: what it shows', () => {
   it('asks the server for the exceptions waiting for approval, and for nothing else', async () => {
     open();
 
-    await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' });
+    await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ });
     expect([...queryOf().entries()]).toEqual([['one_package_exception_state', 'REQUESTED']]);
   });
 
@@ -130,7 +141,7 @@ describe('the queue: what it shows', () => {
     open(() => page([pickupRequestFixture({ declared_package_count: 1 })]));
 
     expect(
-      await screen.findByText('The exceptions waiting for approval could not be loaded.'),
+      (await screen.findAllByText('The exceptions waiting for approval could not be loaded.'))[0],
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
   });
@@ -156,7 +167,7 @@ describe('the queue: what it shows', () => {
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByRole('rowheader', { name: 'ACC-PR-9WXH4T' })).toBeVisible();
+    expect(await screen.findByRole('rowheader', { name: /^ACC-PR-9WXH4T/ })).toBeVisible();
     expect(queryOf().get('page_token')).toBe('next-page');
     expect(queryOf().get('one_package_exception_state')).toBe('REQUESTED');
   });
@@ -174,7 +185,7 @@ describe('the queue: what it shows', () => {
       ]),
     );
 
-    const row = (await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' })).closest('tr');
+    const row = (await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).closest('tr');
     if (row === null) throw new Error('no row');
     expect(within(row).getByText('Cancelled')).toBeVisible();
     expect(within(row).getByText(/Nothing to approve/)).toBeVisible();
@@ -219,7 +230,9 @@ describe('approving', () => {
     expect(request?.headers.has('Idempotency-Key')).toBe(false);
     expect(await request?.clone().text()).toBe('');
     // The queue is read again, and the request is no longer in it.
-    expect(await screen.findByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
     expect(lists()).toHaveLength(2);
     expect(document.body.textContent).not.toMatch(/GH₵/);
   });
@@ -235,7 +248,7 @@ describe('approving', () => {
       [APPROVE]: () => refusal(422, 'SELF_APPROVAL_FORBIDDEN'),
     });
 
-    const row = (await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' })).closest('tr');
+    const row = (await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).closest('tr');
     if (row === null) throw new Error('no row');
     expect(within(row).getByText('You')).toBeVisible();
     const dialog = await openApproval(user);
@@ -259,9 +272,9 @@ describe('approving', () => {
   it('offers no approval for an exception that arrives without who asked for it, and refuses the queue', async () => {
     open(() => page([{ ...waiting, one_package_exception: exceptionOutcomeFixture() }, waiting]));
 
-    expect(await screen.findByRole('alert')).toBeVisible();
+    await alertSaying('The exceptions waiting for approval could not be loaded.');
     expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(requestRows()).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
 
@@ -326,20 +339,22 @@ describeInterfaceStates('The exceptions to approve', {
       });
       open(() => gate);
       expect(
-        await screen.findByText('Loading the exceptions waiting for approval…'),
+        await screen.findByText('Loading exceptions waiting for approval'),
       ).toBeInTheDocument();
       await act(async () => {
         release(page([waiting]));
         await gate;
       });
-      expect(await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+      expect(await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).toBeVisible();
     },
   },
   empty: {
     test: async () => {
       open(() => page([]));
-      expect(await screen.findByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
-      expect(screen.queryByRole('table')).toBeNull();
+      expect(
+        await screen.findByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+      ).toBeVisible();
+      expect(requestRows()).toHaveLength(0);
     },
   },
   'validation error': {
@@ -349,9 +364,7 @@ describeInterfaceStates('The exceptions to approve', {
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL'));
-      expect(
-        await screen.findByText('The exceptions waiting for approval could not be loaded.'),
-      ).toBeVisible();
+      await alertSaying('The exceptions waiting for approval could not be loaded.');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },
@@ -362,8 +375,8 @@ describeInterfaceStates('The exceptions to approve', {
         attempts += 1;
         return attempts === 1 ? refusal(503, 'INTERNAL') : page([waiting]);
       });
-      await view.user.click(await screen.findByRole('button', { name: 'Try again' }));
-      expect(await screen.findByRole('rowheader', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+      await view.user.click(await screen.findByRole('button', { name: 'Retry' }));
+      expect(await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
