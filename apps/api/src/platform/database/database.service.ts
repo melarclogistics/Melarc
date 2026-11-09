@@ -9,6 +9,7 @@ import type { Logger } from 'pino';
 import type { Clock } from '../auth/ports/clock.port.js';
 import type { DatabaseDeadlines } from '../config/load-config.js';
 import {
+  BudgetCancelledError,
   BudgetExpiredError,
   ExecutionBudget,
   currentBudget,
@@ -447,12 +448,17 @@ export class DatabaseService {
       const expiry = run.expiry;
       if (expiry !== undefined && error === expiry.error) {
         // Whatever the work does from here is dropped, and nothing it does reaches the connection.
+        // A budget that its owner cancelled (the client left) is not one whose time ran out, and the lines it writes say so (run 5, Stage 1).
+        const cancelledFor =
+          expiry.error instanceof BudgetCancelledError ? expiry.error.reason : undefined;
         if (expiry.phase === 'committing') {
           // The commit was sent and not answered: it may have happened. No rollback is sent and none is claimed.
           destroyBecause = new CommitOutcomeUnknownError('budget-expired', { cause: error });
           this.logger.error(
             { label: expiry.error.label, phase: expiry.phase },
-            'database commit outcome unknown: the budget ran out while the commit was in flight',
+            cancelledFor === undefined
+              ? 'database commit outcome unknown: the budget ran out while the commit was in flight'
+              : `database commit outcome unknown: the budget was cancelled (${cancelledFor}) while the commit was in flight`,
           );
           throw destroyBecause;
         }
@@ -461,17 +467,23 @@ export class DatabaseService {
           statementRunning: inFlight > 0,
           began: run.sentBegin,
         });
-        this.logger.warn(
-          {
-            label: expiry.error.label,
-            budgetMilliseconds: expiry.error.budgetMilliseconds,
-            phase: expiry.phase,
-            cancel: disposal.cancel,
-            rolledBack: disposal.rolledBack,
-            began: run.sentBegin,
-          },
-          'database transaction abandoned: its budget ran out',
-        );
+        const abandoned = {
+          label: expiry.error.label,
+          budgetMilliseconds: expiry.error.budgetMilliseconds,
+          phase: expiry.phase,
+          cancel: disposal.cancel,
+          rolledBack: disposal.rolledBack,
+          began: run.sentBegin,
+        };
+        if (cancelledFor === undefined) {
+          this.logger.warn(abandoned, 'database transaction abandoned: its budget ran out');
+        } else {
+          // Nobody is waiting for the work any more and its owner ended it: the cancel is the design working, so it is said once, below warn, with its reason.
+          this.logger.info(
+            { ...abandoned, reason: cancelledFor },
+            `database transaction cancelled: ${cancelledFor}`,
+          );
+        }
         throw error;
       }
       if (

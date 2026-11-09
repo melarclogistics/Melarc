@@ -54,6 +54,23 @@ export class BudgetExpiredError extends Error {
 }
 
 /**
+ * Raised, as an expiry, when a budget was ended at once because the work it bounds is no longer wanted (`cancel`: the client that asked for it is gone). It is a
+ * `BudgetExpiredError`, so everything wired to a budget (the database layer's cancel of the running statement) and everything that reads an expiry (the platform's `503`)
+ * takes it as one, but it says why, and it is not a budget whose time ran out: an abandoned lookup is not told as one (run 5, Stage 1).
+ */
+export class BudgetCancelledError extends BudgetExpiredError {
+  constructor(
+    label: string,
+    budgetMilliseconds: number,
+    readonly reason: string,
+  ) {
+    super(label, budgetMilliseconds);
+    this.name = 'BudgetCancelledError';
+    this.message = `The ${label} budget was cancelled: ${reason}`;
+  }
+}
+
+/**
  * Raised when work is asked of a budget that has finished. The unit of work it bounded is over, so no new effect or child budget
  * may start under it. It does not say the deadline passed: a budget finished in time is closed, not expired.
  */
@@ -225,11 +242,12 @@ export class ExecutionBudget {
    * Ends the budget at once because the work it bounds is no longer wanted (the client that asked for it is gone): it expires as if its time had run out,
    * with its own label and its own time, so that the signal aborts and every expiry listener runs (the database layer cancels the statement that is running,
    * rolls back and gives the connection up). Only the owner of a budget ends it. A budget that has finished or expired is left as it is; one whose request
-   * has finished but which itself is still running can be ended, which is the case this is for.
+   * has finished but which itself is still running can be ended, which is the case this is for. The error it ends with is a `BudgetCancelledError`, an expiry that
+   * carries `reason` (what the owner says, for example "abandoned by the client") so that a log line or a caller can tell it from a budget whose time ran out.
    */
-  cancel(): void {
+  cancel(reason = 'cancelled'): void {
     if (this.state !== 'running') return;
-    this.expire(new BudgetExpiredError(this.label, this.budgetMilliseconds));
+    this.expire(new BudgetCancelledError(this.label, this.budgetMilliseconds, reason));
   }
 
   /** Called with each late effect as it is recorded. Returns a function that removes the listener. */

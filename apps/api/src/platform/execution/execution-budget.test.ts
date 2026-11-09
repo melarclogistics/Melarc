@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ManualClock } from '../../test-support/manual-clock.js';
 import {
+  BudgetCancelledError,
   BudgetClosedError,
   BudgetExpiredError,
   ExecutionBudget,
@@ -853,6 +854,30 @@ describe('ExecutionBudget: closure is told, and a budget can be ended at once (A
     expect(() => {
       budget.assertOpen();
     }).toThrow(BudgetExpiredError);
+  });
+
+  // Break caught (run 5, Stage 1): a cancel that cannot say why, so that a budget ended because its client left reads, wherever its error is looked at (the database layer's log
+  // among them), as a budget whose time ran out.
+  it('ends with an error that says why it was cancelled, which is still an expiry, and says only "cancelled" when it is given no reason', () => {
+    const abandoned = new ExecutionBudget(clock, 'lookupRecords', 3_000);
+    const plain = new ExecutionBudget(clock, 'other', 3_000);
+    const late = new ExecutionBudget(clock, 'late', 100);
+
+    abandoned.cancel('abandoned by the client');
+    plain.cancel();
+    pass(150);
+
+    const error = abandoned.expiredWith;
+    expect(error).toBeInstanceOf(BudgetExpiredError);
+    expect(error).toBeInstanceOf(BudgetCancelledError);
+    expect((error as BudgetCancelledError).reason).toBe('abandoned by the client');
+    expect(error?.message).toBe('The lookupRecords budget was cancelled: abandoned by the client');
+    expect(abandoned.signal.reason).toBe(error);
+    expect((plain.expiredWith as BudgetCancelledError).reason).toBe('cancelled');
+    // A budget whose time ran out is not a cancelled one, and says so.
+    expect(late.expiredWith).toBeInstanceOf(BudgetExpiredError);
+    expect(late.expiredWith).not.toBeInstanceOf(BudgetCancelledError);
+    expect(late.expiredWith?.message).toBe('The late budget of 100 ms ran out');
   });
 
   // Break caught: a budget below the one that is ended that keeps running (a transaction's statement is wired to a budget below the lookup's).

@@ -63,6 +63,9 @@ export interface RecordLookupServiceOptions {
   readonly limitStatements: (handle: TransactionHandle, milliseconds: number) => Promise<void>;
 }
 
+/** Why a lookup's budget is cancelled when the request above it ends first: the client that asked is gone. Words of the log (`database transaction cancelled: ...`). */
+export const LOOKUP_ABANDONED = 'abandoned by the client';
+
 /** The most of one kind in an answer, and of all kinds together. */
 export const LOOKUP_PER_KIND = 8;
 export const LOOKUP_IN_ALL = 20;
@@ -207,10 +210,11 @@ export class RecordLookupService {
       // **When the request ends first** (the client left), the lookup's budget is ended with it (run 4, Stage 1, A4.2): finishing the request's budget cancels
       // no statement, so without this the search that is running went on to its own bound (three seconds) and the session kept its slot for that long. Ended
       // as an expiry, the budget has the database layer cancel the statement and roll the transaction back, and the lookup ends at once, which gives the slot back.
+      // It is cancelled **for that reason** (run 5, Stage 1): the database layer says so in its log, below warn, and does not tell it as a budget that ran out.
       let endWithRequest: (() => void) | undefined;
       if (budget !== undefined) {
         endWithRequest = budget.onClosed(() => {
-          budget.cancel();
+          budget.cancel(LOOKUP_ABANDONED);
         });
       }
       try {
