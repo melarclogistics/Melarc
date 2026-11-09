@@ -93,7 +93,7 @@ export interface BulkAction {
  */
 export interface DataTableHandle {
   /**
-   * Puts focus on the control of a row as it is drawn now (the button that opens it, else its box, else its act, else the link of its code: the table is a table or cards, whichever it is now), and brings it into view by
+   * Puts focus on the control of a row as it is drawn now (the button that opens it, else its box, else the link of its code, else its act: the table is a table or cards, whichever it is now), and brings it into view by
    * the least scroll, under the top bar and not behind it. `false` when the row is not drawn or has nothing that can take focus. The id is matched without regard to case.
    */
   readonly focusRow: (id: string) => boolean;
@@ -360,12 +360,17 @@ export function DataTable<Item>({
   const controls = useRef(
     new Map<string, Partial<Record<'open' | 'box' | 'action', HTMLElement>>>(),
   );
-  /** The control of a row that can take focus now: its button that opens, else its box, else its act, skipping the ones that are disabled. */
-  const control = (id: string): HTMLElement | undefined => {
+  /**
+   * The control of a row that can take focus now: its button that opens, else its box, else its act, skipping the ones that are disabled. `kinds` narrows the search to some of them, in that order.
+   */
+  const control = (
+    id: string,
+    kinds: readonly ('open' | 'box' | 'action')[] = ['open', 'box', 'action'],
+  ): HTMLElement | undefined => {
     const own = controls.current.get(id);
-    return [own?.open, own?.box, own?.action].find(
-      (node): node is HTMLElement => node !== undefined && isEnabled(node),
-    );
+    return kinds
+      .map((kind) => own?.[kind])
+      .find((node): node is HTMLElement => node !== undefined && isEnabled(node));
   };
   /** The link of a row as it is drawn now (a row of the table, or a card), for a row that has no control of the table's own. `wanted` is the row's id in lower case. */
   const linkOf = (wanted: string): HTMLElement | undefined => {
@@ -394,8 +399,12 @@ export function DataTable<Item>({
         const key = [...controls.current.keys()].find(
           (candidate) => candidate.toLowerCase() === wanted,
         );
-        // A row whose code is a link to a page of its own (`RowTitle` with `to`) has no control of the table's: its link is what takes focus.
-        const target = (key === undefined ? undefined : control(key)) ?? linkOf(wanted);
+        // A row whose code is a link to a page of its own (`RowTitle` with `to`) has no button that opens it: its link is what takes focus, before the row's act (the review of 499399c: the
+        // officer who comes back from the request they opened is on its link, and not on Approve).
+        const target =
+          (key === undefined ? undefined : control(key, ['open', 'box'])) ??
+          linkOf(wanted) ??
+          (key === undefined ? undefined : control(key));
         if (target === undefined) return false;
         if (key !== undefined) setActiveId(key);
         target.focus({ preventScroll: true });

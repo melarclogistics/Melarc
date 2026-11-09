@@ -1273,6 +1273,30 @@ describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4
       expect(handle.current?.focusRow(THIRD.id)).toBe(true);
       expect(screen.getByRole('link', { name: THIRD.code })).toHaveFocus();
     });
+
+    // Break caught (the review of 499399c): a page that comes back to a list of links with an act on each row (the approver's queue) and finds focus on the act, Approve, and not on the link the
+    // officer used to open the record. A row that opens a page of its own gives focus back to its link; the act is what takes focus only where the row has nothing else.
+    it('puts focus on the link of a row and not on its act, when the rows open pages of their own', () => {
+      const handle = createRef<DataTableHandle>();
+      render(
+        inRouter(
+          <DataTable<Request>
+            {...linkProps({
+              rowAction: {
+                label: 'Approve',
+                ariaLabel: (row) => `Approve ${row.code}`,
+                onRun: () => undefined,
+              },
+            })}
+            ref={handle}
+          />,
+        ),
+      );
+
+      expect(handle.current?.focusRow('R2')).toBe(true);
+      expect(screen.getByRole('link', { name: SECOND.code })).toHaveFocus();
+      expect(screen.getByRole('button', { name: `Approve ${SECOND.code}` })).not.toHaveFocus();
+    });
   });
 
   // Break caught: rows that go to loading rows while they are read again after an act, so that the officer loses the row that changed and their place.
