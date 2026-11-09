@@ -1,5 +1,6 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { freezeClock, TODAY } from './clock';
 import { answerQueueSummary } from './queue-summary';
 
 /**
@@ -39,7 +40,7 @@ export const REQUESTS = {
 } as const;
 
 /** The day the stand-in takes for today: a run for an earlier day is never made or sent, as the server's clock says. */
-export const TODAY = '2026-11-03';
+export { TODAY };
 
 /** A count of the hub's no custody answer carries. If it is ever drawn, a screen showed what it must not: a handover is not a count. */
 export const PLANTED_HUB_COUNT = 4242;
@@ -770,6 +771,8 @@ export async function stubManifestApi(
   initial: World = world(),
 ): Promise<ManifestApi> {
   const state: ManifestApi = { world: initial, calls: [], unexpected: [] };
+  // The clock of the world: "today or later" and "last checked" are the world's, whatever day the machine thinks it is.
+  await freezeClock(target);
   await target.route('**/api/v1/**', async (route) => {
     if (await answerQueueSummary(route)) return;
     const request = route.request();

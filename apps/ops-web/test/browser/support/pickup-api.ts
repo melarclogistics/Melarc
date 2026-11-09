@@ -1,5 +1,6 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { freezeClock } from './clock';
 import { answerQueueSummary } from './queue-summary';
 
 /**
@@ -449,6 +450,8 @@ export async function stubPickupApi(
   initial: World = world(),
 ): Promise<PickupApi> {
   const state: PickupApi = { world: initial, calls: [], unexpected: [] };
+  // The clock of the world: "today or later" and "last checked" are the world's, whatever day the machine thinks it is.
+  await freezeClock(target);
   await target.route('**/api/v1/**', async (route) => {
     if (await answerQueueSummary(route)) return;
     const request = route.request();
