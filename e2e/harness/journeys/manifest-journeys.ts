@@ -83,7 +83,7 @@ async function build(
   day: string,
 ): Promise<{ id: string; code: string }> {
   await page.goto('/manifests/new');
-  await expectHeading(page, 'Build a manifest');
+  await expectHeading(page, 'Build a pickup run');
   try {
     // The pool is drawn as a table where there is room and as cards where there is not (the browser here is 1280 px wide with the menu open,
     // which draws cards), and only the drawing that is shown is in the accessibility tree: the journey asks for the choice, not for a drawing.
@@ -102,7 +102,7 @@ async function build(
   }
   for (const code of codes) await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
   await typeServiceDate(page, day);
-  await page.getByRole('button', { name: 'Create the manifest' }).click();
+  await page.getByRole('button', { name: 'Create the pickup run' }).click();
   await expect(page.getByText(/The pickup run is made\./)).toBeVisible();
   const id = new URL(page.url()).pathname.split('/').at(-1) ?? '';
   expect(id).toMatch(UUID);
@@ -117,12 +117,14 @@ async function assignAndDispatch(page: Page, riderName: string): Promise<void> {
   const assign = page.getByRole('alertdialog', { name: 'Assign this rider?' });
   await assign.getByRole('button', { name: `Choose: ${riderName}` }).click();
   await assign.getByRole('button', { name: 'Assign the rider' }).click();
-  await expect(page.getByText(/A rider is assigned\. The manifest is still a draft/)).toBeVisible();
+  await expect(
+    page.getByText(/A rider is assigned\. The pickup run is still a draft/),
+  ).toBeVisible();
 
   await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
   const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
   await dispatch.getByRole('button', { name: 'Dispatch the pickup run' }).click();
-  await expect(page.getByText(/The manifest is dispatched/)).toBeVisible();
+  await expect(page.getByText(/The pickup run is dispatched/)).toBeVisible();
 }
 
 /** The rider starts the run from the handset: reads the run (its `ETag`), and sends it back. */

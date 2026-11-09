@@ -415,7 +415,7 @@ async function searchAndOpen(page: Page): Promise<void> {
 async function buildRun(page: Page): Promise<void> {
   await topBar(page).getByRole('button', { name: 'New' }).click();
   await page.getByRole('menuitem', { name: 'Build a pickup run' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Build a manifest' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Build a pickup run' })).toBeVisible();
   await pause(page, PACE.step);
   await page.getByRole('combobox', { name: /^Hub/ }).selectOption(HUB_A.id);
   await expect(page.getByRole('checkbox', { name: /^Choose / }).first()).toBeVisible();
@@ -433,7 +433,7 @@ async function buildRun(page: Page): Promise<void> {
     .click();
   await page.keyboard.type(DAY_DIGITS, { delay: PACE.key });
   await pause(page, PACE.step);
-  await page.getByRole('button', { name: 'Create the manifest' }).click();
+  await page.getByRole('button', { name: 'Create the pickup run' }).click();
   await expect(page.getByRole('heading', { level: 1, name: /^ACC-MF-/ })).toBeVisible();
   await pause(page, PACE.read);
 }
