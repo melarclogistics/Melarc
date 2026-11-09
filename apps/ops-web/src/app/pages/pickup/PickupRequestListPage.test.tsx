@@ -942,6 +942,39 @@ describe('the queue: the request beside it', () => {
     expect(screen.getByRole('table', { name: 'Pickup requests' })).toBeVisible();
   });
 
+  // Break caught (the review of 5edada2): the panel's header drawing the state of the list's row, which is older than the panel's own read, so that a request that moved on since the
+  // list was read shows one state in the header and another in the body.
+  it('draws the state in the panel’s header from the panel’s own read, and none until that has answered', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    api = installFakeApi(
+      staffApi(
+        sessionWith(READER, {
+          authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+        }),
+        { [LIST]: () => page([pending]), [RECORD]: () => held },
+      ),
+    );
+    const { user } = renderApp('/pickup-requests');
+    await queueTable();
+    await user.click(await screen.findByRole('button', { name: /^Open ACC-PR-7KQ2MZ, / }));
+    const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+    const header = within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' })
+      .parentElement as HTMLElement;
+
+    // The row says the request waits for confirmation; the header says nothing of its state until the panel's own read has answered.
+    expect(header).not.toHaveTextContent(/Waiting for confirmation|Confirmed/);
+
+    answer(json(200, { ...pending, state: 'CONFIRMED' }, etag('v9')));
+
+    await waitFor(() => {
+      expect(header).toHaveTextContent('Confirmed');
+    });
+    expect(within(panel).queryByText('Waiting for confirmation')).toBeNull();
+  });
+
   describe('confirming', () => {
     const CONFIRM = `POST /pickup-requests/${REQUEST_ID}/confirm`;
 

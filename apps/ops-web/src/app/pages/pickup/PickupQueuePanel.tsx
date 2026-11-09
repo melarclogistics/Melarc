@@ -14,11 +14,11 @@ import { confirmPickupRequest } from '../../../platform/pickup/pickup-commands';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import {
   readPickupRequest,
-  usePickupRequest,
   type PickupRecord,
+  type PickupRecordRead,
 } from '../../../platform/pickup/use-pickup-queries';
 import { canBeConfirmed, PICKUP_STATE_MAP, STATE_SENTENCES } from './pickup-presentation';
-import { queueFactsOf, type QueueFacts } from './pickup-queue-view';
+import { queueFactsOf } from './pickup-queue-view';
 
 /**
  * The confirmation of a request from the queue (`confirmPickupRequest`): the question, its consequence and the two buttons of the kit's `ConfirmationDialog`, over the same
@@ -161,19 +161,21 @@ function Summary({
  * What the panel beside the pickup queue holds for a request: its summary, read as the request's own page reads it (`getPickupRequest`), with the one act the queue offers, in
  * the record template's composition for a panel. A request the session may not read, one in another hub and a failure are the read's own states, in the panel. The full page, with
  * every act, is "Open full page".
+ *
+ * **The read is the page's, handed in** (`record`): the panel's header (its state badge) and its body are drawn from the same read, and never from the row of the list, which is the
+ * last page read and is older than the panel's own answer (the review of 5edada2).
  */
 export function PickupQueuePanel({
-  row,
+  record,
   hubs,
   canConfirm,
   onConfirmed,
 }: {
-  readonly row: QueueFacts;
+  readonly record: PickupRecordRead;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
   readonly onConfirmed: (request: PickupRequestView) => void;
 }) {
-  const record = usePickupRequest(row.id);
   return (
     <ReadState<PickupRecord>
       query={record}

@@ -20,13 +20,6 @@ export interface RecordLinks {
 /** The link of a request, in the queue's table and in its cards (`pickup-queue-view.tsx` puts the request's id on each). */
 export const REQUEST_LINKS: RecordLinks = { selector: 'a[data-request-id]', key: 'requestId' };
 
-/** The button that opens a request in the queue workspace's table or card (`DataTable` puts the request's id on the row or the card that holds it). */
-export const REQUEST_ROW_BUTTONS: RecordLinks = {
-  selector: 'button.ui-data-table__open',
-  key: 'rowId',
-  idOf: (control) => control.closest('[data-row-id]')?.getAttribute('data-row-id') ?? undefined,
-};
-
 /** The link of a manifest, in the manifest list's table and in its cards (`ManifestListPage.tsx` puts the manifest's id on each). */
 export const MANIFEST_LINKS: RecordLinks = { selector: 'a[data-manifest-id]', key: 'manifestId' };
 
@@ -103,8 +96,25 @@ function keepInView(element: HTMLElement): void {
   }
 }
 
+/** What gives focus back, as the queue workspace and a table offer it (`QueueWorkspaceHandle`): a page asks the table and never looks for a class of the kit's markup. */
+export interface PlaceTarget {
+  readonly focusRow: (id: string) => boolean;
+  readonly focusResults: () => void;
+}
+
 /**
- * Gives the officer back their position, once the page they left has been read again and drawn: the document is scrolled to where it was (the
+ * Gives the officer back their position, once the queue workspace has read the page they left again and drawn it: the document is scrolled to where it was (the browser clamps it to the
+ * content there now), and focus goes to the request they opened if it is still on the page, else to the results. **Focus is only ever given where nobody has put it**: an officer who moved
+ * focus while the page was being read keeps it where they put it, and still gets their position back. The row is kept in view by the least scroll (the table does that).
+ */
+export function restoreQueuePlace(target: PlaceTarget, place: QueuePlace): void {
+  window.scrollTo({ top: place.scrollY, left: 0, behavior: 'instant' });
+  if (!isUnclaimed(document.activeElement)) return;
+  if (!target.focusRow(place.requestId)) target.focusResults();
+}
+
+/**
+ * The same, for a list whose markup this file still knows (the manifest list, until it is drawn by the queue workspace as well): the document is scrolled to where it was (the
  * browser clamps it to the content there now), and focus goes to the request they opened if it is still on the page and shown, else to the results,
  * else to whatever stands in their place (a message, a failure). **Focus is only ever given where nobody has put it**: an officer who moved
  * focus while the page was being read keeps it where they put it, and still gets their position back. The request is kept in view, by the least
@@ -132,7 +142,7 @@ export function restorePlace(
     return;
   }
   (
-    root.querySelector<HTMLElement>('.ui-queue-table__results, .ui-data-table__scroller') ??
+    root.querySelector<HTMLElement>('.ui-queue-table__results') ??
     root.querySelector<HTMLElement>('.ui-read-state')
   )?.focus({ preventScroll: true });
 }

@@ -1,10 +1,17 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
-import { DataTable, drawsCards, RowTitle, type DataColumn, type DataTableProps } from './DataTable';
+import {
+  DataTable,
+  drawsCards,
+  RowTitle,
+  type DataColumn,
+  type DataTableHandle,
+  type DataTableProps,
+} from './DataTable';
 
 interface Request {
   readonly id: string;
@@ -1142,5 +1149,70 @@ describe('DataTable: the room a table has (the review of 5edada2, M6)', () => {
     expect(drawsCards(39.9, 'cards', false)).toBe(true);
     expect(drawsCards(39.9, 'drop', true)).toBe(true);
     expect(drawsCards(40, 'drop', true)).toBe(false);
+  });
+});
+
+describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4)', () => {
+  const columns: readonly DataColumn<Request>[] = [
+    { ...REQUEST_COLUMN },
+    { id: 'state', header: 'State', cell: (row) => row.state },
+  ];
+  const props = (overrides: Partial<DataTableProps<Request>> = {}): DataTableProps<Request> => ({
+    label: 'Pickup requests',
+    columns,
+    rows: REQUESTS,
+    rowId: (row) => row.id,
+    onOpen: () => undefined,
+    openLabel: (row) => `Open ${row.code}`,
+    ...overrides,
+  });
+
+  // Break caught: a page that finds a row's button by the kit's class names, and stops finding it when the kit's markup changes.
+  it('puts focus on the control of a row by its id, matched without regard to case, and says whether it did', () => {
+    const handle = createRef<DataTableHandle>();
+    render(<DataTable<Request> {...props()} ref={handle} />);
+
+    expect(handle.current?.focusRow('R2')).toBe(true);
+    expect(screen.getByRole('button', { name: `Open ${SECOND.code}` })).toHaveFocus();
+    expect(handle.current?.focusRow('not-there')).toBe(false);
+    expect(screen.getByRole('button', { name: `Open ${SECOND.code}` })).toHaveFocus();
+  });
+
+  it('puts focus on the box of the rows, which is the results as a whole', () => {
+    const handle = createRef<DataTableHandle>();
+    render(<DataTable<Request> {...props()} ref={handle} />);
+
+    handle.current?.focusResults();
+
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveFocus();
+  });
+
+  it('makes the row it focused the one the keyboard is on, so that the arrows go on from it', async () => {
+    const user = userEvent.setup();
+    const handle = createRef<DataTableHandle>();
+    render(<DataTable<Request> {...props()} ref={handle} />);
+    handle.current?.focusRow(SECOND.id);
+
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('button', { name: `Open ${THIRD.code}` })).toHaveFocus();
+  });
+
+  // Break caught: rows that go to loading rows while they are read again after an act, so that the officer loses the row that changed and their place.
+  it('keeps its rows and says it is busy while they are read again, and draws no loading rows', () => {
+    const view = render(<DataTable<Request> {...props()} />);
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+      'aria-busy',
+    );
+
+    view.rerender(<DataTable<Request> {...props({ busy: true })} />);
+
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getAllByRole('row')).toHaveLength(4);
+    expect(screen.getByRole('button', { name: `Open ${FIRST.code}` })).toBeVisible();
+    expect(screen.queryByText('Loading')).toBeNull();
   });
 });

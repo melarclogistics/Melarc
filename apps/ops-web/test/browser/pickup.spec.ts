@@ -287,7 +287,11 @@ test.describe('the queue, drawn for the room it has', () => {
         context.waitForEvent('page'),
         link.click({ modifiers: ['ControlOrMeta'] }),
       ]);
-      await expect(tab.getByRole('heading', { level: 1, name: CODE })).toBeVisible();
+      // A fresh tab on the development server loads every module of the application one request at a time, which the default 5 s of an assertion (for a page that is open) does
+      // not allow on a machine with two processors: the wait for the new tab's first paint is stated, for the development projects only (the production build loads at once).
+      const loading = { timeout: test.info().project.name.includes('-dev-') ? 30_000 : 5_000 };
+      await tab.waitForLoadState('load', loading);
+      await expect(tab.getByRole('heading', { level: 1, name: CODE })).toBeVisible(loading);
       await expect(tab).toHaveURL(DETAIL);
       await tab.close();
       await expect(page).toHaveURL('/pickup-requests');

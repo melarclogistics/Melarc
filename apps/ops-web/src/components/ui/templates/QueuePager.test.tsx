@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
@@ -92,5 +93,29 @@ describe('QueuePager', () => {
     const { container } = renderPager({ page: 2, hasNext: true });
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+describe('QueuePager: the region that speaks (the review of 5edada2)', () => {
+  // Break caught: a status region that arrives with its words in it, which most screen readers do not announce: "Showing 25 requests" was heard only from the second page.
+  it('is in the page empty on the first paint, and has its words afterwards', () => {
+    const first = renderToStaticMarkup(
+      <QueuePager
+        label="Pages of pickup requests"
+        noun={{ one: 'request', other: 'requests' }}
+        shown={25}
+        page={1}
+        hasNext
+        onNext={() => undefined}
+        onPrevious={() => undefined}
+      />,
+    );
+    expect(first).toMatch(/<p[^>]*role="status"[^>]*><\/p>/);
+    expect(first).not.toContain('Showing 25');
+
+    renderPager({ shown: 25, hasNext: true });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 25 requests. More follow on the next page.',
+    );
   });
 });

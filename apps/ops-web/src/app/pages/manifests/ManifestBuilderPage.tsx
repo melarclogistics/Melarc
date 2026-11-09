@@ -10,6 +10,7 @@ import {
   NoWrap,
   RowTitle,
   type DataColumn,
+  type DataTableHandle,
 } from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
@@ -291,7 +292,7 @@ export function ManifestBuilderPage() {
     carryover: [],
   });
   const form = useRef<HTMLFormElement>(null);
-  const queue = useRef<HTMLDivElement>(null);
+  const poolTable = useRef<DataTableHandle>(null);
 
   const day = isFinishedDate(serviceDate) ? serviceDate : undefined;
   const isCarriedOver = (promised: string): boolean => day !== undefined && promised < day;
@@ -335,9 +336,7 @@ export function ManifestBuilderPage() {
   const settled = !pool.isFetching && (pool.isSuccess || pool.isError);
   useEffect(() => {
     if (!settled || !takeFocus()) return;
-    queue.current
-      ?.querySelector<HTMLElement>('.ui-data-table__scroller')
-      ?.focus({ preventScroll: true });
+    poolTable.current?.focusResults();
   }, [settled, pool.dataUpdatedAt, takeFocus]);
 
   if (me === undefined) return null;
@@ -681,52 +680,51 @@ export function ManifestBuilderPage() {
                     </div>
                   ),
                   children: (
-                    <div ref={queue}>
-                      <DataTable<PickupRequestView>
-                        label="Confirmed pickups waiting for a manifest"
-                        columns={poolColumnsOf}
-                        rows={poolRows}
-                        rowId={(row) => row.id}
-                        density="two-line"
-                        status={
-                          poolLoading ? 'loading' : poolFailure === undefined ? 'ready' : 'error'
-                        }
-                        loadingLabel="Loading the pool"
-                        {...(poolFailure === undefined ? {} : { error: poolFailure })}
-                        emptyState={poolEmpty}
-                        card={(row) => (
-                          <PoolCard
-                            request={row}
-                            carriedOver={isCarriedOver(row.scheduled_service_date)}
-                          />
-                        )}
-                        selection={{
-                          selectedIds: [...chosen.keys()],
-                          onChange: choose,
-                          selectLabel: (row) => `Choose ${row.code}`,
-                          isSelectable: (row) => (chosen.has(row.id) ? !locked : !full && !locked),
-                        }}
-                        {...(pool.isSuccess && !poolLoading
-                          ? {
-                              footer: (
-                                <QueuePager
-                                  label="Pages of the pool"
-                                  noun={{ one: 'request', other: 'requests' }}
-                                  shown={poolRows.length}
-                                  page={paging.page}
-                                  hasNext={pool.data.nextPageToken !== null}
-                                  onNext={() => {
-                                    if (pool.data.nextPageToken !== null) {
-                                      paging.toNextPage(pool.data.nextPageToken);
-                                    }
-                                  }}
-                                  onPrevious={paging.toPreviousPage}
-                                />
-                              ),
-                            }
-                          : {})}
-                      />
-                    </div>
+                    <DataTable<PickupRequestView>
+                      ref={poolTable}
+                      label="Confirmed pickups waiting for a manifest"
+                      columns={poolColumnsOf}
+                      rows={poolRows}
+                      rowId={(row) => row.id}
+                      density="two-line"
+                      status={
+                        poolLoading ? 'loading' : poolFailure === undefined ? 'ready' : 'error'
+                      }
+                      loadingLabel="Loading the pool"
+                      {...(poolFailure === undefined ? {} : { error: poolFailure })}
+                      emptyState={poolEmpty}
+                      card={(row) => (
+                        <PoolCard
+                          request={row}
+                          carriedOver={isCarriedOver(row.scheduled_service_date)}
+                        />
+                      )}
+                      selection={{
+                        selectedIds: [...chosen.keys()],
+                        onChange: choose,
+                        selectLabel: (row) => `Choose ${row.code}`,
+                        isSelectable: (row) => (chosen.has(row.id) ? !locked : !full && !locked),
+                      }}
+                      {...(pool.isSuccess && !poolLoading
+                        ? {
+                            footer: (
+                              <QueuePager
+                                label="Pages of the pool"
+                                noun={{ one: 'request', other: 'requests' }}
+                                shown={poolRows.length}
+                                page={paging.page}
+                                hasNext={pool.data.nextPageToken !== null}
+                                onNext={() => {
+                                  if (pool.data.nextPageToken !== null) {
+                                    paging.toNextPage(pool.data.nextPageToken);
+                                  }
+                                }}
+                                onPrevious={paging.toPreviousPage}
+                              />
+                            ),
+                          }
+                        : {})}
+                    />
                   ),
                 },
                 run: {

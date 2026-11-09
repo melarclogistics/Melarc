@@ -12,6 +12,7 @@ import {
   QueueWorkspace,
   type QueueEmptiness,
   type QueueResult,
+  type QueueWorkspaceHandle,
 } from '../../../components/ui/templates/QueueWorkspace';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { OperationFailure } from '../../../platform/api/api-response';
@@ -23,7 +24,7 @@ import {
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
-import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
+import { usePickupRequest, usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -37,7 +38,7 @@ import {
   queueFactsOf,
   type QueueFacts,
 } from './pickup-queue-view';
-import { REQUEST_ROW_BUTTONS, requestOfClick, restorePlace, searchOf } from './queue-return';
+import { requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
 import './pickup-pages.css';
 
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
@@ -130,6 +131,8 @@ export function PickupRequestListPage() {
   /** The request open in the panel beside the queue, and the one whose confirmation is being asked. */
   const [opened, setOpened] = useState<QueueFacts | undefined>();
   const [confirming, setConfirming] = useState<QueueFacts | undefined>();
+  /** The panel's own read of the request open beside the queue: its header and its body are drawn from it, and never from the list's row, which is older. */
+  const panelRead = usePickupRequest(opened?.id ?? '', opened !== undefined);
 
   // Refresh page: the page now shown is read again, by the same query (its filters and its cursor). One read at a time: the header's Refresh says it is
   // busy and ignores a press, and a press that gets here while a read is under way (before the screen has drawn the busy line) is given that
@@ -162,7 +165,7 @@ export function PickupRequestListPage() {
 
   // Once the page that was left has been read again and drawn, the officer gets their position back, and focus where nobody has put it (the
   // request they opened, else the results). Only if the page is still the one they came back to: not after a change of filter or of page.
-  const queue = useRef<HTMLDivElement>(null);
+  const workspace = useRef<QueueWorkspaceHandle>(null);
   const restored = useRef(arrival === undefined);
   const settled = !list.isFetching && (list.isSuccess || list.isError);
   const stillThere =
@@ -172,9 +175,7 @@ export function PickupRequestListPage() {
   useEffect(() => {
     if (arrival === undefined || restored.current || !settled) return;
     restored.current = true;
-    if (stillThere && queue.current !== null) {
-      restorePlace(queue.current, arrival, REQUEST_ROW_BUTTONS);
-    }
+    if (stillThere && workspace.current !== null) restoreQueuePlace(workspace.current, arrival);
   }, [arrival, settled, stillThere]);
 
   // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
@@ -182,9 +183,7 @@ export function PickupRequestListPage() {
   const { takeFocus } = paging;
   useEffect(() => {
     if (!settled || !takeFocus()) return;
-    queue.current
-      ?.querySelector<HTMLElement>('.ui-data-table__scroller')
-      ?.focus({ preventScroll: true });
+    workspace.current?.focusResults();
   }, [settled, list.dataUpdatedAt, takeFocus]);
 
   /** Going to the opened request's own page leaves where the officer was, for the visit: a plain click on the panel's "Open full page", which is a move in this tab. */
@@ -333,6 +332,7 @@ export function PickupRequestListPage() {
         filtered: true,
         onClearFilters: clearEverything,
         clearLabel: 'Show every request',
+        filteredText: 'Nothing fits these filters. Show every request to start again.',
       }
     : emptiness;
 
@@ -342,8 +342,9 @@ export function PickupRequestListPage() {
   return (
     <>
       <title>Pickup requests · Melarc Ops Portal</title>
-      <div className="pickup-queue" ref={queue} onClickCapture={leavePlace}>
+      <div className="pickup-queue" onClickCapture={leavePlace}>
         <QueueWorkspace<QueueFacts>
+          ref={workspace}
           header={{
             title: 'Pickup requests',
             description: 'Requests at your authorized hubs.',
@@ -461,14 +462,24 @@ export function PickupRequestListPage() {
             ...(opened === undefined
               ? {}
               : {
-                  status: <StatusBadge status={opened.state} map={PICKUP_STATE_MAP} />,
+                  // The state in the header is the panel's own read: until it has answered the header shows none, and never the list's row, which is older than the panel's answer.
+                  ...(panelRead.isSuccess
+                    ? {
+                        status: (
+                          <StatusBadge
+                            status={panelRead.data.request.state}
+                            map={PICKUP_STATE_MAP}
+                          />
+                        ),
+                      }
+                    : {}),
                   fullPage: { to: opened.href },
                 }),
             children:
               opened === undefined ? null : (
                 <PickupQueuePanel
                   key={opened.id}
-                  row={opened}
+                  record={panelRead}
                   hubs={hubs}
                   canConfirm={canConfirm}
                   onConfirmed={(request) => {

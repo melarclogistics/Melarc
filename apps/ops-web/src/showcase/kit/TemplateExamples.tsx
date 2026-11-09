@@ -180,6 +180,7 @@ export function QueueWorkspaceExample() {
                 filtered: true,
                 onClearFilters: clearFilters,
                 clearLabel: 'Show every request',
+                filteredText: 'Nothing fits these filters. Show every request to start again.',
               }
         }
         table={{

@@ -1,12 +1,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import type { DataColumn } from '../data-table/DataTable';
-import { QueueWorkspace, type QueueWorkspaceProps } from './QueueWorkspace';
+import {
+  QueueWorkspace,
+  type QueueWorkspaceHandle,
+  type QueueWorkspaceProps,
+} from './QueueWorkspace';
 
 interface Row {
   readonly id: string;
@@ -154,12 +158,18 @@ describe('QueueWorkspace', () => {
               filtered: true,
               onClearFilters: onClear,
               clearLabel: 'Show every request',
+              filteredText: 'Nothing fits these filters. Show every request to start again.',
             },
           })}
         />
       </MemoryRouter>,
     );
     expect(screen.getByRole('heading', { name: 'No pickup requests match' })).toBeVisible();
+    // The words under the heading and the button are the page's, so that the sentence and the button say the same thing: the template holds none of its own.
+    expect(
+      screen.getByText('Nothing fits these filters. Show every request to start again.'),
+    ).toBeVisible();
+    expect(screen.queryByText(/Take them off/)).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Show every request' }));
     expect(onClear).toHaveBeenCalledTimes(1);
 
@@ -191,6 +201,8 @@ describe('QueueWorkspace', () => {
         none: 'x',
         filtered: true,
         onClearFilters: () => undefined,
+        clearLabel: 'Show every request',
+        filteredText: 'Nothing fits these filters. Show every request to start again.',
         hub: { name: 'Tema', onShowAllHubs: () => undefined },
       },
     });
@@ -268,6 +280,89 @@ describe('QueueWorkspace', () => {
     await user.keyboard('{Escape}');
 
     expect(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' })).toHaveFocus();
+  });
+
+  // Break caught (the review of 5edada2, M3): rows that go to loading rows while they are read again after an act, so that the officer loses their place, their focus and the row
+  // that changed. The rows stay, the queue says it is busy, and the row that changed is marked.
+  it('keeps its rows, with the one that changed marked, while they are read again after an act', () => {
+    const { rerender } = renderQueue();
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+      'aria-busy',
+    );
+
+    rerender(
+      <MemoryRouter>
+        <QueueWorkspace<Row>
+          {...props({
+            result: { status: 'ready', rows: ROWS, refreshing: true },
+            table: { ...props().table, changedIds: ['a'] },
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' })).toBeVisible();
+    expect(screen.queryByText('Loading pickup requests')).toBeNull();
+    // The row that changed is told in words as well as by its tint.
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ' })).toHaveAccessibleDescription(
+      'Updated',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' }),
+    ).not.toHaveAccessibleDescription();
+  });
+
+  // Break caught: a page that has to look for the kit's classes to give focus back to a row, because the template gives it no way to.
+  it('gives the page a handle to put focus on a row or on the results, in the table or in cards', () => {
+    const handle = createRef<QueueWorkspaceHandle>();
+    const view = render(
+      <MemoryRouter>
+        <QueueWorkspace<Row> {...props()} ref={handle} />
+      </MemoryRouter>,
+    );
+
+    expect(handle.current?.focusRow('b')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' })).toHaveFocus();
+    expect(handle.current?.focusRow('zzz')).toBe(false);
+    handle.current?.focusResults();
+    expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveFocus();
+
+    view.rerender(
+      <MemoryRouter>
+        <QueueWorkspace<Row>
+          {...props({ table: { ...props().table, layout: 'cards', card: (row) => row.code } })}
+          ref={handle}
+        />
+      </MemoryRouter>,
+    );
+    expect(handle.current?.focusRow('a')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ' })).toHaveFocus();
+  });
+
+  // Break caught: a template that words "nothing fits" with its own sentence, so that it said "take them off" beside a button the page labelled "Show every request".
+  it('says nothing of its own under "No requests match": the words are the page’s', () => {
+    renderQueue({
+      result: { status: 'ready', rows: [] },
+      empty: {
+        noun: 'pickup requests',
+        none: 'x',
+        filtered: true,
+        onClearFilters: () => undefined,
+        clearLabel: 'Show everything',
+        filteredText: 'No request has that date. Show everything to start again.',
+      },
+    });
+
+    expect(
+      screen.getByText('No request has that date. Show everything to start again.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Show everything' })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/Take them off|Show every request/);
   });
 
   // Break caught: a template whose own composition fails a WCAG 2.2 rule that no part fails alone.

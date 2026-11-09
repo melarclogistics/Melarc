@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type ReactNode,
+  type Ref,
+} from 'react';
 
 import { Button } from '../button/Button';
-import { DataTable, type DataTableProps } from '../data-table/DataTable';
+import { DataTable, type DataTableHandle, type DataTableProps } from '../data-table/DataTable';
 import { EmptyStateV2 } from '../empty-state/EmptyStateV2';
 import { FilterBar, type FilterBarProps } from '../filter-bar/FilterBar';
 import { PageHeader, type PageHeaderProps } from '../page-header/PageHeader';
@@ -31,6 +38,12 @@ export type QueueResult<Item> =
       readonly rows: readonly Item[];
       /** The rows are the last that were read and a newer read failed or is overdue: the page's words, and the way to read again. The rows stay. */
       readonly stale?: { readonly message: string; readonly onRefresh?: () => void };
+      /**
+       * A newer read is under way **after an act** (a confirmation, a decision) and the rows stay where they are, with the person's place, their focus and the row that changed
+       * (`table.changedIds`): the table says it is busy and draws no loading rows. A page that must not show rows as if they answered the read says `loading` instead (a page of
+       * another filter, a refresh the person asked for).
+       */
+      readonly refreshing?: boolean;
     };
 
 interface EmptinessBase {
@@ -56,10 +69,18 @@ export type QueueEmptiness = EmptinessBase &
         readonly filtered: true;
         /** Takes every filter off. Required: the one useful thing to do with a filter that hides everything. */
         readonly onClearFilters: () => void;
-        /** What the button says. Default "Show every request"; say it in the queue's own words. */
-        readonly clearLabel?: string;
+        /** What the button says, in the queue's own words ("Show every request"). */
+        readonly clearLabel: string;
+        /**
+         * What the filters hide, in the queue's own words, under "No <noun> match" and beside the button ("Nothing fits these filters. Show every request to start again."): the template has no
+         * words of its own for it, so that the sentence and the button say the same thing.
+         */
+        readonly filteredText: string;
       }
   );
+
+/** What a page may ask of the queue without reaching into its markup: where focus goes. The table's own handle. */
+export type QueueWorkspaceHandle = DataTableHandle;
 
 /** The table's own configuration: everything of `DataTable` that the template does not decide (its states are `result`'s and `empty`'s). */
 export type QueueTableConfig<Item> = Omit<
@@ -68,6 +89,8 @@ export type QueueTableConfig<Item> = Omit<
 >;
 
 export interface QueueWorkspaceProps<Item> {
+  /** Gives the page the focus handle: put focus on a row (the record the person came back from, the one an act changed) or on the results, whatever the table is drawn as now. */
+  readonly ref?: Ref<QueueWorkspaceHandle>;
   /** The page's header: title, the count where the server states one, the freshness line, the breadcrumb and the page's actions (the one primary, in Ink). */
   readonly header: PageHeaderProps;
   /** Named views of the queue, each with the server's count where it states one. Without them the queue is one list. */
@@ -91,7 +114,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
   const clear =
     empty.filtered === true ? (
       <Button type="button" variant="secondary" onClick={empty.onClearFilters}>
-        {empty.clearLabel ?? 'Show every request'}
+        {empty.clearLabel}
       </Button>
     ) : undefined;
   if (hub !== undefined) {
@@ -112,11 +135,11 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
       >
         {clear === undefined
           ? `No ${noun} at ${hub.name}. Show all hubs to see those of every hub your session reaches.`
-          : `No ${noun} at ${hub.name} fit these filters. Show all hubs, or take the other filters off.`}
+          : `No ${noun} at ${hub.name} fit these filters.`}
       </EmptyStateV2>
     );
   }
-  if (clear !== undefined) {
+  if (empty.filtered === true) {
     return (
       <EmptyStateV2
         variant="filtered-empty"
@@ -125,7 +148,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
         announce={announce}
         action={clear}
       >
-        {`Nothing fits these filters. Take them off to start again.`}
+        {empty.filteredText}
       </EmptyStateV2>
     );
   }
@@ -150,6 +173,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
  * a way to read again.
  */
 export function QueueWorkspace<Item>({
+  ref,
   header,
   views,
   filters,
@@ -161,6 +185,17 @@ export function QueueWorkspace<Item>({
   panel,
 }: QueueWorkspaceProps<Item>) {
   const root = useRef<HTMLDivElement>(null);
+  const tableHandle = useRef<DataTableHandle>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusRow: (id) => tableHandle.current?.focusRow(id) ?? false,
+      focusResults: () => {
+        tableHandle.current?.focusResults();
+      },
+    }),
+    [],
+  );
   /** The record the panel was last opened from: the row to give focus back to. */
   const openedFrom = useRef<string | undefined>(undefined);
   const { onOpen, rowId } = table;
@@ -209,6 +244,8 @@ export function QueueWorkspace<Item>({
   const grid = (
     <DataTable<Item>
       {...table}
+      ref={tableHandle}
+      busy={result.status === 'ready' && result.refreshing === true}
       crowded={table.crowded ?? (docked ? 'drop' : 'cards')}
       {...(onOpen === undefined
         ? {}

@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
-import { isUnclaimed, requestOfClick, restorePlace, searchOf } from './queue-return';
+import {
+  isUnclaimed,
+  requestOfClick,
+  restorePlace,
+  restoreQueuePlace,
+  searchOf,
+} from './queue-return';
 
 /**
  * The parts of coming back to the pickup queue that touch the page itself (COMPONENT_PATTERNS section 22f): which click leaves a place, what a
@@ -284,5 +290,58 @@ describe('restorePlace: the position and the focus, given back', () => {
     restorePlace(root, place());
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+  });
+});
+
+describe('restoreQueuePlace: the position and the focus, given back through the table (the review of 5edada2, M4)', () => {
+  const place = (overrides: Partial<QueuePlace> = {}): QueuePlace => ({
+    signature: 'all',
+    search: '',
+    tokens: [],
+    scrollY: 480,
+    requestId: REQUEST,
+    ...overrides,
+  });
+  const target = (found: boolean) => ({
+    focusRow: vi.fn(() => found),
+    focusResults: vi.fn(),
+  });
+
+  // Break caught: a page that has to look for the kit's classes to find the request, and a position that is not given back.
+  it('scrolls the document to where it was and asks the table for the request the officer opened', () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    const rows = target(true);
+
+    restoreQueuePlace(rows, place());
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 480, left: 0, behavior: 'instant' });
+    expect(rows.focusRow).toHaveBeenCalledWith(REQUEST);
+    expect(rows.focusResults).not.toHaveBeenCalled();
+  });
+
+  it('asks for the results when the request is no longer on the page', () => {
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    const rows = target(false);
+
+    restoreQueuePlace(rows, place());
+
+    expect(rows.focusRow).toHaveBeenCalledWith(REQUEST);
+    expect(rows.focusResults).toHaveBeenCalledTimes(1);
+  });
+
+  // Break caught: focus taken from an officer who moved it while the page was being read.
+  it('gives the position back and leaves focus where the officer put it', () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    const field = document.createElement('input');
+    document.body.append(field);
+    field.focus();
+    const rows = target(true);
+
+    restoreQueuePlace(rows, place());
+
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(rows.focusRow).not.toHaveBeenCalled();
+    expect(rows.focusResults).not.toHaveBeenCalled();
+    expect(field).toHaveFocus();
   });
 });

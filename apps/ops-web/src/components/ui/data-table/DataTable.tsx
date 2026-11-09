@@ -9,12 +9,14 @@ import {
 import {
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from 'react';
 
@@ -84,7 +86,23 @@ export interface BulkAction {
   readonly note?: (ineligible: number) => string;
 }
 
+/**
+ * What a page may ask of a table without reaching into its markup (the review of 5edada2, M4): where focus goes. A page that keeps the place the person left, or that moves them to the results
+ * after a change of page, asks the table; it never looks for a class of the kit, for the kit changes its markup and the page would then fail without a word.
+ */
+export interface DataTableHandle {
+  /**
+   * Puts focus on the control of a row as it is drawn now (the button that opens it, else its box, else its act: the table is a table or cards, whichever it is now), and brings it into view by
+   * the least scroll, under the top bar and not behind it. `false` when the row is not drawn or has nothing that can take focus. The id is matched without regard to case.
+   */
+  readonly focusRow: (id: string) => boolean;
+  /** Puts focus on the box the rows are in (the results as a whole), without moving the page: where focus goes when the row it was on is not there. */
+  readonly focusResults: () => void;
+}
+
 export interface DataTableProps<Item> {
+  /** Gives the page the handle above. */
+  readonly ref?: Ref<DataTableHandle>;
   /** Names the table: what its rows are ("Pickup requests"). It is the caption, read by assistive technology, and names the box that scrolls. */
   readonly label: string;
   readonly columns: readonly DataColumn<Item>[];
@@ -152,6 +170,11 @@ export interface DataTableProps<Item> {
 
   /** `ready` (the default), `loading` (skeleton rows in the table's shape) or `error`. */
   readonly status?: 'ready' | 'loading' | 'error';
+  /**
+   * The rows are being read again and **stay as they are** (after an act, when the person must keep their place, their focus and the row that changed): the table says it is busy to assistive
+   * technology and draws nothing else, no skeleton and no loading line. A read that must not be taken for an answer is `status: 'loading'`.
+   */
+  readonly busy?: boolean;
   /** How many skeleton rows to draw while loading. Default 8. */
   readonly loadingRows?: number;
   /** What a screen reader hears while it loads: "Loading pickup requests". */
@@ -273,6 +296,7 @@ const isEnabled = (node: HTMLElement): boolean =>
  * each is told in a region that is in the page before it speaks. Narrow, the rows are cards (`card`), and the columns the screen marked lesser go (`priority`).
  */
 export function DataTable<Item>({
+  ref,
   label,
   columns,
   rows,
@@ -289,6 +313,7 @@ export function DataTable<Item>({
   sort,
   onSortChange,
   status = 'ready',
+  busy = false,
   loadingRows = 8,
   loadingLabel = 'Loading',
   error,
@@ -330,6 +355,31 @@ export function DataTable<Item>({
     controls.current.set(id, own);
   };
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusRow: (id) => {
+        const wanted = id.toLowerCase();
+        const key = [...controls.current.keys()].find(
+          (candidate) => candidate.toLowerCase() === wanted,
+        );
+        const target = key === undefined ? undefined : control(key);
+        if (key === undefined || target === undefined) return false;
+        setActiveId(key);
+        target.focus({ preventScroll: true });
+        // The least scroll that brings it into view; the page's scroll padding and the control's scroll margin keep it clear of the top bar and of the table's own header.
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return true;
+      },
+      focusResults: () => {
+        scroller.current?.focus({ preventScroll: true });
+      },
+    }),
+    // `control` reads the registry of controls, which is a ref and not state: the handle needs no new identity when the rows change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const rowHeaderColumns = columns.filter((column) => column.rowHeader === true);
   if (rowHeaderColumns.length > 1) {
@@ -695,6 +745,7 @@ export function DataTable<Item>({
         className="ui-data-table__scroller"
         role="region"
         aria-label={label}
+        aria-busy={busy ? true : undefined}
         tabIndex={0}
         style={maxHeight === undefined ? undefined : { maxHeight }}
         onScroll={
