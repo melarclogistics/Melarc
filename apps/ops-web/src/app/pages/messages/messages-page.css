@@ -45,11 +45,6 @@
   overflow-wrap: anywhere;
 }
 
-/* A time, a number's hint: a short line in a table that scrolls sideways rather than breaks in the middle. */
-.messages-nowrap {
-  white-space: nowrap;
-}
-
 /*
  * The dash and its hidden words: the words are positioned against the dash and not against the page, so that a table scrolled sideways inside its
  * region takes them with it (positioned against the page, they would sit off to the right and make the page itself scroll to reach them).

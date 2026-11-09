@@ -57,6 +57,10 @@ const rowAt = (page: Page, time: string) =>
 
 const table = (page: Page) => page.getByRole('table', { name: 'Messages' });
 
+/** The status, the audience and the channel are chosen in the popover of the filter row, which opens with the Filter button. */
+const openFilters = (page: Page) =>
+  page.getByRole('button', { name: 'Filter', exact: true }).click();
+
 /** The requests the page made for the list. */
 const lists = (api: MessagesApi) =>
   api.calls.filter((call) => call.path === '/api/v1/notifications');
@@ -245,7 +249,7 @@ test.describe('the log', () => {
         'Messages appear here when the platform tells someone about an act, for example a confirmed pickup request.',
       ),
     ).toBeVisible();
-    await expect(table(page)).toHaveCount(0);
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
   });
 
   // Break caught: a made-up value in the address sent to the server as a made-up filter (the stand-in refuses it as the server does).
@@ -273,14 +277,13 @@ test.describe('the filters', () => {
     const { api } = await open(page, LOG);
     await expect(table(page)).toBeVisible();
 
-    const show = page.getByRole('combobox', { name: 'Show' });
+    // The three choices are in the popover of the filter row, and are reached in order.
+    await openFilters(page);
     const status = page.getByRole('combobox', { name: 'Status' });
     const audience = page.getByRole('combobox', { name: 'For' });
     const channel = page.getByRole('combobox', { name: 'Channel' });
 
-    await show.focus();
-    await page.keyboard.press('Tab');
-    await expect(status).toBeFocused();
+    await status.focus();
     await page.keyboard.type('Held');
     await expect(page).toHaveURL(/[?&]state=SUPPRESSED(&|$)/);
     // The two messages that were held back.
@@ -297,11 +300,11 @@ test.describe('the filters', () => {
     await expect(channel).toBeFocused();
     await page.keyboard.type('In');
     await expect(page).toHaveURL(/channel=FEED/);
-    // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the next stop.
+    // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the empty state's action.
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
 
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Show every message' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Show every message' }).focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
@@ -324,6 +327,7 @@ test.describe('the filters', () => {
     const { api } = await open(page, LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
 
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Status' }).selectOption('FAILED');
     await expect(page).toHaveURL('/messages?state=FAILED');
     await expect(page.getByRole('rowheader')).toHaveCount(1);
@@ -332,6 +336,7 @@ test.describe('the filters', () => {
     // Linked, a view is the same view.
     await page.goto('/messages?state=SUPPRESSED&audience=AD_HOC_SENDER&channel=SMS');
     await expect(page.getByRole('rowheader')).toHaveCount(2);
+    await openFilters(page);
     await expect(page.getByRole('combobox', { name: 'Status' })).toHaveValue('SUPPRESSED');
     await expect(page.getByRole('combobox', { name: 'For' })).toHaveValue('AD_HOC_SENDER');
     await expect(page.getByRole('combobox', { name: 'Channel' })).toHaveValue('SMS');
@@ -344,10 +349,13 @@ test.describe('the filters', () => {
     await open(page, LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
 
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Status' }).selectOption('FAILED');
     // The first filter is applied (it is in the address) before the second is chosen: two choices made before the page has taken the first are a race of the test's own, which
     // a loaded machine loses (the gate of 5 November 2026 lost it once, in one project of 1,058 tests, and it passed alone three times in three).
     await expect(page).toHaveURL('/messages?state=FAILED');
+    // ...and drawn: its chip is the sign that the page has taken it (the address changes before the page is drawn again).
+    await expect(page.getByRole('button', { name: 'Remove filter: Status: Failed' })).toBeVisible();
     await page.getByRole('combobox', { name: 'For' }).selectOption('RIDER');
 
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
@@ -356,8 +364,12 @@ test.describe('the filters', () => {
 
     await expect(page).toHaveURL(LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
-    await expect(page.getByRole('combobox', { name: 'Status' })).toHaveValue('');
-    await expect(page.getByRole('combobox', { name: 'For' })).toHaveValue('');
+    // No choice is left: no chip of any, and the first view is the one chosen.
+    await expect(page.getByRole('button', { name: /^Remove filter: / })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Every message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   // Break caught (the brief): the Ops feed offered as a different list, a status carried into it, or an entry invented to fill it.
@@ -367,7 +379,7 @@ test.describe('the filters', () => {
     const { api } = await open(page, '/messages?state=FAILED');
     await expect(page.getByRole('rowheader')).toHaveCount(1);
 
-    await page.getByRole('combobox', { name: 'Show' }).selectOption({ label: 'The Ops feed' });
+    await page.getByRole('tab', { name: 'The Ops feed' }).click();
 
     await expect(page.getByRole('heading', { name: 'Nothing in the Ops feed yet' })).toBeVisible();
     const search = new URL(page.url()).searchParams;
@@ -386,8 +398,11 @@ test.describe('the filters', () => {
         );
       }),
     ).toBe(true);
-    await expect(table(page)).toHaveCount(0);
-    await expect(page.getByRole('combobox', { name: 'Show' })).toHaveValue('ops-feed');
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'The Ops feed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
 
     await page.getByRole('button', { name: 'Show every message' }).click();
     await expect(page).toHaveURL(LOG);
@@ -401,7 +416,7 @@ test.describe('the filters', () => {
 
     await page.getByRole('button', { name: 'Next page' }).click();
     await expect(page.getByText(/Showing 4 messages on page 2/)).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Messages' })).toBeFocused();
     expect(lists(api).some((call) => call.search === '?page_token=p4')).toBe(true);
 
     await page.getByRole('button', { name: 'Next page' }).click();
@@ -409,6 +424,7 @@ test.describe('the filters', () => {
     await expect(page.getByRole('button', { name: 'Next page' })).toHaveCount(0);
 
     // A new choice starts again at the first page: the next page of one view is never asked for under another.
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Channel' }).selectOption('SMS');
     await expect(page.getByText('Showing 4 messages. More follow on the next page.')).toBeVisible();
     expect(lists(api).at(-1)?.search).toBe('?channel=SMS');
@@ -423,10 +439,10 @@ test.describe('when the messages cannot be had', () => {
 
     await expect(page.getByRole('alert')).toContainText('The messages could not be loaded.');
     await expect(page.locator('body')).not.toContainText(DIAGNOSTIC);
-    await expect(table(page)).toHaveCount(0);
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
 
     api.world.listFails = undefined;
-    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByRole('rowheader')).toHaveCount(11);
   });
 
@@ -435,9 +451,9 @@ test.describe('when the messages cannot be had', () => {
   }) => {
     await open(page, LOG, { listFails: { status: 403, code: 'PERMISSION_DENIED' } });
 
-    await expect(
-      page.getByText('Your account can’t see the message log. Ask an administrator for access.'),
-    ).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText(
+      'Your account can’t see the message log. Ask an administrator for access.',
+    );
     await expect(page.locator('body')).not.toContainText('notification.read');
     await expect(page.locator('body')).not.toContainText(
       /Ops Staff|Senior Ops|Platform Admin|Finance/,
@@ -457,7 +473,8 @@ const SCREENS: readonly Screen[] = [
     name: 'the log',
     reach: async (page) => {
       await open(page, LOG);
-      await expect(page.getByRole('rowheader')).toHaveCount(11);
+      // Rows or cards, by the room there is: the count the page states is the same.
+      await expect(page.getByText('Showing 11 messages.')).toBeVisible();
       return undefined;
     },
   },
@@ -466,7 +483,7 @@ const SCREENS: readonly Screen[] = [
     reach: async (page) => {
       await open(page, ABOUT);
       await expect(page.getByText('Messages about one request')).toBeVisible();
-      await expect(page.getByRole('rowheader')).toHaveCount(4);
+      await expect(page.getByText('Showing 4 messages.')).toBeVisible();
       return undefined;
     },
   },
@@ -509,7 +526,7 @@ const SCREENS: readonly Screen[] = [
     reach: async (page) => {
       const held: Hold = hold();
       await open(page, LOG, { hold: held });
-      await expect(page.getByText('Loading the messages…')).toBeVisible();
+      await expect(page.getByText('Loading messages')).toBeAttached();
       return held.release;
     },
   },
@@ -558,7 +575,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
       }) => {
         await page.setViewportSize({ width, height });
         await open(page, path);
-        await expect(page.getByRole('rowheader').first()).toBeVisible();
+        await expect(page.getByText(/^Showing \d+ messages/)).toBeVisible();
         await page.evaluate(() => {
           document.documentElement.style.fontSize = '200%';
         });
@@ -591,19 +608,22 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
     expect(await border('.messages-subject')).toEqual({ style: 'solid', width: 1 });
 
     // By keyboard, so that the focus is a keyboard user's, which shows its ring.
-    const show = page.getByRole('combobox', { name: 'Show' });
-    await show.focus();
+    await openFilters(page);
+    const status = page.getByRole('combobox', { name: 'Status' });
+    await status.focus();
     await page.keyboard.press('Tab');
     await page.keyboard.press('Shift+Tab');
-    await expect(show).toBeFocused();
-    expect(await show.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid');
+    await expect(status).toBeFocused();
+    expect(await status.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe(
+      'solid',
+    );
   });
 
   test('with reduced motion nothing moves while the log loads', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const held = hold();
     await open(page, LOG, { hold: held });
-    await expect(page.getByText('Loading the messages…')).toBeVisible();
+    await expect(page.getByText('Loading messages')).toBeAttached();
 
     const running = await page.evaluate(
       () =>
@@ -620,7 +640,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     const held = hold();
     await open(page, LOG, { hold: held });
-    await expect(page.getByText('Loading the messages…')).toBeVisible();
+    await expect(page.getByText('Loading messages')).toBeAttached();
 
     const running = await page.evaluate(
       () =>

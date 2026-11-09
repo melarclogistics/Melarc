@@ -242,8 +242,9 @@ describe('the message log and a number, a text and a code', () => {
         file.path,
       ).toEqual([]);
     }
+    // The masked hint is read where the page draws it: from the entry a cell or a card is given (the scan is not vacuous).
     expect(
-      propertiesRead(fileNamed('MessageLogPage.tsx').text, 'MessageLogPage.tsx', ['row']),
+      propertiesRead(fileNamed('MessageLogPage.tsx').text, 'MessageLogPage.tsx', ['row', 'entry']),
     ).toContain('destination_hint');
   });
 
