@@ -868,6 +868,16 @@ The Ops Portal is an application and not a website, so its navigation is a menu 
 
 > **Code:** `apps/ops-web/src/app/pages/staff/`, `platform/staff/`. (The signed-in landing is My work, `app/pages/my-work/`, §12.6.)
 
+- **On the templates (redesign step R7b, run 5, 9 November 2026), with behaviour unchanged.** *The list* (`/admin/staff`) and *the sessions of a person* (`/admin/sessions`) are the queue
+  workspace (§37, *the four page templates*): the statuses of a profile are its views, the search by name or email is a field in the filter row's popover and a removable chip, the exact
+  count of the approver's queue is the header's (only where the whole queue is on one page), and the rows are a table that is cards under 40rem (a person is a name over a work email, a
+  session is the time it started; a session's act is in its row and in its card). *The person's own trusted browsers* (`/account/trusted-browsers`) are the same template, a list that is not
+  paged or filtered, with the removal in each row; the rows and cards are the ones the profile's panel draws (`trustedBrowserRows`). *Adding a profile* and *the reset of an authenticator* are
+  the task form: two sections (the person; the role and hub) and one section (what happens), the act with its way out as the form's actions, the reason of the reset asked in the act's own
+  dialog beside the form. *A profile* is the record page: the name is its heading (`titleKind: 'name'`, a name is not an operational code), the decision of a profile that waits is the header's, and
+  the facts, the credentials (a new setup link, a recovery, the reset), the sessions and the trusted browsers are panels, so that acts are grouped by what they change (§6.2 of the direction). The
+  sentences that told, above the acts, what each act does are gone: each act's dialog says it, and the one line that changes whether to act now (the maker's, the role that needs a Platform
+  Admin) stays under the header. No leave guard is turned on for the form (the page had none), and no list has a freshness line.
 - **Six screens behind the registry** (`SIGNED_IN_ROUTES`): `/` (the landing; My work since redesign step R4), `/admin/staff` (the list and the approver's queue),
   `/admin/staff/new`, `/admin/staff/{id}`, `/admin/staff/{id}/mfa/reset` and `/admin/sessions`. Each names the permission key its guard needs
   and, for the first three and the sessions page, a menu entry (the sidebar's since redesign step R4; S0.44's landing listed them with a line of what each is for). The detail and the

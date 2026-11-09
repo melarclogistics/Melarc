@@ -257,6 +257,42 @@ test.describe('the lists, drawn for the room they have', () => {
     await expect(
       first.getByRole('button', { name: 'End session started 23 Oct, 08:00' }),
     ).toBeVisible();
+    // Break caught: an act drawn in a card and covered by something over the card, so that it is seen and cannot be pressed.
+    await first.getByRole('button', { name: 'End session started 23 Oct, 08:00' }).click();
+    await expect(page.getByRole('alertdialog', { name: 'End this session?' })).toBeVisible();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('draws the trusted browsers as a table at 1280 px and as cards, with their removal, at 390 px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { api, watch } = await open(page, '/account/trusted-browsers');
+    const table = queueTable(page, 'Your trusted browsers');
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Browser',
+      'Added',
+      'Last used',
+      'Ends',
+      'Action',
+    ]);
+    await expect(queueCards(page, 'Your trusted browsers')).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const cards = queueCards(page, 'Your trusted browsers');
+    await expect(cards).toBeVisible();
+    await expect(cards.getByRole('listitem')).toHaveCount(2);
+    await expect(table).toHaveCount(0);
+    const second = cards.getByRole('listitem').nth(1);
+    await expect(second.getByRole('heading', { level: 2 })).toHaveText('Safari on macOS');
+    await expect(second).toContainText('Not used yet');
+    await expect(cards.getByRole('listitem').first()).toContainText('This browser');
+    // Pressed from the card, the removal asks first and sends nothing until it is confirmed.
+    await second.getByRole('button', { name: 'Remove Safari on macOS' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Remove this browser?' });
+    await expect(dialog).toBeVisible();
+    expect(api.calls.filter((call) => call.method === 'DELETE')).toHaveLength(0);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     expect(watch.problems).toEqual([]);
   });
