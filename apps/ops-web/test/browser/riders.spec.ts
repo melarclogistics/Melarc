@@ -926,7 +926,8 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the roster',
     reach: async (page) => {
       await open(page, '/admin/riders');
-      await expect(page.getByRole('table', { name: 'Riders' })).toBeVisible();
+      // A rider is a row of a table where the table has room and a card where it has not: the rider's link is in both.
+      await expect(page.getByRole('link', { name: 'Kwame Mensah' })).toBeVisible();
     },
   },
   {
