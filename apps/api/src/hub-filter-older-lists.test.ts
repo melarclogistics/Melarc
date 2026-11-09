@@ -70,6 +70,11 @@ const EVERY_HUB = staffWith({ hubScopeMode: 'ALL', authorizedHubIds: [] });
 const NO_HUB = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [] });
 /** A session with a hub of its own whose grant of the list's key reaches no hub at all (no seeded bundle is one; the table of profiles still shows it its own row). */
 const HOME_ONLY = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [] }, [HUB]);
+/**
+ * A session that holds two hubs, `HUB` and `OUTSIDE`: what an effective assignment (`HubAssignment`) adds to the one hub a staff session is issued with today, its primary
+ * membership. Its grant of the list's key reaches no hub. The list of hubs is in ascending order, so the session cannot tell which of the two is its primary hub.
+ */
+const HOME_AND_ASSIGNED = staffWith({ hubScopeMode: 'SET', authorizedHubIds: [] }, [HUB, OUTSIDE]);
 
 /** A runner that notes each authorization it is handed and answers an empty page, so that a read that went ahead is told from one that was not made. */
 function runnerOf(): {
@@ -210,6 +215,23 @@ describe.each(STAFF_LIST)('%s, naming the caller’s own hub (AC-HUBF-14)', (_op
 
     expect(received).toHaveLength(1);
     expect(received[0]).toBe(HOME_ONLY);
+  });
+
+  // Break caught (run 4, Stage 1, item 8): the own hub told from every hub the session holds and not from its primary hub. Once an effective assignment adds a hub to the
+  // session, a hub the profile does not belong to would be read for as if it were its own, and the rule of the table (a profile's own row is shown to its holder) is about
+  // the profile's primary hub alone. The list of hubs is in ascending order and does not say which is primary, so a session that holds several answers none of them as its
+  // own (the empty page, no read) until the primary hub is carried on the session: not read for every hub it holds.
+  it.each([
+    ['the hub of a session that holds two (an assignment beside its primary)', OUTSIDE],
+    ['the primary hub of a session that holds two, which it cannot tell from the other', HUB],
+  ])('answers %s with the empty page and no read', async (_which, hubId) => {
+    const { runner, received } = runnerOf();
+
+    await expect(make(runner).list(HOME_AND_ASSIGNED, 'correlation', { hubId })).resolves.toEqual(
+      EMPTY,
+    );
+
+    expect(received, 'the runner was not asked').toEqual([]);
   });
 
   // Break caught: the exception widened to every hub (the short answer lost for all of them, so the time tells whether a hub exists), or to a hub the session

@@ -88,18 +88,30 @@ export function hubOutsideStaffGrant(authorized: AuthorizedRequest, hubId: strin
 }
 
 /**
- * Whether `hubId` is a hub the session itself belongs to, whatever the grant of this operation reaches: `authority.authorizedHubIds`, which the
- * session was issued with and which for a staff member is its primary hub (`postgres.staff-identity-directory.adapter.ts`; an effective assignment
- * would add to it). It reads nothing from the database. It exists for the one staff list whose table shows a row to its holder whatever the grant
- * (`listStaffIdentities`: a profile's own row), so that a `hub_id` that names the caller's own hub is not answered empty by `hubOutsideStaffGrant`
- * and the filter only ever narrows what the same session sees without it (task A3.5, `AC-HUBF-14`). Every other hub is still answered without a
- * statement, so a hub that exists and a hub that does not take the same short time.
+ * The primary hub of a session, as far as the session itself can say: **the one hub it holds**. A staff member's session is issued with its primary
+ * membership alone (`postgres.staff-identity-directory.adapter.ts`), which is all there is until an effective assignment (`HubAssignment`, domain-model.md
+ * section 5.8) adds hubs, and the list of hubs is then in ascending order and no longer says which of them is the profile's own. A session that holds
+ * several has no primary hub **here**, and a session with none has none: `undefined` for both (run 4, Stage 1, item 8; the day an assignment is built, the
+ * primary hub has to be carried on the session, a Finding of that run). It reads nothing from the database.
+ */
+export function primaryHubOfSession(authorized: AuthorizedRequest): string | undefined {
+  const hubs = authorized.session.authority.authorizedHubIds;
+  return hubs.length === 1 ? hubs[0] : undefined;
+}
+
+/**
+ * Whether `hubId` is **the primary hub** of the session itself, whatever the grant of this operation reaches (`primaryHubOfSession`). It reads nothing from the
+ * database. It exists for the one staff list whose table shows a row to its holder whatever the grant (`listStaffIdentities`: a profile's own row, which is in
+ * the profile's primary hub and in no other), so that a `hub_id` that names the caller's own hub is not answered empty by `hubOutsideStaffGrant` and the filter
+ * only ever narrows what the same session sees without it (task A3.5, `AC-HUBF-14`). It compares with the primary hub alone and not with every hub the session
+ * holds (run 4, Stage 1, item 8): a hub an effective assignment adds is not the profile's own hub, and a session that cannot say which of its hubs is primary
+ * answers none. Every other hub is still answered without a statement, so a hub that exists and a hub that does not take the same short time. "Is this hub in
+ * the grant" stays `scopeIncludesHub`'s one answer (task A3.6).
  */
 export function hubOfTheSession(authorized: AuthorizedRequest, hubId: string): boolean {
-  return scopeIncludesHub(
-    { hubScopeMode: 'SET', authorizedHubIds: authorized.session.authority.authorizedHubIds },
-    hubId,
-  );
+  const primary = primaryHubOfSession(authorized);
+  if (primary === undefined) return false;
+  return scopeIncludesHub({ hubScopeMode: 'SET', authorizedHubIds: [primary] }, hubId);
 }
 
 const held = new WeakMap<object, AuthorizedRequest>();
