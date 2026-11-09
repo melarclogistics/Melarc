@@ -172,6 +172,37 @@ describe('the queue: what it shows', () => {
     expect(queryOf().get('one_package_exception_state')).toBe('REQUESTED');
   });
 
+  // Break caught (the review of 499399c): a pager whose button is gone while the next page loads and drops focus on the document, because this queue never asked for the results to take
+  // it as the other queues do. Once a page is read, whichever way the person moved, focus is on the results.
+  it('puts focus on the results once a page is read, going on and coming back', async () => {
+    let calls = 0;
+    const other = pickupRequestFixture({
+      id: EARLIER_REQUEST_ID,
+      code: 'ACC-PR-9WXH4T',
+      declared_package_count: 1,
+      one_package_exception: exceptionFixture(),
+    });
+    const { user } = open(() => {
+      calls += 1;
+      return page([calls === 2 ? other : waiting], calls === 2 ? null : 'next-page');
+    });
+    const results = () =>
+      screen.getByRole('region', { name: 'One-package exceptions waiting for approval' });
+    await screen.findByText('Showing 1 exception. More follow on the next page.');
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(await screen.findByRole('rowheader', { name: /^ACC-PR-9WXH4T/ })).toBeVisible();
+    await waitFor(() => {
+      expect(results()).toHaveFocus();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Previous page' }));
+    expect(await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).toBeVisible();
+    await waitFor(() => {
+      expect(results()).toHaveFocus();
+    });
+  });
+
   // A page read before a request was cancelled still shows its exception (the server's queue leaves a cancelled request out, AC-QSUM-12);
   // approving it would make a fee due for a pickup that will not happen, so the page shows it with its state and offers no approval.
   it('offers no approval for a request that is no longer waiting for confirmation', async () => {

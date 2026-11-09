@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 
 import { useSignedInSession } from '../session/use-permissions';
-import { bindingOf, LIST_PATHS, QueueContinuity } from './queue-continuity';
+import { bindingOf, LIST_PATHS, QueueContinuity, RECORD_PATHS } from './queue-continuity';
 import { ContinuityContext } from './queue-continuity-context';
 
 /**
- * Where each list's one remembered place lives (COMPONENT_PATTERNS section 22f; the pickup queue and the manifest list): a layout route inside
+ * Where each list's one remembered place lives (COMPONENT_PATTERNS section 22f; the pickup queue, the manifest list and the approver's queue): a layout route inside
  * the session guard, so that it exists only for a signed-in session and is gone with it. The memory is this component's own state, in the
  * application and nowhere else (not the address, not a storage), so a full reload, a new tab or a typed address starts without it. Each list has a
  * memory of its own, held here together so that one door lets go of both.
@@ -19,8 +19,9 @@ import { ContinuityContext } from './queue-continuity-context';
 export function QueueContinuityScope() {
   const me = useSignedInSession();
   const [stores] = useState(() => ({
-    pickup: new QueueContinuity(LIST_PATHS.pickup),
-    manifests: new QueueContinuity(LIST_PATHS.manifests),
+    pickup: new QueueContinuity(LIST_PATHS.pickup, RECORD_PATHS.pickup),
+    manifests: new QueueContinuity(LIST_PATHS.manifests, RECORD_PATHS.manifests),
+    approvals: new QueueContinuity(LIST_PATHS.approvals, RECORD_PATHS.approvals),
   }));
   const { pathname } = useLocation();
   const binding = me === undefined ? undefined : bindingOf(me.session);

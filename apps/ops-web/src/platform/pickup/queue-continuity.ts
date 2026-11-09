@@ -31,12 +31,24 @@ const LONGEST_SEARCH = 256;
 
 /**
  * The lists that remember where they were left, and the address of each with the records under it. The pickup queue was the first and is the one
- * a memory is made for unless it is told another; the manifest list (S1.25) keeps its place by the same rules, in a memory of its own.
+ * a memory is made for unless it is told another; the manifest list (S1.25) and the approver's queue (run 5) keep their place by the same rules, each
+ * in a memory of its own.
  */
-export type ContinuityList = 'pickup' | 'manifests';
+export type ContinuityList = 'pickup' | 'manifests' | 'approvals';
 export const LIST_PATHS: Readonly<Record<ContinuityList, string>> = {
   pickup: '/pickup-requests',
   manifests: '/manifests',
+  approvals: '/approvals',
+};
+
+/**
+ * The address the records of each list live under. A request and a manifest are under their list; the approver's queue lists requests, whose pages are the pickup queue's
+ * (`/pickup-requests/{id}`), so its visit is out of `/approvals` and into a record of another path.
+ */
+export const RECORD_PATHS: Readonly<Record<ContinuityList, string>> = {
+  pickup: '/pickup-requests',
+  manifests: '/manifests',
+  approvals: '/pickup-requests',
 };
 
 /** The address of the pickup queue, and of the requests under it. */
@@ -44,17 +56,18 @@ const QUEUE_PATH = LIST_PATHS.pickup;
 
 /**
  * Whether a place in the application is still within the visit that began when a record was opened from a list: the list, that record and the
- * pages of that record (the pickup queue and a request, unless another list's address is given). Any other screen, another record or the making of
- * a new one ends it.
+ * pages of that record (the pickup queue and a request, unless another list's address is given, and the records' address when it is not the list's).
+ * Any other screen, another record or the making of a new one ends it.
  */
 export function isWithinVisit(
   pathname: string,
   requestId: string,
   listPath: string = QUEUE_PATH,
+  recordsPath: string = listPath,
 ): boolean {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === listPath) return true;
-  const record = `${listPath}/${requestId.toLowerCase()}`;
+  const record = `${recordsPath}/${requestId.toLowerCase()}`;
   return path === record || path.startsWith(`${record}/`);
 }
 
@@ -99,15 +112,17 @@ function kept(given: QueuePlace): QueuePlace | undefined {
  * Reading it changes nothing (`peek`), so that a render, or a render the development build runs twice, cannot use it up; whoever restores from
  * it says so (`discard`) once the visit is over.
  *
- * One memory is for one list (`listPath`, the pickup queue's unless another is given): the places of two lists are held apart, because the same
- * filters make the same signature in each, and a place is judged by the visit of the list that made it.
+ * One memory is for one list (`listPath`, the pickup queue's unless another is given, and `recordsPath`, the address its records live under when that is not the list's): the places of
+ * two lists are held apart, because the same filters make the same signature in each, and a place is judged by the visit of the list that made it.
  */
 export class QueueContinuity {
   private held: { readonly place: QueuePlace; readonly binding: string } | undefined;
   private readonly listPath: string;
+  private readonly recordsPath: string;
 
-  constructor(listPath: string = QUEUE_PATH) {
+  constructor(listPath: string = QUEUE_PATH, recordsPath: string = listPath) {
     this.listPath = listPath;
+    this.recordsPath = recordsPath;
   }
 
   /** Keeps where the officer was as they open a request, in place of any place held before. A place that cannot be kept leaves none. */
@@ -136,7 +151,7 @@ export class QueueContinuity {
   noteLocation(pathname: string): void {
     if (
       this.held !== undefined &&
-      !isWithinVisit(pathname, this.held.place.requestId, this.listPath)
+      !isWithinVisit(pathname, this.held.place.requestId, this.listPath, this.recordsPath)
     )
       this.held = undefined;
   }

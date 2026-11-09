@@ -125,3 +125,56 @@ describe('QueueContinuity for the manifest list: what it holds and for how long'
     expect(held.peek(BINDING)).toBeDefined();
   });
 });
+
+/**
+ * The approver's queue (run 5, the review of 499399c) lists requests, and a request's page is the pickup queue's (`/pickup-requests/{id}`): its visit is out of `/approvals` and into a
+ * record under another address, which a memory is told (`recordsPath`) and which is judged as strictly as a record under the list's own.
+ */
+describe('QueueContinuity for the approver’s queue: a visit to a record of another address', () => {
+  const APPROVALS = '/approvals';
+  const REQUESTS = '/pickup-requests';
+
+  it.each([
+    ['the queue', '/approvals'],
+    ['the queue, with a closing slash', '/approvals/'],
+    ['the request that was opened', `/pickup-requests/${MANIFEST}`],
+    ['that request, in capitals', `/pickup-requests/${MANIFEST.toUpperCase()}`],
+    ['the exception page of that request', `/pickup-requests/${MANIFEST}/exception`],
+  ])('is still the visit on %s', (_where, path) => {
+    expect(isWithinVisit(path, MANIFEST, APPROVALS, REQUESTS)).toBe(true);
+  });
+
+  // Break caught: a visit that lasts through the pickup queue, another request or the booking of a new one, so that a place outlives the work it was left for.
+  it.each([
+    ['another request', `/pickup-requests/${OTHER_MANIFEST}`],
+    ['the booking of a new request', '/pickup-requests/new'],
+    ['the pickup queue', '/pickup-requests'],
+    ['an address that only begins like the request', `/pickup-requests/${MANIFEST}0`],
+    ['the manifests', '/manifests'],
+    ['the landing', '/'],
+  ])('is over on %s', (_where, path) => {
+    expect(isWithinVisit(path, MANIFEST, APPROVALS, REQUESTS)).toBe(false);
+  });
+
+  it('keeps the place while the person is on the request they opened, and drops it when they leave', () => {
+    const held = new QueueContinuity(APPROVALS, REQUESTS);
+    held.leave(place(), BINDING);
+
+    held.noteLocation(`/pickup-requests/${MANIFEST}`);
+    held.noteLocation('/approvals');
+    expect(held.peek(BINDING)).toBeDefined();
+
+    held.noteLocation('/pickup-requests');
+    expect(held.peek(BINDING)).toBeUndefined();
+  });
+
+  // Break caught: a memory that was not told where its records are, which would have dropped the place the moment the person reached the request.
+  it('is over on the request when the memory is not told where the records are', () => {
+    const held = new QueueContinuity(APPROVALS);
+    held.leave(place(), BINDING);
+
+    held.noteLocation(`/pickup-requests/${MANIFEST}`);
+
+    expect(held.peek(BINDING)).toBeUndefined();
+  });
+});
