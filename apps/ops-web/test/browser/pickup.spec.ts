@@ -309,8 +309,15 @@ test.describe('the queue, drawn for the room it has', () => {
         link.click({ modifiers: ['ControlOrMeta'] }),
       ]);
       // A fresh tab on the development server loads every module of the application one request at a time, which the default 5 s of an assertion (for a page that is open) does
-      // not allow on a machine with two processors: the wait for the new tab's first paint is stated, for the development projects only (the production build loads at once).
-      const loading = { timeout: test.info().project.name.includes('-dev-') ? 30_000 : 5_000 };
+      // not allow on a machine with two processors: the wait for the new tab's first paint is stated, for the development projects only (the production build loads at once). The wait
+      // is as long as the test's own 30 s, which would end the test first and make the wait count for nothing: the development projects are slow tests (three times the time) and
+      // the production build is not (the review of 499399c).
+      const development = test.info().project.name.includes('-dev-');
+      test.slow(
+        development,
+        'A fresh tab on the development server loads every module one request at a time.',
+      );
+      const loading = { timeout: development ? 30_000 : 5_000 };
       await tab.waitForLoadState('load', loading);
       await expect(tab.getByRole('heading', { level: 1, name: CODE })).toBeVisible(loading);
       await expect(tab).toHaveURL(DETAIL);

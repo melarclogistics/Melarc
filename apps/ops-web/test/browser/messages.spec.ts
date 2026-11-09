@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import {
   hold,
@@ -60,6 +60,18 @@ const table = (page: Page) => page.getByRole('table', { name: 'Messages' });
 /** The status, the audience and the channel are chosen in the popover of the filter row, which opens with the Filter button. */
 const openFilters = (page: Page) =>
   page.getByRole('button', { name: 'Filter', exact: true }).click();
+
+/**
+ * Goes to a control with the Tab key, as a person does, and fails if it is not reached within a few presses. A test of the keyboard reaches its controls this way and never by
+ * focusing them from the script (the review of 499399c).
+ */
+async function tabTo(page: Page, target: Locator, presses = 12): Promise<void> {
+  for (let step = 0; step < presses; step += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
+}
 
 /** The requests the page made for the list. */
 const lists = (api: MessagesApi) =>
@@ -277,13 +289,14 @@ test.describe('the filters', () => {
     const { api } = await open(page, LOG);
     await expect(table(page)).toBeVisible();
 
-    // The three choices are in the popover of the filter row, and are reached in order.
-    await openFilters(page);
+    // The three choices are in the popover of the filter row. The keyboard opens it (Enter on the Filter button) and goes in with the Tab key, and the choices are reached in order.
     const status = page.getByRole('combobox', { name: 'Status' });
     const audience = page.getByRole('combobox', { name: 'For' });
     const channel = page.getByRole('combobox', { name: 'Channel' });
 
-    await status.focus();
+    await page.getByRole('button', { name: 'Filter', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await tabTo(page, status);
     await page.keyboard.type('Held');
     await expect(page).toHaveURL(/[?&]state=SUPPRESSED(&|$)/);
     // The choice is drawn (its chip) before the next is made: the address changes before the page is drawn again, and a choice made in that moment is made over the log as it was.
@@ -313,8 +326,9 @@ test.describe('the filters', () => {
     // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the empty state's action.
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
 
+    // Out of the popover and on to the way out of the empty state, by the Tab key.
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Show every message' }).focus();
+    await tabTo(page, page.getByRole('button', { name: 'Show every message' }));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
