@@ -47,16 +47,17 @@ export interface CreatedState {
   readonly created?: true;
 }
 
-const ASSIGN_RULE =
-  'Assigning a rider closes the vendor’s own cancellation of every request on this pickup run. The rider sees nothing until the pickup run is dispatched. This is a separate step from dispatching.';
-const DISPATCH_RULE =
-  'Dispatching shows the stops to the assigned rider and queues a text message for them. It does not start the run: the rider does that, on the run’s day. A pickup run needs a rider, and a stop still to be worked, to be dispatched.';
-const CANCEL_RULE =
-  'Cancelling asks for a note. The stops still to be worked are skipped, and the requests that are still confirmed return to the pool with their commitment to a rider ended. It can be done until the run starts.';
-const NO_NEW_RIDER_RULE =
-  'A rider cannot be changed once the pickup run is dispatched. To give the run to another rider, cancel the pickup run and plan its requests again.';
-const STARTED_RULE =
-  'A run that has started cannot be cancelled. A stop that cannot be worked is skipped from the stops below, and if the rider cannot go on the parcels are handed to another rider or to the hub, in the custody panel.';
+/**
+ * The one short line under the acts, only when it changes whether to act now (the Product Owner, 9 November 2026: a rule lives in the confirmation of the act, where the choice is made, and
+ * not in paragraphs above the content). A draft whose acts are offered says what the rider sees until it is sent out; a run to which a rider is bound says how to give it to another; a
+ * run that has started says it cannot be cancelled and where the way out is. A finished run says nothing: the header's sentence says where it stands.
+ */
+const DISPATCH_NOTE = 'The rider sees nothing until you dispatch.';
+const NOT_YET_NOTE = 'The rider sees nothing until the pickup run is dispatched.';
+const NO_NEW_RIDER_NOTE =
+  'A rider cannot be changed once the pickup run is dispatched: cancel it and plan its requests again.';
+const STARTED_NOTE =
+  'A run that has started cannot be cancelled. Skip a stop that cannot be worked, below.';
 
 /**
  * The way a pickup run goes, for the tracker (`contracts/state-machines.md` section 4): **one forward path**, draft, dispatched, in progress and completed, and one end, cancelled (from a
@@ -266,21 +267,21 @@ function Manifest({
         ]
       : [];
 
-  // What a person must know before they choose an act, said beside the acts: what each does and what it closes; and, for an act the session cannot take, what the account cannot do, in plain words.
-  const rules: readonly string[] = [
-    ...(draft ? [holdsAssign ? ASSIGN_RULE : cannotText('pickup.manifest.assign')] : []),
-    ...(draft ? [holdsDispatch ? DISPATCH_RULE : cannotText('pickup.manifest.dispatch')] : []),
-    ...(draft || dispatched
-      ? [holdsCancel ? CANCEL_RULE : cannotText('pickup.manifest.create')]
-      : []),
-    ...(dispatched ? [NO_NEW_RIDER_RULE] : []),
-    ...(inProgress ? [STARTED_RULE] : []),
-    ...(manifest.state === 'CANCELLED'
-      ? ['A cancelled pickup run is not changed again. Its stops are listed below.']
-      : manifest.state === 'COMPLETED'
-        ? ['A completed run is not changed again.']
-        : []),
-  ];
+  // The one short line under the acts (see DISPATCH_NOTE): what changes whether to act now, and nothing a dialog says. What each act does and closes is said where the choice is made, in the
+  // act's own question. A session that can take no act of a draft is told so once, in the words of the table (the first of the two it lacks); a run that is finished says nothing.
+  const note: string | undefined = draft
+    ? !holdsAssign && !holdsDispatch
+      ? cannotText('pickup.manifest.assign')
+      : holdsDispatch
+        ? DISPATCH_NOTE
+        : NOT_YET_NOTE
+    : dispatched
+      ? holdsCancel
+        ? NO_NEW_RIDER_NOTE
+        : undefined
+      : inProgress
+        ? STARTED_NOTE
+        : undefined;
 
   const facts: readonly DescriptionItem[] = [
     { label: 'Service date', value: serviceDateText(manifest.service_date) },
@@ -305,22 +306,16 @@ function Manifest({
           ...(primary === undefined ? {} : { primary }),
           ...(secondary === undefined ? {} : { secondary }),
           menu: { label: `More actions for ${manifest.code}`, items: menu },
+          ...(note === undefined ? {} : { note }),
         }}
         notice={
-          <>
-            {notice === undefined ? null : (
-              <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
-                <Alert variant="success">
-                  <p>{notice}</p>
-                </Alert>
-              </div>
-            )}
-            {rules.map((rule) => (
-              <p key={rule} className="pickup-act__text">
-                {rule}
-              </p>
-            ))}
-          </>
+          notice === undefined ? undefined : (
+            <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
+              <Alert variant="success">
+                <p>{notice}</p>
+              </Alert>
+            </div>
+          )
         }
         main={
           <>
@@ -343,11 +338,7 @@ function Manifest({
           <>
             {history.length === 0 ? null : (
               <Panel title="History" headingLevel={2}>
-                <Timeline
-                  label="History of this pickup run, oldest first"
-                  entries={history}
-                  currentLabel="Latest"
-                />
+                <Timeline label="History of this pickup run, oldest first" entries={history} />
               </Panel>
             )}
             {me.holds('notification.read') ? (

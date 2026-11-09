@@ -119,7 +119,13 @@ describe('the skip: what the page says and asks', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Skip a stop' })).toBeVisible();
     expect(await screen.findByText('Stop 1, ACC-PR-7KQ2MZ.')).toBeVisible();
     expect(await screen.findByText(/The vendor is always told/)).toBeVisible();
-    expect(screen.getByText(/uses up no pickup attempt/)).toBeVisible();
+    // A task form keeps at most two short sentences under its title (the Product Owner, 9 November 2026): what the skip does to the request is told in the question of the skip, where the
+    // choice is made (the dialog's test below), and not in paragraphs above the form.
+    expect(screen.queryByText(/uses up no pickup attempt/)).toBeNull();
+    const sentences = [...document.querySelectorAll('.pickup-form-note')].flatMap((note) =>
+      note.textContent.split(/(?<=\.)\s+/),
+    );
+    expect(sentences.length).toBeLessThanOrEqual(2);
   });
 
   // Break caught: the heading the page had while the stop was read replaced by the form's own, so that the focus the frame put on it falls to the document and a keyboard user is left
@@ -143,7 +149,7 @@ describe('the skip: what the page says and asks', () => {
     await form();
 
     expect(screen.getByText(/not the way to clear a failed pickup/)).toBeVisible();
-    expect(screen.getByText(/decided in the pickup request itself/)).toBeVisible();
+    expect(screen.getByText(/decided in the pickup request\./)).toBeVisible();
     expect(document.body.textContent).not.toContain('pickup.failure.resolve');
   });
 
@@ -405,7 +411,7 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
     open({ [STOP]: () => refusal(404, 'NOT_FOUND') });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Stop not found' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the manifest' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Back to the pickup run' })).toHaveAttribute(
       'href',
       `/manifests/${MANIFEST_ID}`,
     );

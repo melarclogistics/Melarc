@@ -141,6 +141,35 @@ describe('the manifest: what it shows', () => {
     expect(facts.getByText('3 stops')).toBeVisible();
   });
 
+  // Break caught (the Product Owner, 9 November 2026): paragraphs of rules above the content again. A rule lives in the confirmation of the act, where the choice is made (the dialogs hold
+  // these three: the assignment's, the dispatch's and the cancellation's); one short muted line under the acts says only what changes whether to act now.
+  it('draws no paragraph of rules above the content, and one short line under the acts', async () => {
+    const { user } = open(undefined, ALL, {
+      'GET /ops/riders': () => json(200, { items: [riderFixture()], next_page_token: null }),
+    });
+    await ready();
+
+    expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+    for (const rule of [
+      /closes the vendor’s own cancellation/,
+      /Dispatching shows the stops/,
+      /Cancelling asks for a note/,
+    ]) {
+      expect(screen.queryByText(rule)).toBeNull();
+    }
+    expect(screen.getByText('The rider sees nothing until you dispatch.')).toHaveClass(
+      'ui-record-header__note',
+    );
+
+    // The rules are where the choice is made.
+    await user.click(screen.getByRole('button', { name: 'Assign a rider' }));
+    expect(
+      within(screen.getByRole('alertdialog', { name: 'Assign this rider?' })).getByText(
+        /closes the vendor’s own cancellation/,
+      ),
+    ).toBeVisible();
+  });
+
   it('names the rider by name when the roster can say it', async () => {
     open(() =>
       answer(manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' })),
@@ -705,26 +734,45 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     expect(await within(dialog).findByText(words)).toBeVisible();
   });
 
-  it('offers neither act to a session without its key, and names the key', async () => {
+  it('offers neither act to a session without its key, and says so once, in plain words', async () => {
     open(undefined, ['pickup.read']);
     await ready();
 
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
-    expect(screen.getByText(cannotText('pickup.manifest.assign'))).toBeVisible();
-    expect(screen.getByText(cannotText('pickup.manifest.dispatch'))).toBeVisible();
+    expect(screen.getByText(cannotText('pickup.manifest.assign'))).toHaveClass(
+      'ui-record-header__note',
+    );
+    // One line for the draft, not one for each act it cannot take.
+    expect(screen.queryByText(cannotText('pickup.manifest.dispatch'))).toBeNull();
   });
 
-  it('says a rider cannot be changed once the pickup run is dispatched, and offers neither act', async () => {
+  it('says a rider cannot be changed once the pickup run is dispatched, in one line under the acts, and offers neither act', async () => {
     open(() => answer(manifestFixture({ state: 'DISPATCHED', assigned_rider_id: RIDER_ID })));
     await ready();
 
     expect(
       screen.getByText(/A rider cannot be changed once the pickup run is dispatched/),
-    ).toBeVisible();
+    ).toHaveClass('ui-record-header__note');
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
   });
+
+  // Break caught: a line that says there is nothing more to do on a run that cannot change again (the header's sentence says where it stands), or that blames a session that
+  // lacks a key it was never going to need.
+  for (const [state, keys, who] of [
+    ['CANCELLED', ALL, 'a cancelled run'],
+    ['COMPLETED', ALL, 'a completed run'],
+    ['DISPATCHED', ['pickup.read'], 'a dispatched run, to a session that cannot cancel it'],
+  ] as const) {
+    it(`draws no line under the acts of ${who}`, async () => {
+      open(() => answer(manifestFixture({ state, assigned_rider_id: RIDER_ID })), keys);
+      await ready();
+
+      expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(0);
+      expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+    });
+  }
 });
 
 describe('the manifest: cancelling it', () => {
@@ -799,7 +847,9 @@ describe('the manifest: cancelling it', () => {
 
     // The cancellation is the menu's only act: a run that has started has no menu at all.
     expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
-    expect(screen.getByText(/A run that has started cannot be cancelled/)).toBeVisible();
+    expect(screen.getByText(/A run that has started cannot be cancelled/)).toHaveClass(
+      'ui-record-header__note',
+    );
   });
 });
 

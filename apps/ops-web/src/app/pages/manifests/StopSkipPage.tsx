@@ -53,7 +53,7 @@ function BackToRun({ manifestId }: { readonly manifestId: string }) {
       {manifestId === '' ? (
         <Link to="/manifests">Back to pickup runs</Link>
       ) : (
-        <Link to={`/manifests/${manifestId}`}>Back to the manifest</Link>
+        <Link to={`/manifests/${manifestId}`}>Back to the pickup run</Link>
       )}
     </p>
   );
@@ -139,14 +139,8 @@ function Form({
         <TaskFormSection title="Why it is skipped">
           <TaskFormWide>
             <p className="pickup-form-note">
-              Ops skips a stop that cannot be worked, so that the run can close. A skip is Melarc’s
-              decision and not a failed collection: it uses up no pickup attempt, and the request
-              keeps the state it has. <strong>The vendor is always told</strong> that the stop was
-              skipped, and why.
-            </p>
-            <p className="pickup-form-note">
-              This is not the way to clear a failed pickup. A failed pickup is decided in the pickup
-              request itself, by someone who can escalate or reschedule it.
+              <strong>The vendor is always told</strong> that the stop was skipped, and why. This is
+              not the way to clear a failed pickup: that is decided in the pickup request.
             </p>
           </TaskFormWide>
           <Field

@@ -120,7 +120,8 @@ function WaitingCard({
  * whose exception is `REQUESTED` (`listPickupRequests` with `one_package_exception_state`), read and scoped by the server, paged by its tokens, drawn by the queue workspace template.
  * Each row says what is asked and by whom, and offers one act, the approval (`approveOnePackageException`), behind a confirmation that says what it does.
  *
- * **The page decides nothing the server decides.** It says the maker-checker rule in plain words, and sends the approval whoever asked: a refusal (`SELF_APPROVAL_FORBIDDEN`) is told as the
+ * **The page decides nothing the server decides.** It says the maker-checker rule in plain words in the question of the approval, where the choice is made (not in a paragraph above the
+ * queue: the Product Owner, 9 November 2026), and sends the approval whoever asked: a refusal (`SELF_APPROVAL_FORBIDDEN`) is told as the
  * rule (a different approver decides), and never by a key or a role. After an approval the page shows what the answer said (approved, and by whom), keeps its rows while it reads the queue
  * again, which no longer holds the request, and states no fee. An exception of a request that is no longer pending is shown with its state and offered no approval: the request is not going
  * to be collected.
@@ -356,32 +357,24 @@ export function ApprovalsPage() {
               'Single-package pickups at your hubs that wait for an approval before they can be confirmed.',
           }}
           notice={
-            <>
-              <p className="pickup-form-note">
-                Approving an exception lets a single package be collected: the single-package pickup
-                fee becomes due, and the request can then be confirmed. Whoever asked for an
-                exception cannot also approve it, unless they approve at the platform’s highest
-                tier: the server checks this.
-              </p>
-              {approved === undefined ? null : (
-                <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
-                  <Alert variant="success">
-                    <p>
-                      {`The one-package exception of ${approved.request.code} is approved${
-                        approvedBy === undefined
-                          ? ''
-                          : ` by ${actorText(approvedBy, principalId).toLowerCase()}`
-                      }. The request can now be confirmed.`}
-                    </p>
-                    <p>
-                      <Link to={`/pickup-requests/${approved.request.id}`}>
-                        {`Open ${approved.request.code}`}
-                      </Link>
-                    </p>
-                  </Alert>
-                </div>
-              )}
-            </>
+            approved === undefined ? undefined : (
+              <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
+                <Alert variant="success">
+                  <p>
+                    {`The one-package exception of ${approved.request.code} is approved${
+                      approvedBy === undefined
+                        ? ''
+                        : ` by ${actorText(approvedBy, principalId).toLowerCase()}`
+                    }. The request can now be confirmed.`}
+                  </p>
+                  <p>
+                    <Link to={`/pickup-requests/${approved.request.id}`}>
+                      {`Open ${approved.request.code}`}
+                    </Link>
+                  </p>
+                </Alert>
+              </div>
+            )
           }
           result={result}
           empty={empty}
@@ -438,8 +431,8 @@ export function ApprovalsPage() {
             </p>
             {target !== undefined && isSelf(target.exception.requested_by, principalId) ? (
               <p>
-                You asked for this exception yourself. Whoever asks for one cannot also approve it,
-                unless they approve at the platform’s highest tier: the server decides.
+                You asked for this exception yourself. Another approver usually decides it, and
+                approving it yourself may be refused.
               </p>
             ) : null}
           </>

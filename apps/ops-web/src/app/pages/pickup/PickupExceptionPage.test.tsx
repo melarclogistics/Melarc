@@ -72,11 +72,14 @@ describe('the exception: asking for it', () => {
       await screen.findByRole('heading', { level: 1, name: 'Request a one-package exception' }),
     ).toBeVisible();
     expect(await screen.findByText('For ACC-PR-7KQ2MZ.')).toBeVisible();
-    expect(screen.getByText(/An approver decides it\./)).toBeVisible();
+    expect(screen.getByText(/an approver decides it\./)).toBeVisible();
     expect(screen.getByRole('main').textContent).not.toContain('pickup.exception.approve');
     expect(screen.getByRole('main').textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
-    // The maker-checker rule is said in plain words, and decided by the server.
-    expect(screen.getByText(/Whoever asks for an exception cannot also approve it/)).toBeVisible();
+    // A task form keeps at most two short sentences under its title (the Product Owner, 9 November 2026), in plain words: no tier and no word of what the server does. The maker-checker
+    // rule is told where it matters: in the question of the approval, and in the refusal of a self-approval.
+    const note = screen.getByText(/an approver decides it\./);
+    expect(note.textContent.split(/(?<=\.)\s+/).length).toBeLessThanOrEqual(2);
+    expect(note.textContent).not.toMatch(/highest tier|the server|cannot also approve/);
   });
 
   // §21.1: the recipient's name, phone and delivery address become mandatory, and travel with the exception.

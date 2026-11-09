@@ -703,18 +703,14 @@ function Request({
     escalatedAt === undefined ? '' : ` Escalated on ${escalatedAt}.`
   }`;
 
-  // What a person must know before they choose an act, said beside the acts and not only in the question of the act: an escalation is recorded once and is not taken back; and
-  // once a rider holds the request's run, cancelling or rescheduling it records a decision about the cancellation charge.
-  const rules: readonly string[] = [
-    ...(confirmed && escalatedAt === undefined && me.holds('pickup.failure.resolve')
-      ? ['Escalating a request is recorded once, with your note, and is not taken back.']
-      : []),
-    ...(decidesCharge && me.holds('pickup.request.cancel')
-      ? [
-          'A rider holds this request’s run, so cancelling or rescheduling it records a decision about the cancellation charge: it is applied or waived, with a reason.',
-        ]
-      : []),
-  ];
+  // The one short line under the acts, only when it changes whether to act now (the Product Owner, 9 November 2026): why the confirmation is not offered yet. The other rules a person must
+  // know before they choose an act (an escalation is recorded once and is not taken back; once a rider holds the request's run, cancelling or rescheduling it records a decision about
+  // the cancellation charge) are told in the question of their act, where the choice is made, and not in paragraphs above the content.
+  const note: string | undefined = exceptionWaiting
+    ? 'The one-package exception is requested and waits for an approver: the request can be confirmed once it is approved.'
+    : needsException
+      ? 'This request is for a single package: it can be confirmed once its one-package exception is approved.'
+      : undefined;
 
   return (
     <>
@@ -729,48 +725,24 @@ function Request({
           ...(primary === undefined ? {} : { primary }),
           ...(secondary === undefined ? {} : { secondary }),
           menu: { label: `More actions for ${request.code}`, items: menu },
+          ...(note === undefined ? {} : { note }),
         }}
         notice={
-          <>
-            {notice === undefined ? null : (
-              <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
-                <Alert variant="success">
-                  <p>{notice.text}</p>
-                  {notice.next === undefined ? null : (
-                    <p>
-                      <Link to={`/pickup-requests/${notice.next}`}>Go to the new attempt</Link>
-                    </p>
-                  )}
-                </Alert>
-                {notice.estimate === undefined ? null : (
-                  <EstimateSummary estimate={notice.estimate} />
+          notice === undefined ? undefined : (
+            <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
+              <Alert variant="success">
+                <p>{notice.text}</p>
+                {notice.next === undefined ? null : (
+                  <p>
+                    <Link to={`/pickup-requests/${notice.next}`}>Go to the new attempt</Link>
+                  </p>
                 )}
-              </div>
-            )}
-            {exceptionWaiting ? (
-              <p className="pickup-act__text">
-                The one-package exception is requested and waits for an approver. The request can be
-                confirmed once it is approved.
-              </p>
-            ) : needsException ? (
-              <p className="pickup-act__text">
-                This request is for a single package. It can be confirmed only once its one-package
-                exception is approved.
-              </p>
-            ) : null}
-            {!live && !chargeToWaive ? (
-              <p className="pickup-act__text">
-                {request.state === 'CANCELLED'
-                  ? 'A cancelled request is not changed again. Its attempts are listed below.'
-                  : 'A declined request is not changed again.'}
-              </p>
-            ) : null}
-            {rules.map((rule) => (
-              <p key={rule} className="pickup-act__text">
-                {rule}
-              </p>
-            ))}
-          </>
+              </Alert>
+              {notice.estimate === undefined ? null : (
+                <EstimateSummary estimate={notice.estimate} />
+              )}
+            </div>
+          )
         }
         main={
           <>
@@ -803,11 +775,7 @@ function Request({
             </Panel>
             {history.length === 0 ? null : (
               <Panel title="History" headingLevel={2}>
-                <Timeline
-                  label="History of this request, oldest first"
-                  entries={history}
-                  currentLabel="Latest"
-                />
+                <Timeline label="History of this request, oldest first" entries={history} />
               </Panel>
             )}
             {me.holds('notification.read') ? (

@@ -431,20 +431,42 @@ describe('confirming', () => {
     );
   });
 
-  // Break caught (the review of 5edada2): a rule that changes a choice told only inside the dialog of its act, so that a person chooses the act without having read it.
-  describe('the rules beside the acts', () => {
-    const ESCALATION =
-      'Escalating a request is recorded once, with your note, and is not taken back.';
-    const CHARGE = /records a decision about the cancellation charge/;
+  // Break caught (the Product Owner, 9 November 2026, over the review of 5edada2 which had them beside the acts): paragraphs of rules above the content. A rule lives in the confirmation of
+  // the act, where the choice is made, and a rule that changes whether to act now is one short line under the acts. These two (an escalation is recorded once; a rider's run makes a
+  // cancellation a decision about the charge) are told in the dialogs of their acts, and nowhere else on the page.
+  describe('the rules where the choice is made', () => {
+    const ESCALATION = /recorded once, with your note, and is not taken back/;
+    const CHARGE = /records a decision on the hub’s cancellation charge/;
+    const reasons = (list: unknown[]) => () => json(200, list);
 
-    it('says that an escalation is recorded once, beside the acts, to a person who may escalate a request that is not escalated', async () => {
-      open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER);
+    it('tells an escalation is recorded once in the question of the act, and says nothing of it above the content', async () => {
+      const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER);
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+      expect(screen.queryByText(ESCALATION)).toBeNull();
+      expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
 
-      expect(await screen.findByText(ESCALATION)).toBeVisible();
+      await chooseAct(user, 'Escalate the request');
+
+      expect(
+        within(screen.getByRole('alertdialog', { name: 'Escalate this request?' })).getByText(
+          ESCALATION,
+        ),
+      ).toBeVisible();
     });
 
-    it('says nothing of an escalation to one who may not escalate, or of a request that was escalated already', async () => {
-      open(
+    it('offers no escalation to one who may not escalate', async () => {
+      const mayNot = OFFICER.filter((key) => key !== 'pickup.failure.resolve');
+      const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), mayNot);
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+
+      await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+
+      expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+      expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
+    });
+
+    it('offers no escalation for a request that was escalated already', async () => {
+      const { user } = open(
         () =>
           answer(
             pickupRequestFixture({ state: 'CONFIRMED', escalated_at: '2026-11-01T09:00:00Z' }),
@@ -452,21 +474,43 @@ describe('confirming', () => {
         OFFICER,
       );
       await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
-      expect(screen.queryByText(ESCALATION)).toBeNull();
+
+      await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+
+      expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+      expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
     });
 
-    it('says that a cancellation records a charge decision once a rider holds the request’s run, and not before', async () => {
-      open(() => answer(pickupRequestFixture(ASSIGNED)), OFFICER);
-      expect(await screen.findByText(CHARGE)).toBeVisible();
-    });
-
-    it('does not say it for a request no rider holds', async () => {
-      open(
-        () => answer(pickupRequestFixture({ state: 'CONFIRMED', rider_assigned: false })),
-        OFFICER,
-      );
+    it('tells a cancellation records a charge decision once a rider holds the request’s run, in the question of the act and not above the content', async () => {
+      const { user } = open(() => answer(pickupRequestFixture(ASSIGNED)), OFFICER, {
+        [REASONS]: reasons([cancellationReasonFixture()]),
+      });
       await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
       expect(screen.queryByText(CHARGE)).toBeNull();
+      expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+
+      await chooseAct(user, 'Cancel the request');
+
+      expect(
+        await within(
+          screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' }),
+        ).findByText(CHARGE),
+      ).toBeVisible();
+    });
+
+    it('does not say it in the question of the act for a request no rider holds', async () => {
+      const { user } = open(
+        () => answer(pickupRequestFixture({ state: 'CONFIRMED', rider_assigned: false })),
+        OFFICER,
+        { [REASONS]: reasons([cancellationReasonFixture()]) },
+      );
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+
+      await chooseAct(user, 'Cancel the request');
+
+      const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
+      expect(await within(dialog).findByRole('combobox', { name: /Reason/ })).toBeVisible();
+      expect(within(dialog).queryByText(CHARGE)).toBeNull();
     });
   });
 
@@ -515,7 +559,9 @@ describe('confirming', () => {
       `/pickup-requests/${REQUEST_ID}/exception`,
     );
     // What stands in the way is told in words, and names no key.
-    expect(within(actions()).getByText(/This request is for a single package/)).toBeVisible();
+    expect(within(actions()).getByText(/This request is for a single package/)).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(actions().textContent).not.toContain('pickup.exception.approve');
   });
 
@@ -537,7 +583,7 @@ describe('confirming', () => {
     expect(within(actions()).queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
     expect(
       within(actions()).getByText(/The one-package exception is requested and waits/),
-    ).toBeVisible();
+    ).toHaveClass('ui-record-header__note');
     expect(
       within(actions()).getByRole('link', { name: 'Go to the exceptions to approve' }),
     ).toHaveAttribute('href', '/approvals');
@@ -614,7 +660,10 @@ describe('the acts the session may not do', () => {
   it('offers nothing to change on a declined request', async () => {
     open(() => answer(pickupRequestFixture({ state: 'DECLINED' })));
 
-    expect(await screen.findByText('A declined request is not changed again.')).toBeVisible();
+    // The header’s sentence says where it stands; no paragraph says it again, and nothing is offered.
+    expect(await screen.findByText('It was declined.')).toBeVisible();
+    expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(0);
     expect(within(actions()).queryAllByRole('button')).toEqual([]);
   });
 });

@@ -957,6 +957,9 @@ describe('the queue: the request beside it', () => {
       await within(panel).findByText('It waits for an Ops officer to confirm it.'),
     ).toBeInTheDocument();
     expect(within(panel).getByText('14 Demo Lane, Osu')).toBeInTheDocument();
+    // Break caught (the Product Owner, 9 November 2026): the state told twice, by the header's badge and by a fact of the panel's list. It is told once, by the badge.
+    expect(within(panel).getAllByText('Waiting for confirmation')).toHaveLength(1);
+    expect(within(panel).queryByText('State')).toBeNull();
     expect(within(panel).getByRole('link', { name: 'Open full page' })).toHaveAttribute(
       'href',
       `/pickup-requests/${REQUEST_ID}`,

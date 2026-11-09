@@ -6,14 +6,13 @@ import { ConfirmationDialog } from '../../../components/ui/confirmation/Confirma
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
-import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import { showToast } from '../../../components/ui/toast/Toast';
 import { useApiClient } from '../../../platform/api/api-client';
 import { confirmPickupRequest } from '../../../platform/pickup/pickup-commands';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import type { PickupRecord, PickupRecordRead } from '../../../platform/pickup/use-pickup-queries';
-import { canBeConfirmed, PICKUP_STATE_MAP, STATE_SENTENCES } from './pickup-presentation';
+import { canBeConfirmed, STATE_SENTENCES } from './pickup-presentation';
 import { queueFactsOf } from './pickup-queue-view';
 
 /**
@@ -148,10 +147,7 @@ function Summary({
         main={
           <DescriptionList
             items={[
-              {
-                label: 'State',
-                value: <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />,
-              },
+              // The state is told once, by the badge in the panel's header (the Product Owner, 9 November 2026); it is not a fact of this list as well.
               { label: 'Sender', value: facts.sender },
               { label: 'Service date', value: facts.date },
               { label: 'Packages', value: facts.packages },

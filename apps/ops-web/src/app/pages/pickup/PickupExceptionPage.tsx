@@ -240,11 +240,8 @@ function ExceptionForm({
       <TaskFormSection title="The exception">
         <TaskFormWide>
           <p className="pickup-form-note">
-            A single package is collected only by exception. The recipient’s details travel with it,
-            and the delivery address makes the estimate exact. An approver decides it. Whoever asks
-            for an exception cannot also approve it, unless they approve at the platform’s highest
-            tier: the server checks this. The single-package pickup fee becomes due once the
-            exception is approved.
+            A single package is collected only by exception, and an approver decides it. The
+            single-package pickup fee becomes due once it is approved.
           </p>
           {request.one_package_exception?.state === 'REJECTED' ? (
             <p className="pickup-form-note">

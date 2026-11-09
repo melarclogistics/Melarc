@@ -102,6 +102,17 @@ async function openApproval(user: ReturnType<typeof renderApp>['user']) {
 }
 
 describe('the queue: what it shows', () => {
+  // Break caught (the Product Owner, 9 November 2026): a paragraph of rules above the table, and an empty band left in its place. The rules are in the question of the approval, where the
+  // choice is made.
+  it('draws no paragraph of rules and no empty band above the table', async () => {
+    open();
+
+    await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ });
+    expect(document.querySelectorAll('.pickup-form-note')).toHaveLength(0);
+    expect(document.querySelectorAll('.ui-queue-workspace__notice')).toHaveLength(0);
+    expect(screen.queryByText(/highest tier|the server checks/)).toBeNull();
+  });
+
   it('shows each exception waiting: the request, sender, packages, recipient, why, who asked and when, and the hub', async () => {
     open();
 
@@ -353,6 +364,8 @@ describe('approving', () => {
     expect(within(row).getByText('You')).toBeVisible();
     const dialog = await openApproval(user);
     expect(within(dialog).getByText(/You asked for this exception yourself/)).toBeVisible();
+    // Plain words (the Product Owner, 9 November 2026): no tier and no word of what the server does.
+    expect(dialog.textContent).not.toMatch(/highest tier|the server/);
     await user.click(within(dialog).getByRole('button', { name: 'Approve the exception' }));
 
     expect(
