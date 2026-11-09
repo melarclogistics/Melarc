@@ -6,9 +6,10 @@
  *
  *   node scripts/gate.ts precheck [--uncached]
  *       The cheap checks of CI (migration journal, the migration files main has, generated client, format, types, build, contract, lint) in parallel lanes, with the tool
- *       caches on: prettier and ESLint cache by content below node_modules/.cache/melarc-precheck, and turbo's task cache is used. Warm it
- *       takes seconds when little changed, and cold a few minutes. **ESLint's cache is the one place it can say less than the gate**: a file
- *       it has already read is not read again, so a type changed elsewhere can hide a finding until the gate's uncached lint. Run it after
+ *       caches on: prettier caches by content below node_modules/.cache/melarc-precheck, and turbo's task cache is used (it serves lint, one task for each
+ *       workspace). Warm it takes seconds when little changed, and cold a few minutes. **Turbo's cache is the one place it can say less than the gate**: a
+ *       workspace whose files and whose dependencies' files did not change is not read again, so a rule that reads something else can hide a finding
+ *       until the gate's uncached lint. Run it after
  *       every change to a contract, a migration, a schema or a document, and before any gate. `--uncached` runs the real commands. It will
  *       not run while a gate runs: it would starve the gate and rebuild what the gate's stages read.
  *
@@ -108,7 +109,8 @@ const CHECKS: readonly Check[] = [
   { name: 'typecheck', command: 'pnpm run typecheck', lane: 'build' },
   { name: 'build', command: 'pnpm run build', lane: 'build' },
   { name: 'contract', command: 'pnpm run contract:check', needs: 'build', lane: 'build' },
-  { name: 'lint', command: 'pnpm run lint', cache: CACHE_FLAGS('eslint'), lane: 'lint' },
+  // Lint is one task for each workspace through turbo (run 4, Stage 1, item 6): its cache is turbo's, and the precheck adds no ESLint flag.
+  { name: 'lint', command: 'pnpm run lint', lane: 'lint' },
 ];
 
 /** The dependency audit: a test stage of the gate, and a lane of the precheck, since it takes seconds (the owner's decision of 27 October 2026). */

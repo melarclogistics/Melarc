@@ -13,6 +13,16 @@
       "outputs": ["dist/**"]
     },
     "typecheck": {},
+    "lint": {
+      "dependsOn": ["^lint"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eslint.config.mjs",
+        "$TURBO_ROOT$/tsconfig.base.json",
+        "$TURBO_ROOT$/contracts/openapi.yaml"
+      ],
+      "outputs": []
+    },
     "test": {
       "passThroughEnv": ["MELARC_TEST_WORKERS"]
     },

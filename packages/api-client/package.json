@@ -12,6 +12,7 @@
     "generate": "node scripts/generate.ts",
     "check": "node scripts/generate.ts --check",
     "typecheck": "tsc --project tsconfig.json",
+    "lint": "node --max-old-space-size=1536 ../../node_modules/eslint/bin/eslint.js . --max-warnings 0",
     "test": "vitest run"
   },
   "dependencies": {

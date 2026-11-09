@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
+    "lint": "node --max-old-space-size=1536 ../node_modules/eslint/bin/eslint.js . --max-warnings 0",
     "test": "vitest run",
     "test:e2e": "playwright test --project=chromium --project=chromium-secret",
     "test:e2e:https": "node harness/https-run.ts",

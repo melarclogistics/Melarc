@@ -173,9 +173,9 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
     if (DEFINES_A_ROUTINE.test(code)) continue;
     for (const match of code.matchAll(KEY_CALL)) {
       // `ALTER FUNCTION melarc.x(...)`, a GRANT, a REVOKE and a DROP name the function's signature: they call nothing.
-      if (NAMES_A_ROUTINE.test(code.slice(0, match.index ?? 0))) continue;
+      if (NAMES_A_ROUTINE.test(code.slice(0, match.index))) continue;
       const name = (match[1] ?? '').toLowerCase();
-      const open = (match.index ?? 0) + match[0].length - 1;
+      const open = match.index + match[0].length - 1;
       const args = argumentsFrom(code, open);
       if (args === undefined) {
         unresolved.push(`melarc.${name}( that is never closed`);
