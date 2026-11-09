@@ -92,12 +92,64 @@ describe('the reset of an authenticator: what it shows', () => {
     open();
 
     expect(await heading('Reset authenticator')).toBeVisible();
-    expect(await screen.findByText('Kofi Boateng')).toBeVisible();
+    // The person is the description of the heading (the breadcrumb names them too, as a link).
+    expect(await screen.findByText('Kofi Boateng', { selector: 'p' })).toBeVisible();
     expect(document.title).toBe('Reset authenticator · Melarc Ops Portal');
     expect(screen.getByRole('link', { name: 'Back to profile' })).toHaveAttribute(
       'href',
       `/admin/staff/${STAFF_ID}`,
     );
+  });
+
+  it('names the way up, the staff list and the profile, once the profile is read', async () => {
+    open();
+    await screen.findByText('Kofi Boateng', { selector: 'p' });
+
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Staff' })).toHaveAttribute('href', '/admin/staff');
+    expect(trail.getByRole('link', { name: 'Kofi Boateng' })).toHaveAttribute(
+      'href',
+      `/admin/staff/${STAFF_ID}`,
+    );
+  });
+
+  it('is a task form: what happens in a section of its own, and the act with a way out as the form’s actions', async () => {
+    open();
+
+    const section = await screen.findByRole('region', { name: 'What happens' });
+    expect(within(section).getByText(/authenticator stops working/)).toBeVisible();
+    expect(within(section).queryByRole('button')).toBeNull();
+    const act = screen.getByRole('button', { name: 'Reset authenticator' });
+    expect(act).toHaveClass('ui-button--danger');
+    expect(act.closest('form')).not.toBeNull();
+    expect(screen.getByRole('link', { name: 'Cancel' })).toHaveAttribute(
+      'href',
+      `/admin/staff/${STAFF_ID}`,
+    );
+  });
+
+  // Break caught (found in a real browser on the profile page, kept here): the heading replaced when the profile arrives, so that the focus the frame put on it falls to the top
+  // of the document.
+  it('keeps focus on the heading when the profile arrives and the form replaces the page that waited for it', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open(KEYS.everything, {
+      [RECORD]: async () => {
+        await held;
+        return json(200, withFactor, etag('v1'));
+      },
+    });
+    const loading = await heading('Reset authenticator');
+    // The frame puts focus on a page's heading when the address changes; here the page is the first one, so the test does the same.
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    release();
+
+    await screen.findByRole('button', { name: 'Reset authenticator' });
+    expect(screen.getByRole('heading', { level: 1, name: 'Reset authenticator' })).toHaveFocus();
   });
 
   it('says plainly what a reset does, and that the person sets up the new one themselves', async () => {
