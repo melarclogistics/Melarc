@@ -961,8 +961,12 @@ describe('the queue: the request beside it', () => {
     await queueTable();
     await user.click(await screen.findByRole('button', { name: /^Open ACC-PR-7KQ2MZ, / }));
     const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
-    const header = within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' })
-      .parentElement as HTMLElement;
+    // The header is the heading's parent: it holds the code, the state and the way to the full page.
+    const header = within(panel).getByRole('heading', {
+      level: 2,
+      name: 'ACC-PR-7KQ2MZ',
+    }).parentElement;
+    expect(header).not.toBeNull();
 
     // The row says the request waits for confirmation; the header says nothing of its state until the panel's own read has answered.
     expect(header).not.toHaveTextContent(/Waiting for confirmation|Confirmed/);

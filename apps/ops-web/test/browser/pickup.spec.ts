@@ -439,7 +439,7 @@ function overflowingInQueue(page: Page): Promise<string[]> {
       .filter((element) => element.scrollWidth > element.clientWidth + 1)
       .map(
         (element) =>
-          `${element.tagName.toLowerCase()} ${(element.textContent ?? '').trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
+          `${element.tagName.toLowerCase()} ${element.textContent.trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
       ),
   );
 }
@@ -450,7 +450,7 @@ function ellipsisedInQueue(page: Page): Promise<string[]> {
     [...document.querySelectorAll<HTMLElement>('.ui-data-table__scroller *')]
       .filter((element) => element.getClientRects().length > 0)
       .filter((element) => getComputedStyle(element).textOverflow === 'ellipsis')
-      .map((element) => (element.textContent ?? '').trim().slice(0, 30)),
+      .map((element) => element.textContent.trim().slice(0, 30)),
   );
 }
 
@@ -462,7 +462,7 @@ test.describe('the queue: the parts that stay in view, long text and the room it
   }) => {
     await page.setViewportSize({ width: 1440, height: 640 });
     await open(page, '/pickup-requests', { requests: TALL });
-    const code = TALL[0]?.code ?? '';
+    const code = TALL.at(0)?.code ?? '';
     await opener(page, code).click();
     const panel = page.getByRole('dialog', { name: code });
     await expect(panel).toBeVisible();

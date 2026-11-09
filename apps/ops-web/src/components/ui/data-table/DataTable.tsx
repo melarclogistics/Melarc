@@ -377,7 +377,6 @@ export function DataTable<Item>({
       },
     }),
     // `control` reads the registry of controls, which is a ref and not state: the handle needs no new identity when the rows change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

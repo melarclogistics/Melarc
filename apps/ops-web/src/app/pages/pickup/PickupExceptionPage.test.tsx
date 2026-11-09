@@ -15,7 +15,6 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
-import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/{id}/exception` (`requestOnePackageException`; S1.19; AC-SLICE-001-03): the maker's half of the one-package exception,

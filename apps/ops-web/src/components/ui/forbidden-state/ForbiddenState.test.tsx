@@ -47,7 +47,7 @@ describe('ForbiddenState', () => {
       />,
     );
 
-    expect(container.textContent).not.toMatch(/[a-z]+(?:.[a-z_]+){1,3}/);
+    expect(container.textContent).not.toMatch(/\b[a-z]+(?:\.[a-z_]+){1,3}\b/);
     expect(container.innerHTML).not.toContain(KEY);
   });
 
@@ -77,7 +77,7 @@ describe('ForbiddenState', () => {
       );
       // "An administrator" is the Product Owner's own word for who to ask (PRODUCT_DESIGN_DIRECTION section 6.5); a role's name is not told.
       expect(container.textContent).not.toMatch(
-        /role|bundle|officer|senior ops|ops staff|platform admin/i,
+        /\brole\b|bundle|officer|senior ops|ops staff|platform admin/i,
       );
       unmount();
     }
