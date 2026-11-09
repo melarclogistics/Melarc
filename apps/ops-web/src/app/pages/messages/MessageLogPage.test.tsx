@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { byHand } from '../../../test-support/by-hand';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -22,6 +23,7 @@ import {
   suppressedFixture,
 } from '../../../test-support/notification-fixture';
 import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
+import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { cannotText } from '../../../platform/problem/capability-words';
@@ -1025,6 +1027,31 @@ describe('the log: counting and paging', () => {
     await waitFor(() => {
       expect(queryOf().has('page_token')).toBe(false);
     });
+  });
+
+  // Break caught (the review of 499399c): a pager taken out of the page while the next page is read and made anew with its words, which most screen readers do not announce: the status
+  // region is the same element through the read, empty while the page is read.
+  it('keeps the pager’s status region while the next page is read', async () => {
+    const reads = byHand();
+    let calls = 0;
+    const { user } = open((request) => {
+      calls += 1;
+      return calls === 1 ? page([confirmed], 'next-1') : reads.handler(request);
+    });
+    await logTable();
+    const region = pagerRegion();
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => {
+      expect(region).toBeEmptyDOMElement();
+    });
+    expect(pagerRegion()).toBe(region);
+
+    await reads.answer(page([confirmed]));
+    await waitFor(() => {
+      expect(region).toHaveTextContent(/on page 2/);
+    });
+    expect(pagerRegion()).toBe(region);
   });
 
   // Break caught: the next page of one filter asked for under another.

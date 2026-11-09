@@ -9,8 +9,10 @@ export interface QueuePagerProps {
   readonly label: string;
   /** What the queue lists, one and many: "request", "requests". */
   readonly noun: { readonly one: string; readonly other: string };
-  /** How many rows the page shows. */
-  readonly shown: number;
+  /**
+   * How many rows the page shows, or nothing while the page is being read: the region that speaks stays in the page, empty, and no way to another page is drawn until the page is read.
+   */
+  readonly shown?: number | undefined;
   /** The page shown, counted from 1. */
   readonly page: number;
   /** The server said more follow. A queue pages by an opaque token and never states a total, so the count says what the page holds and no more. */
@@ -25,7 +27,9 @@ export interface QueuePagerProps {
  * asks for and the page answers by reading again. Nothing is drawn for a queue of one page that holds nothing to say.
  *
  * **The region is in the page from the first paint, empty, and the words come into it afterwards** (the review of 5edada2): a region that arrives with its words in it is not announced by
- * most screen readers, so "Showing 25 requests" was heard only after the second page. The words are written into the region by an effect, and React draws nothing inside it.
+ * most screen readers, so "Showing 25 requests" was heard only after the second page. The words are written into the region by an effect, and React draws nothing inside it. **It stays
+ * while the next page is read** (the review of 499399c): `shown` is left out then, the words go, and they come back with the page in the same element, so that most screen readers say them
+ * again and the region is not made anew on every move.
  */
 export function QueuePager({
   label,
@@ -36,9 +40,12 @@ export function QueuePager({
   onNext,
   onPrevious,
 }: QueuePagerProps) {
-  const count = `Showing ${String(shown)} ${shown === 1 ? noun.one : noun.other}${
-    page > 1 ? ` on page ${String(page)}` : ''
-  }.${hasNext ? ' More follow on the next page.' : ''}`;
+  const count =
+    shown === undefined
+      ? ''
+      : `Showing ${String(shown)} ${shown === 1 ? noun.one : noun.other}${
+          page > 1 ? ` on page ${String(page)}` : ''
+        }.${hasNext ? ' More follow on the next page.' : ''}`;
   const region = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (region.current !== null) region.current.textContent = count;
@@ -46,7 +53,7 @@ export function QueuePager({
   return (
     <div className="ui-queue-pager">
       <p ref={region} className="ui-queue-pager__count" role="status" />
-      {page > 1 || hasNext ? (
+      {shown !== undefined && (page > 1 || hasNext) ? (
         <nav className="ui-queue-pager__nav" aria-label={label}>
           {page > 1 ? (
             <Button type="button" variant="secondary" onClick={onPrevious}>

@@ -708,25 +708,22 @@ export function ManifestBuilderPage() {
                         selectLabel: (row) => `Choose ${row.code}`,
                         isSelectable: (row) => (chosen.has(row.id) ? !locked : !full && !locked),
                       }}
-                      {...(pool.isSuccess && !poolLoading
-                        ? {
-                            footer: (
-                              <QueuePager
-                                label="Pages of the pool"
-                                noun={{ one: 'request', other: 'requests' }}
-                                shown={poolRows.length}
-                                page={paging.page}
-                                hasNext={pool.data.nextPageToken !== null}
-                                onNext={() => {
-                                  if (pool.data.nextPageToken !== null) {
-                                    paging.toNextPage(pool.data.nextPageToken);
-                                  }
-                                }}
-                                onPrevious={paging.toPreviousPage}
-                              />
-                            ),
-                          }
-                        : {})}
+                      // The pager is in the page whatever the pool is doing, so that its status region is the same one while a page is read (the review of 499399c).
+                      footer={
+                        <QueuePager
+                          label="Pages of the pool"
+                          noun={{ one: 'request', other: 'requests' }}
+                          shown={pool.isSuccess && !poolLoading ? poolRows.length : undefined}
+                          page={paging.page}
+                          hasNext={pool.isSuccess && pool.data.nextPageToken !== null}
+                          onNext={() => {
+                            if (pool.isSuccess && pool.data.nextPageToken !== null) {
+                              paging.toNextPage(pool.data.nextPageToken);
+                            }
+                          }}
+                          onPrevious={paging.toPreviousPage}
+                        />
+                      }
                     />
                   ),
                 },

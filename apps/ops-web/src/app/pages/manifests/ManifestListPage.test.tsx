@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { byHand } from '../../../test-support/by-hand';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -13,6 +14,7 @@ import {
 } from '../../../test-support/manifest-fixture';
 import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
+import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { cannotText } from '../../../platform/problem/capability-words';
@@ -216,6 +218,32 @@ describe('the manifests: paging and freshness', () => {
 
     await user.click(screen.getByRole('button', { name: /Previous page/ }));
     await rowOf('ACC-MF-Q92422');
+  });
+
+  // Break caught (the review of 499399c): a pager taken out of the page while the next page is read and made anew with its words, which most screen readers do not announce: the status
+  // region is the same element through the read, empty while the page is read.
+  it('keeps the pager’s status region while the next page is read', async () => {
+    const reads = byHand();
+    let calls = 0;
+    open((request) => {
+      calls += 1;
+      return calls === 1 ? page([draft], 'second') : reads.handler(request);
+    });
+    await rowOf('ACC-MF-Q92422');
+    const region = pagerRegion();
+
+    const { default: userEvent } = await import('@testing-library/user-event');
+    await userEvent.setup().click(screen.getByRole('button', { name: /Next page/ }));
+    await waitFor(() => {
+      expect(region).toBeEmptyDOMElement();
+    });
+    expect(pagerRegion()).toBe(region);
+
+    await reads.answer(page([started]));
+    await waitFor(() => {
+      expect(region).toHaveTextContent('on page 2');
+    });
+    expect(pagerRegion()).toBe(region);
   });
 
   it('reads the page again on Refresh, and says when it was last checked', async () => {

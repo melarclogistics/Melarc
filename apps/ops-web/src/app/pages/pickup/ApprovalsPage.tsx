@@ -377,24 +377,21 @@ export function ApprovalsPage() {
                 setTarget(row);
               },
             },
-            ...(result.status === 'ready' && list.isSuccess
-              ? {
-                  footer: (
-                    <QueuePager
-                      label="Pages of exceptions"
-                      noun={{ one: 'exception', other: 'exceptions' }}
-                      shown={rows.length}
-                      page={paging.page}
-                      hasNext={list.data.nextPageToken !== null}
-                      onNext={() => {
-                        if (list.data.nextPageToken !== null)
-                          paging.toNextPage(list.data.nextPageToken);
-                      }}
-                      onPrevious={paging.toPreviousPage}
-                    />
-                  ),
-                }
-              : {}),
+            // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+            footer: (
+              <QueuePager
+                label="Pages of exceptions"
+                noun={{ one: 'exception', other: 'exceptions' }}
+                shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+                page={paging.page}
+                hasNext={list.isSuccess && list.data.nextPageToken !== null}
+                onNext={() => {
+                  if (list.isSuccess && list.data.nextPageToken !== null)
+                    paging.toNextPage(list.data.nextPageToken);
+                }}
+                onPrevious={paging.toPreviousPage}
+              />
+            ),
           }}
         />
       </div>

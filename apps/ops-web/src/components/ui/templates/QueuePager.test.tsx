@@ -119,3 +119,42 @@ describe('QueuePager: the region that speaks (the review of 5edada2)', () => {
     );
   });
 });
+
+describe('QueuePager: while a page is being read (the review of 499399c)', () => {
+  // Break caught: a pager that is taken out of the page while the next page loads and put back with its words, so that "Showing 25 requests" is a new region on every move and most screen
+  // readers say nothing. The region is the same element throughout: emptied while the page is read, and given its words when it has been.
+  it('keeps its status region while the page loads, empty, and draws no pages until it is read', () => {
+    const { rerender } = renderPager({ shown: 2, page: 1, hasNext: true });
+    const region = screen.getByRole('status');
+    expect(region).toHaveTextContent('Showing 2 requests. More follow on the next page.');
+
+    rerender(
+      <QueuePager
+        label="Pages of pickup requests"
+        noun={{ one: 'request', other: 'requests' }}
+        page={2}
+        hasNext={false}
+        onNext={() => undefined}
+        onPrevious={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toBeEmptyDOMElement();
+    expect(screen.queryByRole('navigation')).toBeNull();
+
+    rerender(
+      <QueuePager
+        label="Pages of pickup requests"
+        noun={{ one: 'request', other: 'requests' }}
+        shown={3}
+        page={2}
+        hasNext
+        onNext={() => undefined}
+        onPrevious={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toHaveTextContent('Showing 3 requests on page 2. More follow on the next page.');
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeVisible();
+  });
+});

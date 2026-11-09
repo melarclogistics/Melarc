@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { byHand } from '../../../test-support/by-hand';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -16,6 +17,7 @@ import {
   pickupRequestFixture,
   REQUEST_ID,
 } from '../../../test-support/pickup-fixture';
+import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { cannotText } from '../../../platform/problem/capability-words';
@@ -201,6 +203,42 @@ describe('the queue: what it shows', () => {
     await waitFor(() => {
       expect(results()).toHaveFocus();
     });
+  });
+
+  // Break caught (the review of 499399c): a pager taken out of the page while the next page is read and made anew with its words, which most screen readers do not announce: the status
+  // region is the same element through the read, empty while the page is read.
+  it('keeps the pager’s status region while the next page is read', async () => {
+    const reads = byHand();
+    let calls = 0;
+    const { user } = open((request) => {
+      calls += 1;
+      return calls === 1 ? page([waiting], 'next-page') : reads.handler(request);
+    });
+    await screen.findByText('Showing 1 exception. More follow on the next page.', undefined, {
+      timeout: 5000,
+    });
+    const region = pagerRegion();
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => {
+      expect(region).toBeEmptyDOMElement();
+    });
+    expect(pagerRegion()).toBe(region);
+
+    await reads.answer(
+      page([
+        pickupRequestFixture({
+          id: EARLIER_REQUEST_ID,
+          code: 'ACC-PR-9WXH4T',
+          declared_package_count: 1,
+          one_package_exception: exceptionFixture(),
+        }),
+      ]),
+    );
+    await waitFor(() => {
+      expect(region).toHaveTextContent('Showing 1 exception on page 2.');
+    });
+    expect(pagerRegion()).toBe(region);
   });
 
   // A page read before a request was cancelled still shows its exception (the server's queue leaves a cancelled request out, AC-QSUM-12);

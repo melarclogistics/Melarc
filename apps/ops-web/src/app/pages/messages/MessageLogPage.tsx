@@ -503,25 +503,24 @@ export function MessageLogPage() {
           card: (row) => <MessageCard entry={row} />,
           // The kind of message is the heading of each card, for heading navigation.
           cardTitle: (row) => messageKindLabel(row.message_kind),
-          ...(result.status === 'ready' && list.isSuccess
-            ? {
-                footer: (
-                  <QueuePager
-                    label="Pages of messages"
-                    noun={{ one: 'message', other: 'messages' }}
-                    shown={list.data.items.length}
-                    page={paging.page}
-                    hasNext={list.data.nextPageToken !== null}
-                    onNext={() => {
-                      if (list.data.nextPageToken !== null) {
-                        paging.toNextPage(list.data.nextPageToken);
-                      }
-                    }}
-                    onPrevious={paging.toPreviousPage}
-                  />
-                ),
+          // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+          footer: (
+            <QueuePager
+              label="Pages of messages"
+              noun={{ one: 'message', other: 'messages' }}
+              shown={
+                result.status === 'ready' && list.isSuccess ? list.data.items.length : undefined
               }
-            : {}),
+              page={paging.page}
+              hasNext={list.isSuccess && list.data.nextPageToken !== null}
+              onNext={() => {
+                if (list.isSuccess && list.data.nextPageToken !== null) {
+                  paging.toNextPage(list.data.nextPageToken);
+                }
+              }}
+              onPrevious={paging.toPreviousPage}
+            />
+          ),
         }}
       />
     </>
