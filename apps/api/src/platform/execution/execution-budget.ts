@@ -37,6 +37,9 @@ import type { Clock } from '../auth/ports/clock.port.js';
  * kept its session's slot for that long. `onClosed` tells a holder when its budget, or one above it, is finished, and `cancel` ends its own budget at
  * once as an expiry, which is what everything wired to a budget (the database layer's cancel of the running statement) already understands. Neither
  * changes what finishing means for work that nobody wired this way.
+ *
+ * **A budget that has stopped leaves its parent** (run 5, Stage 1.1). However it stopped (it expired, it was cancelled, its owner finished it) it detaches both relays it
+ * registered on its parent and forgets its own closure listeners, so a parent that lives as long as the process keeps nothing of the children that are over.
  */
 
 /** Raised when a budget ran out. `label` says which budget (`request`, `transaction`, ...). */
@@ -199,8 +202,9 @@ export class ExecutionBudget {
 
   /**
    * Runs `listener` once when the budget is closed: when it, or any budget above it, is finished (`finish()`); at once when it already is. Closed is not
-   * expired: a budget that runs out is not told here (`onExpiry` is for that), and a listener of one that expired is called only if a budget above it is
-   * finished afterwards. Finishing cancels nothing, so this is how a holder whose work may still be running when its request ends (a statement under the
+   * expired: a budget that runs out is not told here (`onExpiry` is for that), and a budget that has expired (or been cancelled) is told nothing more, because it left
+   * its parent's listeners when it stopped (run 5, Stage 1.1): its listeners are forgotten, and one added to it afterwards is not kept, unless a budget above it is already
+   * finished, when it is called at once. Finishing cancels nothing, so this is how a holder whose work may still be running when its request ends (a statement under the
    * budget) learns of it and decides what to do (`cancel`). A listener of a budget that is finished by its own owner is told too, once. Returns a
    * function that removes it.
    */
@@ -209,6 +213,8 @@ export class ExecutionBudget {
       this.callClosedListener(listener);
       return () => undefined;
     }
+    // A budget that has expired left its parent's listeners when it stopped and is told nothing more: a listener added to it could never be called, so it is not kept.
+    if (this.state !== 'running') return () => undefined;
     this.closedListeners.add(listener);
     return () => {
       this.closedListeners.delete(listener);
@@ -272,9 +278,7 @@ export class ExecutionBudget {
     if (wasRunning) this.state = 'finished';
     this.stop();
     if (!wasRunning) return;
-    // Closed by its own owner: no longer wired to the parent's closure, and every listener of this budget (and, through them, of the budgets below it) is told.
-    this.detachClosedRelay?.();
-    this.detachClosedRelay = undefined;
+    // Closed by its own owner, and no longer wired to the parent (`stop`): every listener of this budget (and, through them, of the budgets below it) is told.
     this.announceClosed();
   }
 
@@ -310,17 +314,26 @@ export class ExecutionBudget {
     this.state = 'expired';
     this.failure = error;
     this.stop();
+    // Nothing tells a budget that has expired that its line was closed (it left its parent's listeners in `stop`), so the holders who asked to be told are forgotten with it.
+    this.closedListeners.clear();
     const listeners = [...this.expiryListeners];
     this.expiryListeners.clear();
     this.controller.abort(error);
     for (const listener of listeners) this.callExpiryListener(listener, error);
   }
 
+  /**
+   * The budget has stopped, by expiry, by `cancel` or by `finish`: its timer goes, and so does everything that wired it to its parent, both relays (expiry and closure). A parent
+   * that lives as long as the process (the delivery worker's) makes a child for each task and job, so a child that is over and still held there is a leak without a bound
+   * (run 5, Stage 1.1: the closure relay was detached by `finish()` of a running child only, and a child that had expired never left).
+   */
   private stop(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     this.detachFromParent?.();
     this.detachFromParent = undefined;
+    this.detachClosedRelay?.();
+    this.detachClosedRelay = undefined;
     if (this.state !== 'expired') this.expiryListeners.clear();
   }
 
