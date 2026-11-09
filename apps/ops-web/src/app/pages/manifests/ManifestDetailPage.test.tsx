@@ -107,6 +107,11 @@ const rowOf = async (text: string): Promise<HTMLElement> => {
   if (row === null) throw new Error(`no row for ${text}`);
   return row;
 };
+/** The heavier act, the cancellation, is in the menu of the record's header: it is opened, and the act is chosen. It brings its own question. */
+async function chooseAct(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
 const ready = async () => {
   await screen.findByRole('heading', { level: 1, name: 'ACC-MF-Q92422' });
   await stopsTable();
@@ -118,7 +123,14 @@ describe('the manifest: what it shows', () => {
     await ready();
 
     expect(document.title).toBe('ACC-MF-Q92422 · Melarc Ops Portal');
-    expect(screen.getByText('Draft')).toBeVisible();
+    // The state is told by the badge and by the tracker (one forward path: draft, dispatched, in progress, completed), and the sentence says what it means.
+    expect(screen.getAllByText('Draft').length).toBeGreaterThanOrEqual(2);
+    const tracker = screen.getByRole('list', { name: 'Progress of the pickup run' });
+    expect(within(tracker).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(tracker).getByText('Draft').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
     expect(
       screen.getByText(/It is a draft\. Order its stops, give it a rider and dispatch it/),
     ).toBeVisible();
@@ -462,7 +474,7 @@ describe('the manifest: ordering the stops', () => {
     await user.click(screen.getByRole('button', { name: 'Save this order' }));
 
     expect(await screen.findByText(/The stops cannot be ordered now/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Reload the manifest' }));
+    await user.click(screen.getByRole('button', { name: 'Reload the pickup run' }));
 
     await waitFor(() => {
       expect(reads).toBe(2);
@@ -509,13 +521,9 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     open();
     await ready();
 
-    const acts = screen.getByRole('region', { name: 'What you can do' });
-    expect(within(acts).getByRole('heading', { level: 3, name: 'Assign a rider' })).toBeVisible();
-    expect(
-      within(acts).getByRole('heading', { level: 3, name: 'Dispatch the manifest' }),
-    ).toBeVisible();
-    expect(within(acts).getByRole('button', { name: 'Assign a rider' })).not.toBe(
-      within(acts).getByRole('button', { name: 'Dispatch the manifest' }),
+    // Each is a button of its own in the record's header, and neither is the other.
+    expect(screen.getByRole('button', { name: 'Assign a rider' })).not.toBe(
+      screen.getByRole('button', { name: 'Dispatch the pickup run' }),
     );
   });
 
@@ -558,7 +566,7 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     expect(sent(ASSIGN)[0]?.headers.get('Idempotency-Key')).toBeNull();
     expect(await bodyOf(ASSIGN)).toEqual({ rider_id: RIDER_ID });
     expect(
-      await screen.findByText(/A rider is assigned\. The manifest is still a draft/),
+      await screen.findByText(/A rider is assigned\. The pickup run is still a draft/),
     ).toBeVisible();
     expect(sent(DISPATCH)).toHaveLength(0);
   });
@@ -588,7 +596,9 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     await user.click(await within(dialog).findByRole('button', { name: 'Choose: Kwame Mensah' }));
     await user.click(within(dialog).getByRole('button', { name: 'Assign the rider' }));
 
-    expect(await within(dialog).findAllByText(/cannot be given the manifest/)).not.toHaveLength(0);
+    expect(await within(dialog).findAllByText(/cannot be given the pickup run/)).not.toHaveLength(
+      0,
+    );
     expect(within(dialog).queryByText('Choose another rider')).toBeNull();
     expect(
       await within(dialog).findByRole('button', { name: 'Choose: Kwame Mensah' }),
@@ -608,11 +618,11 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
         ),
     });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Dispatch the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
     expect(within(dialog).getByText(/does not start the run/)).toBeVisible();
 
-    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the pickup run' }));
 
     await waitFor(() => {
       expect(sent(DISPATCH)).toHaveLength(1);
@@ -620,7 +630,7 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     expect(sent(DISPATCH)[0]?.headers.get('If-Match')).toBe('"v1"');
     expect(sent(DISPATCH)[0]?.headers.get('Idempotency-Key')).toBeNull();
     expect(await sent(DISPATCH)[0]?.clone().text()).toBe('');
-    expect(await screen.findByText(/The manifest is dispatched/)).toBeVisible();
+    expect(await screen.findByText(/The pickup run is dispatched/)).toBeVisible();
   });
 
   // Break caught: a day that has passed told as "this changed, reload", which would send the officer to reload what cannot work.
@@ -630,16 +640,16 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
         refusal(409, 'STATE_CONFLICT', { rule: 'service_date_passed', service_date: '2026-11-04' }),
     });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Dispatch the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
 
-    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the pickup run' }));
 
     expect(
       await within(dialog).findByText(/day of this run has passed, so it is never sent out/),
     ).toBeVisible();
     expect(
-      within(dialog).getByText(/Cancel the manifest, then plan its requests again/),
+      within(dialog).getByText(/Cancel the pickup run, then plan its requests again/),
     ).toBeVisible();
     expect(screen.queryByText(/service_date_passed/)).toBeNull();
   });
@@ -650,10 +660,10 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
         refusal(409, 'STATE_CONFLICT', { rule: 'request_not_confirmed', stops: [STOP_TWO_ID] }),
     });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Dispatch the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
 
-    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the pickup run' }));
 
     expect(
       await within(dialog).findByText(/no longer confirmed, so nothing was sent/),
@@ -668,15 +678,15 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
   });
 
   it.each([
-    ['MANIFEST_EMPTY', 422, /Nothing is left to be worked on this manifest/],
+    ['MANIFEST_EMPTY', 422, /Nothing is left to be worked on this pickup run/],
     ['RIDER_UNAVAILABLE', 422, /has no rider, or its rider is no longer active/],
   ])('tells %s in the officer’s words', async (code, status, words) => {
     const { user } = open(undefined, ALL, { [DISPATCH]: () => refusal(status, code) });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Dispatch the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
 
-    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Dispatch the pickup run' }));
 
     expect(await within(dialog).findByText(words)).toBeVisible();
   });
@@ -686,20 +696,20 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
     await ready();
 
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dispatch the manifest' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
     expect(screen.getByText(cannotText('pickup.manifest.assign'))).toBeVisible();
     expect(screen.getByText(cannotText('pickup.manifest.dispatch'))).toBeVisible();
   });
 
-  it('says a rider cannot be changed once the manifest is dispatched, and offers neither act', async () => {
+  it('says a rider cannot be changed once the pickup run is dispatched, and offers neither act', async () => {
     open(() => answer(manifestFixture({ state: 'DISPATCHED', assigned_rider_id: RIDER_ID })));
     await ready();
 
     expect(
-      screen.getByText(/A rider cannot be changed once the manifest is dispatched/),
+      screen.getByText(/A rider cannot be changed once the pickup run is dispatched/),
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dispatch the manifest' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
   });
 });
 
@@ -710,11 +720,11 @@ describe('the manifest: cancelling it', () => {
   it('asks for a note, then cancels on the version read under a key, and says the requests return to the pool', async () => {
     const { user } = open(undefined, ALL, { [CANCEL]: () => answer(cancelled, 'v2') });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Cancel the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this manifest?' });
+    await chooseAct(user, 'Cancel the pickup run');
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
     expect(within(dialog).getByText(/return to the pool/)).toBeVisible();
 
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel the pickup run' }));
     expect(await within(dialog).findByText('Write a note saying why.')).toBeVisible();
     expect(sent(CANCEL)).toHaveLength(0);
 
@@ -722,7 +732,7 @@ describe('the manifest: cancelling it', () => {
       within(dialog).getByRole('textbox', { name: /Why it is cancelled/ }),
       'Rider unwell',
     );
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel the pickup run' }));
 
     await waitFor(() => {
       expect(sent(CANCEL)).toHaveLength(1);
@@ -730,29 +740,32 @@ describe('the manifest: cancelling it', () => {
     expect(sent(CANCEL)[0]?.headers.get('If-Match')).toBe('"v1"');
     expect(sent(CANCEL)[0]?.headers.get('Idempotency-Key')).toMatch(KEY);
     expect(await bodyOf(CANCEL)).toEqual({ note: 'Rider unwell' });
-    expect(await screen.findByText(/The manifest is cancelled\./)).toBeVisible();
+    expect(await screen.findByText(/The pickup run is cancelled\./)).toBeVisible();
   });
 
   // Break caught: a run that has started told as a general failure, with no way out.
   it('tells a run that has started, and the way out', async () => {
     const { user } = open(undefined, ALL, { [CANCEL]: () => refusal(422, 'RUN_ALREADY_STARTED') });
     await ready();
-    await user.click(screen.getByRole('button', { name: 'Cancel the manifest' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this manifest?' });
+    await chooseAct(user, 'Cancel the pickup run');
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
     await user.type(
       within(dialog).getByRole('textbox', { name: /Why it is cancelled/ }),
       'Too late',
     );
 
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel the manifest' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel the pickup run' }));
 
     expect(await within(dialog).findByText(/skip a stop, or to hand custody over/)).toBeVisible();
   });
 
-  it('is offered for a dispatched manifest and not for a started one or a finished one', async () => {
-    open(() => answer(manifestFixture({ state: 'DISPATCHED', assigned_rider_id: RIDER_ID })));
+  it('is offered for a dispatched pickup run and not for a started one or a finished one', async () => {
+    const { user } = open(() =>
+      answer(manifestFixture({ state: 'DISPATCHED', assigned_rider_id: RIDER_ID })),
+    );
     await ready();
-    expect(screen.getByRole('button', { name: 'Cancel the manifest' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /^More actions for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Cancel the pickup run' })).toBeVisible();
   });
 
   it('is not offered once the run has started, and says why', async () => {
@@ -770,7 +783,8 @@ describe('the manifest: cancelling it', () => {
     );
     await ready();
 
-    expect(screen.queryByRole('button', { name: 'Cancel the manifest' })).toBeNull();
+    // The cancellation is the menu's only act: a run that has started has no menu at all.
+    expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
     expect(screen.getByText(/A run that has started cannot be cancelled/)).toBeVisible();
   });
 });
@@ -780,9 +794,9 @@ describe('the manifest: a manifest that is not there', () => {
     open(() => refusal(404, 'NOT_FOUND'));
 
     expect(
-      await screen.findByRole('heading', { level: 1, name: 'Manifest not found' }),
+      await screen.findByRole('heading', { level: 1, name: 'Pickup run not found' }),
     ).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to manifests' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Back to pickup runs' })).toHaveAttribute(
       'href',
       '/manifests',
     );
@@ -801,7 +815,7 @@ describeInterfaceStates('the manifest page', {
     test: async () => {
       const held = byHand();
       open(held.handler);
-      expect(await screen.findByText('Loading the manifest…')).toBeVisible();
+      expect(await screen.findByText('Loading the pickup run…')).toBeVisible();
     },
   },
   empty: {
@@ -812,9 +826,9 @@ describeInterfaceStates('the manifest page', {
     test: async () => {
       const { user } = open();
       await ready();
-      await user.click(screen.getByRole('button', { name: 'Cancel the manifest' }));
-      const dialog = screen.getByRole('alertdialog', { name: 'Cancel this manifest?' });
-      await user.click(within(dialog).getByRole('button', { name: 'Cancel the manifest' }));
+      await chooseAct(user, 'Cancel the pickup run');
+      const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel the pickup run' }));
       expect(await within(dialog).findByText('Write a note saying why.')).toBeVisible();
     },
   },
@@ -842,9 +856,9 @@ describeInterfaceStates('the manifest page', {
         [`POST /pickup-manifests/${MANIFEST_ID}/dispatch`]: () => refusal(409, 'STATE_CONFLICT'),
       });
       await ready();
-      await user.click(screen.getByRole('button', { name: 'Dispatch the manifest' }));
-      const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
-      await user.click(within(dialog).getByRole('button', { name: 'Dispatch the manifest' }));
+      await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+      const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+      await user.click(within(dialog).getByRole('button', { name: 'Dispatch the pickup run' }));
       expect(await within(dialog).findByText(/changed after you opened it/)).toBeVisible();
       expect(within(dialog).getByRole('button', { name: 'Reload the record' })).toBeVisible();
     },

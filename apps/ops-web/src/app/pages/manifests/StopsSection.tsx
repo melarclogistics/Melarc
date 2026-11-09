@@ -4,6 +4,7 @@ import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { Link } from '../../../components/ui/link/Link';
+import { Panel } from '../../../components/ui/panel/Panel';
 import { ReorderList, type ReorderItem } from '../../../components/ui/reorder-list/ReorderList';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { Table, type TableColumn } from '../../../components/ui/table/Table';
@@ -134,8 +135,15 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
     wantsCatalogue && me?.holds('settings.reason.read') === true,
   );
   const [order, setOrder] = useState<readonly string[] | undefined>(undefined);
-  const heading = useRef<HTMLHeadingElement>(null);
+  const orderButton = useRef<HTMLButtonElement>(null);
+  /** Set when the changes are put aside: focus goes back to the control that began the ordering, which is drawn again in its place. */
+  const returnFocus = useRef(false);
   const reordering = order !== undefined;
+  useEffect(() => {
+    if (reordering || !returnFocus.current) return;
+    returnFocus.current = false;
+    orderButton.current?.focus();
+  }, [reordering]);
 
   const command = useConfirmedCommand<
     { readonly orderedStopIds: readonly string[]; readonly version: string },
@@ -241,10 +249,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
   ];
 
   return (
-    <section className="pickup-section" aria-labelledby="manifest-stops">
-      <h2 id="manifest-stops" ref={heading} tabIndex={-1}>
-        Stops
-      </h2>
+    <Panel title="Stops" headingLevel={2} region>
       <p className="manifest-note">
         {stopsText(stops.length)}, in the order the rider is shown them.
       </p>
@@ -299,7 +304,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
                   data-reorder-recovery
                   onClick={command.checkRecord}
                 >
-                  Check the manifest
+                  Check the pickup run
                 </Button>
                 {command.canRetry ? (
                   <Button
@@ -320,7 +325,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
                 data-reorder-recovery
                 onClick={command.checkRecord}
               >
-                Reload the manifest
+                Reload the pickup run
               </Button>
             ) : (
               <>
@@ -343,9 +348,9 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
                   variant="secondary"
                   disabled={command.locked}
                   onClick={() => {
+                    returnFocus.current = true;
                     setOrder(undefined);
                     command.dismiss();
-                    heading.current?.focus();
                   }}
                 >
                   Discard the changes
@@ -368,6 +373,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
           {canOrder ? (
             <div className="pickup-act__buttons">
               <Button
+                ref={orderButton}
                 type="button"
                 variant="secondary"
                 onClick={() => {
@@ -380,7 +386,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
           ) : null}
         </>
       )}
-    </section>
+    </Panel>
   );
 }
 

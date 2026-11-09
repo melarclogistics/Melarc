@@ -323,7 +323,7 @@ describe('making the manifest', () => {
     });
     // The new manifest is the page that follows, and it says it was made.
     expect(await screen.findByRole('heading', { level: 1, name: 'ACC-MF-Q92422' })).toBeVisible();
-    expect(screen.getByText(/The manifest is made\./)).toBeVisible();
+    expect(screen.getByText(/The pickup run is made\./)).toBeVisible();
   });
 
   it('sends no carry-over when nothing is carried over', async () => {
@@ -411,13 +411,13 @@ describe('making the manifest', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
 
-    expect(await screen.findByText(/A request you chose is already on a manifest/)).toBeVisible();
+    expect(await screen.findByText(/A request you chose is already on a pickup run/)).toBeVisible();
     const items = within(review()).getAllByRole('listitem');
     const [untouched, refused] = items;
     if (untouched === undefined || refused === undefined)
       throw new Error('the review lists two requests');
-    expect(within(refused).getByText('Already on a manifest.')).toBeVisible();
-    expect(within(untouched).queryByText('Already on a manifest.')).toBeNull();
+    expect(within(refused).getByText('Already on a pickup run.')).toBeVisible();
+    expect(within(untouched).queryByText('Already on a pickup run.')).toBeNull();
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
@@ -478,7 +478,7 @@ describe('making the manifest', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
     expect(
-      await screen.findByText(/could not confirm whether the manifest was created/i),
+      await screen.findByText(/could not confirm whether the pickup run was created/i),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
@@ -588,7 +588,7 @@ describe('a run is for one hub (task C3, audit R4-12; AC-HUBF-09)', () => {
     await act(async () => {
       await router.navigate('/manifests');
     });
-    await screen.findByRole('heading', { level: 1, name: 'Manifests' });
+    await screen.findByRole('heading', { level: 1, name: 'Pickup runs' });
     await act(async () => {
       await router.navigate('/manifests/new');
     });
@@ -811,7 +811,7 @@ describeInterfaceStates('the manifest builder', {
       await user.click(await box('ACC-PR-7KQ2MZ'));
       await typeDate(user, '04112026');
       await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
-      expect(await screen.findByText('Already on a manifest.')).toBeVisible();
+      expect(await screen.findByText('Already on a pickup run.')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Refresh the pool' })).toBeEnabled();
     },
   },

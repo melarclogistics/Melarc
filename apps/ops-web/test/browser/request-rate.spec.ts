@@ -470,7 +470,7 @@ async function oneRound(page: Page): Promise<void> {
   await buildRun(page);
 
   await menuEntry(page, 'Pickup runs').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Manifests' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Pickup runs' })).toBeVisible();
   await pause(page, PACE.read);
 }
 

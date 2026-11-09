@@ -51,7 +51,7 @@ function BackToRun({ manifestId }: { readonly manifestId: string }) {
   return (
     <p className="pickup-back">
       {manifestId === '' ? (
-        <Link to="/manifests">Back to manifests</Link>
+        <Link to="/manifests">Back to pickup runs</Link>
       ) : (
         <Link to={`/manifests/${manifestId}`}>Back to the manifest</Link>
       )}

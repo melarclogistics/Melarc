@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { Button } from '../../../components/ui/button/Button';
+import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
@@ -111,8 +112,7 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
   const holdsInitiate = me.holds('fleet.custody.initiate');
 
   return (
-    <section className="pickup-section" aria-labelledby="manifest-custody">
-      <h2 id="manifest-custody">Custody of the parcels</h2>
+    <Panel title="Custody of the parcels" headingLevel={2} region>
       {!canRead ? (
         <p className="pickup-act__text">{cannotText('fleet.custody.read')}</p>
       ) : (
@@ -250,6 +250,6 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
         onCancel={close}
         onReload={reload}
       />
-    </section>
+    </Panel>
   );
 }

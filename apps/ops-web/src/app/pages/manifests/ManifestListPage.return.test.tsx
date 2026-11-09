@@ -83,7 +83,7 @@ const manifestTable = async (): Promise<HTMLElement> => {
   });
   return table;
 };
-const backLink = () => screen.findByRole('link', { name: 'Back to manifests' });
+const backLink = () => screen.findByRole('link', { name: 'Back to pickup runs' });
 const stateTab = (name: string) => screen.getByRole('tab', { name });
 /** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
 const alertSaying = async (text: string): Promise<HTMLElement> => {
@@ -721,7 +721,7 @@ describe('the manifests: a page the server will not open', () => {
  */
 describe('the manifests, coming back from a manifest that is not there', () => {
   const gone = () => refusal(404, 'NOT_FOUND');
-  const notFound = () => screen.findByRole('heading', { level: 1, name: 'Manifest not found' });
+  const notFound = () => screen.findByRole('heading', { level: 1, name: 'Pickup run not found' });
 
   /** The officer pages to the second page of the list and opens a manifest on it that the server then says is not there. */
   async function toTheMissingRecord() {

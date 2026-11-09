@@ -103,7 +103,7 @@ async function build(
   for (const code of codes) await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
   await typeServiceDate(page, day);
   await page.getByRole('button', { name: 'Create the manifest' }).click();
-  await expect(page.getByText(/The manifest is made\./)).toBeVisible();
+  await expect(page.getByText(/The pickup run is made\./)).toBeVisible();
   const id = new URL(page.url()).pathname.split('/').at(-1) ?? '';
   expect(id).toMatch(UUID);
   const code = (await page.getByRole('heading', { level: 1 }).textContent()) ?? '';
@@ -119,9 +119,9 @@ async function assignAndDispatch(page: Page, riderName: string): Promise<void> {
   await assign.getByRole('button', { name: 'Assign the rider' }).click();
   await expect(page.getByText(/A rider is assigned\. The manifest is still a draft/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-  const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
-  await dispatch.getByRole('button', { name: 'Dispatch the manifest' }).click();
+  await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+  const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+  await dispatch.getByRole('button', { name: 'Dispatch the pickup run' }).click();
   await expect(page.getByText(/The manifest is dispatched/)).toBeVisible();
 }
 

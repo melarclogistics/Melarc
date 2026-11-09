@@ -2,10 +2,19 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useParams } from 'react-router';
 
+import type { ActionMenuItem } from '../../../components/ui/action-menu/ActionMenu';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import {
+  DescriptionList,
+  type DescriptionItem,
+} from '../../../components/ui/description-list/DescriptionList';
 import { Link } from '../../../components/ui/link/Link';
+import { Panel } from '../../../components/ui/panel/Panel';
+import type { Stage } from '../../../components/ui/record-header/StageTracker';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { RecordPage } from '../../../components/ui/templates/RecordPage';
+import { Timeline, type TimelineEntry } from '../../../components/ui/timeline/Timeline';
 import { useApiClient } from '../../../platform/api/api-client';
 import {
   assignRider,
@@ -13,36 +22,104 @@ import {
   dispatchManifest,
   type ManifestRecord,
 } from '../../../platform/manifest/manifest-commands';
+import type { ManifestView } from '../../../platform/manifest/manifest-shape';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { NoteActDialog } from '../pickup/PickupActDialogs';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { hubNameOf } from '../staff/staff-presentation';
-import { ActBlock } from './ActBlock';
 import { CustodySection, RiderName } from './CustodySection';
 import { AssignRiderDialog, DispatchDialog } from './ManifestActDialogs';
 import { MANIFEST_STATE_MAP, MANIFEST_STATE_SENTENCES, stopsText } from './manifest-presentation';
 import type { SkippedState } from './StopSkipPage';
 import { StopsSection } from './StopsSection';
-import { WithManifest } from './WithManifest';
+import { useFocusFallenToHeading, WithManifest } from './WithManifest';
 import '../pickup/pickup-pages.css';
 import './manifests-pages.css';
 
-type Act = 'assign' | 'dispatch' | 'cancel';
+/** The acts that open their own question from the header's buttons (the cancellation is the menu's, and brings its own dialog). */
+type Act = 'assign' | 'dispatch';
 
-/** What a page that just made a manifest tells the one it brings here (router state; a reload of the page is not a creation). */
+/** What a page that just made a pickup run tells the one it brings here (router state; a reload of the page is not a creation). */
 export interface CreatedState {
   readonly created?: true;
 }
 
-function Fact({ term, children }: { readonly term: string; readonly children: ReactNode }) {
-  return (
-    <>
-      <dt>{term}</dt>
-      <dd>{children}</dd>
-    </>
-  );
+const ASSIGN_RULE =
+  'Assigning a rider closes the vendor’s own cancellation of every request on this pickup run. The rider sees nothing until the pickup run is dispatched. This is a separate step from dispatching.';
+const DISPATCH_RULE =
+  'Dispatching shows the stops to the assigned rider and queues a text message for them. It does not start the run: the rider does that, on the run’s day. A pickup run needs a rider, and a stop still to be worked, to be dispatched.';
+const CANCEL_RULE =
+  'Cancelling asks for a note. The stops still to be worked are skipped, and the requests that are still confirmed return to the pool with their commitment to a rider ended. It can be done until the run starts.';
+const NO_NEW_RIDER_RULE =
+  'A rider cannot be changed once the pickup run is dispatched. To give the run to another rider, cancel the pickup run and plan its requests again.';
+const STARTED_RULE =
+  'A run that has started cannot be cancelled. A stop that cannot be worked is skipped from the stops below, and if the rider cannot go on the parcels are handed to another rider or to the hub, in the custody panel.';
+
+/**
+ * The way a pickup run goes, for the tracker (`contracts/state-machines.md` section 4): **one forward path**, draft, dispatched, in progress and completed, and one end, cancelled (from a
+ * draft or a dispatched run), drawn as the end it is: the last stage, reached. A run that was cancelled after it was dispatched has been through the dispatch; one that was not has not.
+ * Assigning a rider is a fact of a draft (`assigned_at`) and not a state, so it is not a stage; it is in the history.
+ */
+function stagesOf(manifest: ManifestView): {
+  readonly label: string;
+  readonly stages: readonly Stage[];
+  readonly currentId: string;
+} {
+  const label = 'Progress of the pickup run';
+  const stage = (id: string, state: ManifestView['state']): Stage => ({
+    id,
+    label: MANIFEST_STATE_MAP[state].label,
+  });
+  const draft = stage('draft', 'DRAFT');
+  const dispatched = stage('dispatched', 'DISPATCHED');
+  const inProgress = stage('in-progress', 'IN_PROGRESS');
+  const completed = stage('completed', 'COMPLETED');
+  const forward = [draft, dispatched, inProgress, completed];
+  switch (manifest.state) {
+    case 'DRAFT':
+      return { label, stages: forward, currentId: 'draft' };
+    case 'DISPATCHED':
+      return { label, stages: forward, currentId: 'dispatched' };
+    case 'IN_PROGRESS':
+      return { label, stages: forward, currentId: 'in-progress' };
+    case 'COMPLETED':
+      return { label, stages: forward, currentId: 'completed' };
+    case 'CANCELLED':
+      return {
+        label,
+        stages: [
+          draft,
+          ...(manifest.dispatched_at === undefined ? [] : [dispatched]),
+          stage('cancelled', 'CANCELLED'),
+        ],
+        currentId: 'cancelled',
+      };
+  }
+}
+
+/**
+ * What the record itself says happened, with when: a rider assigned, dispatched, started, completed. **Only the dated facts of the record, and nothing invented**: the read carries no
+ * moment of the run's making or of its cancellation (a cancelled run says so in its state and its words), and a fuller history would need a read of the run's audit trail, which the
+ * pickup API does not offer to an Ops session. Oldest first, the latest marked.
+ */
+function historyOf(manifest: ManifestView): readonly TimelineEntry[] {
+  const facts = [
+    ['assigned', 'Assigned', manifest.assigned_at],
+    ['dispatched', 'Dispatched', manifest.dispatched_at],
+    ['started', 'Started', manifest.started_at],
+    ['completed', 'Completed', manifest.completed_at],
+  ] as const;
+  const dated = facts.flatMap(([key, title, at]) => (at === undefined ? [] : [{ key, title, at }]));
+  const ordered = [...dated].sort((first, second) => Date.parse(first.at) - Date.parse(second.at));
+  return ordered.map((entry, index) => ({
+    key: entry.key,
+    title: entry.title,
+    details: <p>{formatInstant(entry.at) ?? ''}</p>,
+    current: index === ordered.length - 1,
+  }));
 }
 
 function Manifest({
@@ -59,17 +136,18 @@ function Manifest({
   const [open, setOpen] = useState<Act | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(
     arrival?.created === true
-      ? 'The manifest is made. It is a draft: order its stops, give it a rider and dispatch it.'
+      ? 'The pickup run is made. It is a draft: order its stops, give it a rider and dispatch it.'
       : arrival?.skipped === true
-        ? 'The stop is skipped and the vendor is told. The manifest is read again below: skipping the last stop to be worked of a run that collected nothing completes the run.'
+        ? 'The stop is skipped and the vendor is told. The pickup run is read again below: skipping the last stop to be worked of a run that collected nothing completes the run.'
         : undefined,
   );
-  // The stops a refused dispatch named, until the manifest is read again.
+  // The stops a refused dispatch named, until the pickup run is read again.
   const [flagged, setFlagged] = useState<ReadonlySet<string>>(new Set());
   const noticeBox = useRef<HTMLDivElement>(null);
-  // Focus goes to the news of an act the person has just done, here; the news of an arrival (the manifest was just made, a stop was just
+  // Focus goes to the news of an act the person has just done, here; the news of an arrival (the run was just made, a stop was just
   // skipped) is read in its place, because the arrival has put focus on the heading of the page, where a person starts.
   const focusNotice = useRef(false);
+  useFocusFallenToHeading();
   useEffect(() => {
     if (notice !== undefined && focusNotice.current) noticeBox.current?.focus();
   }, [notice]);
@@ -80,11 +158,13 @@ function Manifest({
   const draft = manifest.state === 'DRAFT';
   const dispatched = manifest.state === 'DISPATCHED';
   const inProgress = manifest.state === 'IN_PROGRESS';
+  const riderId = manifest.assigned_rider_id;
+  const history = historyOf(manifest);
 
   function close(): void {
     setOpen(undefined);
   }
-  /** The act was done: say what it came to and read the manifest again for its new state and version. */
+  /** The act was done: say what it came to and read the pickup run again for its new state and version. */
   function done(text: string): void {
     focusNotice.current = true;
     setOpen(undefined);
@@ -107,153 +187,180 @@ function Manifest({
     return `${places.length === 1 ? 'stop' : 'stops'} ${places.join(' and ')}`;
   }
 
-  const riderId = manifest.assigned_rider_id;
-  const moments = [
-    ['Assigned', manifest.assigned_at],
-    ['Dispatched', manifest.dispatched_at],
-    ['Started', manifest.started_at],
-    ['Completed', manifest.completed_at],
-  ] as const;
+  // The acts the session can take, and no other: hiding is presentation and never enforcement, and the server checks the key, the hub and the state. Assigning a rider and
+  // dispatching are two acts with a button each, never one: the next of the two to make is the primary, and the other stays beside it.
+  const holdsAssign = me.holds('pickup.manifest.assign');
+  const holdsDispatch = me.holds('pickup.manifest.dispatch');
+  const holdsCancel = me.holds('pickup.manifest.create');
+  const actButton = (act: Act, primary: boolean): ReactNode => (
+    <Button
+      key={act}
+      type="button"
+      {...(primary ? {} : { variant: 'secondary' as const })}
+      onClick={() => {
+        setOpen(act);
+      }}
+    >
+      {act === 'dispatch'
+        ? 'Dispatch the pickup run'
+        : riderId === undefined
+          ? 'Assign a rider'
+          : 'Choose another rider'}
+    </Button>
+  );
+  const offered: readonly Act[] = draft
+    ? [
+        ...(holdsAssign ? (['assign'] as const) : []),
+        ...(holdsDispatch ? (['dispatch'] as const) : []),
+      ]
+    : [];
+  const next: Act = riderId === undefined ? 'assign' : 'dispatch';
+  const primaryAct = offered.includes(next) ? next : offered[0];
+  const secondaryAct = offered.find((act) => act !== primaryAct);
+  const primary = primaryAct === undefined ? undefined : actButton(primaryAct, true);
+  const secondary = secondaryAct === undefined ? undefined : actButton(secondaryAct, false);
+
+  // The rarer and heavier act: the cancellation, last, always confirmed, with its own question and its own note.
+  const menu: ActionMenuItem[] =
+    (draft || dispatched) && holdsCancel
+      ? [
+          {
+            id: 'cancel',
+            label: 'Cancel the pickup run',
+            destructive: true as const,
+            dialog: ({ onClose }: { readonly onClose: () => void }) => (
+              <NoteActDialog<ManifestRecord>
+                open
+                title="Cancel this pickup run?"
+                consequence={
+                  <p>
+                    The stops still to be worked are skipped and every claim is released: the
+                    requests that are still confirmed return to the pool, with their commitment to a
+                    rider ended. A request cancelled in the meantime stays cancelled. The run has
+                    not started, so nothing has been collected.
+                  </p>
+                }
+                confirmLabel="Cancel the pickup run"
+                confirmVariant="danger"
+                noteLabel="Why it is cancelled"
+                noteHelp="One line, kept with the cancellation. Leave out phone numbers and email addresses."
+                operation="cancelPickupManifest"
+                notePointer="/note"
+                version={etag}
+                retryable
+                send={(note, version, key) => cancelPickupManifest(client, id, version, note, key)}
+                onDone={() => {
+                  onClose();
+                  done(
+                    'The pickup run is cancelled. Its requests that are still confirmed are back in the pool.',
+                  );
+                }}
+                onCancel={onClose}
+                onReload={() => {
+                  onClose();
+                  return reload();
+                }}
+              />
+            ),
+          },
+        ]
+      : [];
+
+  // What a person must know before they choose an act, said beside the acts: what each does and what it closes; and, for an act the session cannot take, what the account cannot do, in plain words.
+  const rules: readonly string[] = [
+    ...(draft ? [holdsAssign ? ASSIGN_RULE : cannotText('pickup.manifest.assign')] : []),
+    ...(draft ? [holdsDispatch ? DISPATCH_RULE : cannotText('pickup.manifest.dispatch')] : []),
+    ...(draft || dispatched
+      ? [holdsCancel ? CANCEL_RULE : cannotText('pickup.manifest.create')]
+      : []),
+    ...(dispatched ? [NO_NEW_RIDER_RULE] : []),
+    ...(inProgress ? [STARTED_RULE] : []),
+    ...(manifest.state === 'CANCELLED'
+      ? ['A cancelled pickup run is not changed again. Its stops are listed below.']
+      : manifest.state === 'COMPLETED'
+        ? ['A completed run is not changed again.']
+        : []),
+  ];
+
+  const facts: readonly DescriptionItem[] = [
+    { label: 'Service date', value: serviceDateText(manifest.service_date) },
+    { label: 'Hub', value: hubNameOf(manifest.responsible_hub_id, me.session.authorized_hubs) },
+    {
+      label: 'Rider',
+      value: riderId === undefined ? 'No rider assigned yet' : <RiderName id={riderId} />,
+    },
+    { label: 'Stops', value: stopsText(manifest.stops.length) },
+  ];
 
   return (
     <>
-      {notice === undefined ? null : (
-        <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
-          <Alert variant="success">
-            <p>{notice}</p>
-          </Alert>
-        </div>
-      )}
-
-      <p className="pickup-status">
-        <StatusBadge status={manifest.state} map={MANIFEST_STATE_MAP} />{' '}
-        <span>{MANIFEST_STATE_SENTENCES[manifest.state]}</span>
-      </p>
-
-      <dl className="pickup-facts">
-        <Fact term="Service date">{serviceDateText(manifest.service_date)}</Fact>
-        <Fact term="Hub">{hubNameOf(manifest.responsible_hub_id, me.session.authorized_hubs)}</Fact>
-        <Fact term="Rider">
-          {riderId === undefined ? 'No rider assigned yet' : <RiderName id={riderId} />}
-        </Fact>
-        <Fact term="Stops">{stopsText(manifest.stops.length)}</Fact>
-        {moments.map(([term, at]) =>
-          at === undefined ? null : (
-            <Fact key={term} term={term}>
-              {formatInstant(at)}
-            </Fact>
-          ),
-        )}
-      </dl>
-
-      {/* The message log narrowed to this run, for a session that lists the key of the log (the server checks it all the same). */}
-      {me.holds('notification.read') ? (
-        <p>
-          <Link to={subjectLogPath('PICKUP_MANIFEST', id)}>Messages about this run</Link>
-        </p>
-      ) : null}
-
-      <StopsSection
-        record={record}
-        flagged={flagged}
-        onSaved={() => {
-          done('The order of the stops is saved.');
+      <RecordPage
+        header={{
+          code: manifest.code,
+          status: <StatusBadge status={manifest.state} map={MANIFEST_STATE_MAP} />,
+          sentence: MANIFEST_STATE_SENTENCES[manifest.state],
+          stages: stagesOf(manifest),
         }}
-        onReload={reload}
-      />
-
-      {inProgress ? <CustodySection record={record} onDone={done} onReload={reload} /> : null}
-
-      <section className="pickup-section" aria-labelledby="manifest-acts">
-        <h2 id="manifest-acts">What you can do</h2>
-
-        {draft ? (
+        acts={{
+          ...(primary === undefined ? {} : { primary }),
+          ...(secondary === undefined ? {} : { secondary }),
+          menu: { label: `More actions for ${manifest.code}`, items: menu },
+        }}
+        notice={
           <>
-            <ActBlock
-              title={riderId === undefined ? 'Assign a rider' : 'Change the rider'}
-              permission="pickup.manifest.assign"
-              holds={me.holds('pickup.manifest.assign')}
-              text="Assigning a rider closes the vendor’s own cancellation of every request on this manifest. The rider sees nothing until the manifest is dispatched. This is a separate step from dispatching."
-              control={
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    setOpen('assign');
-                  }}
-                >
-                  {riderId === undefined ? 'Assign a rider' : 'Choose another rider'}
-                </Button>
-              }
-            />
-            <ActBlock
-              title="Dispatch the manifest"
-              permission="pickup.manifest.dispatch"
-              holds={me.holds('pickup.manifest.dispatch')}
-              text="Dispatching shows the stops to the assigned rider and queues a text message for them. It does not start the run: the rider does that, on the run’s day. A manifest needs a rider, and a stop still to be worked, to be dispatched."
-              control={
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setOpen('dispatch');
-                  }}
-                >
-                  Dispatch the manifest
-                </Button>
-              }
-            />
+            {notice === undefined ? null : (
+              <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
+                <Alert variant="success">
+                  <p>{notice}</p>
+                </Alert>
+              </div>
+            )}
+            {rules.map((rule) => (
+              <p key={rule} className="pickup-act__text">
+                {rule}
+              </p>
+            ))}
           </>
-        ) : null}
-
-        {dispatched ? (
-          <div className="pickup-act">
-            <h3>The rider</h3>
-            <p className="pickup-act__text">
-              A rider cannot be changed once the manifest is dispatched. To give the run to another
-              rider, cancel the manifest and plan its requests again.
-            </p>
-          </div>
-        ) : null}
-
-        {draft || dispatched ? (
-          <ActBlock
-            title="Cancel the manifest"
-            permission="pickup.manifest.create"
-            holds={me.holds('pickup.manifest.create')}
-            text="Cancelling asks for a note. The stops still to be worked are skipped, and the requests that are still confirmed return to the pool with their commitment to a rider ended. It can be done until the run starts."
-            control={
-              <Button
-                type="button"
-                variant="danger"
-                onClick={() => {
-                  setOpen('cancel');
-                }}
-              >
-                Cancel the manifest
-              </Button>
-            }
-          />
-        ) : null}
-
-        {inProgress ? (
-          <div className="pickup-act">
-            <h3>The run has started</h3>
-            <p className="pickup-act__text">
-              A run that has started cannot be cancelled. A stop that cannot be worked is skipped
-              from this page, and if the rider cannot go on the parcels are handed to another rider
-              or to the hub, above.
-            </p>
-          </div>
-        ) : null}
-
-        {!draft && !dispatched && !inProgress ? (
-          <p className="pickup-act__text">
-            {manifest.state === 'CANCELLED'
-              ? 'A cancelled manifest is not changed again. Its stops are listed above.'
-              : 'A completed run is not changed again.'}
-          </p>
-        ) : null}
-      </section>
+        }
+        main={
+          <>
+            <Panel title="The pickup run" headingLevel={2}>
+              <DescriptionList items={facts} />
+            </Panel>
+            <StopsSection
+              record={record}
+              flagged={flagged}
+              onSaved={() => {
+                done('The order of the stops is saved.');
+              }}
+              onReload={reload}
+            />
+            {inProgress ? <CustodySection record={record} onDone={done} onReload={reload} /> : null}
+          </>
+        }
+        // Beside the work where the page has room, after it where it has not: when each thing happened, and what is related.
+        side={
+          <>
+            {history.length === 0 ? null : (
+              <Panel title="History" headingLevel={2}>
+                <Timeline
+                  label="History of this pickup run, oldest first"
+                  entries={history}
+                  currentLabel="Latest"
+                />
+              </Panel>
+            )}
+            {me.holds('notification.read') ? (
+              <Panel title="Related" headingLevel={2}>
+                {/* The message log narrowed to this run, for a session that lists the key of the log (the server checks it all the same). */}
+                <p>
+                  <Link to={subjectLogPath('PICKUP_MANIFEST', id)}>Messages about this run</Link>
+                </p>
+              </Panel>
+            ) : null}
+          </>
+        }
+      />
 
       <AssignRiderDialog<ManifestRecord>
         open={open === 'assign'}
@@ -262,7 +369,7 @@ function Manifest({
         send={(riderId2, version) => assignRider(client, id, version, riderId2)}
         onDone={() => {
           done(
-            'A rider is assigned. The manifest is still a draft: dispatch it to show the stops to the rider.',
+            'A rider is assigned. The pickup run is still a draft: dispatch it to show the stops to the rider.',
           );
         }}
         onCancel={close}
@@ -275,7 +382,7 @@ function Manifest({
         send={(version) => dispatchManifest(client, id, version)}
         onDone={() => {
           done(
-            'The manifest is dispatched. The rider can see its stops; the run starts on its day.',
+            'The pickup run is dispatched. The rider can see its stops; the run starts on its day.',
           );
         }}
         onCancel={close}
@@ -287,55 +394,29 @@ function Manifest({
           }
         }}
       />
-      <NoteActDialog<ManifestRecord>
-        open={open === 'cancel'}
-        title="Cancel this manifest?"
-        consequence={
-          <p>
-            The stops still to be worked are skipped and every claim is released: the requests that
-            are still confirmed return to the pool, with their commitment to a rider ended. A
-            request cancelled in the meantime stays cancelled. The run has not started, so nothing
-            has been collected.
-          </p>
-        }
-        confirmLabel="Cancel the manifest"
-        confirmVariant="danger"
-        noteLabel="Why it is cancelled"
-        noteHelp="One line, kept with the cancellation. Leave out phone numbers and email addresses."
-        operation="cancelPickupManifest"
-        notePointer="/note"
-        version={etag}
-        retryable
-        send={(note, version, key) => cancelPickupManifest(client, id, version, note, key)}
-        onDone={() => {
-          done(
-            'The manifest is cancelled. Its requests that are still confirmed are back in the pool.',
-          );
-        }}
-        onCancel={close}
-        onReload={reload}
-      />
     </>
   );
 }
 
 /**
- * One manifest (surfaces/ops-portal.md section 7, `/manifests/{id}`; S1.25): where the run stands and what comes next, the rider, the stops in
- * their order, and the acts the record and the session's keys allow. **Assigning a rider and dispatching are separate acts**, never one button;
- * the order of the stops, the cancellation, the Ops skip of a stop and the custody handover are each their own. Every act sends the version the
- * page read (`If-Match`), so a concurrent edit is a `STATE_CONFLICT` that is explained and read again, never a silent overwrite. What is offered
- * is a hint and decides nothing: the server checks the key, the hub and the state. A manifest outside the session's hubs and one that does not
- * exist are pages of their own (`HUB_SCOPE_VIOLATION`, `NOT_FOUND`).
+ * One pickup run (surfaces/ops-portal.md section 7, `/manifests/{id}`; S1.25; redesign step R7a): the record page template. Its header says where the run stands (the tracker is the
+ * contract's one forward path: draft, dispatched, in progress, completed; cancelled is the end it is) and what comes next, with the one primary act, the other beside it and the
+ * cancellation in the menu; the work is the facts, the stops in their order and, while the run is in progress, the custody of the parcels; the history and the way to its messages are in the
+ * side column. **Assigning a rider and dispatching are separate acts**, never one button; the order of the stops, the cancellation, the Ops skip of a stop and the custody handover are
+ * each their own, with their own confirmation. Every act sends the version the page read (`If-Match`), so a concurrent edit is a `STATE_CONFLICT` that is explained and read again, never
+ * a silent overwrite. What is offered is a hint and decides nothing: the server checks the key, the hub and the state. A pickup run outside the session's hubs and one that does not exist
+ * are pages of their own (`HUB_SCOPE_VIOLATION`, `NOT_FOUND`).
  */
 export function ManifestDetailPage() {
   const { id = '' } = useParams();
   return (
     <WithManifest
       id={id}
+      ownsHeading
       heading={(record) => ({
-        title: record?.manifest.code ?? 'Manifest',
+        title: record?.manifest.code ?? 'Pickup run',
         description: 'Pickup run',
-        documentTitle: record?.manifest.code ?? 'Manifest',
+        documentTitle: record?.manifest.code ?? 'Pickup run',
       })}
     >
       {(record, query) => <Manifest record={record} query={query} />}

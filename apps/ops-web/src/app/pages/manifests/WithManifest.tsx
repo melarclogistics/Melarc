@@ -1,11 +1,10 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, type ReactNode } from 'react';
 
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { ManifestRecord } from '../../../platform/manifest/manifest-commands';
@@ -21,9 +20,9 @@ import '../pickup/pickup-pages.css';
 export const LIST_PERMISSION = 'pickup.read';
 
 /**
- * The way back to the list, above a manifest's heading. Given the manifest it is on, it names the list the officer left for it (the filters in
+ * The way back to the list, above a pickup run's heading. Given the run it is on, it names the list the officer left for it (the filters in
  * the address) and says it is a return, so that the list brings them to the page they were on (`platform/pickup/queue-continuity.ts`); a
- * manifest reached any other way (the menu, a typed address, a new tab, a creation, a reload) has no place to go back to, and the link is the
+ * run reached any other way (the menu, a typed address, a new tab, a creation, a reload) has no place to go back to, and the link is the
  * plain list.
  */
 export function BackToManifests({ manifestId }: { readonly manifestId?: string }) {
@@ -35,7 +34,7 @@ export function BackToManifests({ manifestId }: { readonly manifestId?: string }
         to={{ pathname: '/manifests', search: back?.search ?? '' }}
         {...(back === undefined ? {} : { state: back.state })}
       >
-        Back to manifests
+        Back to pickup runs
       </Link>
     </p>
   );
@@ -52,7 +51,7 @@ export function useFocusFallenToHeading(): void {
 }
 
 /**
- * A manifest that does not exist (or an address that is not a manifest's): a page of its own, not a part of one. A manifest that was asked for by
+ * A pickup run that does not exist (or an address that is not a run's): a page of its own, not a part of one. A run that was asked for by
  * its id and the server says is not there keeps that id for the way back, so that the page the officer left for it is still the page they come
  * back to; an address that is not an id has none to keep, and its way back is the plain list.
  */
@@ -60,15 +59,15 @@ export function ManifestNotFound({ manifestId }: { readonly manifestId?: string 
   useFocusFallenToHeading();
   return (
     <>
-      <title>Manifest not found · Melarc Ops Portal</title>
-      <PageHeading>Manifest not found</PageHeading>
+      <title>Pickup run not found · Melarc Ops Portal</title>
+      <PageHeading>Pickup run not found</PageHeading>
       <p>{copyFor({ operation: 'getPickupManifest', code: 'NOT_FOUND' })}</p>
       <BackToManifests {...(manifestId === undefined ? {} : { manifestId })} />
     </>
   );
 }
 
-/** The way back to the list, for an officer who can read it: the link of every manifest's page. A session that cannot is given the refusal only. */
+/** The way back to the list, for an officer who can read it: the link of every run's page. A session that cannot is given the refusal only. */
 function WayBack({ manifestId }: { readonly manifestId: string }) {
   const me = useSignedInSession();
   return me?.holds(LIST_PERMISSION) === true ? <BackToManifests manifestId={manifestId} /> : null;
@@ -97,17 +96,22 @@ function NoAccess({ manifestId }: { readonly manifestId: string }) {
 export interface WithManifestProps {
   /** The manifest asked for. An address that is not an id is a manifest that is not there, and nothing is asked of the server. */
   readonly id: string;
-  /** The page's heading: the same element while the manifest is on its way and after, so that focus on it is not lost when it arrives. */
+  /** The page's heading: the same element while the pickup run is on its way and after, so that focus on it is not lost when it arrives. */
   readonly heading: (record: ManifestRecord | undefined) => {
     readonly title: string;
     readonly description?: string;
     readonly documentTitle: string;
   };
-  /** The body of the page, drawn once the manifest has been read. It gets the read itself and does not ask again. */
+  /**
+   * The page draws its own heading once the run is read (a record page: its header is the run's code, the page's one level-one heading); the way back stays above it, in every state. Until then,
+   * and for a failure, this wrapper's heading stands, so that the page has one.
+   */
+  readonly ownsHeading?: boolean;
+  /** The body of the page, drawn once the pickup run has been read. It gets the read itself and does not ask again. */
   readonly children: (record: ManifestRecord, query: UseQueryResult<ManifestRecord>) => ReactNode;
 }
 
-function Reading({ id, heading, children }: WithManifestProps) {
+function Reading({ id, heading, ownsHeading = false, children }: WithManifestProps) {
   const query = useManifest(id);
 
   if (query.status === 'error') {
@@ -121,11 +125,14 @@ function Reading({ id, heading, children }: WithManifestProps) {
   }
 
   const { title, description, documentTitle } = heading(query.data);
+  const loaded = ownsHeading && query.status === 'success';
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
       <BackToManifests manifestId={id} />
-      <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+      {loaded ? null : (
+        <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+      )}
       {query.status === 'success' ? (
         children(query.data, query)
       ) : (
@@ -133,7 +140,7 @@ function Reading({ id, heading, children }: WithManifestProps) {
           query={query}
           isEmpty={() => false}
           empty={null}
-          loadingLabel="Loading the manifest…"
+          loadingLabel="Loading the pickup run…"
           skeleton={<Skeleton lines={6} />}
           permission="pickup.read"
           operation="getPickupManifest"

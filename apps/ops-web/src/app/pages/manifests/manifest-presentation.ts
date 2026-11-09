@@ -45,7 +45,7 @@ export const STOP_STATUS_MAP: StatusMap<StopStatus> = {
   FAILED: { tone: 'danger', label: 'Failed' },
   SKIPPED: { tone: 'neutral', label: 'Skipped' },
   SKIPPED_REQUEST_CANCELLED: { tone: 'neutral', label: 'Cancelled with its request' },
-  SKIPPED_MANIFEST_CANCELLED: { tone: 'neutral', label: 'Cancelled with the manifest' },
+  SKIPPED_MANIFEST_CANCELLED: { tone: 'neutral', label: 'Cancelled with the pickup run' },
 };
 
 export function isSystemSkip(reason: string): reason is SystemSkipReason {
@@ -99,7 +99,7 @@ export function skipReasonText(
     return 'Its request was cancelled, so the stop was skipped with it.';
   }
   if (skip.reason_code === 'MANIFEST_CANCELLED') {
-    return 'The manifest was cancelled, so the stop was skipped with it.';
+    return 'The pickup run was cancelled, so the stop was skipped with it.';
   }
   const label = catalogue?.find((reason) => reason.code === skip.reason_code)?.label;
   return label === undefined
@@ -107,7 +107,7 @@ export function skipReasonText(
     : `Skipped by Ops: ${label}.`;
 }
 
-/** The stops of a manifest in words: "3 stops", "1 stop". */
+/** The stops of a pickup run in words: "3 stops", "1 stop". */
 export function stopsText(count: number): string {
   return `${String(count)} ${count === 1 ? 'stop' : 'stops'}`;
 }
@@ -118,8 +118,9 @@ export function stopsText(count: number): string {
  * told as a refusal and never as the rule itself.
  */
 export const CREATION_RULE_WORDS: Readonly<Record<string, string>> = {
-  already_manifested: 'Already on a manifest.',
-  not_available: 'Not available for a manifest: it is not there, or not one your session acts on.',
+  already_manifested: 'Already on a pickup run.',
+  not_available:
+    'Not available for a pickup run: it is not there, or not one your session acts on.',
   duplicate: 'Chosen twice.',
   hub_mismatch: 'Belongs to another hub than the first request chosen.',
   not_confirmed: 'Not confirmed any more.',

@@ -95,6 +95,12 @@ const poolTable = (page: Page) =>
 const poolCards = (page: Page) =>
   page.getByRole('list', { name: 'Confirmed pickups waiting for a pickup run' });
 
+/** The cancellation is in the menu of the record's header: it is opened, and the act is chosen. It brings its own question. */
+async function chooseAct(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name }).click();
+}
+
 async function typeDate(page: Page, digits: string): Promise<void> {
   const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await day.click();
@@ -201,7 +207,7 @@ test.describe('building a manifest', () => {
     await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-N7R4PX' })).toBeFocused();
-    await expect(page.getByText(/The manifest is made\./)).toBeVisible();
+    await expect(page.getByText(/The pickup run is made\./)).toBeVisible();
     const create = callTo(api, 'POST', '/pickup-manifests')[0];
     expect(create?.idempotencyKey).toMatch(KEY);
     expect(create?.ifMatch).toBeUndefined();
@@ -226,8 +232,8 @@ test.describe('building a manifest', () => {
 
     await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
-    await expect(page.getByText('Already on a manifest.')).toBeVisible();
-    await expect(page.getByText(/A request you chose is already on a manifest/)).toBeVisible();
+    await expect(page.getByText('Already on a pickup run.')).toBeVisible();
+    await expect(page.getByText(/A request you chose is already on a pickup run/)).toBeVisible();
     expect(api.world.manifests).toHaveLength(1);
   });
 });
@@ -370,14 +376,14 @@ test.describe('ordering, assigning and dispatching a run', () => {
     await assign.getByRole('button', { name: 'Choose: Kwame Mensah' }).click();
     await assign.getByRole('button', { name: 'Assign the rider' }).click();
     await expect(
-      page.getByText(/A rider is assigned\. The manifest is still a draft/),
+      page.getByText(/A rider is assigned\. The pickup run is still a draft/),
     ).toBeVisible();
     expect(callTo(api, 'POST', '/dispatch')).toHaveLength(0);
 
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-    const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
-    await dispatch.getByRole('button', { name: 'Dispatch the manifest' }).click();
-    await expect(page.getByText(/The manifest is dispatched/)).toBeVisible();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+    const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await dispatch.getByRole('button', { name: 'Dispatch the pickup run' }).click();
+    await expect(page.getByText(/The pickup run is dispatched/)).toBeVisible();
     await expect(page.getByText('Dispatched', { exact: true }).first()).toBeVisible();
 
     const assigned = callTo(api, 'POST', '/assign-rider')[0];
@@ -391,17 +397,17 @@ test.describe('ordering, assigning and dispatching a run', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('tells a dispatch refused for a day that has passed, in words, with the manifest still a draft', async ({
+  test('tells a dispatch refused for a day that has passed, in words, with the pickup run still a draft', async ({
     page,
   }) => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, DRAFT, {
       manifests: [manifest({ service_date: '2026-11-02', riderId: IDS.riderA })],
     });
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
     await page
       .getByRole('alertdialog')
-      .getByRole('button', { name: 'Dispatch the manifest' })
+      .getByRole('button', { name: 'Dispatch the pickup run' })
       .click();
 
     await expect(
@@ -415,15 +421,15 @@ test.describe('ordering, assigning and dispatching a run', () => {
   }) => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Cancel the manifest' }).first().click();
-    const dialog = page.getByRole('alertdialog', { name: 'Cancel this manifest?' });
-    await dialog.getByRole('button', { name: 'Cancel the manifest' }).click();
+    await chooseAct(page, 'Cancel the pickup run');
+    const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
+    await dialog.getByRole('button', { name: 'Cancel the pickup run' }).click();
     await expect(dialog.getByText('Write a note saying why.')).toBeVisible();
 
     await dialog.getByRole('textbox', { name: /Why it is cancelled/ }).fill('Rider unwell');
-    await dialog.getByRole('button', { name: 'Cancel the manifest' }).click();
+    await dialog.getByRole('button', { name: 'Cancel the pickup run' }).click();
 
-    await expect(page.getByText(/The manifest is cancelled\./)).toBeVisible();
+    await expect(page.getByText(/The pickup run is cancelled\./)).toBeVisible();
     const cancel = callTo(api, 'POST', '/cancel')[0];
     expect(cancel?.ifMatch).toBe('"m1"');
     expect(cancel?.idempotencyKey).toMatch(KEY);
@@ -435,8 +441,8 @@ test.describe('ordering, assigning and dispatching a run', () => {
   test('keeps Tab inside the dialog of an act, and Escape closes it', async ({ page }) => {
     await page.setViewportSize(WIDE);
     await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-    const dialog = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+    const dialog = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
     await expect(dialog).toBeVisible();
 
     // Past the dialog's last control a browser may hand Tab to its own interface (the document has focus then); what must never happen is focus
@@ -825,7 +831,7 @@ test.describe('filtering the list', () => {
 
     await page.getByRole('link', { name: 'ACC-MF-D3F5RT' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-D3F5RT' })).toBeFocused();
-    await page.getByRole('link', { name: 'Back to manifests' }).click();
+    await page.getByRole('link', { name: 'Back to pickup runs' }).click();
     await expect(page.getByRole('link', { name: 'ACC-MF-D3F5RT' })).toBeFocused();
     expect(new URL(page.url()).search).toBe('?state=DRAFT&date=2026-11-05');
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-D3F5RT']);
@@ -845,7 +851,7 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     await open(page, '/manifests/a1000000-0000-4000-8000-0000000000b1', filterWorld());
 
-    await expect(page.getByRole('link', { name: 'Back to manifests' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'Back to pickup runs' })).toHaveAttribute(
       'href',
       '/manifests',
     );
@@ -910,7 +916,7 @@ test.describe('the manifests: coming back from a manifest', () => {
     return view;
   }
 
-  const backLink = (page: Page) => page.getByRole('link', { name: 'Back to manifests' });
+  const backLink = (page: Page) => page.getByRole('link', { name: 'Back to pickup runs' });
 
   /** Where the officer should be: the page they left, read again, with focus on the manifest they opened. */
   async function expectTheOfficerBack(page: Page, api: ManifestApi) {
@@ -1016,7 +1022,9 @@ test.describe('the manifests: coming back from a manifest', () => {
     await page.route(`**/api/v1/pickup-manifests/${MANY[7]?.id ?? ''}`, failing(404, 'NOT_FOUND'));
 
     await page.getByRole('link', { name: opened }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifest not found' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Pickup run not found' }),
+    ).toBeVisible();
     await expect(backLink(page)).toHaveAttribute('href', '/manifests?state=DRAFT');
     const reads = listRequests(api).length;
     await backLink(page).click();
@@ -1031,7 +1039,9 @@ test.describe('the manifests: coming back from a manifest', () => {
     // An identifier that is a manifest's in form, and that the stand-in does not hold.
     await open(page, '/manifests/a2000000-0000-4000-8000-0000000000ff', FIVE_AT_A_TIME);
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifest not found' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Pickup run not found' }),
+    ).toBeVisible();
     await expect(backLink(page)).toHaveAttribute('href', '/manifests');
   });
 
@@ -1252,8 +1262,10 @@ test.describe('every screen, at the verified widths', () => {
       expect(await wcagViolations(page)).toEqual([]);
       await page.keyboard.press('Escape');
 
-      await page.getByRole('button', { name: 'Cancel the manifest' }).first().click();
-      await expect(page.getByRole('alertdialog', { name: 'Cancel this manifest?' })).toBeVisible();
+      await chooseAct(page, 'Cancel the pickup run');
+      await expect(
+        page.getByRole('alertdialog', { name: 'Cancel this pickup run?' }),
+      ).toBeVisible();
       expect(await wcagViolations(page)).toEqual([]);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     });
@@ -1304,7 +1316,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
   test('with reduced motion nothing moves when a dialog of an act opens', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
 
     const running = await page.evaluate(

@@ -43,14 +43,6 @@
   }
 }
 
-.pickup-section {
-  margin-top: var(--space-6);
-}
-
-.pickup-section > h2 {
-  margin-bottom: var(--space-3);
-}
-
 /* What a person can do with the request: one block for each act, each a sentence about it and the control that does it. */
 .pickup-act + .pickup-act {
   margin-top: var(--space-6);
