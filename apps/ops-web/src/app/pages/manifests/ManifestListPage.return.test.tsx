@@ -870,6 +870,7 @@ describe('the manifests, coming back from a manifest the officer may not read', 
   it('offers the link by the key of the list’s own route', () => {
     const list = SIGNED_IN_ROUTES.find((route) => route.path === '/manifests');
 
-    expect(list?.access).toEqual({ permission: LIST_PERMISSION });
+    // The route asks for the key and says what its page reads with it (the guard refuses in the words of pickup runs): the key is what the link follows.
+    expect(list?.access).toEqual({ permission: LIST_PERMISSION, capability: 'see pickup runs' });
   });
 });
