@@ -686,8 +686,9 @@ test.describe('the trusted browsers (staff-authentication.md section 5.8)', () =
   }) => {
     const { api } = await open(page, `/admin/staff/${IDS.ama}`);
     const section = page.getByRole('region', { name: 'Trusted browsers' });
-    await expect(section.getByRole('table')).toContainText('Firefox on Linux');
-    await expect(section.getByRole('table')).toContainText('Edge on Windows');
+    // The record page has a side column, so the browsers are a table or, in the narrower main column, cards: what each is called is in both (the width matrix holds which is drawn).
+    await expect(section.getByText('Firefox on Linux')).toBeVisible();
+    await expect(section.getByText('Edge on Windows')).toBeVisible();
     expect(await page.content()).not.toContain(PLANTED);
 
     await section.getByRole('button', { name: 'Remove all trusted browsers' }).click();
@@ -816,7 +817,17 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the trusted browsers of the person',
     reach: async (page) => {
       await open(page, '/account/trusted-browsers');
-      await expect(page.getByRole('table', { name: 'Your trusted browsers' })).toBeVisible();
+      // A table from 40rem of the page card's box up (the menu is a rail from 768 px, so a box of 768 px is a table) and cards under it (the Product Owner, 10 November 2026): which one is
+      // drawn follows the width, and the matrix says which, so that a table at 320 px or cards at 1280 px is a failure and not a pass by either.
+      const width = page.viewportSize()?.width ?? 0;
+      const name = 'Your trusted browsers';
+      if (width >= 768) {
+        await expect(page.getByRole('table', { name })).toBeVisible();
+        await expect(page.getByRole('list', { name })).toHaveCount(0);
+      } else {
+        await expect(page.getByRole('list', { name })).toBeVisible();
+        await expect(page.getByRole('table', { name })).toHaveCount(0);
+      }
     },
   },
   {
