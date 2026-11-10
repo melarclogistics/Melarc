@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { ESLint } from 'eslint';
 import { parse } from 'yaml';
 
 /**
@@ -12,6 +13,12 @@ import { parse } from 'yaml';
  * (`scripts/`, the configuration, a fixture of the verifier) are linted by `lint:root`: a workspace whose package has no `lint` script, or a new folder of code that
  * is neither a workspace nor named by `lint:root`, would be linted by nothing, and the precheck, the gate and CI would all say "lint passed". These hold the layout to
  * that: each workspace lints the whole of itself, the root names its own folders, and every TypeScript or JavaScript file Git tracks is under one of them.
+ *
+ * **And ESLint says so itself** (run 6, Stage 1.4). The layout is read from package scripts and folder prefixes, which cannot see that `eslint.config.mjs` ignores a folder
+ * (it counted `packages/api-client/src/generated/` as read, and a folder added to `globalIgnores` would have been read by nothing while every lint stage passed). So each
+ * tracked file is also put to ESLint's own API: `isPathIgnored` must be false, and the configuration it computes for the file (`calculateConfigForFile`) must exist and have
+ * a rule on. What ESLint ignores on purpose is named, with its reason, in `IGNORED_ON_PURPOSE`, and that list must be true: an entry whose files ESLint reads, or which holds
+ * none, fails too.
  */
 const root = resolve(import.meta.dirname, '..');
 const created: string[] = [];
@@ -107,6 +114,78 @@ function lintCoverageProblems(base: string, files: readonly string[]): string[] 
   return problems;
 }
 
+/**
+ * What ESLint is told to ignore on purpose, by folder, and why: the one fact the layout check could not see. A folder added to `globalIgnores` in `eslint.config.mjs` is not
+ * here, so it fails `eslintProblems`; one removed from the configuration while it is here fails it too.
+ */
+const IGNORED_ON_PURPOSE: Readonly<Record<string, string>> = {
+  'packages/api-client/src/generated/':
+    'machine output of the generator, held to the contract by `api-client:check` (that it is current) and not to a style',
+};
+
+/** Whether a computed configuration has a rule that is on (a severity of warn or error, as ESLint writes it: `[2]`, `[1, options]`, or the bare value). */
+function hasRuleOn(config: { readonly rules?: Readonly<Record<string, unknown>> }): boolean {
+  return Object.values(config.rules ?? {}).some((value) => {
+    const severity: unknown = Array.isArray(value) ? (value as unknown[])[0] : value;
+    return severity === 1 || severity === 2 || severity === 'warn' || severity === 'error';
+  });
+}
+
+/**
+ * What ESLint itself says of each lintable file of a repository rooted at `base` (run 6, Stage 1.4): that it is not ignored (by a global ignore, or because no
+ * configuration matches it), that the configuration computed for it has a rule on, and that what is ignored is exactly `onPurpose`, folder by folder.
+ */
+async function eslintProblems(
+  base: string,
+  files: readonly string[],
+  onPurpose: readonly string[],
+): Promise<string[]> {
+  const eslint = new ESLint({ cwd: base });
+  const problems: string[] = [];
+  const ignoredBy = new Map<string, { read: number; ignored: number }>(
+    onPurpose.map((folder) => [folder, { read: 0, ignored: 0 }]),
+  );
+  for (const file of files.filter((candidate) => LINTABLE.test(candidate))) {
+    const folder = onPurpose.find((place) => file.startsWith(place));
+    const ignored = await eslint.isPathIgnored(file);
+    if (folder !== undefined) {
+      const count = ignoredBy.get(folder);
+      if (count !== undefined) {
+        if (ignored) count.ignored += 1;
+        else count.read += 1;
+      }
+      continue;
+    }
+    if (ignored) {
+      problems.push(
+        `${file} is ignored by ESLint's own configuration (a global ignore, or no configuration matches it), so no lint run reads it: take the ignore out, or name the folder in IGNORED_ON_PURPOSE with the reason`,
+      );
+      continue;
+    }
+    const config = (await eslint.calculateConfigForFile(file)) as
+      { readonly rules?: Readonly<Record<string, unknown>> } | undefined;
+    if (config === undefined) {
+      problems.push(`ESLint computes no configuration for ${file}, so no lint run reads it`);
+    } else if (!hasRuleOn(config)) {
+      problems.push(
+        `The configuration ESLint computes for ${file} has no rule on, so a lint run reads it for nothing`,
+      );
+    }
+  }
+  for (const [folder, count] of ignoredBy) {
+    if (count.ignored === 0 && count.read === 0) {
+      problems.push(
+        `${folder} is named in IGNORED_ON_PURPOSE and holds no tracked file to ignore: take it out of the list`,
+      );
+    } else if (count.read > 0) {
+      problems.push(
+        `${folder} is named in IGNORED_ON_PURPOSE, but ESLint reads ${String(count.read)} of its files: take it out of the list, or ignore it in eslint.config.mjs`,
+      );
+    }
+  }
+  return problems;
+}
+
 function gitFiles(base: string): string[] {
   return execFileSync('git', ['ls-files', '-z'], {
     cwd: base,
@@ -126,6 +205,13 @@ describe('this repository', () => {
     assert.deepEqual(lintCoverageProblems(root, files), []);
   });
 
+  // Break caught (run 6, Stage 1.4): a folder added to `globalIgnores` in eslint.config.mjs (or a configuration that no longer matches a kind of file, or one that turns every rule
+  // off for a folder). The layout above cannot see it: the folder is under a workspace that lints itself, and ESLint reads nothing in it, so every lint stage passes. ESLint's
+  // own API is asked of every tracked file.
+  it('has every TypeScript and JavaScript file read by ESLint itself, but for the folders it ignores on purpose', async () => {
+    assert.deepEqual(await eslintProblems(root, files, Object.keys(IGNORED_ON_PURPOSE)), []);
+  });
+
   // A check over nothing passes: the repository has these workspaces and this many files to read.
   it('reads the workspaces and the files it judges', () => {
     const workspaces = workspacesOf(root);
@@ -137,6 +223,13 @@ describe('this repository', () => {
       targetsOf(readJson(join(root, 'package.json')).scripts?.['lint:root']),
       ['scripts', 'eslint.config.mjs', 'apps/attestation-verifier/fixtures'],
       'the root files that lint:root names',
+    );
+    // The one folder ESLint ignores on purpose is a tracked folder with files in it, so that the list is judged against something.
+    assert.deepEqual(Object.keys(IGNORED_ON_PURPOSE), ['packages/api-client/src/generated/']);
+    assert.ok(
+      files.some(
+        (file) => file.startsWith('packages/api-client/src/generated/') && LINTABLE.test(file),
+      ),
     );
   });
 });
@@ -230,5 +323,77 @@ describe('the check itself', () => {
     assert.match(problems.join('\n'), /does not run lint:root/);
     assert.match(problems.join('\n'), /lint:root does not run ESLint over any folder/);
     assert.match(problems.join('\n'), /scripts\/a\.ts is read by no lint run/);
+  });
+});
+
+describe('the check itself, against ESLint', () => {
+  /** A repository on disk with the flat configuration given, for ESLint to judge. It needs no dependency: a configuration is an array. */
+  function configured(config: string): string {
+    const base = mkdtempSync(join(tmpdir(), 'melarc-lint-eslint-'));
+    created.push(base);
+    writeFileSync(join(base, 'eslint.config.mjs'), config);
+    return base;
+  }
+  const RULE = "{ files: ['**/*.ts'], rules: { 'no-undef': 'error' } }";
+
+  // Break caught: a check that says "read" whatever ESLint says.
+  it('accepts files that ESLint reads, with a rule on', async () => {
+    const base = configured(`export default [${RULE}];`);
+
+    assert.deepEqual(await eslintProblems(base, ['src/a.ts', 'src/b.ts', 'README.md'], []), []);
+  });
+
+  // Break caught (run 6, Stage 1.4): a folder added to `globalIgnores`, the very thing the layout check could not see.
+  it('reports a folder that a global ignore names, with the file and what to do', async () => {
+    const base = configured(`export default [{ ignores: ['generated/'] }, ${RULE}];`);
+
+    const problems = await eslintProblems(base, ['src/a.ts', 'generated/b.ts'], []);
+
+    assert.equal(problems.length, 1, problems.join('\n'));
+    assert.match(problems[0] ?? '', /^generated\/b\.ts is ignored by ESLint's own configuration/);
+    assert.match(problems[0] ?? '', /IGNORED_ON_PURPOSE/);
+  });
+
+  // Break caught: a kind of file that no configuration matches any more (ESLint then reads nothing in it, and only warns when it is named).
+  it('reports a file that no configuration matches', async () => {
+    const base = configured(`export default [${RULE}];`);
+
+    const problems = await eslintProblems(base, ['src/a.ts', 'src/view.jsx'], []);
+
+    assert.equal(problems.length, 1, problems.join('\n'));
+    assert.match(problems[0] ?? '', /src\/view\.jsx/);
+  });
+
+  // Break caught: a configuration that matches a folder and turns every rule off for it, so that a lint run reads it for nothing.
+  it('reports a file whose computed configuration has no rule on', async () => {
+    const base = configured(
+      `export default [${RULE}, { files: ['quiet/**'], rules: { 'no-undef': 'off' } }];`,
+    );
+
+    const problems = await eslintProblems(base, ['src/a.ts', 'quiet/c.ts'], []);
+
+    assert.equal(problems.length, 1, problems.join('\n'));
+    assert.match(
+      problems[0] ?? '',
+      /configuration ESLint computes for quiet\/c\.ts has no rule on/,
+    );
+  });
+
+  // The folders named as ignored on purpose are accepted when ESLint ignores them, and the list is held to the truth in both directions.
+  it('accepts a folder that is ignored on purpose, and reports an entry that is not true', async () => {
+    const base = configured(`export default [{ ignores: ['generated/'] }, ${RULE}];`);
+    const files = ['src/a.ts', 'generated/b.ts'];
+
+    assert.deepEqual(await eslintProblems(base, files, ['generated/']), []);
+
+    const reads = await eslintProblems(base, files, ['generated/', 'src/']);
+    assert.deepEqual(reads, [
+      'src/ is named in IGNORED_ON_PURPOSE, but ESLint reads 1 of its files: take it out of the list, or ignore it in eslint.config.mjs',
+    ]);
+
+    const empty = await eslintProblems(base, files, ['generated/', 'gone/']);
+    assert.deepEqual(empty, [
+      'gone/ is named in IGNORED_ON_PURPOSE and holds no tracked file to ignore: take it out of the list',
+    ]);
   });
 });
