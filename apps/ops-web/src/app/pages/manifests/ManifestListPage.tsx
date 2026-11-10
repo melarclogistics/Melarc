@@ -448,7 +448,7 @@ export function ManifestListPage() {
               setTyped({ over: undefined, value: null });
               change({ date: '' });
             },
-            sortLabel: 'Oldest first, as the server lists them',
+            sortLabel: 'Oldest first',
             filterOpen,
             onFilterOpenChange: setFilterOpen,
             filterPanel: (

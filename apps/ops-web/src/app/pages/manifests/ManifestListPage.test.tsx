@@ -161,11 +161,13 @@ describe('the manifests: what the list shows', () => {
     expect(document.body.textContent).not.toContain('9d0e1f2a');
   });
 
-  it('says it is oldest first, as the server lists it, and asks for no filter until one is chosen', async () => {
+  it('says it is oldest first, in those words, and asks for no filter until one is chosen', async () => {
     open();
     await table();
 
-    expect(screen.getByText('Oldest first, as the server lists them')).toBeVisible();
+    // Plain words (the Product Owner, 9 November 2026): the order, and nothing of who lists it.
+    expect(screen.getByText('Oldest first')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/as the server lists/);
     expect(screen.queryByText(/There is no filter yet/)).toBeNull();
     expect(asked()).toHaveLength(1);
     expect([...queryOf(0).keys()]).toEqual([]);

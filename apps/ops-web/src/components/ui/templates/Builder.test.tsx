@@ -154,6 +154,21 @@ describe('Builder', () => {
   });
 
   // Break caught: a submit that does not reach the page, or a form marked busy when it is not.
+  // Break caught (the Product Owner, 9 November 2026, Stage 3 item 8): the run's actions among the rows they act on, so that where the pane scrolls inside they scroll away with them: they are
+  // the pane's own footer, after the part that scrolls, and the footer is not in it.
+  it('draws the run’s actions in the pane’s own footer, after the part of the pane that scrolls', () => {
+    const { container } = renderBuilder();
+
+    const footer = container.querySelector('.ui-builder__footer');
+    const body = container.querySelector('.ui-builder__run-body');
+    if (footer === null || body === null) throw new Error('the run has no footer or no body');
+    expect(
+      within(footer as HTMLElement).getByRole('button', { name: 'Create the manifest' }),
+    ).toBeVisible();
+    expect(body).not.toContainElement(footer as HTMLElement);
+    expect(body.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('hands the submit to the page and says it is busy while it is sent', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((event: { preventDefault: () => void }) => {

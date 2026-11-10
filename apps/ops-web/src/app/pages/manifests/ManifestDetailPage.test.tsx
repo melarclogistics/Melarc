@@ -28,6 +28,7 @@ import {
 import { renderApp } from '../../../test-support/render-app';
 import { RIDER_ID, riderFixture } from '../../../test-support/rider-fixture';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
@@ -66,6 +67,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const answer = (body: unknown, version = 'v1'): Response => json(200, body, etag(version));
@@ -198,6 +200,66 @@ describe('the manifest: what it shows', () => {
         .getAllByRole('listitem')
         .map((step) => step.textContent),
     ).toEqual(['Made2 Nov, 09:00']);
+  });
+
+  // Break caught (owner item b of the Product Owner, 9 November 2026): the stops of a run in a table that scrolls sideways on a phone, so that the state of a stop is off to the right. The stops are
+  // drawn through the data table: a table where the box has room, and under 40rem a list of cards in which every stop says where it is, what it is, its state and what became of it.
+  it('draws the stops as cards in a room too narrow for the table, each stop with its place, its state and its act', async () => {
+    narrowRoom();
+    open(
+      () =>
+        answer(
+          manifestFixture({
+            state: 'IN_PROGRESS',
+            assigned_rider_id: RIDER_ID,
+            started_at: '2026-11-04T07:30:00Z',
+            stops: [
+              stopFixture({ pickup_summary: summaryFixture('ACC-PR-7KQ2MZ') }),
+              stopFixture({
+                id: STOP_TWO_ID,
+                sequence: 2,
+                state: 'SKIPPED',
+                skipped: {
+                  reason_code: 'REQUEST_CANCELLED',
+                  note: 'The vendor called the hub',
+                  skipped_at: '2026-11-03T10:00:00Z',
+                },
+                pickup_summary: summaryFixture('ACC-PR-9WXH4T', {
+                  sender_display_name: 'Overdue Bakes',
+                }),
+              }),
+            ],
+          }),
+        ),
+      ALL,
+      { 'GET /run-custody-handovers': () => json(200, { items: [], next_page_token: null }) },
+    );
+    await screen.findByRole('heading', { level: 1, name: 'ACC-MF-Q92422' });
+
+    const cards = within(await screen.findByRole('list', { name: 'Stops' })).getAllByRole(
+      'listitem',
+    );
+    expect(cards).toHaveLength(2);
+    expect(screen.queryByRole('table', { name: 'Stops' })).toBeNull();
+    const [first, second] = cards;
+    expect(
+      within(first ?? document.body).getByRole('heading', { level: 3, name: 'Stop 1' }),
+    ).toBeVisible();
+    expect(
+      within(first ?? document.body).getByRole('link', { name: 'ACC-PR-7KQ2MZ' }),
+    ).toHaveAttribute('href', `/pickup-requests/${REQUEST_ONE_ID}`);
+    expect(within(first ?? document.body).getByText('Demo Fabrics Ltd')).toBeVisible();
+    expect(within(first ?? document.body).getByText('14 Demo Lane, Osu')).toBeVisible();
+    expect(within(first ?? document.body).getByText('To be worked')).toBeVisible();
+    expect(
+      within(first ?? document.body).getByRole('link', { name: 'Skip stop 1, ACC-PR-7KQ2MZ' }),
+    ).toHaveAttribute('href', `/manifests/${MANIFEST_ID}/stops/${STOP_ONE_ID}/skip`);
+    // A stop's state is never hidden: a stop skipped because its request was cancelled says so, with the note, and it has no act.
+    expect(within(second ?? document.body).getByText('Cancelled with its request')).toBeVisible();
+    expect(
+      within(second ?? document.body).getByText('Note: The vendor called the hub'),
+    ).toBeVisible();
+    expect(within(second ?? document.body).queryByRole('link', { name: /^Skip stop/ })).toBeNull();
   });
 
   it('names the rider by name when the roster can say it', async () => {

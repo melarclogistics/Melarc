@@ -232,7 +232,10 @@ export function Builder({
                   )}
                   {panes.run.children}
                 </div>
-                <div className="ui-builder__actions">{panes.run.actions}</div>
+                {/* The pane's own footer: after the part that scrolls, so that where the pane scrolls inside it stays where it is (the Product Owner, 9 November 2026). */}
+                <div className="ui-builder__footer">
+                  <div className="ui-builder__actions">{panes.run.actions}</div>
+                </div>
               </Panel>
             </section>
           </div>

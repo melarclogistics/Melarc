@@ -138,7 +138,7 @@ async function openFilters(view: ReturnType<typeof open>): Promise<void> {
 const messageRows = () => screen.queryAllByRole('rowheader');
 
 describe('the log: what it shows', () => {
-  it('shows each message by when, what, for whom, over what, its status, what became of it, its number and its tries', async () => {
+  it('shows each message by when, what, to whom and over what, its status with what became of it, and its number', async () => {
     open();
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Messages' })).toBeVisible();
@@ -151,14 +151,15 @@ describe('the log: what it shows', () => {
     expect(within(text).getByText('Delivered')).toBeVisible();
     expect(within(text).getByText('The provider accepted it')).toBeVisible();
     expect(within(text).getByText(HINT)).toBeVisible();
-    expect(within(text).getByRole('cell', { name: '1' })).toBeVisible();
+    // One try says nothing of tries: "N tries" is for a message that was tried more than once (below).
+    expect(within(text).queryByText(/tries/)).toBeNull();
     const feed = await rowAt('29 Oct, 08:14');
     expect(within(feed).getByText('Vendor’s feed')).toBeVisible();
     expect(within(feed).getByText('In-app feed')).toBeVisible();
     // A feed entry is written and not sent: it is "in the feed", not "delivered".
     expect(within(feed).getByText('In the feed')).toBeVisible();
     expect(within(feed).queryByText('Delivered')).toBeNull();
-    expect(within(feed).getByRole('cell', { name: '0' })).toBeVisible();
+    expect(within(feed).queryByText(/tries/)).toBeNull();
   });
 
   it('names each column for what it holds, and the table for the log', async () => {
@@ -170,17 +171,51 @@ describe('the log: what it shows', () => {
       within(table)
         .getAllByRole('columnheader')
         .map((header) => header.textContent),
-    ).toEqual([
-      'When',
-      'Message',
-      'For',
-      'Channel',
-      'Status',
-      'What happened',
-      'Number',
-      'Tries',
-      'Record',
-    ]);
+    ).toEqual(['When', 'Message', 'To', 'Status', 'Number', 'Record']);
+  });
+
+  // Break caught (owner item a of the Product Owner, 9 November 2026): nine columns that do not fit at 1280 px with the menu open. The nine facts are in six, none dropped: the message over
+  // the version of its wording, the audience over the channel, the status over what became of it, the provider's word and the number of tries when more than one.
+  it('composes the nine facts into six columns, each lesser fact muted under the one it belongs to', async () => {
+    open(() =>
+      page([
+        notificationFixture({
+          state: 'FAILED',
+          outcome_class: 'REJECTED',
+          provider_outcome_class: 'REQUEST_INVALID',
+          attempt_count: 3,
+        }),
+      ]),
+    );
+    await logTable();
+
+    const cells = within(messageRows()[0]?.closest('tr') ?? document.body).getAllByRole('cell');
+    expect(cells).toHaveLength(5);
+    const [message, to, status, number, record] = cells;
+    expect(message).toHaveTextContent(/^Pickup request confirmedWording version 1$/);
+    expect(within(message ?? document.body).getByText('Wording version 1')).toHaveClass(
+      'messages-support',
+    );
+    expect(to).toHaveTextContent(/^Ad-hoc senderText message$/);
+    expect(within(to ?? document.body).getByText('Text message')).toHaveClass('messages-support');
+    expect(within(status ?? document.body).getByText('Failed')).toBeVisible();
+    expect(status).toHaveTextContent(
+      /The provider refused itProvider’s word: REQUEST_INVALID3 tries$/,
+    );
+    expect(within(status ?? document.body).getByText('3 tries')).toHaveClass('messages-support');
+    expect(number).toHaveTextContent(HINT);
+    expect(
+      within(record ?? document.body).getByRole('link', { name: 'Pickup request' }),
+    ).toBeVisible();
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): the order told as "as the server lists them", which is not what a person asks: it is newest first, and that is all it says.
+  it('says the order in plain words: newest first', async () => {
+    open();
+    await logTable();
+
+    expect(screen.getByText('Newest first')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/as the server lists/);
   });
 
   it('keeps the server’s order: newest first', async () => {
@@ -374,7 +409,7 @@ describe('the log: what it shows', () => {
     ] as const)('says who %s is', async (audience, words) => {
       const row = await rowOf(notificationFixture({ audience }));
 
-      expect(within(row).getByRole('cell', { name: words })).toBeVisible();
+      expect(within(row).getByText(words)).toBeVisible();
     });
   });
 
@@ -387,8 +422,9 @@ describe('the log: what it shows', () => {
 
       expect(within(text).getByText('+233******567')).toBeVisible();
       expect(within(text).queryByText('No number')).toBeNull();
-      // A feed entry has no number and nothing to report of a sending: two dashes, each with what it stands for.
-      expect(within(feed).getAllByText('—')).toHaveLength(2);
+      // A feed entry has no number: a dash with what it stands for. It has nothing to report of a sending too, which the status cell says in words to assistive technology and not as a
+      // second dash under a badge that already says the state.
+      expect(within(feed).getAllByText('—')).toHaveLength(1);
       expect(within(feed).getByText('No number')).toBeInTheDocument();
       expect(within(feed).getByText('Nothing to report')).toBeInTheDocument();
       expect(within(feed).getByRole('cell', { name: 'No number' })).toBeInTheDocument();

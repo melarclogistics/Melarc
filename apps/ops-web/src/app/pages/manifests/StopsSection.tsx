@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { Link } from '../../../components/ui/link/Link';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReorderList, type ReorderItem } from '../../../components/ui/reorder-list/ReorderList';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import {
@@ -211,40 +211,38 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
   const original = stops.map((stop) => stop.id);
   const unchanged = order === undefined || order.every((id, index) => id === original[index]);
 
-  const columns: readonly TableColumn<StopFacts>[] = [
+  /** The act of a stop that is still to be worked of a run in progress: the Ops skip, to a holder of its key. A link, for it goes to the page that asks why. */
+  const skipAct = (row: StopFacts) =>
+    canSkip && isToBeWorked(row.stop) ? (
+      <ButtonLink
+        to={`/manifests/${manifest.id}/stops/${row.stop.id}/skip`}
+        variant="secondary"
+        aria-label={`Skip stop ${String(row.stop.sequence)}${row.code === undefined ? '' : `, ${row.code}`}`}
+      >
+        Skip this stop
+      </ButtonLink>
+    ) : null;
+
+  // Every column stays (`crowded: keep`): what the officer reads of a stop is its place and its state, and none of them is lesser. Under 40rem of the table's own box each stop is a card.
+  const columns: readonly DataColumn<StopFacts>[] = [
     {
-      key: 'stop',
+      id: 'stop',
       header: 'Stop',
       rowHeader: true,
-      numeric: true,
+      align: 'end',
       cell: (row) => String(row.stop.sequence),
     },
-    { key: 'pickup', header: 'Pickup', cell: (row) => <PickupCell facts={row} /> },
-    { key: 'place', header: 'Place', cell: (row) => placeOf(row) },
+    { id: 'pickup', header: 'Pickup', cell: (row) => <PickupCell facts={row} /> },
+    { id: 'place', header: 'Place', cell: (row) => placeOf(row) },
     {
-      key: 'state',
+      id: 'state',
       header: 'State',
       cell: (row) => (
         <StopState facts={row} flagged={flagged.has(row.stop.id)} catalogue={catalogue.data} />
       ),
     },
     ...(canSkip
-      ? [
-          {
-            key: 'actions',
-            header: 'Actions',
-            cell: (row: StopFacts) =>
-              isToBeWorked(row.stop) ? (
-                <ButtonLink
-                  to={`/manifests/${manifest.id}/stops/${row.stop.id}/skip`}
-                  variant="secondary"
-                  aria-label={`Skip stop ${String(row.stop.sequence)}${row.code === undefined ? '' : `, ${row.code}`}`}
-                >
-                  Skip this stop
-                </ButtonLink>
-              ) : null,
-          } satisfies TableColumn<StopFacts>,
-        ]
+      ? [{ id: 'actions', header: 'Actions', cell: skipAct } satisfies DataColumn<StopFacts>]
       : []),
   ];
 
@@ -273,9 +271,8 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
 
       {reordering ? (
         <>
-          <p className="pickup-act__text">
-            Use the buttons to move a stop up or down. A stop that is no longer to be worked keeps
-            its place. Nothing changes until you save the order.
+          <p className="manifest-note">
+            Use the buttons to move a stop. Nothing changes until you save the order.
           </p>
           <ReorderList
             label="Stops, in order"
@@ -361,15 +358,28 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
         </>
       ) : (
         <>
-          <div className="manifest-stops">
-            <Table
-              caption="Stops"
-              hideCaption
-              columns={columns}
-              rows={facts}
-              rowKey={(row) => row.stop.id}
-            />
-          </div>
+          <DataTable<StopFacts>
+            label="Stops"
+            columns={columns}
+            rows={facts}
+            rowId={(row) => row.stop.id}
+            density="two-line"
+            crowded="keep"
+            cardHeadingLevel={3}
+            cardTitle={(row) => `Stop ${String(row.stop.sequence)}`}
+            card={(row) => (
+              <span className="manifest-stop-line">
+                <PickupCell facts={row} />
+                <span className="manifest-support">{placeOf(row)}</span>
+                <StopState
+                  facts={row}
+                  flagged={flagged.has(row.stop.id)}
+                  catalogue={catalogue.data}
+                />
+                {skipAct(row)}
+              </span>
+            )}
+          />
           {canOrder ? (
             <div className="pickup-act__buttons">
               <Button

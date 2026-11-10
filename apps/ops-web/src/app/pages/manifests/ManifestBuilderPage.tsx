@@ -654,9 +654,8 @@ export function ManifestBuilderPage() {
                   description: (
                     <>
                       These are the confirmed pickups of {runHub?.display_name} that no pickup run
-                      holds, as the server lists them. A pickup whose late booking waits for an Ops
-                      decision is not in it. Choose up to {MAX_STOPS}; your choice is kept as you
-                      move between pages.
+                      holds. A pickup whose late booking waits for an Ops decision is not in it.
+                      Choose up to {MAX_STOPS}; your choice is kept as you move between pages.
                       {invalid.none === undefined ? null : (
                         <span className="manifest-carryover__error" role="alert">
                           {` ${invalid.none}`}

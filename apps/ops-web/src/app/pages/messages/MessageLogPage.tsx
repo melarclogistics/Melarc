@@ -127,9 +127,46 @@ function WhichMessage({ entry }: { readonly entry: NotificationEntryView }) {
   );
 }
 
+/** Who a message is for, over the channel it goes by (the channel is the lesser fact, muted under the audience). */
+function ToAndChannel({ entry }: { readonly entry: NotificationEntryView }) {
+  return (
+    <span className="messages-lines">
+      <span className="messages-words">{AUDIENCE_LABELS[entry.audience]}</span>
+      <span className="messages-support messages-words">{CHANNEL_LABELS[entry.channel]}</span>
+    </span>
+  );
+}
+
 /**
- * The nine facts of a message, each a column: the log is a record to read across, so no column is lesser (the table scrolls sideways inside its region where the room is short, as
- * it always did) and under 40rem each message is a card with the same facts.
+ * Where a message stands: its status as a badge, and under it what became of it, the provider's own word, and how many times it was tried when that was more than once (one try, or
+ * none, says nothing). A message with nothing to report says so to assistive technology, in words and not as a dash under a badge that already says the state.
+ */
+function StatusAndOutcome({ entry }: { readonly entry: NotificationEntryView }) {
+  const words = whatHappenedText(entry);
+  return (
+    <span className="messages-lines">
+      <span>
+        <StatusBadge status={entry.state} map={stateMapFor(entry.channel)} />
+      </span>
+      {words === undefined ? (
+        <span className="messages-hidden">{NOTHING_TO_REPORT}</span>
+      ) : (
+        <span className="messages-support messages-words">{words}</span>
+      )}
+      {entry.provider_outcome_class === undefined ? null : (
+        <span className="messages-support">{providerWordText(entry.provider_outcome_class)}</span>
+      )}
+      {entry.attempt_count > 1 ? (
+        <span className="messages-support messages-words">{`${String(entry.attempt_count)} tries`}</span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The nine facts of a message in six columns, none dropped (the Product Owner, owner item a of 9 November 2026): when; the message over the version of its wording; who it is for over the
+ * channel; the status over what became of it, the provider's word and the number of tries when more than one; the number (the masked hint only); and the record. They fit a table at 1280 px
+ * with the menu open, and under 40rem each message is a card with the same nine facts, each under its own name.
  */
 const COLUMNS: readonly DataColumn<NotificationEntryView>[] = [
   {
@@ -139,29 +176,9 @@ const COLUMNS: readonly DataColumn<NotificationEntryView>[] = [
     cell: (row) => <NoWrap>{formatInstant(row.created_at)}</NoWrap>,
   },
   { id: 'message', header: 'Message', cell: (row) => <WhichMessage entry={row} /> },
-  {
-    id: 'for',
-    header: 'For',
-    cell: (row) => <span className="messages-words">{AUDIENCE_LABELS[row.audience]}</span>,
-  },
-  {
-    id: 'channel',
-    header: 'Channel',
-    cell: (row) => <span className="messages-words">{CHANNEL_LABELS[row.channel]}</span>,
-  },
-  {
-    id: 'status',
-    header: 'Status',
-    cell: (row) => <StatusBadge status={row.state} map={stateMapFor(row.channel)} />,
-  },
-  { id: 'what', header: 'What happened', cell: (row) => <WhatHappened entry={row} /> },
+  { id: 'to', header: 'To', cell: (row) => <ToAndChannel entry={row} /> },
+  { id: 'status', header: 'Status', cell: (row) => <StatusAndOutcome entry={row} /> },
   { id: 'number', header: 'Number', cell: (row) => <NumberHint entry={row} /> },
-  {
-    id: 'tries',
-    header: 'Tries',
-    align: 'end',
-    cell: (row) => String(row.attempt_count),
-  },
   { id: 'record', header: 'Record', cell: (row) => <RecordLink entry={row} /> },
 ];
 
@@ -419,7 +436,7 @@ export function MessageLogPage() {
           onClearAll: () => {
             narrowTo({ subject, subjectType });
           },
-          sortLabel: 'Newest first, as the server lists them',
+          sortLabel: 'Newest first',
           filterPanel: (
             <>
               <Field label="Status">

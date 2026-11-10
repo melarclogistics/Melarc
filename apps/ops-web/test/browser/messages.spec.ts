@@ -587,6 +587,58 @@ test.describe('every screen, at the verified widths', () => {
   }
 });
 
+test.describe('the log in six columns, and cards under 40rem (owner item a, 9 November 2026)', () => {
+  // Break caught: nine columns that did not fit the box at 1280 px with the menu open and scrolled sideways inside it, so that the number and the record were off to the right.
+  test('fits its six columns in the box at 1280 px with the menu open, with nothing to scroll to', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, LOG);
+
+    await expect(table(page)).toBeVisible();
+    await expect(table(page).getByRole('columnheader')).toHaveText([
+      'When',
+      'Message',
+      'To',
+      'Status',
+      'Number',
+      'Record',
+    ]);
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? Number.NaN : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(1);
+    await expect(table(page).getByRole('columnheader', { name: 'Record' })).toBeInViewport({
+      ratio: 1,
+    });
+  });
+
+  // Break caught: a card that drops a fact the table says: under 40rem each message is a card with the same nine facts, each under its own name.
+  test('is cards under 40rem, with every fact of a message', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, LOG);
+
+    const cards = page.getByRole('list', { name: 'Messages' });
+    await expect(cards).toBeVisible();
+    await expect(table(page)).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    for (const name of [
+      'When',
+      'Message',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
+      'Record',
+    ]) {
+      await expect(first.getByText(name, { exact: true })).toBeVisible();
+    }
+  });
+});
+
 test.describe('enlarged text, forced colours and reduced motion', () => {
   // Break caught (WCAG 1.4.4): sizes in pixels, so enlarged text does not grow the filters, or breaks them.
   for (const { width, height } of [

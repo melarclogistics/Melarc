@@ -646,8 +646,7 @@ export function BuilderExample() {
       panes={{
         pool: {
           title: 'The pool of confirmed pickups',
-          description:
-            'The confirmed pickups of Accra Central that no manifest holds, as the server lists them.',
+          description: 'The confirmed pickups of Accra Central that no manifest holds.',
           children: (
             <DataTable<PoolRow>
               label="Confirmed pickups waiting for a manifest"

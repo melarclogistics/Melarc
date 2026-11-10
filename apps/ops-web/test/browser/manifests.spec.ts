@@ -141,7 +141,7 @@ test.describe('moving through the screens', () => {
       manifests: [manifest(), manifest({ id: IDS.run, code: 'ACC-MF-K7M4PX', stops: [] })],
       pageSize: 1,
     });
-    await expect(page.getByText('Oldest first, as the server lists them')).toBeVisible();
+    await expect(page.getByText('Oldest first', { exact: true })).toBeVisible();
     // The states are the views of the page, and it asks for no state until one is chosen.
     await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
 
@@ -272,6 +272,62 @@ test.describe('the builder in a short window (run 4, Stage 2; the review of 5eda
     // And a reason is reached by scrolling the run, with the Create still in view.
     await reason.first().scrollIntoViewIfNeeded();
     await expect(reason.first()).toBeInViewport({ ratio: 1 });
+    await expect(create).toBeInViewport({ ratio: 1 });
+  });
+
+  // Break caught (the Product Owner, 9 November 2026, Stage 3 item 8): the Create among the rows it creates from, so that where the pane scrolls inside it scrolls away with them. It is in the
+  // pane's own footer, below the box that scrolls, and it stays where it is while the rows scroll inside the pane, with the page scrolled to the middle of the stretch in which the pane is
+  // held below the top bar (the page is short here, so the middle of the page is above that stretch: it is measured from the pane's own place).
+  test('keeps the Create in the run pane’s own footer, where it stays while the rows scroll inside the pane, at mid-scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 520 });
+    await open(page, '/manifests/new');
+    for (const code of ['ACC-PR-9WXH4T', 'ACC-PR-7KQ2MZ', 'ACC-PR-ZYU26H']) {
+      await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
+    }
+    await typeDate(page, '04112026');
+    await expect(
+      page.getByRole('combobox', { name: /Why it is carried over/ }).first(),
+    ).toBeVisible();
+    const run = page.getByRole('region', { name: 'Review' });
+    // The pane is held below the top bar from the scroll at which it reaches it (its place on the page less its offset) to the end of the page: scroll to the middle of that.
+    const stretch = await run.evaluate((element) => {
+      const held = parseFloat(getComputedStyle(element).top);
+      const reaches = element.getBoundingClientRect().top + window.scrollY - held;
+      const end = document.documentElement.scrollHeight - window.innerHeight;
+      return { held, reaches, end };
+    });
+    expect(stretch.end, 'the page is long enough to hold the pane').toBeGreaterThan(
+      stretch.reaches,
+    );
+    await page.evaluate(
+      (to) => {
+        window.scrollTo(0, to);
+      },
+      (stretch.reaches + stretch.end) / 2,
+    );
+    await expect
+      .poll(async () => Math.round((await run.boundingBox())?.y ?? -1))
+      .toBeGreaterThanOrEqual(Math.round(stretch.held));
+    const footer = run.locator('.ui-builder__footer');
+    const create = footer.getByRole('button', { name: /^Create the / });
+    const rows = run.locator('.ui-builder__run-body');
+    await expect(create).toBeInViewport({ ratio: 1 });
+    // The rows' box scrolls inside the pane; the footer is below it and is not part of it.
+    expect(
+      await rows.evaluate((element) => element.scrollHeight - element.clientHeight),
+    ).toBeGreaterThan(0);
+    const rowsBox = await rows.boundingBox();
+    const footerBox = await footer.boundingBox();
+    expect(footerBox?.y ?? 0).toBeGreaterThanOrEqual(
+      (rowsBox?.y ?? 0) + (rowsBox?.height ?? 0) - 1,
+    );
+    const before = await create.boundingBox();
+    await rows.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    expect((await create.boundingBox())?.y).toBe(before?.y);
     await expect(create).toBeInViewport({ ratio: 1 });
   });
 
@@ -458,6 +514,46 @@ test.describe('ordering, assigning and dispatching a run', () => {
     }
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+  });
+});
+
+test.describe('the stops of a run, through the data table (owner item b, 9 November 2026)', () => {
+  // Break caught: the stops in a table that scrolls sideways on a phone, so that the state of a stop and its act are off to the right: under 40rem each stop is a card with its place, its state
+  // and its act, and nothing scrolls.
+  test('draws each stop as a card at 390 px, with its state and its act in view', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { watch } = await open(page, RUN, runWorld());
+
+    const cards = page.getByRole('list', { name: 'Stops' });
+    await expect(cards).toBeVisible();
+    await expect(page.getByRole('table', { name: 'Stops' })).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    await expect(first.getByRole('heading', { level: 3, name: 'Stop 1' })).toBeVisible();
+    await expect(first.getByRole('link', { name: 'ACC-PR-7KQ2MZ', exact: true })).toBeVisible();
+    await expect(first.getByText('To be worked')).toBeVisible();
+    await expect(first.getByRole('link', { name: 'Skip stop 1, ACC-PR-7KQ2MZ' })).toBeVisible();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: the table that gave way to cards where it had room, or that dropped a column: at 1440 px the stops are a table of five columns, the state among them.
+  test('draws the stops as a table of five columns at 1440 px', async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, RUN, runWorld());
+
+    const table = page.getByRole('table', { name: 'Stops' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Stop',
+      'Pickup',
+      'Place',
+      'State',
+      'Actions',
+    ]);
+    await expect(table.getByText('To be worked').first()).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Stops' })).toHaveCount(0);
   });
 });
 
@@ -1199,8 +1295,11 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
     name: 'a draft manifest',
     reach: async (page) => {
       await open(page, DRAFT);
-      await expect(page.getByRole('table', { name: 'Stops' })).toBeVisible();
-      await expect(page.getByText('Demo Fabrics Ltd')).toBeVisible();
+      // The stops are a table where the box they are in has room (40rem) and a list of cards where it has not: at 1280px with the menu open the main column of the record is cards.
+      await expect(
+        page.getByRole('table', { name: 'Stops' }).or(page.getByRole('list', { name: 'Stops' })),
+      ).toBeVisible();
+      await expect(page.getByText('Demo Fabrics Ltd').first()).toBeVisible();
     },
   },
   {

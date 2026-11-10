@@ -60,14 +60,6 @@
   margin: 0;
 }
 
-/* The stops of a run, in a table that scrolls inside its own region; the actions of a stop sit in its last column. */
-.manifest-stops .ui-table__table tbody th,
-.manifest-stops .ui-table__table tbody td {
-  padding-block: var(--space-3);
-  vertical-align: top;
-  overflow-wrap: break-word;
-}
-
 .manifest-stop__actions {
   display: flex;
   flex-wrap: wrap;

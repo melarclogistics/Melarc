@@ -158,6 +158,16 @@ describe('the pool', () => {
     expect([...query.keys()].toSorted()).toEqual(['hub_id', 'manifested', 'state']);
   });
 
+  // Break caught (the Product Owner, 9 November 2026): the pool described as "as the server lists them": it says what is in it, in the officer's words.
+  it('says what the pool holds in plain words, with no word of who lists it', async () => {
+    open();
+    await poolTable();
+
+    const pool = screen.getByRole('region', { name: 'The pool of confirmed pickups' });
+    expect(within(pool).getByText(/that no pickup run holds./)).toBeVisible();
+    expect(pool.textContent).not.toMatch(/as the server lists/);
+  });
+
   it('shows each request by its code, sender, promised day, place and packages, with a box to choose it', async () => {
     open();
 
