@@ -667,7 +667,7 @@ rather than only an unlabeled spinner.
 
 ## 11. PageHeader
 
-> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). The initial PageHeader (`components/PageHeader.tsx`: a title, a description and the page's actions) is gone. Every screen is
+> **Status:** DEPRECATED, and removed (run 5, Stage 4, 10 November 2026). The initial PageHeader (`components/PageHeader.tsx`: a title, a description and the page's actions) is gone. Every screen is
 > composed from a template, whose header is the kit's PageHeader (§37, *PageHeader (the kit's)*), and the three development showcases take the kit's as well. The kit's PageHeader keeps
 > what this one promised: the page's one level-one heading through `PageHeading`, which takes focus after a navigation; a description; and the page's actions after the title, which wrap
 > below it on a narrow screen. Its tests are the kit's (`components/ui/page-header/PageHeader.test.tsx`); the ESLint restriction that kept a new screen from importing the older one went
@@ -1109,7 +1109,7 @@ StatusBadge (words in the tone)
 
 ## 19. Table
 
-> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). The older `Table` (`components/ui/table/`: a native table in a named, focusable, scrolling region, with its own sort toggle) is gone.
+> **Status:** DEPRECATED, and removed (run 5, Stage 4, 10 November 2026). The older `Table` (`components/ui/table/`: a native table in a named, focusable, scrolling region, with its own sort toggle) is gone.
 > The grid of every screen is the kit's `DataTable` (§37, *DataTable*), over the table primitive with TanStack Table: a table named by its label in a region that scrolls and takes focus,
 > a row-header column, right-aligned figures, text drawn as text, the row's element kept when the rows are put in another order, cards under 40rem, and an order that the *page* asks of the
 > server (`onSortChange`) rather than one the table toggles. What the older table's tests claimed is held by `DataTable.test.tsx` and `kit.spec.ts` (the keyboard order in a real
@@ -1329,7 +1329,7 @@ how many there are and where each one is.
 
 ## 22f. QueueTable
 
-> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). `QueueTable` (with `QueuePanel` and `QueueFilters`, `components/ui/queue-table/`) was the queue of S1.19 to S1.25: the filters, the count of the
+> **Status:** DEPRECATED, and removed (run 5, Stage 4, 10 November 2026). `QueueTable` (with `QueuePanel` and `QueueFilters`, `components/ui/queue-table/`) was the queue of S1.19 to S1.25: the filters, the count of the
 > page, the rows in a `Table` (§19) as a table or as cards, row selection and a pager. Every list of the portal is now drawn by the queue workspace template (§37, *QueueWorkspace*: the
 > kit's `PageHeader`, `ViewTabs`, `FilterBar`, `DataTable` and `SidePanel`, with `QueuePager` for the paged ones), and the components are gone, with the demo of them in the showcase. What
 > they held is held by: the count of a page, "more follow" and the pages that exist, by `QueuePager.test.tsx`; the rows, the cards and the choice of rows (a box for each, named for its row,
