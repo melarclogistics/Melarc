@@ -371,11 +371,12 @@ describe('the profile: who may decide', () => {
   it('offers the maker the acts on their own profile, and says that only a Platform Admin may use them', async () => {
     open(KEYS.approver, {}, undefined, MAKER_ID);
 
+    // One short muted line under the acts, in the header (the Product Owner, 9 November 2026), and not a paragraph above the content.
     expect(
       await screen.findByText(
         'You created this profile. A Platform Admin can approve or reject a profile they made; anyone else needs a different person to.',
       ),
-    ).toBeVisible();
+    ).toHaveClass('ui-record-header__note');
     expect(screen.getByRole('button', { name: 'Approve profile' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reject profile' })).toBeVisible();
   });
@@ -391,7 +392,9 @@ describe('the profile: who may decide', () => {
     open(KEYS.reader);
     await heading('Kofi Boateng');
 
-    expect(screen.getByText(cannotText('staff.identity.approve'))).toBeVisible();
+    expect(screen.getByText(cannotText('staff.identity.approve'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('button', { name: 'Approve profile' })).toBeNull();
   });
 
@@ -401,7 +404,33 @@ describe('the profile: who may decide', () => {
         json(200, staffIdentityFixture({ role_bundle_id: PRIVILEGED_BUNDLE_ID }), etag('v1')),
     });
 
-    expect(await screen.findByText('This role needs a Platform Admin to decide.')).toBeVisible();
+    expect(await screen.findByText('This role needs a Platform Admin to decide.')).toHaveClass(
+      'ui-record-header__note',
+    );
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): two lines for one place, so that a person meets a paragraph of rules where one short line was asked for. A maker of a profile that
+  // needs a Platform Admin is told both things in the one line.
+  it('says both in one line when the person made a profile whose role needs a Platform Admin', async () => {
+    open(
+      KEYS.approver,
+      {
+        [RECORD]: () =>
+          json(
+            200,
+            staffIdentityFixture({ role_bundle_id: PRIVILEGED_BUNDLE_ID, created_by: MAKER_ID }),
+            etag('v1'),
+          ),
+      },
+      undefined,
+      MAKER_ID,
+    );
+
+    // The role says whether it needs a Platform Admin once the roles are read: the line has both sentences when they are.
+    const line = await screen.findByText(/This role needs a Platform Admin to decide./);
+    expect(line).toHaveClass('ui-record-header__note');
+    expect(line).toHaveTextContent('You created this profile.');
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(1);
   });
 
   it('offers no decision on a profile that has been decided', async () => {

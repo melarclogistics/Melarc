@@ -165,6 +165,8 @@ function Profile({
         }
       : undefined;
 
+  // What changes whether to act now, in one short muted line under the acts (the Product Owner, 9 November 2026: a rule is in the act's own question, and a paragraph of rules is not
+  // drawn above the content): why the session may not decide, that the maker's own profile needs a different person, and that the role needs a Platform Admin. Said in one line.
   const lines = [
     ...(waiting && !canApprove ? [cannotText('staff.identity.approve')] : []),
     ...(waiting && canApprove && mine
@@ -184,25 +186,18 @@ function Profile({
           status: <StatusBadge status={identity.status} map={STAFF_STATUS_MAP} />,
           sentence: statusSentence(identity),
         }}
-        {...(decision === undefined ? {} : { acts: decision })}
-        {...(notice === undefined && lines.length === 0
+        {...(decision === undefined && lines.length === 0
+          ? {}
+          : { acts: { ...decision, ...(lines.length === 0 ? {} : { note: lines.join(' ') }) } })}
+        {...(notice === undefined
           ? {}
           : {
               notice: (
-                <>
-                  {notice === undefined ? null : (
-                    <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
-                      <Alert variant="success">
-                        <p>{notice}</p>
-                      </Alert>
-                    </div>
-                  )}
-                  {lines.map((line) => (
-                    <p key={line} className="staff-note">
-                      {line}
-                    </p>
-                  ))}
-                </>
+                <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
+                  <Alert variant="success">
+                    <p>{notice}</p>
+                  </Alert>
+                </div>
               ),
             })}
         main={

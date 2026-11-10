@@ -107,7 +107,11 @@ describe('the rider: what it shows', () => {
     const header = heading.closest<HTMLElement>('.ui-record-header');
     if (header === null) throw new Error('The heading is not in a record header');
     expect(within(header).getByText('Suspended')).toBeVisible();
-    expect(within(header).queryByText(/PIN|device|ready/i)).toBeNull();
+    // The identity of the record (its name, its status, its sentence) says nothing of the readiness. The line under the acts is another thing: it is about the act (here: a device cannot be
+    // registered while the access has ended), and it is not part of what the header says of the rider.
+    const identity = header.querySelector<HTMLElement>('.ui-record-header__identity');
+    if (identity === null) throw new Error('The header has no identity');
+    expect(within(identity).queryByText(/PIN|device|ready/i)).toBeNull();
     for (const label of ['PIN', 'Device', 'Readiness']) {
       const term = screen.getByText(label, { selector: 'dt' });
       expect(term.closest('.ui-record-header'), label).toBeNull();
@@ -303,7 +307,10 @@ describe('the rider: the acts it offers', () => {
       [RECORD]: () => json(200, riderDetailFixture(unboundRider(), []), etag('v1')),
     });
 
-    expect(await screen.findByText(cannotText('staff.device.register'))).toBeVisible();
+    // One short muted line under the acts, in the header (the Product Owner, 9 November 2026).
+    expect(await screen.findByText(cannotText('staff.device.register'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });
 
@@ -319,7 +326,7 @@ describe('the rider: the acts it offers', () => {
         await screen.findByText(
           'A device cannot be registered while this rider’s access has ended.',
         ),
-      ).toBeVisible();
+      ).toHaveClass('ui-record-header__note');
       expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
     },
   );
@@ -349,7 +356,9 @@ describe('the rider: the acts it offers', () => {
   it('names the permission revoking needs, and offers nothing, to a session without it', async () => {
     open(REGISTERER);
 
-    expect(await screen.findByText(cannotText('staff.device.revoke'))).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.revoke'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('link', { name: 'Revoke or replace the device' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });

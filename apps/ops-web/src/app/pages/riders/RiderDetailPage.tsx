@@ -115,7 +115,7 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
 
   // The acts follow the held keys and what the record says and decide nothing (the server checks every request): the first binding for a rider who has held no device, revoking or
   // replacing for one who has. What the session cannot do is told in one muted line in plain words, and the explanation of each act is on its own page.
-  const note: ReactNode =
+  const note: string | undefined =
     noDevice && !mayBind
       ? 'A device cannot be registered while this rider’s access has ended.'
       : noDevice && !holdsRegister
@@ -152,8 +152,8 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
               ),
             }
           : {}),
+        ...(note === undefined ? {} : { note }),
       }}
-      notice={note === undefined ? undefined : <p className="rider-note">{note}</p>}
       main={
         <>
           <Panel title="The rider" headingLevel={2}>
