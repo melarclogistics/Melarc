@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import { Button } from '../button/Button';
-import { PageHeader, type PageHeaderProps } from './PageHeader';
+import { FreshnessLine, PageHeader, type PageHeaderProps } from './PageHeader';
 
 function renderHeader(props: PageHeaderProps) {
   return render(
@@ -199,5 +199,36 @@ describe('PageHeader', () => {
     });
 
     expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
+describe('FreshnessLine', () => {
+  // Break caught (the Product Owner, 10 November 2026): a pane that is not a page header (the builder's pool) writing its own words for how current it is and for the way to read it again
+  // ("Last checked 09:42. Refresh the pool"), so that two screens say it two ways. The line is the header's own, drawn alone: the same words in each of its states, and the same button.
+  it('says how current the results are in the words of the page header, drawn alone', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn();
+    const { rerender } = render(<FreshnessLine freshness={{ updatedAt: '09:42', onRefresh }} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Updated 09:42');
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    rerender(<FreshnessLine freshness={{ state: 'refreshing', updatedAt: '09:42', onRefresh }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Checking…');
+    // One read at a time: a press while a read is under way is that read's.
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    rerender(<FreshnessLine freshness={{ state: 'failed', updatedAt: '09:42', onRefresh }} />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Refresh failed. Last successful check: 09:42',
+    );
+  });
+
+  it('says nothing of a pane that was never read', () => {
+    const { container } = render(<FreshnessLine freshness={{ onRefresh: vi.fn() }} />);
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

@@ -41,7 +41,11 @@ export interface PageHeaderProps {
 
 const NUMBER = new Intl.NumberFormat('en-GB');
 
-function FreshnessLine({ freshness }: { readonly freshness: Freshness }) {
+/**
+ * How current the results are and the way to read them again, in the page header's words ("Updated 09:42 · Refresh"). It is the header's own line, and is **also drawn alone** by a pane that is
+ * not a page header but has results of its own to read again (the builder's pool), so that every screen says it the same way and no page writes its own words for it.
+ */
+export function FreshnessLine({ freshness }: { readonly freshness: Freshness }) {
   const { state = 'idle', updatedAt, onRefresh } = freshness;
   // A page that was never read says nothing, and has nothing to refresh.
   if (state === 'idle' && updatedAt === undefined) return null;
