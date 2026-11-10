@@ -380,7 +380,7 @@ describe('the staff list: searching', () => {
   });
 
   it('reads a search out of the address and shows it in the field and as a chip', async () => {
-    const { user } = open('/admin/staff?view=all&q=mensah', KEYS.approver);
+    open('/admin/staff?view=all&q=mensah', KEYS.approver);
 
     await table();
 
@@ -418,7 +418,7 @@ describe('the staff list: searching', () => {
   });
 
   it('limits a search to what the server accepts, as it is typed', async () => {
-    const { user } = open('/admin/staff?view=all', KEYS.approver);
+    open('/admin/staff?view=all', KEYS.approver);
     await table();
 
     expect(await searchField()).toHaveAttribute('maxlength', '128');
@@ -809,7 +809,7 @@ describeInterfaceStates('The staff list', {
   },
   'validation error': {
     test: async () => {
-      const { user } = open('/admin/staff?view=all&q=x', KEYS.approver, {
+      open('/admin/staff?view=all&q=x', KEYS.approver, {
         [LIST]: () => refusal(400, 'VALIDATION_FAILED'),
       });
 
