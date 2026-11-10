@@ -43,11 +43,19 @@ async function until(
 }
 
 /**
- * What the schema is, as the catalogue says it, section by section (tables with their owner, row-level security and privileges, columns, constraints, indexes, policies,
- * grants, triggers, functions with their privileges, types), as one JSON line for each row in a fixed order. The data is not in it.
+ * What the schema is, as the catalogue says it, section by section (the schemas with their owner and privileges, tables with their owner, row-level security and privileges,
+ * the definitions of views, columns, constraints, indexes, policies, grants, the default privileges, triggers with whether each is enabled, functions with their privileges,
+ * types), as one JSON line for each row in a fixed order. The data is not in it. The schemas' privileges, the default privileges, the views and the state of a trigger were added
+ * in run 6 (Stage 1.7): a migration that left one of them different from what the files build in one go was not seen by the sections of run 5.
  */
 const SCHEMAS = "('public', 'melarc', 'drizzle')";
 const SCHEMA_SECTIONS: Readonly<Record<string, string>> = {
+  schemas: `select n.nspname, pg_get_userbyid(n.nspowner) as owner, n.nspacl::text as acl from pg_namespace n where n.nspname in ${SCHEMAS} order by 1`,
+  views: `select n.nspname, c.relname, c.relkind, pg_get_viewdef(c.oid, true) as definition
+            from pg_class c join pg_namespace n on n.oid = c.relnamespace
+           where n.nspname in ${SCHEMAS} and c.relkind in ('v', 'm') order by 1, 2`,
+  defaultPrivileges: `select pg_get_userbyid(d.defaclrole) as for_role, n.nspname as in_schema, d.defaclobjtype as object_type, d.defaclacl::text as acl
+                        from pg_default_acl d left join pg_namespace n on n.oid = d.defaclnamespace order by 1, 2, 3`,
   tables: `select n.nspname, c.relname, c.relkind, c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) as owner, c.relacl::text as acl
              from pg_class c join pg_namespace n on n.oid = c.relnamespace
             where n.nspname in ${SCHEMAS} and c.relkind in ('r', 'p', 'v', 'm', 'S') order by 1, 2`,
@@ -60,7 +68,7 @@ const SCHEMA_SECTIONS: Readonly<Record<string, string>> = {
                from pg_policies where schemaname in ${SCHEMAS} order by 1, 2, 3`,
   grants: `select grantee, table_schema, table_name, privilege_type from information_schema.role_table_grants where table_schema in ${SCHEMAS} order by 1, 2, 3, 4`,
   columnGrants: `select grantee, table_schema, table_name, column_name, privilege_type from information_schema.role_column_grants where table_schema in ${SCHEMAS} order by 1, 2, 3, 4, 5`,
-  triggers: `select t.tgrelid::regclass::text as on_table, t.tgname, pg_get_triggerdef(t.oid) as definition from pg_trigger t where not t.tgisinternal order by 1, 2`,
+  triggers: `select t.tgrelid::regclass::text as on_table, t.tgname, t.tgenabled as enabled, pg_get_triggerdef(t.oid) as definition from pg_trigger t where not t.tgisinternal order by 1, 2`,
   functions: `select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) as arguments, pg_get_functiondef(p.oid) as definition, p.proacl::text as acl, pg_get_userbyid(p.proowner) as owner
                 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ${SCHEMAS} and p.prokind in ('f', 'p') order by 1, 2, 3`,
   types: `select n.nspname, t.typname, t.typtype, (select string_agg(e.enumlabel, ',' order by e.enumsortorder) from pg_enum e where e.enumtypid = t.oid) as labels
@@ -117,6 +125,33 @@ describe('the chain applied from a database at 0073', () => {
       expect(then.triggers?.length).toBeGreaterThan(40);
       expect(then.functions?.length).toBeGreaterThan(80);
       expect(then.constraints?.length).toBeGreaterThan(400);
+      // The three schemas, each with the privileges the migrations granted on it. There is no view and no default privilege in the migrations today: those sections are
+      // compared all the same, and each is shown below to see a difference.
+      expect(then.schemas).toHaveLength(3);
+      expect(then.views).toBeInstanceOf(Array);
+      expect(then.defaultPrivileges).toBeInstanceOf(Array);
+
+      // A comparison that cannot see a kind of difference passes whatever the files did (run 6, Stage 1.7): each of the sections added in run 6 is shown to see a difference
+      // planted in the upgraded database (a view, a privilege on a schema, a default privilege, a trigger that is not enabled).
+      const triggerOff = await scalar<string>(
+        built.admin,
+        `select format('alter table %s disable trigger %I', t.tgrelid::regclass, t.tgname) from pg_trigger t where not t.tgisinternal order by t.tgrelid::regclass::text, t.tgname limit 1`,
+      );
+      for (const [section, statement] of [
+        ['views', 'create view public.zz_planted_view as select 1 as one'],
+        ['schemas', 'grant usage on schema drizzle to public'],
+        [
+          'defaultPrivileges',
+          'alter default privileges in schema public grant select on tables to public',
+        ],
+        ['triggers', triggerOff],
+      ] as const) {
+        await built.admin.query(statement);
+        expect(
+          (await schemaOf(built.admin))[section],
+          `the ${section} section sees a difference planted in it`,
+        ).not.toEqual(then[section]);
+      }
     } finally {
       await fromNothing.drop();
     }
