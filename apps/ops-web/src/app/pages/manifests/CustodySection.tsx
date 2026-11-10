@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { Button } from '../../../components/ui/button/Button';
@@ -14,8 +15,8 @@ import {
   type ManifestRecord,
 } from '../../../platform/manifest/manifest-commands';
 import type { HandoverView } from '../../../platform/manifest/manifest-shape';
-import { usePendingHandover } from '../../../platform/manifest/use-manifest-queries';
-import { useRider } from '../../../platform/rider/use-rider-queries';
+import { handoverKey, usePendingHandover } from '../../../platform/manifest/use-manifest-queries';
+import { useRiderName } from '../../../platform/rider/use-rider-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
@@ -27,7 +28,10 @@ import { cannotText } from '../../../platform/problem/capability-words';
 import '../pickup/pickup-pages.css';
 import './manifests-pages.css';
 
-/** A rider by name, as the roster knows them (`getRider`, `dispatch.read`); a rider the session cannot read is told as a rider. */
+/**
+ * A rider by name, as the roster knows them (`getRider`, `dispatch.read`); a rider the session cannot read is told as a rider. The name is read once and kept for the page's life
+ * (`useRiderName`), however many places name the rider.
+ */
 export function RiderName({
   id,
   fallback = 'A rider',
@@ -35,8 +39,8 @@ export function RiderName({
   readonly id: string;
   readonly fallback?: string;
 }) {
-  const rider = useRider(id);
-  if (rider.status === 'success') return <>{rider.data.rider.full_name}</>;
+  const rider = useRiderName(id);
+  if (rider.status === 'success') return <>{rider.data}</>;
   return <>{rider.status === 'pending' ? 'Reading the rider…' : fallback}</>;
 }
 
@@ -92,15 +96,25 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
   const { manifest, etag } = record;
   const canRead = me?.holds('fleet.custody.read') === true;
   const pending = usePendingHandover(manifest.id, canRead);
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState<Act | undefined>(undefined);
   if (me === undefined) return null;
 
   function close(): void {
     setOpen(undefined);
   }
-  function done(text: string): void {
+  /**
+   * The act was done. What it answered is the run's pending handover now: the one it opened (with the version of its answer), or none, for a handover that has ended (failed or completed). It is written
+   * into the read of the pending handover, which is two requests (the list, then the handover) and was made again after every act (the review of f6cf02b); an answer that is not one of those is
+   * read again. The run is read again by the page, because the same act may have completed it and the answer does not say so.
+   */
+  function done(text: string, pendingNow?: HandoverRecord | null): void {
     setOpen(undefined);
-    void pending.refetch();
+    if (pendingNow === undefined) {
+      void pending.refetch();
+    } else {
+      queryClient.setQueryData<HandoverRecord | null>(handoverKey(manifest.id), pendingNow);
+    }
     onDone(text);
   }
   function reload(): unknown {
@@ -209,8 +223,11 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
                   send={(note, version, key) =>
                     failRunCustodyHandover(client, manifest.id, version, note, key)
                   }
-                  onDone={() => {
-                    done('The handover is marked as failed. Custody is where it was.');
+                  onDone={(ended) => {
+                    done(
+                      'The handover is marked as failed. Custody is where it was.',
+                      ended.state === 'PENDING' ? undefined : null,
+                    );
                   }}
                   onCancel={close}
                   onReload={reload}
@@ -226,6 +243,7 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
                       `Custody is handed over to the hub. You recorded ${String(
                         accepted.parcel_count_taken ?? 0,
                       )} parcels taken: a record of custody, not the hub’s count.`,
+                      accepted.state === 'PENDING' ? undefined : null,
                     );
                   }}
                   onCancel={close}
@@ -244,8 +262,11 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
         send={(destination, note, version) =>
           initiateRunCustodyHandover(client, manifest.id, version, destination, note)
         }
-        onDone={() => {
-          done('A custody handover is opened. Custody stays where it is until it is accepted.');
+        onDone={(opened) => {
+          done(
+            'A custody handover is opened. Custody stays where it is until it is accepted.',
+            opened.handover.state === 'PENDING' ? opened : undefined,
+          );
         }}
         onCancel={close}
         onReload={reload}

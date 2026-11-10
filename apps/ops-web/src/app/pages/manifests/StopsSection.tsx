@@ -101,8 +101,8 @@ export interface StopsSectionProps {
   readonly record: ManifestRecord;
   /** The stops a refused dispatch named: marked in words, and not by colour alone. */
   readonly flagged: ReadonlySet<string>;
-  /** The order was saved (the page reads the manifest again and says so). */
-  readonly onSaved: () => void;
+  /** The order was saved: the run as the server answered it, with its new version (the page keeps it as its read and says so). */
+  readonly onSaved: (record: ManifestRecord) => void;
   /** The officer asks for the manifest to be read again, after a conflict or an outcome nobody knows. */
   readonly onReload: () => unknown;
 }
@@ -151,9 +151,9 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
   >({
     send: (sent, key) =>
       setManifestStopOrder(client, manifest.id, sent.version, sent.orderedStopIds, key),
-    onDone: () => {
+    onDone: (answer) => {
       setOrder(undefined);
-      onSaved();
+      onSaved(answer);
     },
     onReload: () => {
       setOrder(undefined);

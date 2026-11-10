@@ -1,4 +1,4 @@
-import type { UseQueryResult } from '@tanstack/react-query';
+import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useParams } from 'react-router';
 
@@ -23,6 +23,8 @@ import {
   type ManifestRecord,
 } from '../../../platform/manifest/manifest-commands';
 import type { ManifestView } from '../../../platform/manifest/manifest-shape';
+import { manifestKey } from '../../../platform/manifest/use-manifest-queries';
+import { useRiderName } from '../../../platform/rider/use-rider-queries';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
 import { lackedText } from '../../../platform/problem/capability-words';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -139,6 +141,7 @@ function Manifest({
 }) {
   const client = useApiClient();
   const me = useSignedInSession();
+  const queryClient = useQueryClient();
   const location = useLocation();
   const arrival = location.state as (CreatedState & SkippedState) | null;
   const [open, setOpen] = useState<Act | undefined>(undefined);
@@ -159,6 +162,11 @@ function Manifest({
   useEffect(() => {
     if (notice !== undefined && focusNotice.current) noticeBox.current?.focus();
   }, [notice]);
+  // The name of the run's rider for the question of the dispatch, read once for the page's life with the facts' own (`useRiderName`): a session that may not read riders is not asked.
+  const riderName = useRiderName(
+    record.manifest.assigned_rider_id ?? '',
+    record.manifest.assigned_rider_id !== undefined && me?.holds('dispatch.read') === true,
+  );
   if (me === undefined) return null;
 
   const { manifest, etag } = record;
@@ -172,13 +180,21 @@ function Manifest({
   function close(): void {
     setOpen(undefined);
   }
-  /** The act was done: say what it came to and read the pickup run again for its new state and version. */
-  function done(text: string): void {
+  /**
+   * The act was done: say what it came to, and keep the run as it answered. Assigning, dispatching, cancelling and saving the order answer with the whole run and its new version (the `ETag` of
+   * the answer), which is written into the page's read; the run was read again after every act, and the request counts of a journey showed it (the review of f6cf02b). An act whose
+   * answer is not the run (a custody act, which may have completed it) reads the run again.
+   */
+  function done(text: string, answer?: ManifestRecord): void {
     focusNotice.current = true;
     setOpen(undefined);
     setFlagged(new Set());
     setNotice(text);
-    void query.refetch();
+    if (answer === undefined) {
+      void query.refetch();
+    } else {
+      queryClient.setQueryData<ManifestRecord>(manifestKey(id), answer);
+    }
   }
   function reload(): Promise<unknown> {
     setOpen(undefined);
@@ -257,10 +273,11 @@ function Manifest({
                 version={etag}
                 retryable
                 send={(note, version, key) => cancelPickupManifest(client, id, version, note, key)}
-                onDone={() => {
+                onDone={(answer) => {
                   onClose();
                   done(
                     'The pickup run is cancelled. Its requests that are still confirmed are back in the pool.',
+                    answer,
                   );
                 }}
                 onCancel={onClose}
@@ -347,8 +364,8 @@ function Manifest({
             <StopsSection
               record={record}
               flagged={flagged}
-              onSaved={() => {
-                done('The order of the stops is saved.');
+              onSaved={(answer) => {
+                done('The order of the stops is saved.', answer);
               }}
               onReload={reload}
             />
@@ -380,9 +397,10 @@ function Manifest({
         hubId={manifest.responsible_hub_id}
         version={etag}
         send={(riderId2, version) => assignRider(client, id, version, riderId2)}
-        onDone={() => {
+        onDone={(answer) => {
           done(
             'A rider is assigned. The pickup run is still a draft: dispatch it to show the stops to the rider.',
+            answer,
           );
         }}
         onCancel={close}
@@ -390,12 +408,13 @@ function Manifest({
       />
       <DispatchDialog<ManifestRecord>
         open={open === 'dispatch'}
-        riderName={undefined}
+        riderName={riderName.data}
         version={etag}
         send={(version) => dispatchManifest(client, id, version)}
-        onDone={() => {
+        onDone={(answer) => {
           done(
             'The pickup run is dispatched. The rider can see its stops; the run starts on its day.',
+            answer,
           );
         }}
         onCancel={close}

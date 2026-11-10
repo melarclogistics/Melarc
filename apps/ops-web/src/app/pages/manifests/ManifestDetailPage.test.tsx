@@ -566,13 +566,21 @@ describe('the manifest: ordering the stops', () => {
     expect(sent(PUT)).toHaveLength(0);
   });
 
-  it('saves the complete order under the version read and a key, then reads the manifest again', async () => {
+  // The answer of the act is the run (the whole run and its new version): the page keeps it as its read and does not read the run again (the review of f6cf02b: three to five requests for each act).
+  // A second read here would answer the run as it was before, so a page that read again would show the old order and carry the old version.
+  it('saves the complete order under the version read and a key, and keeps the answer: the manifest is not read again', async () => {
     let reads = 0;
     const { user } = open(
-      () => answer(reads++ === 0 ? manifestFixture() : newOrder, reads === 1 ? 'v1' : 'v2'),
+      () =>
+        answer(
+          reads++ === 0 ? manifestFixture() : manifestFixture(),
+          reads === 1 ? 'v1' : 'v-again',
+        ),
       ALL,
       {
         [PUT]: () => answer(newOrder, 'v2'),
+        [`POST /pickup-manifests/${MANIFEST_ID}/dispatch`]: () =>
+          answer(manifestFixture({ state: 'DISPATCHED', assigned_rider_id: RIDER_ID }), 'v3'),
       },
     );
     await startOrdering(user);
@@ -591,7 +599,37 @@ describe('the manifest: ordering the stops', () => {
     });
     expect(await screen.findByText('The order of the stops is saved.')).toBeVisible();
     expect(screen.queryByRole('list', { name: 'Stops, in order' })).toBeNull();
-    expect(sent(READ)).toHaveLength(2);
+    // The new order is the answer's, drawn at once, and the run was read once, when the page opened.
+    expect(sent(READ)).toHaveLength(1);
+    const rows = within(await stopsTable()).getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('ACC-PR-9WXH4T');
+    // The act that follows carries the version of the answer.
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const question = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await user.click(within(question).getByRole('button', { name: 'Dispatch the pickup run' }));
+    await waitFor(() => {
+      expect(sent(`POST /pickup-manifests/${MANIFEST_ID}/dispatch`)).toHaveLength(1);
+    });
+    expect(sent(`POST /pickup-manifests/${MANIFEST_ID}/dispatch`)[0]?.headers.get('If-Match')).toBe(
+      '"v2"',
+    );
+  });
+
+  // Break caught (the review of f6cf02b): the requests of the stops read again when the order changes, because their key was made of the ids in the order of the stops. The answer is a map by id.
+  it('does not read the requests of the stops again when their order is saved', async () => {
+    const { user } = open(undefined, ALL, { [PUT]: () => answer(newOrder, 'v2') });
+    await startOrdering(user);
+    const before = api.requests.filter((request) =>
+      request.url.includes('/pickup-requests/'),
+    ).length;
+    expect(before).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Move ACC-PR-7KQ2MZ down' }));
+    await user.click(screen.getByRole('button', { name: 'Save this order' }));
+    expect(await screen.findByText('The order of the stops is saved.')).toBeVisible();
+
+    expect(
+      api.requests.filter((request) => request.url.includes('/pickup-requests/')),
+    ).toHaveLength(before);
   });
 
   it('offers to save only an order that is not the one it has', async () => {
@@ -1137,4 +1175,140 @@ describeInterfaceStates('the manifest page', {
       ).toBeVisible();
     },
   },
+});
+
+describe('the manifest: an act keeps its answer, and the run is not read again', () => {
+  const ASSIGN = `POST /pickup-manifests/${MANIFEST_ID}/assign-rider`;
+  const DISPATCH = `POST /pickup-manifests/${MANIFEST_ID}/dispatch`;
+  const CANCEL = `POST /pickup-manifests/${MANIFEST_ID}/cancel`;
+  const RIDERS = 'GET /ops/riders';
+  const RIDER_READ = `GET /ops/riders/${RIDER_ID}`;
+  const riders = (): Response => json(200, { items: [riderFixture()], next_page_token: null });
+  const assigned = manifestFixture({
+    assigned_rider_id: RIDER_ID,
+    assigned_at: '2026-11-03T08:00:00Z',
+  });
+  const dispatched = manifestFixture({
+    state: 'DISPATCHED',
+    assigned_rider_id: RIDER_ID,
+    assigned_at: '2026-11-03T08:00:00Z',
+    dispatched_at: '2026-11-03T09:00:00Z',
+  });
+
+  /**
+   * The read of the run, counted. Any read after the first answers the run **as it is not**: cancelled, at a version nobody holds. A page that read the run again after an act would draw that,
+   * and send that version in the next.
+   */
+  function counted(first: ReturnType<typeof manifestFixture>) {
+    const state = { reads: 0 };
+    const read = () => {
+      state.reads += 1;
+      return state.reads === 1
+        ? answer(first, 'v1')
+        : answer(manifestFixture({ state: 'CANCELLED' }), 'v-not-this');
+    };
+    return { state, read };
+  }
+
+  // Break caught (the review of f6cf02b): the run read again after every act, though the answer of the act is the whole run with its new version. Assigning, dispatching, cancelling and saving the
+  // order answer so, and the pages made three to five requests for each; the limit of a session is 120 a minute. The answer is the page's read, the next act carries its version, and the
+  // rider's name, which the facts and the question of the dispatch both ask for, is read once.
+  it('assigning a rider and then dispatching: the answers are the page’s reads, the versions carry on, and the rider is read once', async () => {
+    const { state, read } = counted(manifestFixture());
+    const { user } = open(read, ALL, {
+      [RIDERS]: riders,
+      [ASSIGN]: () => answer(assigned, 'v2'),
+      [DISPATCH]: () => answer(dispatched, 'v3'),
+    });
+    await ready();
+    await user.click(screen.getByRole('button', { name: 'Assign a rider' }));
+    const assignQuestion = screen.getByRole('alertdialog', { name: 'Assign this rider?' });
+    await user.click(
+      await within(assignQuestion).findByRole('button', { name: 'Choose: Kwame Mensah' }),
+    );
+    await user.click(within(assignQuestion).getByRole('button', { name: 'Assign the rider' }));
+
+    expect(await screen.findByText(/A rider is assigned\./)).toBeVisible();
+    expect(state.reads).toBe(1);
+    const facts = within(screen.getByText('Service date').closest('dl') as HTMLElement);
+    expect(await facts.findByText('Kwame Mensah')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const question = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    expect(
+      within(question).getByText(/shown to Kwame Mensah, and to no other rider/),
+    ).toBeVisible();
+    await user.click(within(question).getByRole('button', { name: 'Dispatch the pickup run' }));
+
+    expect(await screen.findByText(/The pickup run is dispatched\./)).toBeVisible();
+    await waitFor(() => {
+      expect(sent(DISPATCH)).toHaveLength(1);
+    });
+    expect(sent(ASSIGN)[0]?.headers.get('If-Match')).toBe('"v1"');
+    expect(sent(DISPATCH)[0]?.headers.get('If-Match')).toBe('"v2"');
+    expect(state.reads).toBe(1);
+    expect(screen.getAllByText('Dispatched').length).toBeGreaterThanOrEqual(1);
+    expect(sent(RIDER_READ)).toHaveLength(1);
+  });
+
+  it('dispatching: the answer is the page’s read, and the run is not read again', async () => {
+    const { state, read } = counted(assigned);
+    const { user } = open(read, ALL, { [DISPATCH]: () => answer(dispatched, 'v2') });
+    await ready();
+
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const question = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await user.click(within(question).getByRole('button', { name: 'Dispatch the pickup run' }));
+
+    expect(await screen.findByText(/The pickup run is dispatched\./)).toBeVisible();
+    expect(state.reads).toBe(1);
+    expect(screen.getAllByText('Dispatched').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
+  });
+
+  it('cancelling: the answer is the page’s read, and the run is not read again', async () => {
+    const { state, read } = counted(dispatched);
+    const { user } = open(read, ALL, {
+      [CANCEL]: () =>
+        answer(manifestFixture({ state: 'CANCELLED', assigned_rider_id: RIDER_ID }), 'v2'),
+    });
+    await ready();
+    await chooseAct(user, 'Cancel the pickup run');
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
+    await user.type(
+      within(dialog).getByRole('textbox', { name: /Why it is cancelled/ }),
+      'Rider unwell',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel the pickup run' }));
+
+    expect(await screen.findByText(/The pickup run is cancelled\./)).toBeVisible();
+    expect(state.reads).toBe(1);
+    expect(screen.getAllByText('Cancelled').length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Break caught: the read after a conflict, or an outcome nobody knows, skipped with the rest: that read is the person's, and it stays.
+  it('still reads the run again when the person asks for it after a conflict', async () => {
+    let reads = 0;
+    const { user } = open(
+      () => {
+        reads += 1;
+        return answer(manifestFixture(), `v${String(reads)}`);
+      },
+      ALL,
+      { [DISPATCH]: () => refusal(409, 'STATE_CONFLICT') },
+    );
+    await ready();
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const question = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await user.click(within(question).getByRole('button', { name: 'Dispatch the pickup run' }));
+    await user.click(
+      await within(question).findByRole('button', {
+        name: /Reload|Look at the pickup run|Read it again/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+  });
 });

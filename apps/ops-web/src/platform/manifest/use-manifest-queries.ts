@@ -91,11 +91,20 @@ export function useManifests(params: ManifestListParams): UseQueryResult<Manifes
   });
 }
 
+/**
+ * The key of a run's read, so that a screen can write into it what an act answered (the whole run and its new version) instead of reading the run again
+ * (the review of f6cf02b: the pages made three to five requests for each act on a pickup run).
+ */
+export const manifestKey = (id: string) => ['manifests', 'manifest', id] as const;
+
+/** The key of a run's pending custody handover, for the same reason as {@link manifestKey}. */
+export const handoverKey = (manifestId: string) => ['manifests', 'handover', manifestId] as const;
+
 /** `getPickupManifest`: the run with its stops in order and the version the next act takes. */
 export function useManifest(id: string, enabled = true): UseQueryResult<ManifestRecord> {
   const client = useApiClient();
   return useQuery({
-    queryKey: ['manifests', 'manifest', id],
+    queryKey: manifestKey(id),
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -136,7 +145,7 @@ export function usePendingHandover(
 ): UseQueryResult<HandoverRecord | null> {
   const client = useApiClient();
   return useQuery({
-    queryKey: ['manifests', 'handover', manifestId],
+    queryKey: handoverKey(manifestId),
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -213,7 +222,8 @@ export function useStopRequests(
     .filter((stop) => stop.pickup_summary === undefined)
     .map((stop) => stop.pickup_request_id);
   return useQuery({
-    queryKey: ['manifests', 'stop-requests', wanted.join(',')],
+    // By which requests are wanted and not by the order they are in: the answer is a map by id, so an order saved for the stops is no new question (it read every request of the run again).
+    queryKey: ['manifests', 'stop-requests', [...wanted].sort().join(',')],
     enabled: wanted.length > 0,
     ...NOT_KEPT,
     queryFn: async () => {

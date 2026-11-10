@@ -61,6 +61,33 @@ export function useRiders(params: RiderListParams): UseQueryResult<RiderPageView
   });
 }
 
+/**
+ * A rider's name, for the pages and the dialogs that name the rider (a pickup run's rider, the one a custody handover is to or from): **read once and kept for the page's life**. `useRider` is the
+ * rider's own screens' read, not kept (`gcTime: 0`) so that the version an act takes is the one just read, and every component that named the rider read it again, with its devices (the review of
+ * f6cf02b: sixteen reads in the minute of a journey). A name carries no version and no act takes it, so it is kept (`staleTime: Infinity`); the cache is emptied with the session.
+ */
+export function useRiderName(id: string, enabled = true): UseQueryResult<string> {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: ['riders', 'name', id],
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const answer = answerOf(
+        await client.GET('/ops/riders/{riderId}', { params: { path: { riderId: id } } }),
+      );
+      const detail = parseRiderDetail(answer.data);
+      if (detail?.rider.id.toLowerCase() !== id.toLowerCase()) {
+        throw unexpectedResponse(answer.status);
+      }
+      return detail.rider.full_name;
+    },
+  });
+}
+
 /** A rider, the devices the rider has held and the version the next act on the rider takes: the `ETag` of this read, exactly as sent. */
 export interface RiderRecord extends RiderDetailView {
   readonly etag: string;
