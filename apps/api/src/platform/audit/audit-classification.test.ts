@@ -19,6 +19,38 @@ const AUDIT_MD = readFileSync(
   'utf8',
 ).replaceAll('\r', '');
 
+type TierName = 'enhanced' | 'conditional' | 'standard';
+
+/**
+ * Every place a document states how many codes a tier holds, in any wording (run 6, Stage 1.7): a number, then markup and a few filler words (`are`, `codes`, `events`...), then
+ * the name of the tier. `**81 are Enhanced**`, `**81** are **Enhanced**`, `81 Enhanced codes`, `81 *Enhanced* events` and `116 are ordinary` are all statements; "was 201 until
+ * `x` (**Enhanced**) was added" (a count of all the codes, in a history) and "§5 makes enhanced audit mandatory" are not, because a word that is neither filler nor markup stands
+ * between the number and the tier. The run-5 patterns read three wordings of one shape ("N are enhanced") and missed all the others.
+ */
+function statedCounts(
+  document: string,
+): readonly { readonly tier: TierName; readonly count: number }[] {
+  const filler = '(?:codes?|events?|are|is|were|them|of)';
+  const markup = '[\\s*_`]*';
+  const pattern = new RegExp(
+    // The end of the tier's word is "not followed by a letter or a digit" and not `\b`, which an underscore (`_enhanced_`) would defeat.
+    `\\b(\\d+)\\b${markup}(?:${filler}\\b${markup}){0,3}(enhanced or standard(?: by the act)?|enhanced|depend on the act|conditional|standard|ordinary)(?![a-z0-9])`,
+    'gi',
+  );
+  return [...document.matchAll(pattern)].map((match) => {
+    const named = (match[2] ?? '').toLowerCase();
+    const tier: TierName =
+      named.startsWith('enhanced or standard') ||
+      named === 'depend on the act' ||
+      named === 'conditional'
+        ? 'conditional'
+        : named === 'enhanced'
+          ? 'enhanced'
+          : 'standard';
+    return { tier, count: Number(match[1]) };
+  });
+}
+
 const ID = '019a0000-0000-7000-8000-000000000001';
 const NOW = new Date('2026-10-11T09:00:00.000Z');
 const STAFF_ID = '11111111-1111-4111-8111-111111111111';
@@ -125,24 +157,56 @@ describe('the tier of each event is the catalogue’s, read from the document (G
       conditional: tiers.filter((tier) => tier === 'CONDITIONAL').length,
       standard: tiers.filter((tier) => tier === 'STANDARD').length,
     };
-    const statements: readonly [string, RegExp, number][] = [
-      ['enhanced', /\b(\d+) are enhanced\b(?! or standard)/gi, derived.enhanced],
-      [
-        'conditional',
-        /\b(\d+) (?:are enhanced or standard by the act|depend on the act)\b/gi,
-        derived.conditional,
-      ],
-      ['standard', /\b(\d+) are (?:standard|ordinary)\b/gi, derived.standard],
-    ];
-    for (const [tier, pattern, count] of statements) {
-      const found = [...AUDIT_MD.matchAll(pattern)].map((match) => Number(match[1]));
+    const stated = statedCounts(AUDIT_MD);
+    for (const tier of ['enhanced', 'conditional', 'standard'] as const) {
+      const found = stated.filter((statement) => statement.tier === tier);
       // A check over nothing passes: the document states each of the three.
       expect(found.length, `the document states a count of the ${tier} codes`).toBeGreaterThan(0);
       expect(
-        found.filter((number) => number !== count),
-        `statements of the ${tier} count other than ${String(count)}`,
+        found.map((statement) => statement.count).filter((number) => number !== derived[tier]),
+        `statements of the ${tier} count other than ${String(derived[tier])}`,
       ).toEqual([]);
     }
+  });
+
+  // Break caught (run 6, Stage 1.7): a stale count in a wording the run-5 patterns did not read: markup between the number and the tier (`**80** Enhanced codes`), the tier before
+  // the word codes, another word for it. Each is read as a statement of its tier, and the look-alikes that are not statements are not.
+  it('reads a count of a tier in any wording: markup between the number and the tier, the tier before the word codes', () => {
+    const read = (text: string) =>
+      statedCounts(text).map(({ tier, count }) => `${tier} ${String(count)}`);
+
+    expect(read('**81 are Enhanced**')).toEqual(['enhanced 81']);
+    expect(read('**81** are **Enhanced**')).toEqual(['enhanced 81']);
+    expect(read('81 Enhanced codes')).toEqual(['enhanced 81']);
+    expect(read('81 *Enhanced* events')).toEqual(['enhanced 81']);
+    expect(read('80 codes are _enhanced_')).toEqual(['enhanced 80']);
+    expect(read('**5 are Enhanced or Standard by the act**')).toEqual(['conditional 5']);
+    expect(read('5 **Enhanced or Standard** codes')).toEqual(['conditional 5']);
+    expect(read('5 depend on the act')).toEqual(['conditional 5']);
+    expect(read('**116 are Standard**')).toEqual(['standard 116']);
+    expect(read('116 Standard codes')).toEqual(['standard 116']);
+    expect(read('116 are ordinary')).toEqual(['standard 116']);
+    // Not statements: a count of all the codes in a history, a section number, a word between the number and the tier.
+    expect(
+      read('The count was 201 until `permission.fixed_policy.widened` (**Enhanced**) was added'),
+    ).toEqual([]);
+    expect(read('§5 makes enhanced audit mandatory')).toEqual([]);
+    expect(read('202 codes, of which the Enhanced ones are listed')).toEqual([]);
+  });
+
+  // Break caught: the document check taking the scanner's word for it when a stale statement is planted in the document in the wordings above.
+  it('finds a stale count planted in the document in a wording of its own', () => {
+    const enhanced = AUDIT_EVENT_CODES.map((code) => tierOf(code)).filter(
+      (tier) => tier === 'ENHANCED',
+    ).length;
+    const planted = `${AUDIT_MD}\nOf these **${String(enhanced - 1)}** are **Enhanced**.\n${String(enhanced - 2)} Enhanced codes.\n`;
+
+    const stale = statedCounts(planted)
+      .filter((statement) => statement.tier === 'enhanced')
+      .map((statement) => statement.count)
+      .filter((number) => number !== enhanced);
+
+    expect(stale).toEqual([enhanced - 1, enhanced - 2]);
   });
 
   // Break caught: the document's count of its own codes going stale again (it read 188 when there were 190).
