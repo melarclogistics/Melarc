@@ -17,22 +17,23 @@
 /*
  * The end of the list that is cut off fades out over 1.5rem, so that a row does not look complete when a tab is hidden behind its edge (`data-fade` is set by
  * `use-edge-fade.ts` from the row's own scroll position: "start", "end" or "start end", and none when nothing is cut off). A mask fades what is drawn, whatever the surface
- * behind it is, so no colour has to be guessed.
+ * behind it is, so no colour has to be guessed. A mask reads only the alpha of its stops, so the opaque ones are `currentColor` (the list's own text colour, which is opaque) and
+ * paint nothing: a colour written as a literal or as a name outside the token file is refused by `scripts/design-tokens.test.ts`.
  */
 .ui-view-tabs__scroll[data-fade='end'] {
-  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - 1.5rem), transparent);
 }
 
 .ui-view-tabs__scroll[data-fade='start'] {
-  mask-image: linear-gradient(to right, transparent, #000 1.5rem);
+  mask-image: linear-gradient(to right, transparent, currentColor 1.5rem);
 }
 
 .ui-view-tabs__scroll[data-fade='start end'] {
   mask-image: linear-gradient(
     to right,
     transparent,
-    #000 1.5rem,
-    #000 calc(100% - 1.5rem),
+    currentColor 1.5rem,
+    currentColor calc(100% - 1.5rem),
     transparent
   );
 }
