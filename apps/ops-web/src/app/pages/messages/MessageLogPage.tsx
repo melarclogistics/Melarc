@@ -33,7 +33,7 @@ import {
   type SubjectType,
 } from '../../../platform/notifications/notification-shape';
 import { useNotifications } from '../../../platform/notifications/use-notification-queries';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
@@ -231,9 +231,7 @@ function MessageCard({ entry }: { readonly entry: NotificationEntryView }) {
 
 /** A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that. */
 function refusalWords(problem: Problem): string {
-  return problem.forbidden === 'outside-hubs'
-    ? 'These messages are at a hub your account does not work in.'
-    : cannotText('notification.read');
+  return refusalText(problem.forbidden, 'notification.read', { of: 'messages' });
 }
 
 /**

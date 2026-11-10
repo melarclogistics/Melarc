@@ -40,7 +40,7 @@ import {
 import { MAX_STOPS } from '../../../platform/manifest/manifest-shape';
 import { calendarDateOf, type PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import { usePickupReasons, usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
@@ -488,9 +488,7 @@ export function ManifestBuilderPage() {
       : {
           message:
             poolProblem.kind === 'forbidden'
-              ? poolProblem.forbidden === 'outside-hubs'
-                ? 'These pickup requests are at a hub your account does not work in.'
-                : cannotText('pickup.read')
+              ? refusalText(poolProblem.forbidden, 'pickup.read', { of: 'pickup requests' })
               : poolProblem.reference === undefined
                 ? poolProblem.message
                 : `${poolProblem.message} Reference: ${poolProblem.reference}`,

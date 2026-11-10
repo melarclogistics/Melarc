@@ -17,7 +17,7 @@ import {
   type QueueWorkspaceHandle,
 } from '../../../components/ui/templates/QueueWorkspace';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
@@ -115,9 +115,7 @@ function AccountCard({ facts }: { readonly facts: AccountFacts }) {
 
 /** A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that. */
 function refusalWords(problem: Problem): string {
-  return problem.forbidden === 'outside-hubs'
-    ? 'These vendor accounts are at a hub your account does not work in.'
-    : cannotText('vendor.read');
+  return refusalText(problem.forbidden, 'vendor.read', { of: 'vendor accounts' });
 }
 
 /**

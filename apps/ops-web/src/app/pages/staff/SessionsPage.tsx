@@ -12,7 +12,7 @@ import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirma
 import { QueueWorkspace, type QueueResult } from '../../../components/ui/templates/QueueWorkspace';
 import { useApiClient } from '../../../platform/api/api-client';
 import { isNotFound } from '../../../platform/api/api-response';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { cannotText, refusalText } from '../../../platform/problem/capability-words';
 import { problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { revokeSession } from '../../../platform/staff/staff-commands';
@@ -150,10 +150,9 @@ function Sessions({
       const message =
         problem.kind === 'forbidden'
           ? problem.forbidden === 'insufficient-authority'
-            ? `A higher authority is needed. ${problem.message}`
-            : problem.forbidden === 'outside-hubs'
-              ? 'This person is at a hub your account does not work in.'
-              : cannotText('staff.read')
+            ? // The words of this act (staff-copy): they say whose sessions a session of this tier may see, which the table's general sentence does not.
+              problem.message
+            : refusalText(problem.forbidden, 'staff.read', { of: 'this person' })
           : problem.reference === undefined
             ? problem.message
             : `${problem.message} Reference: ${problem.reference}`;

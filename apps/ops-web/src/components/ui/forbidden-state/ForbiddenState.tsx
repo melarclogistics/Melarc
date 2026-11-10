@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { PageHeading } from '../../PageHeading';
-import { cannotText, type CapabilityWords } from '../../../platform/problem/capability-words';
+import { refusalText, type CapabilityWords } from '../../../platform/problem/capability-words';
 import { Alert } from '../alert/Alert';
 
 /**
@@ -59,18 +59,8 @@ function Explanation({
   readonly permission?: string;
   readonly capability?: CapabilityWords;
 }): ReactNode {
-  switch (kind) {
-    case 'permission-missing':
-      return cannotText(permission, capability);
-    case 'insufficient-authority':
-      return 'This needs a higher authority than your session has.';
-    case 'outside-hubs':
-      return 'This record belongs to a hub your session does not act in.';
-    case 'approval-required':
-      return 'A different approver decides this.';
-    case 'unavailable-here':
-      return 'This cannot be done for this record as it stands.';
-  }
+  // The sentence of every refusal is the table's, one function for every screen (`capability-words.ts`).
+  return refusalText(kind, permission, capability === undefined ? {} : { doing: capability });
 }
 
 /**

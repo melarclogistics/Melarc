@@ -678,6 +678,26 @@ describe('the staff list: when it cannot be had', () => {
     expect(document.body.textContent).not.toMatch(/staff\.read/);
   });
 
+  // Break caught (the review of f6cf02b): every kind of refusal of authority told as a missing key (`cannotText('staff.read')`), so a person who needs a higher authority, or whose list is
+  // of a hub their account does not work in, was told to ask for access they may hold. Each kind has its own words, the table's, as the refusal components give them.
+  it('tells a refusal for a higher authority in its own words, and not as a missing key', async () => {
+    open('/admin/staff', KEYS.approver, { [LIST]: () => refusal(403, 'INSUFFICIENT_AUTHORITY') });
+
+    const alert = await alertSaying('This needs a higher authority than your session has.');
+    expect(alert).not.toHaveTextContent('Ask an administrator for access');
+    expect(profileRows()).toHaveLength(0);
+  });
+
+  it('tells a refusal for a hub in its own words, and not as a missing key', async () => {
+    open('/admin/staff', KEYS.approver, { [LIST]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
+
+    const alert = await alertSaying(
+      'These staff profiles are at a hub your account does not work in.',
+    );
+    expect(alert).not.toHaveTextContent('Ask an administrator for access');
+    expect(profileRows()).toHaveLength(0);
+  });
+
   // Break caught: an answer that is not a list believed, and shown as an empty queue.
   it('treats an answer that is not a list as an answer that is not the API’s', async () => {
     open('/admin/staff', KEYS.approver, { [LIST]: () => json(200, { surprise: true }) });

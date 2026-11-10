@@ -3,6 +3,7 @@ import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { Timeline, type TimelineEntry } from '../../../components/ui/timeline/Timeline';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { useAttemptChain, type AttemptLink } from '../../../platform/pickup/use-pickup-queries';
 import { PICKUP_STATE_MAP, serviceDateText } from './pickup-presentation';
 
@@ -16,7 +17,7 @@ function entryOf(
     return {
       key: link.id,
       title: 'An attempt this session cannot read',
-      details: <p>It belongs to a hub your session does not act in, or it is no longer there.</p>,
+      details: <p>{refusalText('outside-hubs', undefined, { of: 'a linked request' })}</p>,
     };
   }
   const { request } = link;

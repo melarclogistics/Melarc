@@ -11,6 +11,8 @@
  * **The words are this table's and no page's** (the review of f6cf02b: `cannotText('pickup.read', 'pickup.read')` drew a key and passed, because the second argument was free text): the
  * `doing` of {@link cannotText} and the `capability` of the refusal components are a {@link CapabilityWords}, a value of this table, so that the compiler refuses any other text.
  */
+import type { ForbiddenKind } from '../../components/ui/forbidden-state/ForbiddenState';
+
 const CAPABILITY = {
   // Pickup requests, exceptions and runs.
   'pickup.read': 'see pickup requests',
@@ -82,6 +84,56 @@ export function cannotText(permission: string | undefined, doing?: CapabilityWor
   const words = doing ?? (permission === undefined ? undefined : capabilityOf(permission));
   return `Your account can’t ${words ?? 'do this'}. ${ASK_FOR_ACCESS}`;
 }
+
+/**
+ * What a refusal for a hub says of what a page holds, by what the page holds. A page names what it lists (`of: 'riders'`, a member of this list) and writes no sentence of its own (the review of
+ * f6cf02b: six pages each wrote "These … are at a hub your account does not work in."), so that the words of a refusal are one table's whatever the screen. A list is "these"; a person and a
+ * linked request are one.
+ */
+const OUTSIDE_HUBS_OF = {
+  'pickup requests': 'These pickup requests are at a hub your account does not work in.',
+  'pickup runs': 'These pickup runs are at a hub your account does not work in.',
+  messages: 'These messages are at a hub your account does not work in.',
+  riders: 'These riders are at a hub your account does not work in.',
+  'vendor accounts': 'These vendor accounts are at a hub your account does not work in.',
+  'staff profiles': 'These staff profiles are at a hub your account does not work in.',
+  'this person': 'This person is at a hub your account does not work in.',
+  'a linked request': 'It belongs to a hub your session does not act in, or it is no longer there.',
+} as const;
+
+/** What a page can say it holds when a refusal is for a hub (see {@link refusalText}). */
+export type HeldBy = keyof typeof OUTSIDE_HUBS_OF;
+
+/**
+ * The sentence of a refusal of authority, **one function for every screen** (PRODUCT_DESIGN_DIRECTION section 6.5): a missing permission is what the account cannot do, in plain words and never
+ * the key ({@link cannotText}); a higher authority is told as that; a hub is told as the hub of what the page holds when it says what it holds (`of`), and as "this record" when it does not;
+ * a different approver and an act the record does not allow are told as they are. The kit's refusal components (`ForbiddenState`, `ForbiddenPage`) and every page that words a refusal call it,
+ * so that two screens never tell the same refusal in two ways (the staff list told every kind as a missing key). `kind` is `Problem.forbidden`; `undefined` is a refusal for want of a key.
+ */
+export function refusalText(
+  kind: ForbiddenKind | undefined,
+  permission: string | undefined,
+  options: { readonly doing?: CapabilityWords; readonly of?: HeldBy } = {},
+): string {
+  switch (kind) {
+    case 'insufficient-authority':
+      return 'This needs a higher authority than your session has.';
+    case 'outside-hubs':
+      return options.of === undefined
+        ? 'This record belongs to a hub your session does not act in.'
+        : OUTSIDE_HUBS_OF[options.of];
+    case 'approval-required':
+      return 'A different approver decides this.';
+    case 'unavailable-here':
+      return 'This cannot be done for this record as it stands.';
+    case 'permission-missing':
+    case undefined:
+      return cannotText(permission, options.doing);
+  }
+}
+
+/** Every sentence a hub refusal can be, for the test that holds each to plain words with no key and no role in it. */
+export const OUTSIDE_HUBS_SENTENCES: readonly string[] = Object.values(OUTSIDE_HUBS_OF);
 
 /** The permission keys that have words, for the test that holds the table to the catalogue and to the source. */
 export const CAPABILITY_KEYS: readonly string[] = Object.keys(CAPABILITY);

@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CAPABILITY_KEYS,
   CAPABILITY_WORDS,
+  OUTSIDE_HUBS_SENTENCES,
   ASK_FOR_ACCESS,
   capabilityOf,
   cannotText,
+  refusalText,
 } from '../src/platform/problem/capability-words';
 import { catalogueKeys, REPOSITORY_ROOT } from './support/permission-catalogue';
 
@@ -108,6 +110,59 @@ describe('the words of a refusal', () => {
       expect(catalogue.has(words), words).toBe(false);
       expect(words, words).not.toMatch(/\b[a-z]+\.[a-z_]+\b/);
       expect(words, words).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance|Auditor/);
+    }
+  });
+
+  // Break caught (the review of f6cf02b): the sentence of a refusal written by a page, so that two screens told one refusal in two ways, and the staff list told every kind of refusal as a
+  // missing key. One function tells every kind, and each kind has its own words.
+  it('are told by one function: each kind in its own words, and a missing key as what the account cannot do', () => {
+    expect(refusalText('permission-missing', 'pickup.read')).toBe(cannotText('pickup.read'));
+    expect(refusalText(undefined, 'staff.read')).toBe(cannotText('staff.read'));
+    expect(refusalText('permission-missing', 'pickup.read', { doing: 'see pickup runs' })).toBe(
+      cannotText('pickup.read', 'see pickup runs'),
+    );
+    expect(refusalText('insufficient-authority', 'staff.read')).toBe(
+      'This needs a higher authority than your session has.',
+    );
+    expect(refusalText('outside-hubs', 'staff.read')).toBe(
+      'This record belongs to a hub your session does not act in.',
+    );
+    expect(refusalText('approval-required', 'pickup.exception.approve')).toBe(
+      'A different approver decides this.',
+    );
+    expect(refusalText('unavailable-here', undefined)).toBe(
+      'This cannot be done for this record as it stands.',
+    );
+    const sentences = new Set(
+      (
+        [
+          'permission-missing',
+          'insufficient-authority',
+          'outside-hubs',
+          'approval-required',
+          'unavailable-here',
+        ] as const
+      ).map((kind) => refusalText(kind, 'staff.read')),
+    );
+    expect(sentences.size).toBe(5);
+  });
+
+  it('tell a hub as the hub of what a page holds, in plain words with no key and no role', () => {
+    expect(OUTSIDE_HUBS_SENTENCES.length).toBeGreaterThanOrEqual(8);
+    expect(refusalText('outside-hubs', 'pickup.read', { of: 'pickup requests' })).toBe(
+      'These pickup requests are at a hub your account does not work in.',
+    );
+    expect(refusalText('outside-hubs', 'dispatch.read', { of: 'riders' })).toBe(
+      'These riders are at a hub your account does not work in.',
+    );
+    expect(refusalText('outside-hubs', 'staff.read', { of: 'this person' })).toBe(
+      'This person is at a hub your account does not work in.',
+    );
+    for (const sentence of OUTSIDE_HUBS_SENTENCES) {
+      expect(sentence).toMatch(/hub your (account|session)/);
+      expect(sentence).not.toMatch(/\b[a-z]+\.[a-z_]+\b/);
+      expect(sentence).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance|Auditor/);
+      for (const key of catalogue) expect(sentence).not.toContain(key);
     }
   });
 

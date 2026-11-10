@@ -27,7 +27,7 @@ import {
 } from '../../../platform/manifest/manifest-shape';
 import { useManifests } from '../../../platform/manifest/use-manifest-queries';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -178,9 +178,10 @@ const ALL_VIEW = 'all';
  * A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that.
  */
 function refusalWords(problem: Problem): string {
-  return problem.forbidden === 'outside-hubs'
-    ? 'These pickup runs are at a hub your account does not work in.'
-    : cannotText('pickup.read', 'see pickup runs');
+  return refusalText(problem.forbidden, 'pickup.read', {
+    doing: 'see pickup runs',
+    of: 'pickup runs',
+  });
 }
 
 /**

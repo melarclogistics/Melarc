@@ -12,7 +12,7 @@ import { catalogueKeys, REPOSITORY_ROOT } from './support/permission-catalogue';
  * `platform/problem/capability-words.ts`. This reads the syntax tree of every source file of the portal, that table included, and fails on a key of the catalogue
  * (`contracts/permissions.md`) wherever a screen could show it: in a string, a template, the text of an element, a name put together from parts (`'pickup.' + 'read'`,
  * `` `pickup.${'read'}` ``, `['pickup', 'read'].join('.')`, a constant of parts), or a constant that holds one (under whatever name it is imported). A key is let through in **its own place
- * only**: the first argument of `holds(` and of `cannotText(` (the second is words, and a type keeps it so), the `permission` or `decidedBy` of the kit components that read a key to
+ * only**: the key argument of `holds(`, `cannotText(` and `refusalText(` (the words after it are the table's, and a type keeps them so), the `permission` or `decidedBy` of the kit components that read a key to
  * look its words up ({@link KEY_CONSUMERS}, listed so that a new one is a choice), the `permission` and `decidedBy` of a route's `access`, and the keys of the table of words. A comment is
  * not a node, so it may name a key; a test, the showcase and the stand-ins of `test-support` are not screens. What reading cannot see (a name built from a variable, a value an answer
  * carried) is caught by the runtime half: the render helpers of the page tests (`src/test-support/permission-keys.ts`) and the page watcher of the browser tests (`test/browser/support/page.ts`).
@@ -20,8 +20,12 @@ import { catalogueKeys, REPOSITORY_ROOT } from './support/permission-catalogue';
 const SRC = join(REPOSITORY_ROOT, 'apps', 'ops-web', 'src');
 const WORDS_FILE = 'platform/problem/capability-words.ts';
 
-/** The calls whose FIRST argument is a key to ask about. Any other argument is drawn as written. */
-const KEY_CALLS: ReadonlySet<string> = new Set(['holds', 'cannotText']);
+/** The calls that take a key to ask about, and which argument it is (counted from 0): `refusalText(kind, key, …)` has the kind of refusal before it. Any other argument is drawn as written. */
+const KEY_CALLS: ReadonlyMap<string, number> = new Map([
+  ['holds', 0],
+  ['cannotText', 0],
+  ['refusalText', 1],
+]);
 
 /** The attributes and properties that name the key a guard, a refusal or a route asks for. */
 const NAMES: ReadonlySet<string> = new Set(['permission', 'decidedBy']);
@@ -133,7 +137,8 @@ function isKeyPosition(node: ts.Node): boolean {
   const parent = at.parent;
   if (ts.isCallExpression(parent)) {
     const name = calleeName(parent);
-    return name !== undefined && KEY_CALLS.has(name) && parent.arguments[0] === at;
+    const place = name === undefined ? undefined : KEY_CALLS.get(name);
+    return place !== undefined && parent.arguments[place] === at;
   }
   const attribute = ts.isJsxAttribute(parent)
     ? parent
@@ -455,9 +460,12 @@ describe('the source of the portal', () => {
   });
 
   // Break caught (the review of f6cf02b): every argument of cannotText was let through, and the second one, `doing`, is drawn as written, so `cannotText(k, 'pickup.read')` put a key on
-  // screen and passed. Only the first argument of a call that asks about a key is the key's place.
-  it('finds a key in the words of cannotText, and in any argument of holds but the first', () => {
+  // screen and passed. Only the key argument of a call that asks about a key is the key's place: the first of holds and cannotText, the second of refusalText (after the kind).
+  it('finds a key in the words of cannotText and refusalText, and in any argument of a call but the key’s', () => {
     const wrong = (code: string) => scan(sourceOf(code), keys).found.length;
+    expect(wrong(`const t = refusalText(kind, 'pickup.read', { doing: 'pickup.read' });`)).toBe(1);
+    expect(wrong(`const t = refusalText('pickup.read', undefined);`)).toBe(1);
+    expect(wrong(`const t = refusalText(kind, undefined, { of: 'staff.read' });`)).toBe(1);
     expect(wrong(`const t = cannotText('pickup.read', 'pickup.read');`)).toBe(1);
     expect(wrong(`const t = cannotText(key, 'needs pickup.read');`)).toBe(1);
     expect(wrong(`const t = cannotText(undefined, 'staff.read');`)).toBe(1);
@@ -573,6 +581,9 @@ describe('the source of the portal', () => {
     ).toEqual([]);
     expect(fine(`const t = cannotText('pickup.exception.approve');`)).toEqual([]);
     expect(fine(`const t = cannotText('pickup.read', 'see pickup runs');`)).toEqual([]);
+    expect(
+      fine(`const t = refusalText(problem.forbidden, 'pickup.read', { of: 'pickup requests' });`),
+    ).toEqual([]);
     expect(
       fine(`const a = <ForbiddenPage kind="permission-missing" permission="pickup.read" />;`),
     ).toEqual([]);

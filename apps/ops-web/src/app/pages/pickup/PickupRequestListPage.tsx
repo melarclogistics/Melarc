@@ -33,7 +33,7 @@ import {
   usePickupRequests,
   type PickupRecord,
 } from '../../../platform/pickup/use-pickup-queries';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -88,9 +88,7 @@ const STALE_QUEUE =
  * the queue and for one whose hub does not reach it; what the person can do about either is to ask whoever sets up their access.
  */
 function refusalWords(problem: Problem): string {
-  return problem.forbidden === 'outside-hubs'
-    ? 'These pickup requests are at a hub your account does not work in.'
-    : cannotText('pickup.read');
+  return refusalText(problem.forbidden, 'pickup.read', { of: 'pickup requests' });
 }
 
 /**

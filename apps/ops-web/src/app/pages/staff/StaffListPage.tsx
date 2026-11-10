@@ -18,7 +18,7 @@ import {
   type QueueWorkspaceHandle,
 } from '../../../components/ui/templates/QueueWorkspace';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -249,7 +249,7 @@ export function StaffListPage() {
       }
       const message =
         problem.kind === 'forbidden'
-          ? cannotText('staff.read')
+          ? refusalText(problem.forbidden, 'staff.read', { of: 'staff profiles' })
           : problem.reference === undefined
             ? problem.message
             : `${problem.message} Reference: ${problem.reference}`;

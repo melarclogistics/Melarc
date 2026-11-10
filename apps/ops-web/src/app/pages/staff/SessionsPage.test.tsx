@@ -17,7 +17,7 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { cannotText, refusalText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -516,7 +516,20 @@ describe('the sessions: when it cannot be had', () => {
     const alert = await alertSaying(
       'Your session cannot see this person’s sessions. Staff and vendor sessions are seen by a Platform Admin.',
     );
-    expect(alert).toHaveTextContent('A higher authority is needed');
+    // Told as the refusal of a tier and never as a missing key (the page wrote "A higher authority is needed." itself; the words are the operation's now, and the table's for the other kinds).
+    expect(alert).not.toHaveTextContent(cannotText('staff.read'));
+    expect(alert).not.toHaveTextContent('Ask an administrator for access');
+    expect(sessionRows()).toHaveLength(0);
+  });
+
+  // Break caught (the review of f6cf02b): the hub of a person told in a sentence a page wrote; it is the table's.
+  it('says a person of another hub is at a hub the account does not work in', async () => {
+    open(KEYS.approver, { [LIST]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
+
+    const alert = await alertSaying(
+      refusalText('outside-hubs', 'staff.read', { of: 'this person' }),
+    );
+    expect(alert).toHaveTextContent('This person is at a hub your account does not work in.');
     expect(sessionRows()).toHaveLength(0);
   });
 

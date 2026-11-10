@@ -3,6 +3,7 @@ import { ApiError } from '@melarc/api-client/browser';
 import type { ForbiddenKind } from '../../components/ui/forbidden-state/ForbiddenState';
 import { OperationFailure, type Violation } from '../api/api-response';
 import { StaleSessionError } from '../session/session-boundary';
+import { refusalText } from './capability-words';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
 import { PICKUP_COPY } from './pickup-copy';
@@ -292,10 +293,11 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   stale: '',
 };
 
+// What a refusal says is the table's (`capability-words.ts`); the message of an approval and of an act the record does not allow is the short form of the explanation the refusal components draw.
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {
-  'permission-missing': 'Your account can’t do this. Ask an administrator for access.',
-  'insufficient-authority': 'This needs a higher authority than your session has.',
-  'outside-hubs': 'This record belongs to a hub your session does not act in.',
+  'permission-missing': refusalText('permission-missing', undefined),
+  'insufficient-authority': refusalText('insufficient-authority', undefined),
+  'outside-hubs': refusalText('outside-hubs', undefined),
   'approval-required': 'A different approver is required.',
   'unavailable-here': 'This is not available here.',
 };

@@ -16,7 +16,7 @@ import {
   type QueueWorkspaceHandle,
 } from '../../../components/ui/templates/QueueWorkspace';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import {
   RIDER_STATUSES,
@@ -135,9 +135,7 @@ function RiderCard({ facts }: { readonly facts: RiderFacts }) {
 
 /** A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that. */
 function refusalWords(problem: Problem): string {
-  return problem.forbidden === 'outside-hubs'
-    ? 'These riders are at a hub your account does not work in.'
-    : cannotText('dispatch.read');
+  return refusalText(problem.forbidden, 'dispatch.read', { of: 'riders' });
 }
 
 /**
