@@ -13,7 +13,7 @@
 #   5.97.0  A2    the 429 `RATE_LIMITED` with `Retry-After` declared on every operation the authenticated limiter covers (`RateLimited`); the operations reached before a session exists declare `RateLimitedAnonymous`, which carries none
 #   5.98.0  F     the `hub_id` of `listPickupRequests` is judged as a UUID and ignored for a Rider (a Rider is shown no request, so its page is the one it is given without a hub, whatever hub is named); a staff session's `hub_id` outside its grant is answered at once by the three older lists as by the four (no change of any answer)
 #   5.99.0  A3    `listPickupRequests` and `getPickupRequest` are no longer served to a Rider (their security names the browser session alone: surfaces/rider-android.md, "Not a rider act"); `lookupRecords` takes one lookup in flight per session (a second answers `429` `RATE_LIMITED` with `Retry-After: 1`) and gives the whole lookup one budget of 3 seconds; the text of `RateLimited` says where the `Retry-After` of `requestAdditionalDeviceGrant` comes from
-#   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (its `ETag` moves once for every run, as it does for any member added). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
+#   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (it is not part of the run's `ETag`: it never changes, and a rolling release serves a build that does not state it beside one that does, so the `ETag` of a run is the one the build before computed). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -14541,7 +14541,9 @@ components:
           description: >-
             The moment the run was made (contract 5.100.0). It is the table's own column, set once and
             never changed, so it is on every read, on every item of a list and on every answer that carries
-            a run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
+            a run. It is not part of the run's `ETag`, which is the one a build that does not state it
+            computes for the same run. The moment a run was cancelled is not stored and is not stated here
+            (OB-S1-79).
       description: |
         **Hub-scoped, never vendor-scoped** (domain-model §4). A manifest spans vendors, so
         applying a vendor filter to it would leak one vendor's existence to another or return

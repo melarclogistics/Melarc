@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.100.0
- *   SHA-256 b60e3075bcf713ea842ee512b9ee4e7acb7e0082b0cb6f8d6eb739e35d8e6020 (of the contract, line endings normalized to LF)
+ *   SHA-256 bbc3558d6135fae151f72dafbfd81eaeb634eaf59a6ff428b0e7c70f879c8e60 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -9399,7 +9399,7 @@ export interface components {
             completed_at?: string | null;
             /**
              * Format: date-time
-             * @description The moment the run was made (contract 5.100.0). It is the table's own column, set once and never changed, so it is on every read, on every item of a list and on every answer that carries a run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
+             * @description The moment the run was made (contract 5.100.0). It is the table's own column, set once and never changed, so it is on every read, on every item of a list and on every answer that carries a run. It is not part of the run's `ETag`, which is the one a build that does not state it computes for the same run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
              */
             created_at: string;
         };
