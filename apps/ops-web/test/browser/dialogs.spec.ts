@@ -456,18 +456,18 @@ test.describe('the reason and confirmation workflow in a browser', () => {
     for (const url of seen.requests) expect(new URL(url).origin, url).toBe(baseURL);
   });
 
-  test('has no WCAG 2.2 A or AA violation with the workflow open, at each verified width', async ({
-    page,
-  }) => {
-    for (const { width, height } of VERIFIED_VIEWPORTS) {
+  // One test for each verified width: a scan of the whole page takes seconds on the development server, and three of them in one test of 30 seconds ran out of time
+  // when the machine was busy (the review of f6cf02b). Each width is a test of its own, and none is near its budget.
+  for (const { width, height } of VERIFIED_VIEWPORTS) {
+    test(`has no WCAG 2.2 A or AA violation with the workflow open, at ${String(width)} px`, async ({
+      page,
+    }) => {
       await page.setViewportSize({ width, height });
       await reasoned(page);
 
       expect(await wcagViolations(page), `${String(width)} px`).toEqual([]);
-      await page.keyboard.press('Escape');
-      await page.unrouteAll();
-    }
-  });
+    });
+  }
 });
 
 /** What a token comes to, written by the browser as the value of a CSS property: `var(--shadow-floating)` as a `box-shadow`, `var(--motion-normal)` as a duration. */
