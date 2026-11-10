@@ -86,11 +86,9 @@ const alertSaying = async (text: string): Promise<HTMLElement> => {
 const viewTab = (name: string) => screen.getByRole('tab', { name });
 /** A profile's row header is its name (a link). The table's own message (nothing yet, a failure) sits in a cell and is not one. */
 const profileRows = () => screen.queryAllByRole('rowheader');
-/** The search is in the popover of the filter row, opened with the Filter button. */
-async function openSearch(user: ReturnType<typeof open>['user']): Promise<HTMLElement> {
-  await user.click(screen.getByRole('button', { name: 'Filter' }));
-  return screen.findByRole('searchbox', { name: 'Search by name or email' });
-}
+/** The search is a field in the bar, always there: nothing is opened to find it. */
+const searchField = (): Promise<HTMLElement> =>
+  screen.findByRole('searchbox', { name: 'Search by name or email' });
 
 const queryOf = (index = -1): URLSearchParams => {
   const requests = api.requests.filter((request) => request.url.includes('/staff-identities'));
@@ -371,7 +369,7 @@ describe('the staff list: searching', () => {
     const { user, router } = open('/admin/staff?view=all', KEYS.approver);
     await table();
 
-    await user.type(await openSearch(user), 'kofi{Enter}');
+    await user.type(await searchField(), 'kofi{Enter}');
 
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('kofi');
@@ -388,7 +386,7 @@ describe('the staff list: searching', () => {
 
     expect(queryOf(0).get('q')).toBe('mensah');
     expect(screen.getByText('Search: mensah')).toBeVisible();
-    expect(await openSearch(user)).toHaveValue('mensah');
+    expect(await searchField()).toHaveValue('mensah');
   });
 
   // Break caught: spaces around a search sent as part of it, which would find nobody.
@@ -396,11 +394,11 @@ describe('the staff list: searching', () => {
     const { user } = open('/admin/staff?view=all', KEYS.approver);
     await table();
 
-    await user.type(await openSearch(user), '   kofi   {Enter}');
+    await user.type(await searchField(), '   kofi   {Enter}');
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('kofi');
     });
-    const field = await openSearch(user);
+    const field = await searchField();
     await user.clear(field);
     await user.type(field, '    {Enter}');
 
@@ -423,21 +421,21 @@ describe('the staff list: searching', () => {
     const { user } = open('/admin/staff?view=all', KEYS.approver);
     await table();
 
-    expect(await openSearch(user)).toHaveAttribute('maxlength', '128');
+    expect(await searchField()).toHaveAttribute('maxlength', '128');
   });
 
-  it('closes the search once it is sent, and gives focus back to the Filter button', async () => {
+  // Break caught (the Product Owner, 10 November 2026): a search that is behind the Filter button, so that the person opens something to find a name and it closes once it is sent. It replaces
+  // "closes the search once it is sent, and gives focus back to the Filter button": the search stays where it is, with the person's text, and focus stays in it.
+  it('keeps the search in the bar, with no Filter button, and focus in the field once it is sent', async () => {
     const { user } = open('/admin/staff?view=all', KEYS.approver);
     await table();
+    expect(screen.queryByRole('button', { name: 'Filter' })).toBeNull();
 
-    await user.type(await openSearch(user), 'kofi{Enter}');
+    await user.type(await searchField(), 'kofi{Enter}');
 
-    await waitFor(() => {
-      expect(screen.queryByRole('searchbox', { name: 'Search by name or email' })).toBeNull();
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Filter' })).toHaveFocus();
-    });
+    expect(await screen.findByText('Search: kofi')).toBeVisible();
+    expect(await searchField()).toHaveValue('kofi');
+    expect(await searchField()).toHaveFocus();
   });
 
   it('takes the search off with its chip and keeps the view', async () => {
@@ -467,7 +465,7 @@ describe('the staff list: searching', () => {
       expect(router.state.location.search).toBe('?view=all');
     });
     expect(screen.queryByText('Search: nobody')).toBeNull();
-    expect(await openSearch(user)).toHaveValue('');
+    expect(await searchField()).toHaveValue('');
   });
 });
 
@@ -478,6 +476,35 @@ describe('the staff list: counting and paging', () => {
     expect(await screen.findByText('2 profiles waiting for approval')).toBeInTheDocument();
     expect(await screen.findByText('Showing 2 profiles.')).toBeVisible();
   });
+
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "No staff profiles yet" or, in the approver's queue, as the good news "Nothing is waiting
+  // for approval", as if the queue were empty; or with no way back to the first page. A page past the end is only that.
+  for (const view of ['all', 'waiting']) {
+    it(`tells an empty page after the first as that, with the way back to the first page, in the ${view} view`, async () => {
+      let reads = 0;
+      const { user } = open(`/admin/staff?view=${view}`, KEYS.approver, {
+        [LIST]: () => {
+          reads += 1;
+          return reads === 2 ? staffPage([]) : staffPage([kofi], 'next-1');
+        },
+      });
+      await table();
+      await user.click(await screen.findByRole('button', { name: 'Next page' }));
+
+      expect(
+        await screen.findByRole('heading', { name: 'No staff profiles on this page' }),
+      ).toBeVisible();
+      expect(
+        screen.getByText('Page 2 has no staff profiles now. Earlier pages may still have some.'),
+      ).toBeVisible();
+      expect(screen.queryByText('No staff profiles yet')).toBeNull();
+      expect(screen.queryByText('Nothing is waiting for approval')).toBeNull();
+
+      await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+      expect(await screen.findByRole('link', { name: 'Kofi Boateng' })).toBeVisible();
+      expect(queryOf().has('page_token')).toBe(false);
+    });
+  }
 
   // Break caught: "2 are waiting" for a queue that runs on to a next page, or for a later page of it.
   it('does not claim an exact count for a queue that runs past the page, or for a later page of it', async () => {
@@ -787,7 +814,7 @@ describeInterfaceStates('The staff list', {
       });
 
       await alertSaying('That search was not accepted. Use at most 128 characters.');
-      expect(await openSearch(user)).toHaveAttribute('maxlength', '128');
+      expect(await searchField()).toHaveAttribute('maxlength', '128');
     },
   },
   error: {

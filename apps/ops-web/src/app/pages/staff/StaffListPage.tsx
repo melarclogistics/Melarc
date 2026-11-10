@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
-import { Field } from '../../../components/ui/field/Field';
-import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
@@ -112,7 +109,7 @@ function ProfileCard({ facts }: { readonly facts: ProfileFacts }) {
 /**
  * Staff (surfaces/ops-portal.md section 7, `/admin/staff`; redesign step R7b): the people with a staff profile at the session's hubs, and the approver's queue,
  * which is the same list filtered to the profiles waiting for a decision. It is drawn by the queue workspace template (COMPONENT_PATTERNS, *QueueWorkspace*): the views are
- * the statuses a profile has, the search by name or email is a field in the filter row's popover and a chip when it is applied, and a person opens on a page of their own
+ * the statuses a profile has, the search by name or email is a field in the filter row, always there, and a chip when it is applied, and a person opens on a page of their own
  * (their name is a link). A person who can approve opens on the queue, because that is what they came for; anyone else opens on everyone. The view and the search are in
  * the address, so a link (the landing's "Review the queue") and the Back button mean what they say; the page of results is not, because a token the server gave is only
  * good for the list it was given for.
@@ -149,11 +146,6 @@ export function StaffListPage() {
   const bundles = useAssignableBundles(canReadRoles);
   const refreshSummary = useRefreshQueueSummary();
 
-  // What the person typed and has not sent yet. It follows the address when the address changes (Back, a link): what was typed is
-  // kept with the search it was typed over, and is the search again as soon as that is not the one in the address.
-  const [typing, setTyping] = useState({ over: q, text: q });
-  const draft = typing.over === q ? typing.text : q;
-  const [filterOpen, setFilterOpen] = useState(false);
   const [interacted, setInteracted] = useState(false);
 
   // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
@@ -208,12 +200,6 @@ export function StaffListPage() {
     setParams(out, { replace: true });
   }
 
-  function search(event: SubmitEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    change({ q: draft.trim() });
-    setFilterOpen(false);
-  }
-
   function showEveryone(): void {
     setInteracted(true);
     setParams(new URLSearchParams({ view: 'all' }), { replace: true });
@@ -261,6 +247,8 @@ export function StaffListPage() {
     noun: 'staff profiles',
     none: 'Profiles that are created at your hubs appear here.',
     announce: interacted,
+    // A page after the first that holds nothing is told as that, in the words of every list (the Product Owner, 10 November 2026), and not as the queue being empty.
+    laterPage: { page: paging.page, onFirstPage: paging.toFirstPage },
     // A chosen hub is a filter too (audit B1): nothing at this hub says nothing of the others, so it is never "nothing is waiting" or "no profiles yet".
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
@@ -275,7 +263,7 @@ export function StaffListPage() {
     : emptiness;
   // The approver's queue worked down to nothing is good news and is told as that; a search of it, or a hub, is not.
   const allClear =
-    hub === undefined && q === '' && view === 'waiting' ? (
+    hub === undefined && q === '' && view === 'waiting' && paging.page === 1 ? (
       <EmptyStateV2
         variant="all-clear"
         title="Nothing is waiting for approval"
@@ -335,31 +323,19 @@ export function StaffListPage() {
         }}
         filters={{
           label: 'Filter the staff',
+          // The search is a field in the bar, always there (the Product Owner, 10 November 2026), and not behind the Filter button: this list has no other filter to choose from.
+          search: {
+            label: 'Search by name or email',
+            value: q,
+            onSearch: (text) => {
+              change({ q: text });
+            },
+            maxLength: SEARCH_LIMIT,
+          },
           chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
           onRemove: () => {
             change({ q: '' });
           },
-          filterOpen,
-          onFilterOpenChange: setFilterOpen,
-          filterPanel: (
-            <form role="search" noValidate onSubmit={search}>
-              <Field label="Search by name or email">
-                <Input
-                  type="search"
-                  name="q"
-                  value={draft}
-                  maxLength={SEARCH_LIMIT}
-                  autoComplete="off"
-                  onChange={(event) => {
-                    setTyping({ over: q, text: event.target.value });
-                  }}
-                />
-              </Field>
-              <Button type="submit" variant="secondary">
-                Search
-              </Button>
-            </form>
-          ),
         }}
         result={result}
         empty={empty}
