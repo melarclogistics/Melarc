@@ -17,6 +17,9 @@ import {
   MATRIX_BROWSERS,
   MATRIX_ENGINE,
   MATRIX_SHARD,
+  MIGRATION_BASE_COMMAND,
+  MIGRATION_BASE_STEP_ENV,
+  MIGRATION_GUARD_COMMAND,
   PLAN_COMMAND,
   PLANNED_RUN,
   PULL_REQUEST_SKIP,
@@ -251,7 +254,9 @@ function goodShared(): Json {
         run('pnpm run lint'),
         run('pnpm run typecheck'),
         run('pnpm --filter @melarc/api run db:check'),
-        run('node scripts/migration-immutability.ts'),
+        // The step that names the revision a push is held to, before the guard (run 6, Stage 1.3).
+        { name: 'Name the base', env: { ...MIGRATION_BASE_STEP_ENV }, run: MIGRATION_BASE_COMMAND },
+        run(MIGRATION_GUARD_COMMAND),
         run('pnpm run api-client:check'),
         REHEARSAL,
       ]),
@@ -3173,6 +3178,155 @@ describe('the CI variable and the revision the migrations are held to (run 5, St
       }),
       [],
     );
+  });
+
+  // Break caught (run 6, Stage 1.3): `CI` taken away by a script (`unset CI`, `env -u CI`), which the `env` check and the assignments do not see: the step then runs as a developer's
+  // shell would, though GitHub sets CI to `true`. The names are read whole, and an argument never reads across a separator.
+  for (const [script, refused] of [
+    ['unset CI', true],
+    ['unset -v CI', true],
+    ['unset FOO CI', true],
+    ['env -u CI node scripts/x.ts', true],
+    ['env -uCI node scripts/x.ts', true],
+    ['env --unset=CI node scripts/x.ts', true],
+    ['env --unset CI node scripts/x.ts', true],
+    ['env FOO=1 -u CI node scripts/x.ts', true],
+    ['echo ok && unset CI', true],
+    ['(unset CI; node scripts/x.ts)', true],
+    ['if true; then\n  unset CI\nfi', true],
+    ['unset CIRCLE', false],
+    ['unset MELARC_CI', false],
+    ['unset FOO; echo CI', false],
+    ['env -u CIRCLE node scripts/x.ts', false],
+    ['env -u MELARC_CI node scripts/x.ts', false],
+    ['env FOO=1 node scripts/x.ts', false],
+    ['unset DEBUG', false],
+  ] as const) {
+    it(`${refused ? 'refuses' : 'accepts'} a script that says ${JSON.stringify(script)}`, () => {
+      const found = codesWith((_, jobs) => {
+        stepsOf(jobs.unit).push({ name: 'Anything else', run: script });
+      });
+      assert.deepEqual(found, refused ? ['CI_NOT_TRUE'] : []);
+    });
+  }
+});
+
+describe('the step that names the revision a push is held to (run 6, Stage 1.3)', () => {
+  const problemsWith = (change: (workflow: Json, jobs: Jobs) => void) =>
+    findWorkflowProblems(workflowWith(change));
+  const baseStepOf = (jobs: Jobs): Json => stepRunning(jobs.static, MIGRATION_BASE_COMMAND);
+  const withoutBaseStep = (jobs: Jobs): Json[] =>
+    stepsOf(jobs.static).filter((step) => step.run !== MIGRATION_BASE_COMMAND);
+  const indexOfRunning = (jobs: Jobs, script: string): number =>
+    stepsOf(jobs.static).findIndex((step) => step.run === script);
+
+  it('is in the workflow of the fixture: the step before the guard, handed the event', () => {
+    const jobs = good().jobs as Jobs;
+
+    assert.ok(
+      indexOfRunning(jobs, MIGRATION_BASE_COMMAND) < indexOfRunning(jobs, MIGRATION_GUARD_COMMAND),
+    );
+    assert.deepEqual(baseStepOf(jobs).env, { ...MIGRATION_BASE_STEP_ENV });
+    assert.deepEqual(
+      codesWith(() => undefined),
+      [],
+    );
+  });
+
+  // Break caught: the step deleted. A push to main is then held to nothing: the guard compares the revision with itself and passes whatever the push changed.
+  it('refuses a workflow with no step that names the base, and says what then happens', () => {
+    const found = problemsWith((_, jobs) => {
+      jobs.static.steps = withoutBaseStep(jobs);
+    });
+
+    assert.deepEqual(
+      found.map((problem) => problem.code),
+      ['MIGRATION_BASE_STEP'],
+    );
+    assert.match(found[0]?.message ?? '', /no step runs "node scripts\/ci-migration-base\.ts"/);
+    assert.match(found[0]?.message ?? '', /compare the revision with itself/);
+  });
+
+  // Break caught: the step moved after the guard, where it names a base that nothing reads.
+  it('refuses the step after the guard, and says it is too late', () => {
+    const found = problemsWith((_, jobs) => {
+      const step = baseStepOf(jobs);
+      jobs.static.steps = withoutBaseStep(jobs);
+      const guardAt = indexOfRunning(jobs, MIGRATION_GUARD_COMMAND);
+      stepsOf(jobs.static).splice(guardAt + 1, 0, step);
+    });
+
+    assert.deepEqual(
+      found.map((problem) => problem.code),
+      ['MIGRATION_BASE_STEP'],
+    );
+    assert.match(found[0]?.message ?? '', /after "node scripts\/migration-immutability\.ts"/);
+  });
+
+  // Break caught: the step in another job, which the guard's job does not share an environment with.
+  it('refuses the step in another job than the guard’s', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        const step = baseStepOf(jobs);
+        jobs.static.steps = withoutBaseStep(jobs);
+        stepsOf(jobs.unit).push(step);
+      }),
+      ['MIGRATION_BASE_STEP'],
+    );
+  });
+
+  // Break caught: a copy after the guard standing in for the step that was removed from before it.
+  it('does not take a copy after the guard for the step before it', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        const step = baseStepOf(jobs);
+        jobs.static.steps = withoutBaseStep(jobs);
+        stepsOf(jobs.static).push({ ...step });
+      }),
+      ['MIGRATION_BASE_STEP'],
+    );
+  });
+
+  it('accepts a copy after the guard beside the step before it', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        stepsOf(jobs.static).push({ ...baseStepOf(jobs) });
+      }),
+      [],
+    );
+  });
+
+  // Break caught: the step handed no event, no previous revision or no word on a force push, or handed another expression: it then names no base, or the wrong one.
+  for (const name of Object.keys(MIGRATION_BASE_STEP_ENV)) {
+    it(`requires ${name} to be handed to it, exactly`, () => {
+      for (const change of [
+        (env: Json) => void Reflect.deleteProperty(env, name),
+        (env: Json) => void (env[name] = ''),
+        (env: Json) => void (env[name] = 'true'),
+        (env: Json) => void (env[name] = '${{ github.sha }}'),
+      ]) {
+        assert.deepEqual(
+          codesWith((_, jobs) => {
+            change(baseStepOf(jobs).env as Json);
+          }),
+          ['MIGRATION_BASE_STEP'],
+        );
+      }
+    });
+  }
+
+  // Break caught: the step changed so that it is no longer the whole of its script, or its failure is absorbed: it may then not name a base and still pass.
+  it('refuses the step run behind another command, or with its failure absorbed', () => {
+    for (const script of [
+      `${MIGRATION_BASE_COMMAND} || true`,
+      `echo naming; ${MIGRATION_BASE_COMMAND}`,
+      `${MIGRATION_BASE_COMMAND} --dry-run`,
+    ]) {
+      const found = codesWith((_, jobs) => {
+        baseStepOf(jobs).run = script;
+      });
+      assert.ok(found.includes('MIGRATION_BASE_STEP'), `${script}: ${found.join(', ')}`);
+    }
   });
 });
 

@@ -133,16 +133,17 @@ jobs:
 
       # A migration that main has is never changed, renamed or removed (apps/api/CLAUDE.md, "Migrations only go forward"). A push to main is held to the revision it
       # came from; every other run to the merge base of the revision and main (scripts/migration-immutability.ts says how it behaves while main lacks the files).
-      # The guard refuses a base that is named and empty, and an `env:` expression is empty on every run that is not a push, so the base is named only on a push, by
-      # writing it to the environment of the steps after this one (scripts/ci-workflow.ts refuses MELARC_MIGRATION_BASE in an `env:`).
+      # A push tests the commit main is now at, and a guard with no base compares that commit with itself and passes whatever was changed: so the step below names the base,
+      # BEFORE THE GUARD, and scripts/ci-workflow.ts holds the step and its place (MIGRATION_BASE_STEP). It writes the base only on a push, to the environment of the steps after
+      # it (the guard refuses a base that is named and empty, and an `env:` expression is empty on every run that is not a push: the workflow check refuses MELARC_MIGRATION_BASE
+      # in an `env:`). After a force push it fetches the revision the push replaced, by name, and fails in words that name the force push when the server no longer has it; it never
+      # falls back to origin/main (scripts/ci-migration-base.ts).
       - name: Name the revision the migrations are held to on a push
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT" = "push" ]; then
-            echo "MELARC_MIGRATION_BASE=$BEFORE" >> "$GITHUB_ENV"
-          fi
+          FORCED: ${{ github.event.forced }}
+        run: node scripts/ci-migration-base.ts
 
       - name: Check that no migration main has was changed
         run: node scripts/migration-immutability.ts

@@ -41,6 +41,9 @@
  *   - the database job leaves the tests whose bounds are wall-clock time (apps/api/test/timing-sensitive-tests.ts) out of a pull
  *     request and runs them everywhere else, by one variable set in one place;
  *   - the nightly run happens on weekdays only (the Product Owner's decision of 7 November 2026);
+ *   - the migration guard is preceded, in its job, by the step that names the revision a push came from (scripts/ci-migration-base.ts), handed the event, that revision and
+ *     whether the push replaced history: a push to main that is held to nothing is held to itself, and passes whatever it changed (run 6, Stage 1.3); `CI` is `true` wherever
+ *     the workflow sets it and is never unset;
  *   - the token can only read (the plan's job also reads the workflow's runs).
  *
  * The workflow's pins (Node.js, pnpm, frozen install, action SHAs) are held by workspace-pins.ts.
@@ -129,7 +132,8 @@ export type WorkflowProblemCode =
   | 'REHEARSAL_MISSING'
   | 'POSTGRES_IMAGE_DRIFT'
   | 'CI_NOT_TRUE'
-  | 'MIGRATION_BASE_ENV';
+  | 'MIGRATION_BASE_ENV'
+  | 'MIGRATION_BASE_STEP';
 
 export interface WorkflowProblem {
   code: WorkflowProblemCode;
@@ -1368,13 +1372,22 @@ function checkTimingSkip(workflow: unknown, jobs: readonly Job[]): WorkflowProbl
 /** `CI=<value>` as a script writes it: before a command, after `export` or `env`, or in a line written to the file that sets the environment of the steps after it. */
 const CI_ASSIGNMENT = /(?:^|[\s;&|("'])(?:export\s+|env\s+)?CI=("[^"]*"|'[^']*'|[^\s;&|)"']*)/gm;
 
+/**
+ * `CI` taken away as a script writes it (run 6, Stage 1.3): `unset CI` (with `-v`, and among other names) and `env -u CI` (`-uCI`, `--unset=CI`, `--unset CI`, among other
+ * options and assignments of `env`). A step that does either runs its command as a developer's shell would, though GitHub sets `CI` to `true`. The names are read whole, so
+ * `unset CIRCLE`, `unset MELARC_CI` and `env -u CIRCLE` are not this. An argument never contains a separator, so `unset FOO; echo CI` is not read across the `;`.
+ */
+const CI_REMOVAL =
+  /(?:^|[\s;&|("'`])(?:unset\s+(?:-[fvn]+\s+)*(?:[^\s;&|()`"']+\s+)*?CI|env\s+(?:[^\s;&|()`"']+\s+)*?(?:-u\s*CI|--unset(?:=|\s+)CI))(?=$|[\s;&|)"'`])/gm;
+
 /** Whether a value written in a workflow is CI's `true`: the string, or the YAML boolean that GitHub turns into it. */
 const isTrue = (value: unknown): boolean => value === 'true' || value === true;
 
 /**
  * `CI` is `true` wherever the workflow sets it (run 5, Stage 1.4). Scripts tell a developer's shell from a CI run by it (the migration guard did: outside CI it was a
  * warning), and GitHub Actions sets it to `true` itself, so a step that sets it to anything else (`false`, a blank, an expression that can come out as either) makes a CI
- * run behave as a developer's. It is looked for in the `env` of the workflow, of a job and of a step, in the steps of the local actions, and in the assignments a script makes.
+ * run behave as a developer's. It is looked for in the `env` of the workflow, of a job and of a step, in the steps of the local actions, and in the assignments a script makes
+ * and the removals it makes (`unset CI`, `env -u CI`: run 6, Stage 1.3).
  */
 function checkCiIsTrue(workflow: unknown, jobs: readonly Job[]): WorkflowProblem[] {
   const problems: WorkflowProblem[] = [];
@@ -1398,6 +1411,12 @@ function checkCiIsTrue(workflow: unknown, jobs: readonly Job[]): WorkflowProblem
       for (const match of scriptOf(step).matchAll(CI_ASSIGNMENT)) {
         const written = (match[1] ?? '').replace(/^(["'])(.*)\1$/, '$2');
         if (written !== 'true') refuse(label, written);
+      }
+      for (const match of scriptOf(step).matchAll(CI_REMOVAL)) {
+        problems.push({
+          code: 'CI_NOT_TRUE',
+          message: `${label} takes CI away (${JSON.stringify(match[0].trim().replace(/^["'(`]/, ''))}): GitHub sets it to "true" in a CI run, and a step that unsets it makes the scripts that read it treat a CI run as a developer's shell. Leave it alone.`,
+        });
       }
     }
   }
@@ -1432,6 +1451,58 @@ function checkMigrationBaseIsNotAnEnv(workflow: unknown, jobs: readonly Job[]): 
           message: `MELARC_MIGRATION_BASE is set in the env of ${strays.join(', ')}: the migration guard refuses a base that is empty, and an env expression is empty on a run that is not a push. Write it to "$GITHUB_ENV" from a step that checks the event, and leave it unset otherwise.`,
         },
       ];
+}
+
+/** The step that names the revision a push is held to (scripts/ci-migration-base.ts), as the whole of its script. */
+export const MIGRATION_BASE_COMMAND = 'node scripts/ci-migration-base.ts';
+/** The guard that holds the migrations to that revision (scripts/migration-immutability.ts), as the whole of its script. */
+export const MIGRATION_GUARD_COMMAND = 'node scripts/migration-immutability.ts';
+/** What the step is handed, as expressions of the run: the event, the revision the push came from and whether the push replaced history. Nothing else gives it these. */
+export const MIGRATION_BASE_STEP_ENV: Readonly<Record<string, string>> = {
+  EVENT: '${{ github.event_name }}',
+  BEFORE: '${{ github.event.before }}',
+  FORCED: '${{ github.event.forced }}',
+};
+
+/**
+ * The step that names the revision a push is held to is there, before the guard, and is handed the event (run 6, Stage 1.3). A push tests the commit main is now at, and a guard
+ * with no base compares that commit with the merge base of itself and `origin/main`, which is itself: it passes whatever the push changed. So the step is held, as the whole
+ * script of a step of the job that runs the guard, **before** it, with `EVENT`, `BEFORE` and `FORCED` handed to it. A step that is deleted, moved after the guard, or handed nothing
+ * leaves a push to main checked against itself and green.
+ */
+function checkMigrationBaseStep(jobs: readonly Job[]): WorkflowProblem[] {
+  const problems: WorkflowProblem[] = [];
+  for (const { id, steps } of jobs) {
+    const guardAt = steps.findIndex((step) => scriptOf(step).trim() === MIGRATION_GUARD_COMMAND);
+    if (guardAt === -1) continue;
+    const named = steps.flatMap((step, index) =>
+      scriptOf(step).trim() === MIGRATION_BASE_COMMAND ? [index] : [],
+    );
+    const firstBefore = named.find((index) => index < guardAt);
+    if (firstBefore === undefined) {
+      problems.push({
+        code: 'MIGRATION_BASE_STEP',
+        message:
+          named.length === 0
+            ? `Job ${id} runs "${MIGRATION_GUARD_COMMAND}" and no step runs "${MIGRATION_BASE_COMMAND}": a push to main would be held to nothing, the guard would compare the revision with itself, and it would pass whatever the push changed.`
+            : `Job ${id} runs "${MIGRATION_BASE_COMMAND}" after "${MIGRATION_GUARD_COMMAND}": the guard has already compared the revision with itself by then. Move the step before the guard.`,
+      });
+      continue;
+    }
+    const baseStep = steps.at(firstBefore);
+    const env: Record<string, unknown> =
+      baseStep !== undefined && isRecord(baseStep.env) ? baseStep.env : {};
+    const wrong = Object.entries(MIGRATION_BASE_STEP_ENV)
+      .filter(([name, expression]) => env[name] !== expression)
+      .map(([name, expression]) => `${name}: ${expression}`);
+    if (wrong.length > 0) {
+      problems.push({
+        code: 'MIGRATION_BASE_STEP',
+        message: `The step "${MIGRATION_BASE_COMMAND}" of job ${id} must be handed ${wrong.join(', ')} in its env, exactly: without the event and the revision the push came from it names no base.`,
+      });
+    }
+  }
+  return problems;
 }
 
 function pathsOf(step: Step): string[] {
@@ -1564,6 +1635,7 @@ export function findWorkflowProblems(
     ...checkTimingSkip(workflow, jobs),
     ...checkCiIsTrue(workflow, jobs),
     ...checkMigrationBaseIsNotAnEnv(workflow, jobs),
+    ...checkMigrationBaseStep(jobs),
     ...checkDatabaseShards(workflow, jobs),
     ...checkAggregate(jobs),
     ...checkVerdictName(jobs),
