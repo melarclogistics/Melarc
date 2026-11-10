@@ -453,6 +453,10 @@ describe('a request that outlasts its budget, with the clock in the test’s han
   // Break caught: a transaction left open until the work decides to end it, or a write made after the answer. The work heeds nothing, but everything it asks of the database
   // after the expiry is refused. The work is still at its gate when the answer is given, so the rollback at the expiry is seen before the work wakes.
   it('is answered 503, the transaction is rolled back at the expiry before the work goes on, and the late write is refused and absent', async () => {
+    // The log is read from here on (run 6, Stage 1.7): the test before this one has already written the line of an abandoned transaction ("its budget ran out"), so a search of the
+    // whole log found it whether or not this test's own transaction was rolled back at the expiry.
+    const seen = recordsManual().length;
+    const logged = () => recordsManual().slice(seen);
     const answered = postManual(
       'gated-open-transaction?body=held-manual&late=late-in-tx-manual&gate=open-transaction',
     );
@@ -472,7 +476,7 @@ describe('a request that outlasts its budget, with the clock in the test’s han
     // the work ended (it has not ended: it is at its gate). The server's own transaction bound would end it a few seconds later whatever the application did, so this is not
     // waited for. A row an open transaction wrote is invisible to the observer, so the row's absence alone would not tell a rollback from a transaction left open.
     expect(
-      recordsManual().find(
+      logged().find(
         (record) => record.msg === 'database transaction abandoned: its budget ran out',
       ),
     ).toMatchObject({ level: 'warn', label: 'request', phase: 'working' });
@@ -482,18 +486,14 @@ describe('a request that outlasts its budget, with the clock in the test’s han
     await eventually(
       () =>
         Promise.resolve(
-          recordsManual().some(
-            (record) => record.msg === 'pipeline fixture: the late write was refused',
-          ),
+          logged().some((record) => record.msg === 'pipeline fixture: the late write was refused'),
         ),
       'the late write to be attempted',
     );
     expect(await notes('late-in-tx-manual')).toEqual([{ n: 0 }]);
     expect(await notes('held-manual')).toEqual([{ n: 0 }]);
     expect(
-      recordsManual().some(
-        (record) => record.msg === 'pipeline fixture: the late write was accepted',
-      ),
+      logged().some((record) => record.msg === 'pipeline fixture: the late write was accepted'),
     ).toBe(false);
   });
 
