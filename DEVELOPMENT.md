@@ -357,8 +357,11 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    journeys for a task whose evidence names them.
 2. **After a change to a contract, a schema, a migration or a document, and before a task is handed over**, run
    `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the migration files main has, the generated client, formatting, types,
-   the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
-   network, in parallel, with the content cache of the formatter and turbo's
+   the build, the contract check and lint), the dependency audit, which asks the package registry and so needs the
+   network, and the `guards` lane (the root tests that read only documents, styles and manifests: the design tokens, the lifecycle
+   words of the component patterns, the links between documents, the agent documents and the rest of `ROOT_GUARDS` in
+   `scripts/gate.ts`, which add a few seconds beside the other lanes: the gate's unit stage runs them as every root test), in
+   parallel, with the content cache of the formatter and turbo's
    task cache (which serves lint, one task for each workspace) switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
    a few minutes on cold caches, and exits 0 when no check failed: every check passed, or the one that did not pass cleanly is a
    migration check that could not tell (`warned`, below), which does not fail it. It is not a gate and says nothing about a
@@ -401,6 +404,12 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
      configuration, shutdown, the logs, the probes, the command-line tools, or those tests and their helpers. The
      development-server project of a browser spec that also runs against the production build runs with
      `--with-dev-browser`. The browser target's record moves on the projects it ran.
+   - After a screen, a stylesheet or a journey's page changes (run 6, Stage 5.3, the finding of run 5). Run the affected root
+     and journey targets before the task is handed over, and not only the precheck:
+     `pnpm run test:affected --only root,e2e --with-e2e`. The precheck runs no test but its `guards` lane, so the root guards
+     that a stylesheet or a document breaks beyond that lane (the design tokens and the lifecycle words are in it; the rest of
+     the root tests are not) and the journeys of the integrated harness, which a change of a screen can break, are found only
+     by these: run 5 found five such breakages (two root guards and three steps of journeys) only in its final run.
    - The record. A target's record moves only when every test chosen for it passed on a tree that did not change while
      they ran, so a failing test keeps being chosen until it passes. It lives below `node_modules/.cache`, and
      `--forget` drops it.
