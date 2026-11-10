@@ -19,11 +19,11 @@ import {
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { OperationFailure } from '../../../platform/api/api-response';
 import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
+import type { ConfirmedPickup } from '../../../platform/pickup/pickup-commands';
 import {
   calendarDateOf,
   PICKUP_STATES,
   type CutoffExceptionState,
-  type PickupRequestView,
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
@@ -220,12 +220,17 @@ export function PickupRequestListPage() {
   }
 
   /** The act of the panel was answered: say so, show the answer in the panel at once, mark the row, and read the page again with its rows kept. */
-  function confirmedInPanel(request: PickupRequestView): void {
+  function confirmedInPanel({ request, etag }: ConfirmedPickup): void {
     announceConfirmed(request);
-    // The version stays that of the read the person saw: no act is offered for a confirmed request, and the panel reads the request again when it is opened again.
-    queryClient.setQueryData<PickupRecord>(pickupRequestKey(request.id), (record) =>
-      record === undefined ? record : { ...record, request },
-    );
+    // The answer is kept with its own version, the one the request has now (the review of f6cf02b: it was kept with the version of the read before the act, so that "Open full page", which reads
+    // this same entry, could act on a version that was not the record's). An answer that carried no version leaves nothing to keep, and the entry is read again. The panel reads the request
+    // again when it is opened again.
+    const key = pickupRequestKey(request.id);
+    if (etag === undefined) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    } else {
+      queryClient.setQueryData<PickupRecord>(key, { request, etag });
+    }
     setChanged({ visit: visit.id, ids: [request.id] });
     returnTo.current = request.id;
     readAgainAfterAct();

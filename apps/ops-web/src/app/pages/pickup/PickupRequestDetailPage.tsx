@@ -795,7 +795,7 @@ function Request({
         id={id}
         version={etag}
         onDone={(answer) => {
-          done('The request is confirmed. It waits in the pool for a pickup run.', answer);
+          done('The request is confirmed. It waits in the pool for a pickup run.', answer.request);
         }}
         onCancel={close}
         onReload={reload}

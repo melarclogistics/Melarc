@@ -1156,6 +1156,62 @@ describe('the queue: the request beside it', () => {
       expect(reads).toBe(2);
     });
 
+    // Break caught (the review of f6cf02b): the panel wrote the confirmed request into the shared cache with the version of the read BEFORE the act, and the request's own page draws from that same
+    // entry, so "Open full page" could act on a version that was not the record's. The answer is kept with its own version: the page's read is held here, as it is in the moment after the click,
+    // so that the act is made on what the entry holds, and it carries the version of the confirmation's answer and not the panel's.
+    it('keeps the answer of the confirmation with its own version, so that an act on the request’s own page carries it', async () => {
+      let reads = 0;
+      api = installFakeApi(
+        staffApi(
+          sessionWith([...CONFIRMER, 'pickup.failure.resolve'], {
+            authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+          }),
+          {
+            [LIST]: () => page([pending, late]),
+            // The panel's read is "v1"; the page's own read, a moment later, is held.
+            [RECORD]: () => {
+              reads += 1;
+              return reads === 1
+                ? json(200, pending, etag('v1'))
+                : new Promise<Response>(() => undefined);
+            },
+            [CONFIRM]: () => json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer')),
+            [`POST /pickup-requests/${REQUEST_ID}/escalate`]: () =>
+              json(200, { ...pending, state: 'CONFIRMED' }, etag('v-escalated')),
+          },
+        ),
+      );
+      const view = renderApp('/pickup-requests');
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+
+      await view.user.click(within(panel).getByRole('link', { name: 'Open full page' }));
+      expect(await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+      await view.user.click(await screen.findByRole('button', { name: /^More actions for / }));
+      await view.user.click(await screen.findByRole('menuitem', { name: 'Escalate the request' }));
+      const dialog = await screen.findByRole('alertdialog', { name: 'Escalate this request?' });
+      await view.user.type(
+        within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
+        'Refused at the door twice',
+      );
+      await view.user.click(within(dialog).getByRole('button', { name: 'Escalate the request' }));
+
+      await waitFor(() => {
+        expect(
+          api.requests.filter((request) =>
+            request.url.endsWith(`/pickup-requests/${REQUEST_ID}/escalate`),
+          ),
+        ).toHaveLength(1);
+      });
+      const escalation = api.requests.find((request) => request.url.endsWith('/escalate'));
+      expect(escalation?.headers.get('If-Match')).toBe('"v-answer"');
+      expect(escalation?.headers.get('If-Match')).not.toBe('"v1"');
+    });
+
     // Break caught (the review of 499399c): a queue that cannot be read again after a confirmation, drawn as a failure that takes away the rows the officer was working on, or as if nothing were wrong:
     // the rows stay, under a line that says they may be out of date, with the way to read them again.
     it('keeps the rows, with a line that says so, when the queue cannot be read again after a confirmation', async () => {

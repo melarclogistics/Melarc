@@ -9,7 +9,10 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import { showToast } from '../../../components/ui/toast/Toast';
 import { useApiClient } from '../../../platform/api/api-client';
-import { confirmPickupRequest } from '../../../platform/pickup/pickup-commands';
+import {
+  confirmPickupRequest,
+  type ConfirmedPickup,
+} from '../../../platform/pickup/pickup-commands';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import type { PickupRecord, PickupRecordRead } from '../../../platform/pickup/use-pickup-queries';
 import { canBeConfirmed, STATE_SENTENCES } from './pickup-presentation';
@@ -35,7 +38,7 @@ export function ConfirmPickupDialog({
   readonly id: string;
   /** The `ETag` of the read the screen shows. */
   readonly version: string;
-  readonly onDone: (request: PickupRequestView) => void;
+  readonly onDone: (confirmed: ConfirmedPickup) => void;
   readonly onCancel: () => void;
   /** The server said the request is not as the person saw it: the screen says so where the record is drawn (a banner with the way to read it again). */
   readonly onConflict?: () => void;
@@ -43,7 +46,7 @@ export function ConfirmPickupDialog({
 }) {
   const client = useApiClient();
   return (
-    <ConfirmationDialog<PickupRequestView>
+    <ConfirmationDialog<ConfirmedPickup>
       open={open}
       title="Confirm this pickup?"
       consequence={
@@ -94,7 +97,7 @@ function Summary({
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
   readonly confirmAsk: number;
-  readonly onConfirmed: (request: PickupRequestView) => void;
+  readonly onConfirmed: (confirmed: ConfirmedPickup) => void;
   readonly onReload: () => unknown;
 }) {
   // What the panel shows is the server's last word on the request: the read, which the screen replaces with the answer of the act the person just made.
@@ -205,7 +208,7 @@ export function PickupQueuePanel({
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
   readonly canConfirm: boolean;
   readonly confirmAsk: number;
-  readonly onConfirmed: (request: PickupRequestView) => void;
+  readonly onConfirmed: (confirmed: ConfirmedPickup) => void;
 }) {
   return (
     <ReadState<PickupRecord>
