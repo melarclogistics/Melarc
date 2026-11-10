@@ -198,6 +198,12 @@ export function ApprovalsPage() {
     });
   }
 
+  /** The first page, on purpose: the officer's choice, and the end of any place left. */
+  function firstPage(): void {
+    continuity.discard();
+    paging.toFirstPage();
+  }
+
   if (me === undefined) return null;
   const principalId = me.session.principal_id;
   const mayApprove = me.holds('pickup.exception.approve');
@@ -338,6 +344,8 @@ export function ApprovalsPage() {
   const empty: QueueEmptiness = {
     noun: 'exceptions waiting for approval',
     none: 'A one-package exception appears here when an Ops officer asks for one at your hubs, and leaves once it is approved.',
+    // A page after the first can hold nothing without the queue being empty (exceptions are decided between reads): the template says so, as every list does.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
 

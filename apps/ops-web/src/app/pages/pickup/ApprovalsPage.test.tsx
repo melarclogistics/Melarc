@@ -194,6 +194,37 @@ describe('the queue: what it shows', () => {
     expect(queryOf().get('one_package_exception_state')).toBe('REQUESTED');
   });
 
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "nothing yet", as if no exception had ever been asked for, or in words of its own, or with no
+  // way back to the first page: every list says it the same way, in the queue template's words.
+  it('tells an empty page after the first as that, and goes back to the first page when asked', async () => {
+    const { user } = open((request) =>
+      new URL(request.url).searchParams.get('page_token') === null
+        ? page([waiting], 'next-page')
+        : page([]),
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Next page' }));
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'No exceptions waiting for approval on this page',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'Page 2 has no exceptions waiting for approval now. Earlier pages may still have some.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+
+    expect(await screen.findByRole('rowheader', { name: /^ACC-PR-7KQ2MZ/ })).toBeVisible();
+    expect(queryOf().has('page_token')).toBe(false);
+  });
+
   // Break caught (the review of 499399c): a pager whose button is gone while the next page loads and drops focus on the document, because this queue never asked for the results to take
   // it as the other queues do. Once a page is read, whichever way the person moved, focus is on the results.
   it('puts focus on the results once a page is read, going on and coming back', async () => {
