@@ -1077,13 +1077,15 @@ describe('ExecutionBudget: a listener that stops another budget while the parent
   /** A parent, a listener of the parent's that runs `stopper` on the sibling, and the sibling (made after it, so that the parent tells the stopper first). */
   function parentWithASibling(stopper: (sibling: ExecutionBudget) => void) {
     const parent = new ExecutionBudget(clock, 'request', 1_000);
-    let sibling: ExecutionBudget | undefined;
+    // The stopper is registered before the sibling exists (so that the parent tells it first), and reads the sibling once it does.
+    const made: { sibling?: ExecutionBudget } = {};
     const told: string[] = [];
     parent.onExpiry(() => {
       told.push('stopper');
-      if (sibling !== undefined) stopper(sibling);
+      if (made.sibling !== undefined) stopper(made.sibling);
     });
-    sibling = parent.child('sibling', 800);
+    const sibling = parent.child('sibling', 800);
+    made.sibling = sibling;
     const siblingTold = vi.fn();
     sibling.onExpiry(siblingTold);
     parent.onExpiry(() => {
