@@ -1902,6 +1902,16 @@ The queue table: TanStack Table's model (columns, row model, selection, manual s
 - **Keys.** Only one row's controls are in the Tab order, so Tab crosses the table in a few stops; the up and down arrows, Home and End move between rows; **Enter opens the record; Space chooses the row and does not open it**; a field in a cell keeps its arrows, and so does a menu or a combobox in one (a control that takes the arrow for itself is left alone); a row with nothing to focus is stepped over. The keys are described to assistive technology.
 - **Do** order, filter and page on the server and pass the rows as they came. **Do not** add a select-all, a total, a sort of the rows in the browser, or an act that is not safe in bulk, and do not put the muted text on a chosen row (it is 4.2 to 1 on the selected tint: the name under the code takes the secondary text there).
 
+#### CardFacts
+
+> **Status:** IMPLEMENTING (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/card-facts/`
+
+The facts of a card, where a table is too narrow for its columns and draws a card for each row ([DataTable](#datatable), *Cards*). **Each fact is a label and its value, side by side where the card has the room for both and one over the other where it has not.** The card’s own width decides (a container query on the list of facts, at 15rem: no width of the window is assumed, so a card in a narrow panel does what a card on a phone does). What it saves is height: a card on which each of three facts stood under its label was about 270px tall at 390px (the Product Owner’s review of f6cf02b, 10 November 2026), and every list drew its own copy of that block.
+
+- **Props.** `facts` (`{ label, value }`, in the order given: the label is the name the fact has as a column of the table, in one to three words, and the value is words and badges), `head?` (what leads the card: usually the status badge, which wraps under the code where there is no room for both) and `lead?` (a quiet line under it: the sender of a request, the work email of a person).
+- **Anatomy.** A list of terms and definitions (`dl`), a `div` of its own around each pair, the label in `text.secondary` at the small size in a column of 5rem to 7.5rem (the longest label of the portal wraps in its column and is never cut off), the value taking the rest and wrapping at its words (an address is whole). It draws no heading and no control: the table draws the card’s heading, its one button over the card and its act around it.
+- **Do** draw the facts of every card of every list with it, each fact with the name its column has, so that a card is the same on every screen. **Do not** put a button, a link or a field in a value (the card’s one hit target is the table’s, and a second one makes two ways to open a row; a row that opens nothing is the table’s own exception), repeat the heading’s code among the facts, or leave out a fact that a lesser column of the table carries: a card shows every fact.
+
 #### SidePanel
 
 > **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/side-panel/`
