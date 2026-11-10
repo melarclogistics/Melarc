@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -387,6 +387,39 @@ describe('ViewTabs on a narrow screen', () => {
     } finally {
       document.documentElement.style.fontSize = '';
     }
+  });
+
+  // Break caught (the engines run of 10 November 2026, Firefox): a row that watches its box and the box of its list and not its tabs. The list keeps its own width when a count arrives and its tabs
+  // grow (they overflow it), so nothing told the row, which stayed where it was with the last view cut off by what the counts added. Every tab is watched, and so is one that comes later.
+  it('watches every tab for a change of size, and a tab that comes later too', () => {
+    const watched = new Set<Element>();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(target: Element): void {
+          watched.add(target);
+        }
+        unobserve(): void {
+          // Not asked.
+        }
+        disconnect(): void {
+          // Not asked.
+        }
+      },
+    );
+    const { container } = render(<Host />);
+
+    const names = [/^Needs decision/, /^Confirmed/, /^Cancelled/, 'All'];
+    for (const name of names) expect(watched.has(tab(name))).toBe(true);
+
+    // A tab that is added to the row is watched from then on (the observer of what changes in the row runs after the update).
+    const row = container.querySelector('.ui-view-tabs__scroll');
+    const late = document.createElement('button');
+    late.setAttribute('role', 'tab');
+    row?.firstElementChild?.append(late);
+    return waitFor(() => {
+      expect(watched.has(late)).toBe(true);
+    });
   });
 
   // Break caught (found on the pickup queue at 320 and 390 px): the current view brought into view once, at the first draw, before the counts and the fonts have arrived and made the list longer,

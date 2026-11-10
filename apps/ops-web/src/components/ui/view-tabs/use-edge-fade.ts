@@ -99,11 +99,27 @@ export function useEdgeFade(current: string): {
       typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(onResize);
     observer?.observe(element);
     for (const child of element.children) observer?.observe(child);
+    // A tab is wider when its count arrives, and the list it is in keeps its own box (the tabs overflow it), so a change of size is seen only by watching the tabs themselves: otherwise the row
+    // stays where it was and the last view is cut off by what the counts added (found by the engines run of 10 November 2026, in Firefox, where the counts arrive after the first draw).
+    // Views that come and go, and a count that appears, are told by what changes in the row.
+    const watchTabs = (): void => {
+      for (const tab of element.querySelectorAll('[role="tab"]')) observer?.observe(tab);
+    };
+    watchTabs();
+    const changes =
+      typeof MutationObserver === 'undefined'
+        ? undefined
+        : new MutationObserver(() => {
+            watchTabs();
+            onResize();
+          });
+    changes?.observe(element, { childList: true, subtree: true, characterData: true });
     return () => {
       element.removeEventListener('focusin', onFocus);
       element.removeEventListener('scroll', measure);
       for (const type of BY_HAND) element.removeEventListener(type, takeOver);
       observer?.disconnect();
+      changes?.disconnect();
     };
   }, [measure, bringCurrentIntoView]);
 
