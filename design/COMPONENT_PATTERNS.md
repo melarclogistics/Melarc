@@ -667,45 +667,11 @@ rather than only an unlabeled spinner.
 
 ## 11. PageHeader
 
-> **Status:** ACTIVE  
-> **Initial implementation priority:** Required
-
-### 11.1 Purpose
-
-PageHeader establishes page-level hierarchy.
-
-*The redesign's PageHeader* (a count, a freshness line, a breadcrumb and the 24/30 title) is a separate component, `components/ui/page-header/`, built in step R5 (§37, *the kit as built*). This initial one stays ACTIVE, and the screens that import it unchanged, until steps R6 and R7 move them.
-
-### 11.2 Anatomy
-
-```text
-PageHeader
-├── optional breadcrumb/context
-├── title
-├── optional description
-└── optional actions
-```
-
-### 11.3 Rules
-
-PageHeader composes the existing `PageHeading` (`apps/ops-web/src/components/PageHeading.tsx`), the page's one level-one
-heading, which takes programmatic focus after a navigation. PageHeader adds the context, description and actions around
-it and never replaces it.
-
-PageHeader should:
-
-- use one clear page title;
-- avoid unnecessary visual decoration;
-- allow actions without turning the header into a toolbar by default;
-- collapse gracefully on narrow viewports.
-
-### 11.4 Density
-
-PageHeader belongs to the **spacious** density context.
-
-Operational content below it may be compact.
-
----
+> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). The initial PageHeader (`components/PageHeader.tsx`: a title, a description and the page's actions) is gone. Every screen is
+> composed from a template, whose header is the kit's PageHeader (§37, *PageHeader (the kit's)*), and the three development showcases take the kit's as well. The kit's PageHeader keeps
+> what this one promised: the page's one level-one heading through `PageHeading`, which takes focus after a navigation; a description; and the page's actions after the title, which wrap
+> below it on a narrow screen. Its tests are the kit's (`components/ui/page-header/PageHeader.test.tsx`); the ESLint restriction that kept a new screen from importing the older one went
+> with it, since an import of a file that does not exist fails the typecheck and the build.
 
 ## 12. Application Frame
 
@@ -877,7 +843,19 @@ The Ops Portal is an application and not a website, so its navigation is a menu 
   dialog beside the form. *A profile* is the record page: the name is its heading (`titleKind: 'name'`, a name is not an operational code), the decision of a profile that waits is the header's, and
   the facts, the credentials (a new setup link, a recovery, the reset), the sessions and the trusted browsers are panels, so that acts are grouped by what they change (§6.2 of the direction). The
   sentences that told, above the acts, what each act does are gone: each act's dialog says it, and the one line that changes whether to act now (the maker's, the role that needs a Platform
-  Admin) stays under the header. No leave guard is turned on for the form (the page had none), and no list has a freshness line.
+  Admin) is the header's one short line under the acts (`acts.note`). No leave guard is turned on for the form (the page had none). Each of the three lists says in its header when it was last
+  read and offers Refresh (the Product Owner's rule that every queue has the line, 9 November 2026).
+- **The vendors and the riders on the templates (redesign step R7b, run 5, 9 November 2026), with behaviour unchanged.** *The vendor accounts* (`/admin/vendors`) and *the rider roster* (`/admin/riders`)
+  are the queue workspace: the identifier over the organisation, or the name over the phone, is the row's link (no panel opens and no button stands over the row); the status of a rider is the views, the
+  typed search is a field in the filter row's popover and a removable chip, both in the address; the header says when the list was last read and offers Refresh; the pager is `QueuePager`; cards
+  under 40rem carry every fact of the row; a rider's PIN and device are facts in their own columns, apart from the administrative status, and nothing of a credential has a place on either screen.
+  *A vendor account* and *a rider* are the record page: the heading is the account identifier (a code) or the rider's name (`titleKind: 'name'`), the status is the header's badge with one sentence, the
+  facts are grouped under their names, the browsers and the devices are the kit's table (cards under 40rem), and the acts follow the held keys and the record and decide nothing (a new setup link or
+  a recovery, by the credential; the first binding, or revoking or replacing, by the devices); what the session cannot do is the header's one short line. *The first binding of a rider's device* and
+  *the revoking or replacing of one* are the task form: one section and two short sentences for the binding, whose code (`EnrolmentCode`) and lapsed code are sections of their own in the same place
+  so that the heading and the focus never move between the three; two sections for the device page, the report of a loss (whose question stands outside the form so that its submission never reaches
+  the replacement's) and the replacement. The enrolment code is drawn by `EnrolmentCode` alone and held by `use-enrolment-code.ts` alone, released before a new request and gone on navigation (the
+  moment the router moves, not when the next page has been drawn), expiry, completion, `pagehide` and the end of the session.
 - **Six screens behind the registry** (`SIGNED_IN_ROUTES`): `/` (the landing; My work since redesign step R4), `/admin/staff` (the list and the approver's queue),
   `/admin/staff/new`, `/admin/staff/{id}`, `/admin/staff/{id}/mfa/reset` and `/admin/sessions`. Each names the permission key its guard needs
   and, for the first three and the sessions page, a menu entry (the sidebar's since redesign step R4; S0.44's landing listed them with a line of what each is for). The detail and the
@@ -1131,38 +1109,11 @@ StatusBadge (words in the tone)
 
 ## 19. Table
 
-> **Status:** ACTIVE (S0.40)  
-> **Code:** `apps/ops-web/src/components/ui/table/`
-
-### 19.1 Anatomy
-
-```text
-Table
-└── region (named, focusable, scrolls sideways)
-    └── <table> with <caption>
-        ├── <thead>  column headers; sortable ones hold a button and carry aria-sort
-        └── <tbody>  rows; the cell that names a row is a row header
-```
-
-### 19.2 Rules
-
-- A **native table** with a caption. The caption names the table and the region; `hideCaption` takes it from the eye and not from
-  assistive technology, where the page's own heading already says it.
-- Rows are at least 36px (`density.row.compact`, [DESIGN_SYSTEM §10](DESIGN_SYSTEM.md#10-density-system)), in rem so that enlarged text grows them.
-- A column of numbers is aligned to the end and set in figures of one width.
-- **Sorting is the screen's**: the header button asks for an order (`ascending` first, then it toggles; another column starts
-  ascending) and `aria-sort` says the order that is shown, on the sorted column only. The table sorts nothing. A sortable column
-  with nothing to sort with, a duplicate column or row key, and two row-header columns are defects of the page, and drawing
-  them throws.
-- **Overflow is intentional**: a table narrower than 30rem scrolls inside its region instead of squeezing its columns, the region
-  has a name and takes focus, and the arrow keys scroll it. The page never scrolls sideways for a table (WCAG 1.4.10 allows a data
-  table to scroll).
-- It draws only its header for no rows. What to say about none is the screen's (§16), and the states around it are
-  `ReadState`'s (§33.3).
-- It is **not a data grid**: no selection, paging, filtering, resizing or virtualisation. A requirement that needs one is a new
-  pattern (§37).
-
----
+> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). The older `Table` (`components/ui/table/`: a native table in a named, focusable, scrolling region, with its own sort toggle) is gone.
+> The grid of every screen is the kit's `DataTable` (§37, *DataTable*), over the table primitive with TanStack Table: a table named by its label in a region that scrolls and takes focus,
+> a row-header column, right-aligned figures, text drawn as text, the row's element kept when the rows are put in another order, cards under 40rem, and an order that the *page* asks of the
+> server (`onSortChange`) rather than one the table toggles. What the older table's tests claimed is held by `DataTable.test.tsx` and `kit.spec.ts` (the keyboard order in a real
+> browser is the ordered specimen's test there). The showcase's demo of it is gone with it.
 
 ## 20. Dialog and AlertDialog
 
@@ -1378,144 +1329,13 @@ how many there are and where each one is.
 
 ## 22f. QueueTable
 
-> **Status:** IMPLEMENTING (S1.19, 29 October 2026, as §22b)  
-> **Code:** `apps/ops-web/src/components/ui/queue-table/`
-
-The queue workspace template ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace), approved on 5 November 2026) supersedes the presentation below, one screen at a time: **the pickup queue (`/pickup-requests`) is drawn by it since redesign step R6.1 (8 November 2026), and no longer uses `QueueTable`**; the other lists (manifests, approvals, messages, and the manifest builder's pool) still do, until step R7 moves them. This section records the queue as built, and `DataTable`, its successor, is PROPOSED in §37. Its selection is the native checkbox of §7.10; the `DataTable`'s box is another thing (task R5.2, M12).
-
-A page of a queue the server pages by token (surfaces/ops-portal.md §4): the count of the page, the rows in a `Table` (§19) and a pager.
-`QueueFilters` is the named group of the screen's filters above it, in a row that wraps, so nothing is clipped at 320px or at enlarged text.
-
-- **It never claims a total it was not given**: the count is of the page ("Showing 20 requests on page 2."), followed by "More follow on
-  the next page." when the server gave a token, and no count is shown while loading.
-- `useQueuePaging` keeps the tokens of the pages visited **for the filter that produced them**: a change of filter starts again at the first
-  page, and no token is sent under another filter. Nothing is kept in the address or a storage. A screen that brings a person back to a queue
-  they left may say where to start (`from`, once, and only for the filter the tokens were kept for) and may send them to the first page on
-  purpose (`toFirstPage`); how long a place lasts, and whose it is, is the screen's (*Refresh and return to the queue*, below).
-- After a move to another page, focus goes to the results once they are drawn, because the button that was pressed is gone while the
-  page loads.
-- Loading, failure and the empty state are `ReadState`'s, and the empty state tells *none* from *filtered to nothing* (§16). The filters
-  filter nothing themselves; they stay in place while the queue loads, fails or is empty.
-- **Row selection (S1.25, 3 November 2026).** `QueueTable` takes an optional `selection` (`QueueSelection`): a native checkbox for each row, in a
-  column of its own at the start of the table headed "Select" and, in a queue given a `card`, at the head of each card with the word "Select"
-  beside it. The queue **holds no selection**: the screen keeps which rows are chosen, by their keys (`rowKey`), so that a choice survives a move
-  to another page of the queue, and the table draws the ones it shows and reports a tick or a clear (`onToggle`). Each box is named by the screen
-  (`rowLabel`: "Choose ACC-PR-7KQ2MZ"); a row that cannot be chosen now (a limit is reached) is drawn disabled (`isDisabled`) and the screen says
-  why in its own words, and a row that is ticked can always be cleared. The label around the box is the target, at least the height of a small
-  control. The table decides nothing about what may be chosen, offers no "select all" (a choice of the whole page is a decision the screen has
-  not been asked for) and draws nothing for a queue given no `selection`, which is drawn exactly as before. Because both drawings are in the
-  page, each row has two boxes of one choice, and the stylesheet's `display: none` takes the one not shown out of the accessibility tree.
-- **The manifest list (S1.25) adapts the queue's filters and keeps its place on the queue's terms.** It uses `QueueFilters` with the same `Field`, `Select` and `DatePicker`, the chosen values in the address (so a reload keeps them), a change of filter starting again at the first page, and the same empty states (*none* told from *filtered to nothing*, which names what was filtered). The filters are the server's (`state`, `service_date`, each exact and combined as "and"): a value in the address that is not one is no filter, and the screen sends only values the contract accepts. Its place (the pages visited, the position and the manifest opened) is the queue's memory (*Refresh and return to the queue*, below) with the same rules of what is kept, for whom and for how long: one mechanism (`queue-continuity*.ts`, `QueueContinuityScope`, `useQueueContinuity`) holding a place for each list apart from the other's, so that a place left in one is never offered to the other. A manifest's page, and its not-found and refusal pages, keep the link back.
-
-### Queue presentation (the pickup queue, 1 November 2026)
-
-The first queue drawn to [PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace) (focused results, compact filters), from the
-owner's reference of that date (`design/reference/MELARC_PICKUP_QUEUE_REFERENCE_2026-11-01.html`, a design proposal and not code). It changes
-how a request is drawn and nothing the queue reads, asks, orders or allows. Code: `apps/ops-web/src/app/pages/pickup/` (`pickup-queue-view.tsx`).
-
-- **Header and filters.** One heading, one short sentence of scope, the permission-gated action beside the heading, and the screen's own
-  filters in one wrapping row. No totals, counts by status, charts or cards of figures.
-- **One panel** (`QueuePanel`, `queue-table/`). The filters, the count of the page, the rows (as a table or as cards) and the pager are one white
-  surface with one border (`radius.lg`, the subtle border token) and a hairline between each part, and not a box for each; what the rows
-  draw inside it gives up its own border and corners. Whatever stands in the place of the rows (the loading and its placeholder, an empty
-  state, a failure with its retry, a refusal) is inside the same panel, below the filters, inset from its edges by the filters' own space, and the
-  rows run to the border. A queue given no panel (the approvals, the message log) is drawn as it always was.
-- **The filters share a line.** Their fields align at the top, so that the State select and the date control are on one line whatever hangs
-  beneath one of them (the date's help text stays, beneath its control), and the button that clears the date is set down to the control's
-  line, not the help text's. A select in the filters takes no vertical padding of its own, because Safari's engine draws a native select 5px
-  taller than the portal's other controls and the two would sit on different baselines there; every engine then gives it the control's height.
-  They wrap, as before, where they cannot share a row (a phone).
-- **Six columns for nine facts**, each named for what it holds. *Request / sender*: the operational code, the row's header and the one link of
-  the request (the row is not a link), over the sender. *State*: the badge from the status mapping. *Service date*. *Pickup address / hub*: the
-  address the server resolved for the pickup, over the hub. *Packages / booking type*: the count, over what is booked. *Needs*: the queue's own
-  attention words, and for a request that needs nothing a dash that is read as "No additional note", which says nothing of blockers or of
-  whether the request may go ahead. A missing fact says "Not recorded"; nothing is a tooltip. A cell's second line is the quieter one.
-- **A fixed table.** The columns are percentages that add up to 100 and are tuned to the narrowest table drawn, so that the cells of a request
-  keep their places from page to page; a long address or note wraps in its own column and rows have no fixed height. Cells align to the top.
-- **Cards for a narrow room.** `QueueTable` takes an optional `card` for each row. The card is made from the same facts as the row, so that
-  neither tells less, in the order a person reads a request: the code (a heading, so that a screen reader can move from request to request)
-  with its state, the sender, then each fact under the name of its column. A term sits beside its value where there is room and over it where
-  there is not. A queue given no `card` is drawn exactly as before (the approvals and the message log).
-- **One drawing at a time.** Both are drawn and the stylesheet shows one, by a **container query on the results region** and not a media
-  query on the screen: the docked menu takes 15.5rem (4rem as the rail), so the same screen gives a queue more or less room as the menu opens and
-  shuts. The table is shown from 64rem (`breakpoint.lg`, written as a number because a query condition cannot read a token) and cards below it;
-  `rem` follows enlarged text, so enlarging it gives way to the cards before the columns break. The one not shown is `display: none`, out of the
-  accessibility tree and the Tab order, and the list says `role="list"` outright because Safari takes it from a list whose markers a style removes.
-  Cards are the default and the table the exception, so a browser that cannot evaluate the query shows the layout that works at every width.
-- **Not changed by the presentation.** The requests the screen sends, the server's order, the filters and their defaults (every state, every
-  date), the permission and its refusal, the loading, empty, failure and validation states, and the paging with its focus move.
-
-### Refresh and return to the queue (the pickup queue, 1 November 2026)
-
-Both approved by the owner on 1 November 2026 (sections 3 and 4 of the reference above) and built for the pickup queue; the return to the place is built for the manifest list (S1.25) on the same terms, as that list's bullet above says. They add no polling,
-no read on focus or reconnection, and no cursor in the address or in any storage, and they change nothing the queue asks of the server or the
-order it gets back. Code: `apps/ops-web/src/app/pages/pickup/` (`PickupRequestListPage.tsx`, `queue-return.ts`); the memory is
-`apps/ops-web/src/platform/pickup/queue-continuity*.ts` and `QueueContinuityScope.tsx`.
-
-- **Refresh page.** A button beside the filters, outside their group (`QueueFilters` takes an `aside`: at the end of the filters' row where
-  there is room, under them where there is not), with a line of text over it as a field has its label, so that the button sits on the controls'
-  line. It reads the page now shown **again, by the same query**: the same filters, the same cursor and the same page number. It never goes to
-  the first page; refreshing the first page is another act, and is the officer's.
-- **The time.** "Last checked 3 Nov, 14:30" is the moment this page's read was answered, by the browser's clock, in the portal's time format
-  (`formatInstant`: Accra, 24-hour, no seconds). It is not a server snapshot, and it says nothing of other pages or of the whole queue. A read
-  that found nothing counts: it was checked. Nothing is shown before the page's read has been answered, and a change of filter or of page
-  clears it until that query is answered (each filter and cursor is a query of its own). "Checking this page…" while a read is under way;
-  "Refresh failed. Last successful check: 3 Nov, 14:30" after a failure, and nothing at all for a page that was never read.
-- **One read at a time.** The button stays mounted and focusable and says it is busy (`aria-busy`, and it ignores a press) while any read of
-  the page is under way; a press that reaches the page then is given that read, and neither cancels it nor starts another.
-- **No old rows beside a new read.** While a page that was read is read again, the loading treatment takes the place of its rows, as for a
-  first read, and a failure takes their place if the read fails; rows are never drawn as the answer to a read that has not come. The region
-  carries no `aria-busy` of its own: the loading status inside it is what announces, and a busy region may hold its announcement back.
-- **Focus and words.** Focus stays on the button unless the officer moved it. The completion is said once, politely, in a status region of the
-  aside ("Page refreshed."), which is emptied when the next refresh starts, and **only of the visit the refresh was asked in**. A visit is the
-  filters and the cursor the officer is on, counted anew each time either changes: coming back to a filter or a page they were on is a new
-  visit, so the word is not said again over a read nobody asked for as a refresh, and an answer that arrives late, after the officer has gone
-  elsewhere and come back, is said of nothing, during the newer read or after it.
-- **Return to the place.** For a same-tab queue → request → queue visit the application remembers five facts and nothing else: the filters as
-  the address carries them, the cursors of the pages visited, how far down the page the officer was, the request they opened, and the filters'
-  signature. It keeps no row, code, name, address or state of any request, and no response. They are the state of `QueueContinuityScope`, a
-  layout route inside `RequireSession`, **in the application's memory only**: not the address, not `localStorage` or `sessionStorage`, not a
-  cookie, and of the history state only a flag that a link is a return. A full reload, a new tab or a typed address starts without it.
-- **Whose, and for how long.** It is bound to the session, the person and the hubs they act in (`bindingOf`), and grants nothing: the server
-  authorises the page it is asked for. It is let go of when the session ends or is replaced, when the hubs change, when the officer goes
-  anywhere but the queue, that request and its pages, when the filter changes, on an explicit return to the first page, and once the queue has
-  been shown again, whether it used the place or refused it.
-- **When it is used.** On the browser's Back (or Forward) to the queue, and on the request's own link back ("Back to pickup requests", which
-  names the queue's filters and says it is a return), the first time only: the arrival uses the place up, so Forward and Back again start at
-  the first page rather than at a page the officer may no longer be on. The menu's link, a typed address and the booking ask for the queue
-  anew and get the first page, as does a request opened in another tab (a click with a modifier, or a link that opens one, leaves no place).
-  A request the server says is not there (`NOT_FOUND`: it went between the reading of the queue and the opening of the request), or refuses the
-  officer (`HUB_SCOPE_VIOLATION`, `PERMISSION_DENIED`), keeps its way back like any other, because its page keeps the request's id for the
-  link; an address that is not an id, and a request reached with nothing left behind, have the plain queue. The link of a refusal is offered
-  only to a session that can read the queue, by the hints the menu and the route's guard go by (`pickup.read`): a session that cannot is given
-  the forbidden page as every one is, with no link to another refusal, and the menu is its way on. The link grants nothing and says nothing of
-  the request: it names the queue's filters, and the queue is read again under its own permission on arrival.
-- **A fresh read, not a frozen one.** The saved cursor is asked of the server again by the same query and under the same cache policy;
-  nothing is painted from memory, the rows are the server's current ones in its order, and a request may have moved or gone. It is continuity of
-  place, not of a result set.
-- **Position and focus.** Once the page is drawn the document is scrolled to the saved position (the browser clamps it to the content that is
-  there now), and focus goes to the request the officer opened if it is still on the page (in the drawing that is shown, table or cards), else
-  to the results, else to whatever stands in their place. The request is kept in view by the least scroll. Focus is given only where nobody
-  put it (nothing, the document, the main region, the page's heading): an officer who moved it during the read keeps it, and still gets their
-  position back.
-- **A later page that holds nothing.** It says "No requests on this page" and offers "Back to first page"; it does not say the queue is empty,
-  and it does not read the earlier pages on its own. A move to a page that comes back empty or failed puts focus on the message, once.
-- **A page the server will not open** (`400 VALIDATION_FAILED` naming `page_token`) says so in its own words, keeps the filters, offers no retry
-  (it would fail alike) and offers "Back to first page" (`ReadState`'s `recovery`). A refused filter keeps its own words and offers no such way.
-- **Not built:** the Overview dashboard (a later task, with the backend data it would need assessed first), and a refresh or a place for any
-  other queue than the manifest list (above: its place as the queue's, its *Refresh page* the button alone, without the completion word).
-
-**Proof of §22g and §22h, and of the row selection of §22f.** Each component's own test (`ReorderList.test.tsx`, `QueueTable.selection.test.tsx`, and the
-manifest page's tests for the rider picker, which need the API's reads), the development showcase, `test/browser/components.spec.ts` (the keyboard
-walks and the showcase-wide WCAG 2.2 sweep) and the manifest screens in `test/browser/manifests.spec.ts`, run in Chromium; Firefox and WebKit are
-left to the full run.
-
-**Proof of §22b to §22f.** Each component's own test (its keys and states, in jsdom), the development showcase, and
-`test/browser/components.spec.ts` (the keyboard walk, the focus rings, WCAG 2.2 at 320px and at 200% text, forced colours); the pickup screens
-that use them in `test/browser/pickup.spec.ts`. S1.19 ran both in Chromium; Firefox and WebKit are left to the full run. The recorded
-keyboard-only and screen-reader passes are not part of this. The refresh and the return are proved in
-`PickupRequestListPage.refresh.test.tsx`, `PickupRequestListPage.return.test.tsx`, `QueueContinuityScope.test.tsx`, `queue-continuity.test.ts`
-and `queue-return.test.ts`, and in the pickup spec (Chromium, Firefox and WebKit).
+> **Status:** RETIRED (run 5, Stage 4, 10 November 2026). `QueueTable` (with `QueuePanel` and `QueueFilters`, `components/ui/queue-table/`) was the queue of S1.19 to S1.25: the filters, the count of the
+> page, the rows in a `Table` (§19) as a table or as cards, row selection and a pager. Every list of the portal is now drawn by the queue workspace template (§37, *QueueWorkspace*: the
+> kit's `PageHeader`, `ViewTabs`, `FilterBar`, `DataTable` and `SidePanel`, with `QueuePager` for the paged ones), and the components are gone, with the demo of them in the showcase. What
+> they held is held by: the count of a page, "more follow" and the pages that exist, by `QueuePager.test.tsx`; the rows, the cards and the choice of rows (a box for each, named for its row,
+> Space from the keyboard, none where the screen gives no selection), by `DataTable.test.tsx`; the filters beside the count, by `FilterBar.test.tsx` and `QueueWorkspace.test.tsx`; the pages
+> held by token and focus put on the results of the page moved to, by `use-queue-paging.test.tsx` (the hook stays in `components/ui/queue-table/use-queue-paging.ts`: every list calls it) and
+> by each list's own tests and browser spec; the choice kept across the pages of the builder's pool, by `manifests.spec.ts`.
 
 ## 22g. ReorderList
 
@@ -1999,7 +1819,7 @@ Before accepting the initial UI-foundation implementation:
 | HubSwitcher | the hub a person browses, and acts in. **Built in redesign step R4** and **IMPLEMENTING** (§2): `HubSwitcher`, with the choice held by `platform/hub` and read by `useActiveHub` |
 | Tabs with counts | the views of a queue ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)) |
 | FilterBar with chips | a queue's filters, each applied choice a chip that can be removed |
-| DataTable | the queue table, with selection, a bulk-action bar and an inline row action: TanStack Table, which redesign step R3 adopted, over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It builds on Table and QueueTable (§19, §22f) |
+| DataTable | the queue table, with selection, a bulk-action bar and an inline row action: TanStack Table, which redesign step R3 adopted, over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It replaced Table and QueueTable (§19, §22f), retired in run 5 |
 | SidePanel and Sheet | a record beside its list, and a full-screen sheet at 768px |
 | RecordHeader with StageTracker | the record's code, status, stage tracker, primary action and "more actions" menu ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)) |
 | ActionMenu | the overflow menu of a record's acts, destructive acts last |
@@ -2030,7 +1850,7 @@ The first half of step R5 built the components below, in `components/ui`, each c
 
 > **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/page-header/`
 
-The header of a page of the redesign: the title (the page's one level-one heading, through the existing `PageHeading`, which takes focus after a navigation), how many there are where the server stated a count, how fresh the results are and the way to refresh them, the pages above, and the page's actions. The initial PageHeader of §11 (`src/components/PageHeader.tsx`) stays ACTIVE, and the twenty pages that import it are unchanged, until steps R6 and R7 move them.
+The header of a page of the redesign: the title (the page's one level-one heading, through the existing `PageHeading`, which takes focus after a navigation), how many there are where the server stated a count, how fresh the results are and the way to refresh them, the pages above, and the page's actions. The initial PageHeader of §11 (`src/components/PageHeader.tsx`) is retired (run 5, Stage 4): every page and the showcases take this one.
 
 - **Props.** `title`; `description?`; `count?` (`{ value, noun }`: the number the server stated and what it counts, "pickup requests", said to assistive technology with the number); `freshness?` (`{ state?: 'idle' | 'refreshing' | 'failed', updatedAt?, onRefresh }`; `updatedAt` is the time already written the way the portal writes one); `breadcrumb?` (`{ label, to }[]`, the pages above, not the page itself); `actions?`.
 - **States.** *Loading*: leave `count` out (it is never drawn as `0`) and show `refreshing`. *Error*: `failed` says "Refresh failed. Last successful check: 09:42" (or "Refresh failed." when none ever worked) and Refresh is the retry. *Stale*: the last good time stays. A page never read has no freshness line. Empty, validation and permission-restricted do not apply: the header draws no refusal, and an act the person cannot take is not passed in.
@@ -2064,7 +1884,7 @@ What a queue is filtered by: each applied choice a chip that can be removed on i
 
 > **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/data-table/`
 
-The queue table: TanStack Table's model (columns, row model, selection, manual sorting) over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It builds on Table and QueueTable (§19, §22f), which stay ACTIVE until step R7 moves the pickup queue.
+The queue table: TanStack Table's model (columns, row model, selection, manual sorting) over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It replaced Table and QueueTable (§19, §22f), which run 5 (Stage 4) retired once every list was drawn by it.
 
 - **Rows.** 36px single-line, 52px where a cell holds a code over a name (`RowTitle`), 56px for the hub-floor tablet (`density: 'single' | 'two-line' | 'touch'`), each with its 1px separator inside it, or as tall as its tallest control (a touch row that holds a 56px control is 57px, or 65px where the page puts air around it); **a cell wraps at its words and the row grows to hold the lines** (a code, a date and a count are kept to a line by the screen, which marks them with the kit’s `NoWrap`), so that no word is cut off or left to a tooltip, and the name under a code is whole, never ellipsised (the review of 5edada2, M5). **Wrapped cells are not clamped** (the Product Owner’s decision of 9 November 2026, which settles the brief of run 4 that asked for “up to two lines”): a cell wraps in full, nothing is hidden by a height or a line count, with a panel open beside the table as with none (the long-data check holds the height of a wrapped sender with the panel open); codes in the monospaced face at weight 600. **The whole row opens its record through a real button in the code cell, stretched over the row** by its pseudo-element (no handler on a row or a div); the controls of other cells stay above it.
 - **Props.** `label`, `columns` (`{ id, header, cell, rowHeader?, align?, width?, sortable? }`; the row-header column holds the code), `rows` and `rowId` (in the order the server gave), `density?`, `onOpen?` with `openLabel` ("Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd", which contains the visible words), `selection?` (`selectedIds`, `onChange`, `selectLabel`, `isSelectable?`, `bulkActions?`), `rowAction?` (`label`, `ariaLabel?`, `onRun`, `isAvailable?`), `changedIds?`, `sort?` and `onSortChange?`, `status?`, `loadingRows?` and `loadingLabel?`, `error?`, `emptyState?`, `stale?`, `footer?`, `maxHeight?`, `initialScroll?` and `onScrollChange?`, `focusRowId?`. **Added by task R5.2 (M12):** a column takes `priority?` (1, 2 or 3), the table takes `card?` and `layout?` (cards in place of the table where its box is narrow), and a bulk act takes `eligible?` and `note?`; each is described below. **Added in RUN 4:** `crowded?` (what an `auto` table does where its box is too narrow for every column), `busy?` (the rows are read again and stay), `cardTitle?` and `cardHeadingLevel?` (a card keeps a heading, its code, drawn above the card's button and **outside** it, because a button's content is presentational to assistive technology and holds no heading: a person who moves by heading reaches each card) and `ref` (`DataTableHandle`: `focusRow(id)` and `focusResults()`); the table also exports `RowTitle` and `NoWrap`. **TanStack Table is imported by this component alone** (an ESLint rule and `test/tanstack-door.test.ts`): a screen gives it columns and rows and never builds a grid of its own.
@@ -2470,8 +2290,8 @@ Do not use this file to override a product contract.
 | CommandPalette and SearchButton, NewMenu, AccountMenu, HubSwitcher | IMPLEMENTING | Redesign step R4 (7 November 2026): built (`components/ui/app-shell/`), drawn by every signed-in screen, and awaiting the Product Owner's acceptance with the shell (§2) |
 | Icon, IconButton | ACTIVE | 25 October 2026 |
 | DatePicker | IMPLEMENTING | 28 October 2026: built, proven in the showcase and reviewed ([the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026)); the pickup screens use it since S1.19 (29 October 2026), and its look awaits the Product Owner. **Rebuilt on 6 November 2026** (redesign step R5) on the calendar and popover primitives behind the same public API, as one field typed DD/MM/YYYY and read strictly: a day that its month does not have and a year in fewer than four digits are refused in words, and nothing is corrected (the Product Owner's decision of 7 November 2026; the previous field's silent corrections were the alternative rejected, §22a); React Aria Components is removed (§22a, §37) |
-| RadioGroup, Picker, MoneyAmount, Timeline, QueueTable | IMPLEMENTING | Pickup intake (S1.19, 29 October 2026): built, in the showcase, used by the pickup screens (§22b to §22f) |
-| QueueTable row selection, ReorderList, RiderPicker | IMPLEMENTING | Manifests and runs (S1.25, 3 November 2026): built, in the showcase (the rider picker as the Picker over demo riders), used by the manifest screens (§22f, §22g, §22h) |
+| RadioGroup, Picker, MoneyAmount, Timeline | IMPLEMENTING | Pickup intake (S1.19, 29 October 2026): built, in the showcase, used by the pickup screens (§22b to §22f) |
+| ReorderList, RiderPicker | IMPLEMENTING | Manifests and runs (S1.25, 3 November 2026): built, in the showcase (the rider picker as the Picker over demo riders), used by the manifest screens (§22f, §22g, §22h) |
 | Split screen (`AuthSplitLayout`, `AuthArt`) | ACTIVE | 25 October 2026 |
 | ErrorState | ACTIVE | Yes |
 | NotFoundState | ACTIVE | Yes |
@@ -2562,7 +2382,6 @@ Paths are under `apps/ops-web/src/`. Tests sit beside each component; the browse
 | Alert | `components/ui/alert/` | `danger` and `success`, an icon and words. `announce` is set only when the alert is inserted by something that just happened: `danger` then has `role="alert"` and `success` `role="status"`; otherwise it has no role |
 | Field, Input | `components/ui/field/`, `components/ui/input/` | `Field` takes `label`, `help`, `error` and `required` and ties them to the control through context; inside a Field the Field owns the control's `id`. The error is text with an icon and is not a live region (§14 of the design system: focus goes to the first invalid field). `Input` takes the native attributes; read-only and disabled differ in look and in behaviour |
 | LoadingIndicator | `components/ui/loading/` | A polite status region with a label (default "Loading…"); the spinner is decorative and optional. The router uses it as the `HydrateFallback` of the page area, so a page loaded on demand shows it inside the frame |
-| PageHeader | `components/PageHeader.tsx` (beside `PageHeading`, not under `layout/`) | Composes `PageHeading`; `title`, optional `description` and `actions`; no breadcrumb yet |
 | ErrorState, NotFoundState | `components/ErrorFallback.tsx`, `app/pages/NotFoundPage.tsx` | Now use Button and Link. The copy is unchanged, because the existing tests pin it and the specification wants the error `code` mapped to copy, not new wording |
 | Showcase | `showcase/`, route `/__showcase` | Development only: `import.meta.env.DEV` removes the route and its import from a production build, and `test/build.test.ts` proves no trace remains. The component browser tests run against the Vite development server for that reason |
 
@@ -2598,7 +2417,6 @@ showcase in three engines.
 | Skeleton | `components/ui/skeleton/` | Decoration beside a loading indicator, 1 to 20 lines, still under reduced motion |
 | StatusBadge | `components/ui/status-badge/` | A tone and words from a `StatusMap` typed over the whole enum; an unknown value is "Unknown status" |
 | CountBadge | `components/ui/count-badge/` | A whole number the server counted, from the Badge primitive and the tokens (the first Melarc component to import a primitive); `meaning` is said after the number to a screen reader and hides the drawn digits from it; a read `0` is quiet; `surface="shell"` for the dark menu. What it is drawn beside, and its words, are `app/navigation/queue-places.ts` |
-| Table | `components/ui/table/` | A native table in a named, focusable, scrolling region; the screen sorts and the table says the order |
 | ReadState, the problem copy | `components/ui/read-state/`, `platform/problem/` | §33.3 |
 | Select | `components/ui/select/` | §7.9 |
 | Button `danger` | `components/ui/button/` | The outline recipe, §4.7 |
