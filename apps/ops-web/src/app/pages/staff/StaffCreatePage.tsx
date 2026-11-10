@@ -353,10 +353,12 @@ function Created({
   const name = identity.full_name;
   return (
     <div className="staff-created" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="staff-created__heading">Profile created</h2>
-        <p>{name} is waiting for approval.</p>
-      </Alert>
+      <div className="staff-created__alert">
+        <Alert variant="success">
+          <h2 className="staff-created__heading">Profile created</h2>
+          <p>{name} is waiting for approval.</p>
+        </Alert>
+      </div>
       <p className="staff-action__text">
         {name} cannot sign in until the profile is approved. A different approver is needed, unless
         you are a Platform Admin.

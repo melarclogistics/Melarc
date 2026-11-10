@@ -117,7 +117,8 @@
   font-weight: var(--text-heading-sm-weight);
 }
 
-.staff-created .ui-alert {
+/* The page's own wrapper of the alert: the page spaces what it draws, and does not style the kit's markup. */
+.staff-created__alert {
   margin-bottom: var(--space-4);
 }
 

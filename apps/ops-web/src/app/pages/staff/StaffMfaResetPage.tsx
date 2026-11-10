@@ -57,13 +57,15 @@ function Done({
       : undefined;
   return (
     <div className="staff-created" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="staff-created__heading">Authenticator reset</h2>
-        <p>{sessionsText(outcome.sessionsTerminated)}</p>
-        {link === undefined ? null : (
-          <p>{`${link}${until === undefined ? '' : ` It works until ${until}.`}`}</p>
-        )}
-      </Alert>
+      <div className="staff-created__alert">
+        <Alert variant="success">
+          <h2 className="staff-created__heading">Authenticator reset</h2>
+          <p>{sessionsText(outcome.sessionsTerminated)}</p>
+          {link === undefined ? null : (
+            <p>{`${link}${until === undefined ? '' : ` It works until ${until}.`}`}</p>
+          )}
+        </Alert>
+      </div>
       <p className="staff-action__text">
         {identity.full_name} sets up the new authenticator themselves and then signs in as usual.
         You will not see the link.
