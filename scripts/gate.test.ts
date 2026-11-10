@@ -30,6 +30,8 @@ import {
   DATABASE_CHECK,
   MEMORY_REFUSE_MB,
   PRECHECK_CACHE,
+  ROOT_GUARDS,
+  ROOT_GUARDS_COMMAND,
   affectedProblems,
   agentRefusal,
   baselineChanges,
@@ -407,7 +409,11 @@ describe('the precheck', () => {
         .map((candidate) => candidate.name),
       'audit',
     ];
-    const cached = precheckLanes(false).flat();
+    // (Run 6, Stage 5.3: the lane of the root guards is the precheck's own, and is compared with nothing of the gate's: the gate's unit stage runs every root test. It has its own
+    // tests below. What stays held here: every other lane is the gate's command, with the tools' own cache flags and nothing else.)
+    const cached = precheckLanes(false)
+      .flat()
+      .filter((candidate) => candidate.name !== 'guards');
     assert.deepEqual(cached.map((candidate) => candidate.name).toSorted(), cheap.toSorted());
     for (const candidate of cached) {
       const real = defined(gate.get(candidate.name), candidate.name);
@@ -418,10 +424,44 @@ describe('the precheck', () => {
     assert.deepEqual(
       precheckLanes(true)
         .flat()
+        .filter((candidate) => candidate.name !== 'guards')
         .map((candidate) => candidate.command)
         .toSorted(),
       cheap.map((name) => gate.get(name)).toSorted(),
     );
+  });
+
+  // Break caught (run 6, Stage 5.3): the root guards that read documents and styles (the design tokens, the lifecycle words, the links, the agent documents) left out of the precheck,
+  // so that a document or a stylesheet that breaks one is found only by the final run of a task (run 5 found two of them there); or put into the gate as a stage of its own, which
+  // the gate's unit stage already runs and the equivalence with CI's commands does not allow; or run in the same lane as another check (the precheck then costs their sum).
+  it('has a lane of the root guards that read only files, beside the others, cached or not, and the gate has no stage for it', () => {
+    for (const uncached of [false, true]) {
+      const lanes = precheckLanes(uncached);
+      const lane = lanes.find((candidate) => candidate.some((entry) => entry.name === 'guards'));
+      assert.deepEqual(lane, [{ name: 'guards', kind: 'static', command: ROOT_GUARDS_COMMAND }]);
+      assert.ok(lanes.length > 1, 'it runs beside the other lanes');
+    }
+    assert.ok(!gateStages('ci').some((stage) => stage.command === ROOT_GUARDS_COMMAND));
+    assert.ok(!gateStages('local').some((stage) => stage.command === ROOT_GUARDS_COMMAND));
+  });
+
+  // Break caught: a guard named that does not exist (the lane then fails, or Node's runner finds no test to run and passes), one `test:root` does not run (the gate's unit stage
+  // would never run it), a duplicate, or the lane that has lost one of the four guards the brief of run 6 names.
+  it('names root tests that exist, that `test:root` runs, each once, among them the guards of documents and styles', () => {
+    const manifestText = readFileSync(join(root, 'package.json'), 'utf8');
+    const testRoot = String(
+      (JSON.parse(manifestText) as { scripts: Record<string, string> }).scripts['test:root'],
+    );
+    assert.ok(ROOT_GUARDS.length >= 10, 'the lane holds the guards, not a token few');
+    assert.equal(new Set(ROOT_GUARDS).size, ROOT_GUARDS.length);
+    for (const guard of ROOT_GUARDS) {
+      assert.ok(existsSync(join(root, guard)), `${guard} exists`);
+      assert.ok(testRoot.split(/\s+/).includes(guard), `${guard} is run by test:root`);
+    }
+    for (const named of ['design-tokens', 'design-lifecycle', 'markdown-links', 'agent-docs']) {
+      assert.ok(ROOT_GUARDS.includes(`scripts/${named}.test.ts`), `the lane holds ${named}`);
+    }
+    assert.equal(ROOT_GUARDS_COMMAND, `node --test ${ROOT_GUARDS.join(' ')}`);
   });
 
   // Break caught: the cache written into the tree (a file nobody meant to add, and one more path for the gate to hold still), or the checks
@@ -1674,6 +1714,11 @@ describe('the agents are told', () => {
     assert.ok(loop.includes('`--asked`'));
     assert.ok(loop.includes('Never set `VITEST_MAX_WORKERS`'));
     assert.ok(!loop.includes('says when each run is due'));
+    // Run 6, Stage 5.3: the precheck's lane of root guards, and the affected root and journey targets to run after a screen, a stylesheet or a journey's page changes (the finding
+    // of run 5: five breakages the precheck cannot see were found only in the final run).
+    assert.ok(loop.includes('`guards` lane'));
+    assert.ok(loop.includes("After a screen, a stylesheet or a journey's page changes"));
+    assert.ok(loop.includes('`pnpm run test:affected --only root,e2e --with-e2e`'));
     const plan = read('delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md');
     const cadence =
       plan.split(/\r?\n/).find((line) => line.startsWith('**Testing cadence**')) ?? '';

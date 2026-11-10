@@ -130,6 +130,33 @@ const CHECKS: readonly Check[] = [
 const AUDIT = 'pnpm audit --audit-level high';
 
 /**
+ * The root guards that read only documents, styles and manifests (run 6, Stage 5.3): a lane of the precheck and no stage of the gate (the gate's unit stage runs every root test).
+ * They are the tests that a document, a stylesheet or a manifest breaks (the design tokens, the lifecycle words of the component patterns, the links between documents, the agent
+ * documents), which the precheck, running no test, did not see until the final run of a task: run 5 found two of them only there. Each reads files, takes seconds and starts no
+ * process but Git's; `gate.test.ts` holds the list to that (every file exists and is run by `test:root`) and to being the lane. A guard that needs a browser, a build, a database, a
+ * JDK, a walk of the whole tree or more than a few seconds is not in it; the affected run's root target is what runs those (DEVELOPMENT.md, step 4).
+ */
+export const ROOT_GUARDS: readonly string[] = [
+  'scripts/design-tokens.test.ts',
+  'scripts/design-lifecycle.test.ts',
+  'scripts/design-contrast.test.ts',
+  'scripts/markdown-links.test.ts',
+  'scripts/agent-docs.test.ts',
+  'scripts/local-setup.test.ts',
+  'scripts/dependency-policy.test.ts',
+  'scripts/workspace-pins.test.ts',
+  'scripts/turbo-config.test.ts',
+  'scripts/security-matrix-rows.test.ts',
+  'scripts/shadcn-wiring.test.ts',
+  'scripts/repository-shape.test.ts',
+  'scripts/test-inventory.test.ts',
+  'scripts/gitignore.test.ts',
+];
+
+/** The command of the lane: Node's own runner over the guards, as `test:root` runs them. */
+export const ROOT_GUARDS_COMMAND = `node --test ${ROOT_GUARDS.join(' ')}`;
+
+/**
  * What CI runs that this script does not, and why: the HTTPS run makes a certificate authority and refuses to run on a developer machine, and the
  * plan of the run (task CI.2) asks GitHub whether the nightly run has anything to test, which only a run of the workflow has to decide.
  */
@@ -174,6 +201,7 @@ export function precheckLanes(uncached: boolean): Stage[][] {
     lanes.set(check.lane, [...(lanes.get(check.lane) ?? []), stage]);
   }
   lanes.set('audit', [{ name: 'audit', kind: 'static', command: AUDIT }]);
+  lanes.set('guards', [{ name: 'guards', kind: 'static', command: ROOT_GUARDS_COMMAND }]);
   return [...lanes.values()];
 }
 
