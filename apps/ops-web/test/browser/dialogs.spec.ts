@@ -534,6 +534,7 @@ test.describe('the defaults that Melarc dialogs carry, in a browser (COMPONENT_P
     // the moment it starts; an animation that lasts no time still sends the event, and would show here as a duration of 0s.
     test(`the ${kind} comes in over motion.normal on the enter easing, and its scrim with it`, async ({
       page,
+      browserName,
     }) => {
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       await openShowcase(page);
@@ -543,7 +544,13 @@ test.describe('the defaults that Melarc dialogs carry, in a browser (COMPONENT_P
         const onStart = (event: AnimationEvent): void => {
           if (!(event.target instanceof Element) || !event.target.classList.contains('ui-dialog'))
             return;
-          const style = getComputedStyle(event.target, event.pseudoElement || null);
+          // The scrim is the animation of the backdrop. Chromium and Firefox say so in `pseudoElement`; WebKit starts the animation and reports none (it is an empty string,
+          // as it is for the panel's), so the scrim is told by the name of its animation and its duration and easing are read from the backdrop's own style, in every engine.
+          const scrim = event.animationName === 'ui-dialog-scrim-enter';
+          const style = getComputedStyle(
+            event.target,
+            scrim ? '::backdrop' : event.pseudoElement || null,
+          );
           found.push({
             pseudo: event.pseudoElement,
             name: event.animationName,
@@ -568,8 +575,10 @@ test.describe('the defaults that Melarc dialogs carry, in a browser (COMPONENT_P
       // The panel's and the scrim's, whichever the browser reports first.
       expect(starts).toHaveLength(2);
       expect(starts).toContainEqual({ pseudo: '', name: 'ui-dialog-enter', duration, easing });
+      // WebKit starts the scrim's animation and does not say whose it is: its event carries no pseudo-element, where Chromium's and Firefox's say '::backdrop'. The name, the
+      // duration and the easing of the scrim's animation are asserted in every engine.
       expect(starts).toContainEqual({
-        pseudo: '::backdrop',
+        pseudo: browserName === 'webkit' ? '' : '::backdrop',
         name: 'ui-dialog-scrim-enter',
         duration,
         easing,
