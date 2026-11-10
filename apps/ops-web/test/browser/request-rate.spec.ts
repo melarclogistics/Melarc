@@ -13,8 +13,8 @@ import { HUB_A, HUB_B, menuEntry, topBar } from './support/shell';
  * each was sent. It then computes, per operation and for all of them, the **busiest 60 seconds** (a window that slides over the requests, not a clock
  * minute) and the **average per minute**, and prints them as a table.
  *
- * The session: My work; a switch of hub and back; the pickup queue (a filter, the next page, a refresh); three requests opened and confirmed, with the
- * queue again after each; two searches in the palette typed with corrections, one closed and one opening the record it finds; a run built from the pool (the hub first, four requests,
+ * The session: My work; a switch of hub and back; the pickup queue (a view, the next page, a refresh of the page); three requests opened (in the panel beside the
+ * queue, and then on their own page) and confirmed, with the queue again after each; two searches in the palette typed with corrections, one closed and one opening the record it finds; a run built from the pool (the hub first, four requests,
  * the day) and made; the runs; My work again. It goes round twice, and for as long as three minutes have not passed.
  *
  * **It takes about three and a half minutes, so it is not part of the default run**: it is skipped unless `MELARC_MEASURE=1` is set. To run it (from the
@@ -358,12 +358,19 @@ async function openQueue(page: Page): Promise<void> {
   await pause(page, PACE.read);
 }
 
-/** One request opened from the first page of the waiting ones, read, and confirmed. */
+/**
+ * One request opened from the first page of the waiting ones: in the panel beside the queue (its own read, as the queue's row gives it), then on its own page by the
+ * panel's "Open full page" (the pickup queue draws a panel for a row since redesign step R6.1: the code of a row is not a link), read, and confirmed.
+ */
 async function confirmOne(page: Page): Promise<void> {
   await page
-    .getByRole('link', { name: /^ACC-PR-/ })
+    .getByRole('button', { name: /^Open ACC-PR-/ })
     .first()
     .click();
+  const panel = page.getByRole('dialog', { name: /^ACC-PR-/ });
+  await expect(panel.getByRole('link', { name: 'Open full page' })).toBeVisible();
+  await pause(page, PACE.step);
+  await panel.getByRole('link', { name: 'Open full page' }).click();
   await expect(page.getByRole('button', { name: 'Confirm the pickup' })).toBeVisible();
   await pause(page, PACE.read);
   await page.getByRole('button', { name: 'Confirm the pickup' }).click();
@@ -450,18 +457,18 @@ async function oneRound(page: Page): Promise<void> {
   await pause(page, PACE.step);
 
   await openQueue(page);
-  await page.getByRole('combobox', { name: 'State' }).selectOption('PENDING');
+  await page.getByRole('tab', { name: 'Waiting for confirmation' }).click();
   await pause(page, PACE.look);
   await page.getByRole('button', { name: /Next page/ }).click();
   await pause(page, PACE.look);
-  await page.getByRole('button', { name: 'Refresh page' }).click();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await pause(page, PACE.look);
-  await page.getByRole('combobox', { name: 'State' }).selectOption('');
+  await page.getByRole('tab', { name: 'All', exact: true }).click();
   await pause(page, PACE.step);
 
   for (let each = 0; each < 3; each += 1) {
     if (each > 0) await openQueue(page);
-    await page.getByRole('combobox', { name: 'State' }).selectOption('PENDING');
+    await page.getByRole('tab', { name: 'Waiting for confirmation' }).click();
     await pause(page, PACE.step);
     await confirmOne(page);
   }
