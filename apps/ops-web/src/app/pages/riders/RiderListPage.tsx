@@ -1,11 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { Button } from '../../../components/ui/button/Button';
 import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
-import { Field } from '../../../components/ui/field/Field';
-import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
@@ -129,7 +126,7 @@ function refusalWords(problem: Problem): string {
  * Riders (surfaces/ops-portal.md section 7, `/admin/riders`; S0.60a; redesign step R7b): the roster an officer finds a rider on, to register a device for the rider, replace a handset or
  * report one lost, drawn by the queue workspace template (the reference pattern: the pickup run list, `/manifests`). It shows **identity and readiness only**: the name, the phone, the
  * status, the hub, whether a PIN is set and whether a device is active. Never a PIN, a hash or a key: the screen has nowhere to show any. Which riders the session may see is the
- * server's decision (each rider's primary hub); **the server filters** (the status, the views of the page, and the search, a field in the filter row's popover that shows as a chip,
+ * server's decision (each rider's primary hub); **the server filters** (the status, the views of the page, and the search, a field in the filter row, always there, that shows as a chip,
  * both in the address) **and pages** (by token, for the filters it was made with): the screen draws what comes back, whole.
  */
 export function RiderListPage() {
@@ -153,10 +150,7 @@ export function RiderListPage() {
     enabled: me !== undefined,
   });
   const workspace = useRef<QueueWorkspaceHandle>(null);
-  const [typing, setTyping] = useState({ over: q, text: q });
-  const draft = typing.over === q ? typing.text : q;
   const [interacted, setInteracted] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
 
   // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
   // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
@@ -190,12 +184,6 @@ export function RiderListPage() {
     if (nextStatus !== undefined) out.set('status', nextStatus);
     if (nextQ !== '') out.set('q', nextQ);
     setParams(out, { replace: true });
-  }
-
-  function search(event: SubmitEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    change({ q: draft.trim() });
-    setFilterOpen(false);
   }
 
   const result: QueueResult<RiderFacts> = (() => {
@@ -236,6 +224,8 @@ export function RiderListPage() {
     noun: 'riders',
     none: 'The riders of your hubs appear here once they are on the roster.',
     announce: interacted,
+    // A page after the first that holds nothing is told as that, in the words of every list (the Product Owner, 10 November 2026), and not as the roster being empty.
+    laterPage: { page: paging.page, onFirstPage: paging.toFirstPage },
     // A chosen hub is a filter too (audit B1): the roster is empty at this hub, which says nothing of the others.
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
@@ -280,31 +270,19 @@ export function RiderListPage() {
         }}
         filters={{
           label: 'Filter the riders',
+          // The search is a field in the bar, always there (the Product Owner, 10 November 2026), and not behind the Filter button: the views are the roster's other choice.
+          search: {
+            label: 'Search by name or phone',
+            value: q,
+            onSearch: (text) => {
+              change({ q: text });
+            },
+            maxLength: SEARCH_LIMIT,
+          },
           chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
           onRemove: () => {
             change({ q: '' });
           },
-          filterOpen,
-          onFilterOpenChange: setFilterOpen,
-          filterPanel: (
-            <form className="rider-search" role="search" noValidate onSubmit={search}>
-              <Field label="Search by name or phone">
-                <Input
-                  type="search"
-                  name="q"
-                  value={draft}
-                  maxLength={SEARCH_LIMIT}
-                  autoComplete="off"
-                  onChange={(event) => {
-                    setTyping({ over: q, text: event.target.value });
-                  }}
-                />
-              </Field>
-              <Button type="submit" variant="secondary">
-                Search
-              </Button>
-            </form>
-          ),
         }}
         result={result}
         empty={empty}

@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { Button } from '../../../components/ui/button/Button';
 import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
-import { Field } from '../../../components/ui/field/Field';
-import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
@@ -121,7 +118,7 @@ function refusalWords(problem: Problem): string {
  * browsers are active, for every account the session's grant reaches, drawn by the queue workspace template (the reference pattern: the pickup run list, `/manifests`). **Never a
  * credential or a recovery address**: the screen has nowhere to show either. Which accounts the session may see is the server's decision (each organisation's responsible hub); **the server
  * searches** (the text is sent as `q`, and is in the address, so that a reload keeps it) **and pages** (by token, for the search it was made with): the screen draws what comes back, whole.
- * The search is a field in the filter row's popover and shows as a chip that can be taken off; an empty list is told as no accounts at all, as a search that hides everything, or as nothing
+ * The search is a field in the filter row, always there, and shows as a chip that can be taken off; an empty list is told as no accounts at all, as a search that hides everything, or as nothing
  * at the chosen hub, and a failed read stays a failure with the search in place.
  */
 export function VendorListPage() {
@@ -141,10 +138,7 @@ export function VendorListPage() {
     enabled: me !== undefined,
   });
   const workspace = useRef<QueueWorkspaceHandle>(null);
-  const [typing, setTyping] = useState({ over: q, text: q });
-  const draft = typing.over === q ? typing.text : q;
   const [interacted, setInteracted] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
 
   // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
   // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
@@ -168,14 +162,11 @@ export function VendorListPage() {
   const updatedAt =
     list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
 
-  function search(event: SubmitEvent<HTMLFormElement>): void {
-    event.preventDefault();
+  function search(text: string): void {
     setInteracted(true);
-    const next = draft.trim();
-    setParams(next === '' ? new URLSearchParams() : new URLSearchParams({ q: next }), {
+    setParams(text === '' ? new URLSearchParams() : new URLSearchParams({ q: text }), {
       replace: true,
     });
-    setFilterOpen(false);
   }
 
   function clearSearch(): void {
@@ -220,6 +211,8 @@ export function VendorListPage() {
     noun: 'vendor accounts',
     none: 'Accounts of the vendors at your hubs appear here once their organisation is approved.',
     announce: interacted,
+    // A page after the first that holds nothing is told as that, in the words of every list (the Product Owner, 10 November 2026), and not as the list being empty.
+    laterPage: { page: paging.page, onFirstPage: paging.toFirstPage },
     // A chosen hub is a filter too (audit B1): no account at this hub says nothing of the others, so it is never "no vendor accounts yet".
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
@@ -252,29 +245,15 @@ export function VendorListPage() {
         }}
         filters={{
           label: 'Filter the vendor accounts',
+          // The search is a field in the bar, always there (the Product Owner, 10 November 2026), and not behind the Filter button: this list has no other filter to choose from.
+          search: {
+            label: 'Search by organisation or account',
+            value: q,
+            onSearch: search,
+            maxLength: SEARCH_LIMIT,
+          },
           chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
           onRemove: clearSearch,
-          filterOpen,
-          onFilterOpenChange: setFilterOpen,
-          filterPanel: (
-            <form className="vendor-search" role="search" noValidate onSubmit={search}>
-              <Field label="Search by organisation or account">
-                <Input
-                  type="search"
-                  name="q"
-                  value={draft}
-                  maxLength={SEARCH_LIMIT}
-                  autoComplete="off"
-                  onChange={(event) => {
-                    setTyping({ over: q, text: event.target.value });
-                  }}
-                />
-              </Field>
-              <Button type="submit" variant="secondary">
-                Search
-              </Button>
-            </form>
-          ),
         }}
         result={result}
         empty={empty}

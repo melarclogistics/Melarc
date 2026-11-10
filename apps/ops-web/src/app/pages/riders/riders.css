@@ -49,13 +49,6 @@
   display: contents;
 }
 
-/* The search, in the popover of the filter row: the field and the button that sends it, one under the other. */
-.rider-search {
-  display: grid;
-  gap: var(--space-3);
-  min-width: min(20rem, 100%);
-}
-
 /* The enrolment code and what is said around it: a column of readable width, with the picture set apart from the prose (the section of the task form around it gives the space above). */
 .rider-code {
   max-width: 40rem;

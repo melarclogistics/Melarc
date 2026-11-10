@@ -7,13 +7,6 @@
   margin: 0 0 var(--space-4);
 }
 
-/* The search, in the popover of the filter row: the field and the button that sends it, one under the other. */
-.vendor-search {
-  display: grid;
-  gap: var(--space-3);
-  min-width: min(20rem, 100%);
-}
-
 /* The facts of an account, in the groups of their meaning (the record template's main column): one list under another. */
 .vendor-facts-groups {
   display: flex;

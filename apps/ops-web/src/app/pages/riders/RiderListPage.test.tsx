@@ -90,11 +90,9 @@ const viewTab = (name: string) => screen.getByRole('tab', { name });
 const removeChip = (label: string) =>
   screen.getByRole('button', { name: `Remove filter: ${label}` });
 
-/** The search lives in the popover of the filter row: opened with the Filter button, and its field is the page's own. */
-async function openSearch(view: ReturnType<typeof open>): Promise<HTMLElement> {
-  await view.user.click(screen.getByRole('button', { name: 'Filter' }));
-  return screen.findByRole('searchbox', { name: 'Search by name or phone' });
-}
+/** The search is a field in the bar, always there: nothing is opened to find it. */
+const searchField = (): Promise<HTMLElement> =>
+  screen.findByRole('searchbox', { name: 'Search by name or phone' });
 
 async function rowOf(name: string): Promise<HTMLElement> {
   const row = within(await table())
@@ -177,6 +175,37 @@ describe('the rider list: what it shows', () => {
       Device: null,
       Hub: '3',
     });
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "No riders yet" or "No riders match", as if the roster were empty; or with no way back to the
+  // first page. A page past the end is only that, whatever the roster's filters are.
+  it('tells an empty page after the first as that, with the way back to the first page', async () => {
+    let reads = 0;
+    const view = open(() => {
+      reads += 1;
+      return reads === 2 ? page([]) : page([kwame], 'next-1');
+    });
+    await table();
+    await view.user.click(await screen.findByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByRole('heading', { name: 'No riders on this page' })).toBeVisible();
+    expect(
+      screen.getByText('Page 2 has no riders now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    expect(screen.queryByText('No riders yet')).toBeNull();
+
+    await view.user.click(screen.getByRole('button', { name: 'Back to first page' }));
+    expect(await screen.findByRole('link', { name: 'Kwame Mensah' })).toBeVisible();
+    expect(queryOf().has('page_token')).toBe(false);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a search that is behind the Filter button, so that the person opens something to find a rider.
+  it('has the search in the bar and no Filter button', async () => {
+    open();
+    await table();
+
+    expect(await searchField()).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Filter' })).toBeNull();
   });
 
   // Break caught: a hub the session does not act in named by its id, or as if it were the officer's own.
@@ -282,7 +311,7 @@ describe('the rider list: searching', () => {
     const view = open();
     await table();
 
-    await view.user.type(await openSearch(view), 'kwame{Enter}');
+    await view.user.type(await searchField(), 'kwame{Enter}');
 
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('kwame');
@@ -296,7 +325,7 @@ describe('the rider list: searching', () => {
     const { user, router } = view;
     await table();
 
-    await user.type(await openSearch(view), 'ama{Enter}');
+    await user.type(await searchField(), 'ama{Enter}');
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('ama');
     });
@@ -327,13 +356,13 @@ describe('the rider list: searching', () => {
     const view = open();
     const { user } = view;
     await table();
-    const field = await openSearch(view);
+    const field = await searchField();
 
     await user.type(field, '   +233   {Enter}');
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('+233');
     });
-    const field2 = await openSearch(view);
+    const field2 = await searchField();
     await user.clear(field2);
     await user.type(field2, '    {Enter}');
 
@@ -345,20 +374,20 @@ describe('the rider list: searching', () => {
 
   // Break caught: a search read out of the address with its spaces, which would find nobody.
   it('sends a search from the address without the spaces around it', async () => {
-    const view = open(undefined, READER, '/admin/riders?q=%20%20kwame%20');
+    open(undefined, READER, '/admin/riders?q=%20%20kwame%20');
 
     await table();
 
     expect(queryOf(0).get('q')).toBe('kwame');
     expect(removeChip('Search: kwame')).toBeVisible();
-    expect(await openSearch(view)).toHaveValue('kwame');
+    expect(await searchField()).toHaveValue('kwame');
   });
 
   it('limits a search to what the server accepts, as it is typed', async () => {
-    const view = open();
+    open();
     await table();
 
-    expect(await openSearch(view)).toHaveAttribute('maxlength', '128');
+    expect(await searchField()).toHaveAttribute('maxlength', '128');
   });
 });
 
@@ -443,7 +472,7 @@ describe('the rider list: counting, paging and freshness', () => {
 
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
-    await user.type(await openSearch(view), 'kwame{Enter}');
+    await user.type(await searchField(), 'kwame{Enter}');
 
     await waitFor(() => {
       expect(queryOf().get('q')).toBe('kwame');

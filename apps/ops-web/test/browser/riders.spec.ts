@@ -204,7 +204,7 @@ test.describe('moving through the screens', () => {
     await expect(kwame).toContainText('Accra Central');
     await expect(table.getByRole('row', { name: /Esi Owusu/ })).toContainText('No active device');
 
-    // The status is a view of the roster (a tab), and the search a field in the filter row's popover.
+    // The status is a view of the roster (a tab), and the search a field in the filter row.
     await page.getByRole('tab', { name: 'Suspended' }).click();
     await expect(page).toHaveURL('/admin/riders?status=SUSPENDED');
     await expect(table.getByRole('row')).toHaveCount(2);
@@ -215,7 +215,8 @@ test.describe('moving through the screens', () => {
     // builds the new address from what it last drew, so a search made before that (the development server is slow enough for it) keeps the old status.
     await expect(page).toHaveURL('/admin/riders');
     await expect(table.getByRole('row')).toHaveCount(4);
-    await page.getByRole('button', { name: 'Filter', exact: true }).click();
+    // The search is a field in the bar, always there: nothing is opened to find it.
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toHaveCount(0);
     await page.getByRole('searchbox', { name: 'Search by name or phone' }).fill('  esi  ');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL('/admin/riders?q=esi');

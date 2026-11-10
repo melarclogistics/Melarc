@@ -82,11 +82,9 @@ const queryOf = (index = -1) => new URL(asked().at(index)?.url ?? 'http://x/').s
 const removeChip = (label: string) =>
   screen.getByRole('button', { name: `Remove filter: ${label}` });
 
-/** The search lives in the popover of the filter row: opened with the Filter button, and its field is the page's own. */
-async function openSearch(view: ReturnType<typeof open>): Promise<HTMLElement> {
-  await view.user.click(screen.getByRole('button', { name: 'Filter' }));
-  return screen.findByRole('searchbox', { name: 'Search by organisation or account' });
-}
+/** The search is a field in the bar, always there: nothing is opened to find it. */
+const searchField = (): Promise<HTMLElement> =>
+  screen.findByRole('searchbox', { name: 'Search by organisation or account' });
 
 async function rowOf(code: string): Promise<HTMLElement> {
   const row = within(await table())
@@ -289,11 +287,52 @@ describe('the vendor list: paging and freshness', () => {
 });
 
 describe('the vendor list: the search', () => {
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "No vendor accounts yet" or "No vendor accounts match", as if the list were empty; or with
+  // no way back to the first page. A page past the end is only that.
+  it('tells an empty page after the first as that, with the way back to the first page', async () => {
+    let reads = 0;
+    const view = open(() => {
+      reads += 1;
+      return reads === 2 ? page([]) : page([vendorAccountFixture()], 'next-1');
+    });
+    await table();
+    await view.user.click(await screen.findByRole('button', { name: /Next page/ }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'No vendor accounts on this page' }),
+    ).toBeVisible();
+    expect(
+      screen.getByText('Page 2 has no vendor accounts now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    expect(screen.queryByText('No vendor accounts yet')).toBeNull();
+
+    await view.user.click(screen.getByRole('button', { name: 'Back to first page' }));
+    expect(await screen.findByRole('link', { name: 'K7M2Q9X4' })).toBeVisible();
+    expect(queryOf().has('page_token')).toBe(false);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a search that is behind the Filter button, so that the person opens something to find an account.
+  it('has the search in the bar and no Filter button', async () => {
+    open();
+    await table();
+
+    expect(await searchField()).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Filter' })).toBeNull();
+  });
+
+  // Break caught: a field that takes more than the server accepts, so that a long search is refused after it was typed.
+  it('limits a search to what the server accepts, as it is typed', async () => {
+    open();
+    await table();
+
+    expect(await searchField()).toHaveAttribute('maxlength', '128');
+  });
+
   it('sends the search in the query, keeps it in the address, and shows it as a filter that can be taken off', async () => {
     const view = open();
     await table();
 
-    await view.user.type(await openSearch(view), 'asante');
+    await view.user.type(await searchField(), 'asante');
     await view.user.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => {
@@ -338,7 +377,7 @@ describe('the vendor list: the search', () => {
     await screen.findByText(/on page 2/);
     expect(queryOf().get('page_token')).toBe('next-1');
 
-    await view.user.type(await openSearch(view), 'asante');
+    await view.user.type(await searchField(), 'asante');
     await view.user.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => {

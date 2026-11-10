@@ -343,10 +343,10 @@ test.describe('the vendor screens', () => {
     await page.goto('/admin/vendors');
     await expect(page.getByRole('link', { name: 'K7M2Q9X4' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Filter', exact: true }).focus();
-    await page.keyboard.press('Enter');
+    // The search is a field in the bar, always there: nothing is opened to find it.
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toHaveCount(0);
     const field = page.getByRole('searchbox', { name: 'Search by organisation or account' });
-    await expect(field).toBeFocused();
+    await field.focus();
     await page.keyboard.type('synthetic');
     await page.keyboard.press('Enter');
 
@@ -354,7 +354,9 @@ test.describe('the vendor screens', () => {
     await expect(
       page.getByRole('button', { name: 'Remove filter: Search: synthetic' }),
     ).toBeVisible();
-    await expect(field).toHaveCount(0);
+    // The field stays where it is, with what was typed, and has focus still.
+    await expect(field).toHaveValue('synthetic');
+    await expect(field).toBeFocused();
     expect(queries.at(-1)).toBe('?q=synthetic');
 
     await page.getByRole('button', { name: 'Remove filter: Search: synthetic' }).click();
