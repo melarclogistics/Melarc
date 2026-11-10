@@ -200,7 +200,11 @@ test.describe('opening and closing the palette', () => {
 
     await openByKey(page);
     await typeText(page, 'ama');
-    await expect.poll(() => opened.asked).toEqual(['ama']);
+    // The text that stood still is the one asked last. The keys are pressed 15 ms apart and the search waits for 200 ms of stillness, so on a machine that stalls between
+    // two keys it is asked for "am" as well, and then for "ama" (it failed one run in ten on the development server under load): what is asserted is the last lookup,
+    // and that nothing is asked after the palette has closed.
+    await expect.poll(() => opened.asked.at(-1)).toBe('ama');
+    const askedWhileOpen = [...opened.asked];
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
 
@@ -210,7 +214,8 @@ test.describe('opening and closing the palette', () => {
       palette(page).getByText('Type two letters or more to search records.'),
     ).toBeVisible();
     await page.waitForTimeout(400);
-    expect(opened.asked).toEqual(['ama']);
+    expect(opened.asked).toEqual(askedWhileOpen);
+    expect(opened.asked.at(-1)).toBe('ama');
   });
 });
 
