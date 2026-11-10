@@ -103,6 +103,33 @@ const listRequests = () =>
 const summaryRequests = () =>
   api.requests.filter((request) => new URL(request.url).pathname.endsWith('/ops/queue-summary'));
 
+// Break caught (the security review of run 5, Stage 5.1): a credential drawn in the cards, or in an attribute, which no check of the list made at all. A password hash, a token or a setup
+// link that the server sent anyway has no place in either drawing, in any text or any attribute of the page (the whole markup is read).
+describe('the staff list: nothing that could sign anyone in, in either drawing', () => {
+  it.each([
+    ['the table', false],
+    ['the cards', true],
+  ] as const)('draws no credential in %s, in any text or attribute', async (_name, narrow) => {
+    if (narrow) narrowRoom();
+    open('/admin/staff?view=all', KEYS.approver, {
+      [LIST]: () =>
+        staffPage([
+          {
+            ...kofi,
+            password_hash: 'SENTINEL-PASSWORD-HASH',
+            token: 'SENTINEL-TOKEN',
+            setup_token: 'SENTINEL-SETUP',
+            link: 'https://example.test/setup/credential#token=SENTINEL-SETUP',
+          },
+          ama,
+        ]),
+    });
+    await (narrow ? cards() : table());
+
+    expect(document.body.innerHTML).not.toContain('SENTINEL');
+  });
+});
+
 describe('the staff list: what it shows', () => {
   it('names the page and the title, and describes what is on it', async () => {
     open('/admin/staff', KEYS.approver);

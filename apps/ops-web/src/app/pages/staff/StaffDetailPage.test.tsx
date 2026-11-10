@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
+
 import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -33,6 +35,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const RECORD = `GET /staff-identities/${STAFF_ID}`;
@@ -1346,6 +1349,30 @@ describe('the profile: the trusted browsers of the person (staff-authentication.
     expect(table).toHaveTextContent('24 Oct, 07:30');
     expect(table).not.toHaveTextContent('This browser');
     expect(view.container.textContent).not.toContain('SENTINEL');
+  });
+
+  // Break caught (the security review of run 5, Stage 5.1): the same panel drawn as cards in a narrow room, where no check looked for a credential. The whole markup is read.
+  it('draws no credential in the cards of a narrow room, in any text or attribute', async () => {
+    narrowRoom();
+    const view = open(KEYS.approver, {
+      [RECORD]: () => json(200, enrolled, etag('v2')),
+      [BROWSERS]: () =>
+        json(200, {
+          items: [
+            {
+              ...chrome,
+              token: 'SENTINEL-CREDENTIAL',
+              token_hash: 'SENTINEL-HASH',
+              factor_id: 'SENTINEL-FACTOR',
+            },
+            safari,
+          ],
+        }),
+    });
+
+    const list = await screen.findByRole('list', { name: 'Trusted browsers of Kofi Boateng' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    expect(view.container.innerHTML).not.toContain('SENTINEL');
   });
 
   it('says so when there is none, and offers no removal', async () => {

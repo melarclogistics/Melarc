@@ -196,6 +196,8 @@ test.describe('the lists, drawn for the room they have', () => {
     ]);
     await expect(table.getByRole('row')).toHaveCount(3);
     await expect(queueCards(page, 'Staff profiles')).toHaveCount(0);
+    // The stand-in plants a password hash in each profile the list answers with; the table's markup, attributes included, has no place for it.
+    expect(await page.content()).not.toContain(PLANTED);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     expect(watch.problems).toEqual([]);
   });
@@ -225,6 +227,9 @@ test.describe('the lists, drawn for the room they have', () => {
     ]) {
       await expect(first).toContainText(fact);
     }
+    // Break caught (the security review of run 5, Stage 5.1): a credential drawn in a card, or in an attribute, which a look at the table at 1280 px or at the text cannot see. The stand-in
+    // plants a password hash in each profile it answers with; the whole document is read, attributes included.
+    expect(await page.content()).not.toContain(PLANTED);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     expect(watch.problems).toEqual([]);
   });
@@ -257,6 +262,9 @@ test.describe('the lists, drawn for the room they have', () => {
     await expect(
       first.getByRole('button', { name: 'End session started 23 Oct, 08:00' }),
     ).toBeVisible();
+    // Break caught (the security review of run 5, Stage 5.1): a session's token or its hash drawn in a card, or in an attribute of one (the stand-in plants both in each session it answers
+    // with). The table of 1280 px is read in its own test; the cards, which are another drawing, are read here, as the whole document.
+    expect(await page.content()).not.toContain(PLANTED);
     // Break caught: an act drawn in a card and covered by something over the card, so that it is seen and cannot be pressed.
     await first.getByRole('button', { name: 'End session started 23 Oct, 08:00' }).click();
     await expect(page.getByRole('alertdialog', { name: 'End this session?' })).toBeVisible();
@@ -288,6 +296,9 @@ test.describe('the lists, drawn for the room they have', () => {
     await expect(second.getByRole('heading', { level: 2 })).toHaveText('Safari on macOS');
     await expect(second).toContainText('Not used yet');
     await expect(cards.getByRole('listitem').first()).toContainText('This browser');
+    // Break caught (the security review of run 5, Stage 5.1): a credential or its hash drawn in a card, or in an attribute of one (the stand-in plants both in each browser it answers
+    // with), which the check of the table at 1280 px, made as text, cannot see. The whole document is read.
+    expect(await page.content()).not.toContain(PLANTED);
     // Pressed from the card, the removal asks first and sends nothing until it is confirmed.
     await second.getByRole('button', { name: 'Remove Safari on macOS' }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Remove this browser?' });
@@ -465,7 +476,11 @@ test.describe('a credential has nowhere to go', () => {
 
   test('a session list shows nothing of a session’s credential', async ({ page }) => {
     await open(page, `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`);
-    await expect(page.getByRole('table', { name: 'Open sessions' })).toBeVisible();
+    const table = page.getByRole('table', { name: 'Open sessions' });
+    await expect(table).toBeVisible();
+    // The rows are drawn before the markup is read: the table is on the page while its rows are still loading, and a look made then has nothing to find (found by the mutation proof of
+    // run 5, Stage 5.1: the same check failed in one run and passed in the next, with the same planted field).
+    await expect(table.getByRole('row')).toHaveCount(3);
 
     expect(await page.content()).not.toContain(PLANTED);
   });
@@ -578,7 +593,8 @@ test.describe('the trusted browsers (staff-authentication.md section 5.8)', () =
     const table = page.getByRole('table', { name: 'Your trusted browsers' });
     await expect(table.getByRole('row')).toHaveCount(3);
     await expect(table).toContainText('This browser');
-    await expect(page.locator('body')).not.toContainText(PLANTED);
+    // The whole document, attributes included, and not only what a person reads (the security review of run 5, Stage 5.1).
+    expect(await page.content()).not.toContain(PLANTED);
 
     await page.getByRole('button', { name: 'Remove Safari on macOS' }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Remove this browser?' });
@@ -594,7 +610,7 @@ test.describe('the trusted browsers (staff-authentication.md section 5.8)', () =
     expect(call?.path).toBe(`/api/v1/auth/staff/trusted-browsers/${IDS.other}`);
     expect(call?.ifMatch).toBeUndefined();
     expect(call?.idempotencyKey).toBeUndefined();
-    await expect(page.locator('body')).not.toContainText(PLANTED);
+    expect(await page.content()).not.toContain(PLANTED);
   });
 
   test('an administrator removes all of a person’s browsers with a reason, and sees none of their credentials', async ({
@@ -604,7 +620,7 @@ test.describe('the trusted browsers (staff-authentication.md section 5.8)', () =
     const section = page.getByRole('region', { name: 'Trusted browsers' });
     await expect(section.getByRole('table')).toContainText('Firefox on Linux');
     await expect(section.getByRole('table')).toContainText('Edge on Windows');
-    await expect(page.locator('body')).not.toContainText(PLANTED);
+    expect(await page.content()).not.toContain(PLANTED);
 
     await section.getByRole('button', { name: 'Remove all trusted browsers' }).click();
     const dialog = page.getByRole('alertdialog', { name: /^Remove the trusted browsers of / });

@@ -175,6 +175,33 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
   });
 });
 
+// Break caught (the security review of run 5, Stage 5.1): a credential drawn in the cards, or in an attribute, which a check of the table's text cannot see. The whole markup of the
+// page is read in both drawings.
+describe('the trusted browsers: nothing that could sign anyone in, in either drawing', () => {
+  it.each([
+    ['the table', false],
+    ['the cards', true],
+  ] as const)('draws no credential in %s, in any text or attribute', async (_name, narrow) => {
+    if (narrow) narrowRoom();
+    const view = open({
+      [LIST]: () =>
+        json(200, {
+          items: [
+            {
+              ...chrome,
+              token: 'SENTINEL-CREDENTIAL-VALUE',
+              token_hash: 'SENTINEL-HASH',
+              factor_id: 'SENTINEL-FACTOR',
+            },
+          ],
+        }),
+    });
+    await (narrow ? cards() : table());
+
+    expect(view.container.innerHTML).not.toContain('SENTINEL');
+  });
+});
+
 describe('the trusted browsers: removing one', () => {
   it('asks first, says what it means for another browser, and sends the one removal', async () => {
     const view = open({ [REMOVE(SECOND)]: () => new Response(null, { status: 204 }) });

@@ -325,7 +325,9 @@ async function answer(route: Route, state: StaffApi, call: Call): Promise<void> 
           candidate.full_name.toLowerCase().includes(q) ||
           candidate.work_email.toLowerCase().includes(q),
       )
-      .map(wire);
+      // A credential a real server never sends on this read either: the list, as a table or as cards, would show it if the screen could (the security review of run 5, Stage 5.1:
+      // only the profile read was planted, so a look for it on the list could not have failed).
+      .map((each) => ({ ...wire(each), password_hash: PLANTED }));
     return route.fulfill({
       status: 200,
       headers: JSON_HEADERS,

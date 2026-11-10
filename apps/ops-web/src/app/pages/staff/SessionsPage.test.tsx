@@ -223,6 +223,34 @@ describe('the sessions: what it shows', () => {
     expect(document.body.textContent).not.toContain('SECRET');
   });
 
+  // Break caught (the security review of run 5, Stage 5.1): a credential drawn in the cards, or in an attribute, which a check of the table's text cannot see. A token or its hash
+  // that the server sent anyway has no place in either drawing, in any text or any attribute of the page (the whole markup is read).
+  it.each([
+    ['the table', false],
+    ['the cards', true],
+  ] as const)(
+    'draws nothing of a session’s credential in %s, in any text or attribute',
+    async (_name, narrow) => {
+      if (narrow) narrowRoom();
+      open(KEYS.approver, {
+        [LIST]: () =>
+          json(200, {
+            items: [
+              {
+                ...first,
+                token_hash: 'SECRET-HASH',
+                token: 'SECRET',
+                password_hash: 'SECRET-PASSWORD-HASH',
+              },
+            ],
+          }),
+      });
+      await (narrow ? cards() : table());
+
+      expect(document.body.innerHTML).not.toContain('SECRET');
+    },
+  );
+
   it('marks the session the person is using', async () => {
     open(KEYS.approver, {
       [LIST]: () => json(200, { items: [sessionRecordFixture({ id: MY_SESSION }), second] }),
