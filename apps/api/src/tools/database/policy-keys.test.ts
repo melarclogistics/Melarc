@@ -7,6 +7,7 @@ import {
   policyKeysOfRun,
   scanPolicyKeys,
 } from './policy-keys.js';
+import { BUNDLE_IDS } from '../seed/bundles.js';
 import { MIGRATIONS_FOLDER } from './run-migrations.js';
 
 /**
@@ -123,13 +124,42 @@ describe('what a migration names (scanPolicyKeys)', () => {
     expect(fixed.unresolved[0]).toContain('change_fixed_policy');
   });
 
-  it('accepts a change of a bundle and of a fixed policy that the file has named first', () => {
+  // (Run 6, Stage 1.7: this was "accepts a change ... that the file has named first" with a row's fields (`b.id`, `b.audience`) for the keys, which is the very form that is
+  // refused now: a bundle another key of the file names is not necessarily the one a variable holds. The claim that is kept: a change of a bundle and of a fixed policy that the
+  // file has named is accepted, and the keys it names are the keys that are taken.)
+  it('accepts a change of a bundle and of a fixed policy whose keys are literals the file has named first', () => {
     const found = scanPolicyKeys([
       locks([BUNDLE_1], ['VENDOR']),
-      `DO $x$ BEGIN PERFORM melarc.change_role_bundle(b.id, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy(b.audience, false, 'release#b'); END $x$;`,
+      `DO $x$ BEGIN PERFORM melarc.change_role_bundle('${BUNDLE_1}', NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy('VENDOR', false, 'release#b'); END $x$;`,
     ]);
 
     expect(found.unresolved).toEqual([]);
+    expect(found.bundleIds).toEqual([BUNDLE_1]);
+    expect(found.fixedTypes).toEqual(['VENDOR']);
+  });
+
+  // The form of 0043 and 0057: a loop over the bundle table gives the change the key of whatever bundle the loop holds. It is accepted because the file names every bundle of the
+  // seed and both fixed policies first, so that whatever the variable holds was taken first; with one of them missing it is refused (the forms of the next describe).
+  it('accepts a change whose key is a variable when the file names every bundle of the seed and both fixed policies', () => {
+    const found = scanPolicyKeys([
+      locks(Object.values(BUNDLE_IDS), ['VENDOR', 'RIDER']),
+      `DO $x$ DECLARE s record; BEGIN FOR s IN SELECT b.id, b.audience FROM public.role_bundle AS b LOOP PERFORM melarc.change_role_bundle(s.id, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy(s.audience, false, 'release#b'); END LOOP; END $x$;`,
+    ]);
+
+    expect(found.unresolved).toEqual([]);
+    expect(found.bundleIds).toEqual(Object.values(BUNDLE_IDS));
+  });
+
+  // The form of 0075 and 0077: the bundle is a constant that the statement declares with a literal, and the change is given the constant. It is read as that literal, and
+  // that bundle is taken first even when the file names no other key.
+  it('reads a constant the statement declares with a literal as that literal', () => {
+    const found = scanPolicyKeys([
+      `DO $x$ DECLARE platform_admin constant uuid := '${BUNDLE_2}'; audience constant text := 'RIDER'; BEGIN PERFORM melarc.change_role_bundle(platform_admin, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy(audience, false, 'release#b'); END $x$;`,
+    ]);
+
+    expect(found.unresolved).toEqual([]);
+    expect(found.bundleIds).toEqual([BUNDLE_2]);
+    expect(found.fixedTypes).toEqual(['RIDER']);
   });
 
   // Break caught: a migration with nothing to do with policy keys made to name some.
@@ -262,6 +292,81 @@ describe('what the runner cannot place refuses the run, with the name of the fil
       [`DO $x$ BEGIN EXECUTE 'select melarc.lock_policy_keys(' || ids || ')'; END $x$;`],
       /lock_policy_keys is named in a string of a statement that EXECUTEs/,
     ],
+    // Run 6, Stage 1.7: four more forms that the reader accepted and resolved wrongly.
+    [
+      'a variable for the bundle of a change, though the file has named a bundle',
+      [
+        locks([BUNDLE_1]),
+        `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+      ],
+      /change_role_bundle\(some_id.*the bundle is a variable, and the file does not name every bundle of the seed/,
+    ],
+    [
+      'a row field for the fixed policy of a change, though the file has named a fixed policy',
+      [
+        locks([], ['VENDOR']),
+        `DO $x$ BEGIN PERFORM melarc.change_fixed_policy(b.audience, false, 'release#b'); END $x$;`,
+      ],
+      /change_fixed_policy\(b\.audience.*the fixed policy is a variable, and the file does not name both fixed policies/,
+    ],
+    [
+      'a variable that is given a literal but is not a constant',
+      [
+        `DO $x$ DECLARE b uuid := '${BUNDLE_1}'; BEGIN PERFORM melarc.change_role_bundle(b, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+      ],
+      /change_role_bundle\(b,.*the bundle is a variable/,
+    ],
+    [
+      'a wrapper function that takes the keys, defined in the file',
+      [
+        `CREATE FUNCTION public.take_keys() RETURNS void LANGUAGE sql AS $$ SELECT melarc.lock_policy_keys(ARRAY['${BUNDLE_1}']::uuid[], ARRAY[]::text[]) $$;`,
+      ],
+      /take_keys is defined here and its body names lock_policy_keys/,
+    ],
+    [
+      'a wrapper function that changes a bundle, defined in the file',
+      [
+        `CREATE OR REPLACE FUNCTION melarc.widen(b uuid) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RETURN melarc.change_role_bundle(b, NULL, '[]'::jsonb, 'release#a'); END $$;`,
+      ],
+      /widen is defined here and its body names change_role_bundle/,
+    ],
+    [
+      'a wrapper function whose body is a string',
+      [
+        `CREATE FUNCTION public.w() RETURNS void LANGUAGE sql AS 'select melarc.lock_policy_bundle(''${BUNDLE_1}'')';`,
+      ],
+      /w is defined here and its body names lock_policy_bundle/,
+    ],
+    [
+      'a name in a string that query_to_xml runs as SQL',
+      [`SELECT query_to_xml('select melarc.lock_policy_keys(' || ids || ')', false, false, '');`],
+      /lock_policy_keys is named in a string of a statement that runs it as SQL \(query_to_xml\)/,
+    ],
+    [
+      'a name in a string that ts_stat runs as SQL',
+      [`SELECT * FROM ts_stat('select melarc.lock_policy_bundle(x)');`],
+      /lock_policy_bundle is named in a string of a statement that runs it as SQL \(ts_stat\)/,
+    ],
+    [
+      'a name in a string that dblink_exec runs as SQL',
+      [`SELECT dblink_exec('dbname=x', 'select melarc.change_fixed_policy(a, b, c)');`],
+      /change_fixed_policy is named in a string of a statement that runs it as SQL \(dblink_exec\)/,
+    ],
+    [
+      'a Unicode-escaped identifier for the function',
+      [String.raw`SELECT melarc.U&"lock_policy_\006beys"(${LITERAL});`],
+      /Unicode-escaped identifier/,
+    ],
+    [
+      'a Unicode-escaped identifier for the schema',
+      [String.raw`SELECT U&"\006delarc".lock_policy_keys(${LITERAL});`],
+      /Unicode-escaped identifier/,
+    ],
+    [
+      'a Unicode-escaped string that is executed',
+      [String.raw`DO $x$ BEGIN EXECUTE U&'select melarc.lock_policy_\006beys(a)'; END $x$;`],
+      /Unicode-escaped string/,
+    ],
     [
       'a dollar quote that is never closed',
       [`DO $x$ BEGIN PERFORM ${VARIABLE.replace('some_ids', `ARRAY['${BUNDLE_1}']::uuid[]`)};`],
@@ -311,12 +416,22 @@ describe('what the runner cannot place refuses the run, with the name of the fil
       ],
     ],
     ['a drop if exists', [`DROP FUNCTION IF EXISTS melarc.lock_policy_keys(uuid[], text[]);`]],
+    // (Run 6, Stage 1.7: the body of this function used to name lock_policy_bundle, which is a wrapper and is refused now (the forms above). The claim that is kept: a function
+    // defined and the signature of one of the five granted in one chunk are two statements, and the grant is not a call.)
     [
       'a function defined and its signature granted in one chunk',
       [
-        `CREATE FUNCTION melarc.x() RETURNS void LANGUAGE sql AS $$ SELECT melarc.lock_policy_bundle(b) $$; REVOKE ALL ON FUNCTION melarc.lock_policy_bundle(uuid) FROM PUBLIC;`,
+        `CREATE FUNCTION melarc.x() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$; REVOKE ALL ON FUNCTION melarc.lock_policy_bundle(uuid) FROM PUBLIC;`,
       ],
     ],
+    [
+      'a definition of one of the five, which calls another of them',
+      [
+        `CREATE OR REPLACE FUNCTION "melarc"."change_role_bundle"(b uuid) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN PERFORM melarc.lock_policy_bundle(b); RETURN NULL; END $$;`,
+      ],
+    ],
+    ['a name in a string of a statement that runs nothing', [`SELECT 'lock_policy_keys';`]],
+    ['a US-ASCII look-alike of the escape', [`SELECT 'US&"x"', 'u&';`]],
     [
       'an unqualified signature',
       [`ALTER FUNCTION lock_policy_keys(uuid[], text[]) OWNER TO melarc_owner;`],

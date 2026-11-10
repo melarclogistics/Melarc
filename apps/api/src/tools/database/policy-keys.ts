@@ -19,9 +19,16 @@
  * Anything else (`unresolved`) is a mention the runner cannot place and the run is refused with the file's name: a key named by a variable or a query, a call with
  * no `melarc.` before it or with another schema, a quoted identifier (`"melarc"."lock_policy_keys"`), a name inside a string of a statement that `EXECUTE`s, a
  * string, a comment or a dollar quote that is never closed. A change of a bundle or of a fixed policy (`change_role_bundle`, `change_fixed_policy`) in a file that
- * has not named, by literal, a key of that kind to take first is refused as well, because the primitive would take its own key in the middle of the run. The runner
- * also checks, after each file, that the file took no key the run had not taken first.
+ * has not named, by literal, a key of that kind to take first is refused as well, because the primitive would take its own key in the middle of the run. **Run 6, Stage 1.7**
+ * closed four more: a change whose key is a variable (a constant that the statement declares with a literal, as 0075 and 0077 do, is read as that literal; any other variable
+ * takes the key of whatever it holds, which the text does not say, and is accepted only when the file names every bundle of the seed, or both fixed policies, as 0043 and 0057 do
+ * for their loop over the bundle table: a bundle that another key of the file names is not necessarily the one a variable holds); a routine defined in the file, other than the five themselves, whose body names
+ * one of the five (a wrapper makes its call when it is called, which the files do not show); a name in a string that a function other than `EXECUTE` runs as SQL
+ * (`query_to_xml`, `ts_stat`, `dblink_exec` and their kin); and a Unicode-escaped identifier (`U&"..."`), whose characters the text does not say. The runner also checks,
+ * after each file, that the file took no key the run had not taken first.
  */
+
+import { BUNDLE_IDS } from '../seed/bundles.js';
 
 export type FixedPolicyType = 'RIDER' | 'VENDOR';
 
@@ -62,13 +69,58 @@ const NAMES_A_ROUTINE = /\b(?:function|procedure)\s+(?:if\s+exists\s+)?$/i;
 /** A statement that defines a routine: its body runs when the routine is called, not when the migration is. */
 const DEFINES_A_ROUTINE = /^\s*create\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i;
 
+/** The name a routine is defined under, as written (schema-qualified or not, each part quoted or not). */
+const DEFINED_ROUTINE_NAME =
+  /^\s*create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+(?:if\s+not\s+exists\s+)?((?:"[^"]*"|[a-z_][a-z0-9_$]*)(?:\s*\.\s*(?:"[^"]*"|[a-z_][a-z0-9_$]*))*)/i;
+
+/**
+ * What runs a string as SQL: `EXECUTE` of a `DO` block or a function, and the functions that take a query as text (`query_to_xml` and its two kin, `cursor_to_xml`, `ts_stat`, the
+ * `dblink` family). A name inside a string of a statement that has one of these may be the call (run 6, Stage 1.7: the reader looked for `EXECUTE` alone).
+ */
+const RUNS_STRINGS =
+  /\b(execute|query_to_xml_and_xmlschema|query_to_xmlschema|query_to_xml|cursor_to_xml|ts_stat|dblink_send_query|dblink_exec|dblink)\b/i;
+
+/** A constant of a `DECLARE` section, with the literal it is given: `platform_admin constant uuid := '5eed...'`. A variable that is not a constant can be assigned again, and is never resolved. */
+const CONSTANT_DECLARATION =
+  /\b([a-z_][a-z0-9_]*)\s+constant\s+(?:pg_catalog\.)?(?:uuid|text|varchar)\s*(?::=|=|default)\s*'((?:[^']|'')*)'/gi;
+
+/** The name a routine is defined under, unquoted and in lower case (`CREATE FUNCTION melarc.change_role_bundle(...)` is `change_role_bundle`). */
+function definedRoutineOf(text: string): string | undefined {
+  const written = DEFINED_ROUTINE_NAME.exec(text)?.[1];
+  const last = written?.split('.').at(-1)?.trim();
+  return last === undefined ? undefined : last.replace(/^"|"$/g, '').toLowerCase();
+}
+
+/** The literal a constant of the text is given, when the text declares it once, or the same way each time; otherwise nothing. */
+function constantValue(text: string, name: string): string | undefined {
+  const values = new Set<string>();
+  for (const match of text.matchAll(CONSTANT_DECLARATION)) {
+    if ((match[1] ?? '').toLowerCase() === name.toLowerCase()) {
+      values.add((match[2] ?? '').replaceAll("''", "'"));
+    }
+  }
+  return values.size === 1 ? [...values][0] : undefined;
+}
+
 // ------------------------------------------------------------------------------------------------ the lexer
 
 type Piece =
   | { readonly kind: 'code'; readonly text: string }
   | { readonly kind: 'comment'; readonly text: string; readonly closed: boolean }
-  | { readonly kind: 'string'; readonly text: string; readonly closed: boolean }
-  | { readonly kind: 'identifier'; readonly text: string; readonly closed: boolean }
+  /** `unicode`: written `U&'...'`, whose backslash escapes name characters the text does not show (run 6, Stage 1.7). */
+  | {
+      readonly kind: 'string';
+      readonly text: string;
+      readonly closed: boolean;
+      readonly unicode?: boolean;
+    }
+  /** `unicode`: written `U&"..."`, a name whose characters may be escaped, so that the text does not say which name it is. */
+  | {
+      readonly kind: 'identifier';
+      readonly text: string;
+      readonly closed: boolean;
+      readonly unicode?: boolean;
+    }
   | {
       readonly kind: 'dollar';
       readonly tag: string;
@@ -77,6 +129,8 @@ type Piece =
     };
 
 const IDENTIFIER_CHARACTER = /[\p{L}\p{N}_$]/u;
+/** The code before a quote ends in `U&` that stands alone (it is not the end of a longer word): the quote opens a Unicode-escaped string or identifier. */
+const UNICODE_ESCAPE_PREFIX = /(?:^|[^\p{L}\p{N}_$])u&$/iu;
 const DOLLAR_OPEN = /\$([\p{L}_][\p{L}\p{N}_]*)?\$/uy;
 
 /** The index of the end of the line comment that starts at `start`: the newline is not part of it. */
@@ -159,14 +213,26 @@ function lexSql(sql: string): Piece[] {
       const escapes =
         (before === 'E' || before === 'e') &&
         (code.length === 1 || !IDENTIFIER_CHARACTER.test(code.at(-2) ?? ''));
+      const unicode = UNICODE_ESCAPE_PREFIX.test(code);
       flush();
       const { end, closed } = stringEnd(sql, index, escapes);
-      pieces.push({ kind: 'string', text: sql.slice(index, end), closed });
+      pieces.push({
+        kind: 'string',
+        text: sql.slice(index, end),
+        closed,
+        ...(unicode ? { unicode } : {}),
+      });
       index = end;
     } else if (character === '"') {
+      const unicode = UNICODE_ESCAPE_PREFIX.test(code);
       flush();
       const { end, closed } = identifierEnd(sql, index);
-      pieces.push({ kind: 'identifier', text: sql.slice(index, end), closed });
+      pieces.push({
+        kind: 'identifier',
+        text: sql.slice(index, end),
+        closed,
+        ...(unicode ? { unicode } : {}),
+      });
       index = end;
     } else if (character === '$' && !IDENTIFIER_CHARACTER.test(code.at(-1) ?? '')) {
       DOLLAR_OPEN.lastIndex = index;
@@ -206,6 +272,10 @@ interface Rendered {
   readonly identifiers: readonly string[];
   /** The strings, as they were written. */
   readonly strings: readonly string[];
+  /** The Unicode-escaped identifiers (`U&"..."`) as written: names the text does not say. */
+  readonly escapedIdentifiers: readonly string[];
+  /** The Unicode-escaped strings (`U&'...'`) as written. */
+  readonly escapedStrings: readonly string[];
   /** One line for each string, comment, identifier or dollar quote that is never closed. */
   readonly open: readonly string[];
 }
@@ -216,6 +286,8 @@ function render(pieces: readonly Piece[]): Rendered {
   let blank = '';
   const identifiers: string[] = [];
   const strings: string[] = [];
+  const escapedIdentifiers: string[] = [];
+  const escapedStrings: string[] = [];
   const open: string[] = [];
   for (const piece of pieces) {
     if (piece.kind === 'code') {
@@ -231,7 +303,11 @@ function render(pieces: readonly Piece[]): Rendered {
       blank += piece.text.replaceAll(/[^\n]/g, ' ');
       if (piece.kind === 'identifier') {
         identifiers.push(piece.text.slice(1, piece.closed ? -1 : undefined).replaceAll('""', '"'));
-      } else strings.push(piece.text);
+        if (piece.unicode === true) escapedIdentifiers.push(piece.text);
+      } else {
+        strings.push(piece.text);
+        if (piece.unicode === true) escapedStrings.push(piece.text);
+      }
       if (!piece.closed) {
         open.push(
           `${piece.kind === 'string' ? 'a string' : 'a quoted identifier'} that is never closed`,
@@ -245,11 +321,13 @@ function render(pieces: readonly Piece[]): Rendered {
       blank += delimiter + inner.blank + close;
       identifiers.push(...inner.identifiers);
       strings.push(...inner.strings);
+      escapedIdentifiers.push(...inner.escapedIdentifiers);
+      escapedStrings.push(...inner.escapedStrings);
       open.push(...inner.open);
       if (!piece.closed) open.push(`a dollar quote ${delimiter} that is never closed`);
     }
   }
-  return { text, blank, identifiers, strings, open };
+  return { text, blank, identifiers, strings, escapedIdentifiers, escapedStrings, open };
 }
 
 /** The text with its comments taken out, at every level (the body of a dollar quote is read again). A comment marker inside a string is part of the string. */
@@ -325,6 +403,11 @@ function literalsOf(text: string): { readonly strings: string[]; readonly rest: 
   return { strings, rest: plain };
 }
 
+const IDENTIFIER_WORD = /^[a-z_][a-z0-9_]*$/i;
+
+/** A piece of the text as a line of a refusal: whole when short, cut with an ellipsis when long. */
+const shortened = (text: string): string => (text.length > 40 ? `${text.slice(0, 37)}...` : text);
+
 function describe(name: string, args: string): string {
   const flat = args.replaceAll(/\s+/g, ' ').trim();
   return `melarc.${name}(${flat.length > 70 ? `${flat.slice(0, 67)}...` : flat})`;
@@ -340,6 +423,9 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
   const unresolved: string[] = [];
   let changesABundle: string | undefined;
   let changesAFixedPolicy: string | undefined;
+  /** The first change of a bundle, and of a fixed policy, whose key is a variable (not a literal, nor a constant declared with one): judged at the end of the file. */
+  let variableBundleChange: string | undefined;
+  let variableFixedChange: string | undefined;
 
   const addBundle = (id: string): void => {
     const canonical = id.toLowerCase();
@@ -357,9 +443,35 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
 
   for (const chunk of statements) {
     for (const statement of statementsOf(lexSql(chunk))) {
-      const { text, blank, identifiers, strings, open } = render(statement);
+      const { text, blank, identifiers, strings, escapedIdentifiers, escapedStrings, open } =
+        render(statement);
       for (const line of open) unresolved.push(`${line}, so the rest of the text cannot be read`);
-      if (DEFINES_A_ROUTINE.test(blank)) continue;
+      // A Unicode-escaped identifier (`U&"..."`) names its characters by escape, so the text does not say which name it is: it may be the schema or one of the five (run 6, Stage 1.7).
+      for (const written of escapedIdentifiers) {
+        unresolved.push(
+          `${shortened(written)} is a Unicode-escaped identifier (U&"..."), a name the runner does not read`,
+        );
+      }
+      if (DEFINES_A_ROUTINE.test(blank)) {
+        const defined = definedRoutineOf(text);
+        // The five's own definitions (0017 makes them, 0078 and 0079 replace two) call each other and run nothing now.
+        if (defined !== undefined && (FUNCTIONS as readonly string[]).includes(defined)) continue;
+        // Any other routine whose body names one of the five is a wrapper: the call is made when it is called, which the runner cannot see from the files (run 6, Stage 1.7).
+        const named = [
+          ...new Set(
+            [
+              ...blank.matchAll(MENTION),
+              ...strings.flatMap((string) => [...string.matchAll(MENTION)]),
+            ].map((mention) => (mention[1] ?? '').toLowerCase()),
+          ),
+        ];
+        if (named.length > 0) {
+          unresolved.push(
+            `${defined ?? 'a routine'} is defined here and its body names ${named.join(', ')}: the runner reads calls, not a routine that makes one when it is called later`,
+          );
+        }
+        continue;
+      }
 
       /** Where, in the blanked code, a mention of the five has been placed. */
       const placed = new Set<number>();
@@ -396,12 +508,22 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
           else unresolved.push(describe(name, args));
         } else if (name === 'change_role_bundle') {
           changesABundle ??= describe(name, args);
-          const item = literal(firstArgument(args));
+          // The key the primitive takes is the bundle it is given: a literal, or a constant the statement declares with one (0075 and 0077 write `platform_admin constant uuid := '...'`).
+          // A variable that is not a constant, a field, a query: the runner cannot say which bundle it is, and a bundle that another key of the file names is not that one (run 6, Stage 1.7).
+          const first = firstArgument(args).trim();
+          const item =
+            literal(first) ??
+            (IDENTIFIER_WORD.test(first) ? constantValue(text, first) : undefined);
           if (item !== undefined && UUID.test(item)) addBundle(item);
+          else variableBundleChange ??= describe(name, args);
         } else {
           changesAFixedPolicy ??= describe(name, args);
-          const item = literal(firstArgument(args));
+          const first = firstArgument(args).trim();
+          const item =
+            literal(first) ??
+            (IDENTIFIER_WORD.test(first) ? constantValue(text, first) : undefined);
           if (item !== undefined && FIXED_TYPES.includes(item)) addFixed(item);
+          else variableFixedChange ??= describe(name, args);
         }
       }
 
@@ -425,26 +547,57 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
           );
         }
       }
-      // A name inside a string is text, unless the statement executes strings (`EXECUTE format(...)`): then it may be the call.
-      if (/\bexecute\b/i.test(blank)) {
+      // A name inside a string is text, unless the statement runs strings as SQL (`EXECUTE format(...)`, `query_to_xml('...')`, `ts_stat('...')`, `dblink_exec`...): then it may be the
+      // call, and a string whose characters are escaped (`U&'...'`) is not read at all.
+      const runner = RUNS_STRINGS.exec(blank)?.[1];
+      if (runner !== undefined) {
+        const how =
+          runner.toLowerCase() === 'execute'
+            ? 'a statement that EXECUTEs'
+            : `a statement that runs it as SQL (${runner.toLowerCase()})`;
         for (const string of strings) {
           for (const mention of string.matchAll(MENTION)) {
-            unresolved.push(
-              `${(mention[1] ?? '').toLowerCase()} is named in a string of a statement that EXECUTEs`,
-            );
+            unresolved.push(`${(mention[1] ?? '').toLowerCase()} is named in a string of ${how}`);
           }
+        }
+        for (const written of escapedStrings) {
+          unresolved.push(
+            `${shortened(written)} is a Unicode-escaped string (U&'...') in ${how}: its text is not read`,
+          );
         }
       }
     }
   }
 
+  // A change whose key is a variable (a loop over the bundle table, as 0043 and 0057 write) takes the key of whatever bundle or fixed policy the variable holds, which the text
+  // does not say: it is read as safe only when the file has named every one there is (the six bundles of the seed, both fixed policies), so that whatever it holds was taken first.
+  // Any other variable is the case that was accepted when the file had named some other key (run 6, Stage 1.7).
+  let refusedAChange = false;
+  if (variableBundleChange !== undefined) {
+    const missing = Object.values(BUNDLE_IDS).filter((id) => !bundleIds.includes(id));
+    if (missing.length > 0) {
+      refusedAChange = true;
+      unresolved.push(
+        `${variableBundleChange}: the bundle is a variable, and the file does not name every bundle of the seed by literal (${String(missing.length)} of ${String(Object.keys(BUNDLE_IDS).length)} are missing), so the runner cannot say that the keys it takes first are all the keys the variable can hold`,
+      );
+    }
+  }
+  if (variableFixedChange !== undefined) {
+    const missing = FIXED_TYPES.filter((type) => !fixedTypes.includes(type as FixedPolicyType));
+    if (missing.length > 0) {
+      refusedAChange = true;
+      unresolved.push(
+        `${variableFixedChange}: the fixed policy is a variable, and the file does not name both fixed policies by literal (${missing.join(' and ')} missing), so the runner cannot say that the keys it takes first are all the keys the variable can hold`,
+      );
+    }
+  }
   // The primitive takes its own key, in the middle of the run, unless the file named one of that kind to be taken first.
-  if (changesABundle !== undefined && bundleIds.length === 0) {
+  if (!refusedAChange && changesABundle !== undefined && bundleIds.length === 0) {
     unresolved.push(
       `${changesABundle}: no bundle is named by literal in a lock_policy_keys call of the file`,
     );
   }
-  if (changesAFixedPolicy !== undefined && fixedTypes.length === 0) {
+  if (!refusedAChange && changesAFixedPolicy !== undefined && fixedTypes.length === 0) {
     unresolved.push(
       `${changesAFixedPolicy}: no fixed policy is named by literal in a lock_policy_keys call of the file`,
     );
