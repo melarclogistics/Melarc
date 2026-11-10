@@ -822,7 +822,7 @@ describeInterfaceStates('the manifest builder', {
       await typeDate(user, '04112026');
       await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
       expect(await screen.findByText('Already on a pickup run.')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Refresh the pool' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
     },
   },
   success: {
@@ -932,5 +932,51 @@ describe('the builder: leaving', () => {
 
     expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
     expect(router.state.location.pathname).toBe('/');
+  });
+});
+
+describe('the pool: when it was read, the way to read it again, and a page that holds nothing (the Product Owner, 10 November 2026)', () => {
+  const pools = () =>
+    api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-requests');
+
+  // Break caught: a pool that says "Last checked 09:42." with a button of its own words ("Refresh the pool"), where every list says "Updated 09:42 · Refresh": two screens, two ways of saying how
+  // current they are. The pool draws the page header's own line, and reads the pool again when asked.
+  it('says when the pool was updated, with the way to refresh it, in the words of every list, and reads it again when asked', async () => {
+    const { user } = open();
+    await poolTable();
+
+    expect(await screen.findByText(/^Updated /)).toBeVisible();
+    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh the pool' })).toBeNull();
+    const before = pools().length;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(pools()).toHaveLength(before + 1);
+    });
+    await poolTable();
+  });
+
+  // Break caught: a page past the end of the pool told as the pool's own nothing ("The pool is empty", as if no pickup were waiting anywhere), or in words that are not the queue template's, or with
+  // no way back to the first page.
+  it('tells a page after the first that holds nothing as that, and goes back to the first page', async () => {
+    const { user } = open({
+      [POOL]: (request) =>
+        new URL(request.url).searchParams.has('page_token') ? page([]) : page([one], 'second'),
+    });
+    await poolTable();
+
+    await user.click(await screen.findByRole('button', { name: /Next page/ }));
+
+    expect(await screen.findByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    expect(
+      screen.getByText('Page 2 has no requests now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'The pool is empty' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+
+    expect(await box('ACC-PR-7KQ2MZ')).toBeVisible();
+    expect(pools().at(-1)?.url.includes('page_token')).toBe(false);
   });
 });

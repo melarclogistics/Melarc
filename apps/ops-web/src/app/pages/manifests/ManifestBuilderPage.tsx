@@ -29,6 +29,7 @@ import {
   BuilderRunList,
   type BuilderRunItem,
 } from '../../../components/ui/templates/Builder';
+import { FreshnessLine } from '../../../components/ui/page-header/PageHeader';
 import { QueuePager } from '../../../components/ui/templates/QueuePager';
 import { useApiClient } from '../../../platform/api/api-client';
 import type { Violation } from '../../../platform/api/api-response';
@@ -672,22 +673,16 @@ export function ManifestBuilderPage() {
                     </>
                   ),
                   toolbar: (
-                    <div className="manifest-freshness manifest-freshness--bare">
-                      <p className="manifest-freshness__text">
-                        {updatedAt === undefined ? '' : `Last checked ${updatedAt}.`}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        loading={pool.isFetching}
-                        disabled={locked}
-                        onClick={() => {
-                          void pool.refetch({ cancelRefetch: false });
-                        }}
-                      >
-                        Refresh the pool
-                      </Button>
-                    </div>
+                    <FreshnessLine
+                      freshness={{
+                        state: pool.isFetching ? 'refreshing' : pool.isError ? 'failed' : 'idle',
+                        ...(updatedAt === undefined ? {} : { updatedAt }),
+                        // While the pickup run is being made the pool is left as it is: a press is ignored, as one is while a read is under way.
+                        onRefresh: () => {
+                          if (!locked) void pool.refetch({ cancelRefetch: false });
+                        },
+                      }}
+                    />
                   ),
                   children: (
                     <DataTable<PickupRequestView>
