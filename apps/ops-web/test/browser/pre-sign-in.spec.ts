@@ -516,15 +516,21 @@ test.describe('the split screen', () => {
       page.getByRole('banner').getByRole('img', { name: 'Melarc Logistics' }),
     ).toBeVisible();
 
-    // The photograph is a real picture: loaded, cropped to its place and not stretched, and it says nothing a screen reader would read.
-    const photograph = await art
-      .locator('.ui-auth-art__picture img')
-      .evaluate((image: HTMLImageElement) => ({
-        loaded: image.complete && image.naturalWidth > 0,
-        fit: getComputedStyle(image).objectFit,
-        alt: image.alt,
-        src: image.currentSrc,
-      }));
+    // The photograph is a real picture: loaded, cropped to its place and not stretched, and it says nothing a screen reader would read. It is read once it has loaded: it is
+    // a third of a megabyte, and a page that is drawn is not a picture that has arrived (a slow machine read `loaded: false` in the review of f6cf02b). A picture that never
+    // loads still fails the test, at the end of the wait.
+    const picture = art.locator('.ui-auth-art__picture img');
+    await expect
+      .poll(() =>
+        picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0),
+      )
+      .toBe(true);
+    const photograph = await picture.evaluate((image: HTMLImageElement) => ({
+      loaded: image.complete && image.naturalWidth > 0,
+      fit: getComputedStyle(image).objectFit,
+      alt: image.alt,
+      src: image.currentSrc,
+    }));
     expect(photograph).toMatchObject({ loaded: true, fit: 'cover', alt: '' });
     expect(photograph.src).toMatch(/auth-art-\d/);
     // Nothing in it can be operated or reached.
