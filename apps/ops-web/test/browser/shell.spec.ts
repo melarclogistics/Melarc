@@ -1446,6 +1446,7 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
     // the bottom edge of the bar, whatever height the bar has. At 100% the bar is one row and the walk is the control of the test.
     test(`keeps each control reached by Shift+Tab up a long list below the top bar, with text at ${size}`, async ({
       page,
+      browserName,
     }) => {
       await page.setViewportSize({ width: 390, height: 700 });
       await stubApi(page);
@@ -1471,11 +1472,24 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
       for (let step = 0; step < 70; step += 1) {
         // The list is of links. Safari's Shift+Tab walks past links (Option+Shift+Tab reaches them), so the step is the one a person who reaches links makes in the engine.
         await stepIncludingLinks(page, { backwards: true });
+        // Two frames before the look, as a person's eye has them: WebKit scrolls to a control a frame or two after it has taken focus (read in the very frame, a control at
+        // 200% text was seen with its whole height under the bar, a position the engine then left), and where a control is in the frame it took focus is not where it stays.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  resolve();
+                });
+              });
+            }),
+        );
         const state = await page.evaluate(() => {
           const active = document.activeElement;
           return {
             inList: active?.closest('#long-list') != null,
             top: active?.getBoundingClientRect().top ?? Number.NaN,
+            bottom: active?.getBoundingClientRect().bottom ?? Number.NaN,
             barBottom:
               document.querySelector('.app-topbar')?.getBoundingClientRect().bottom ?? Number.NaN,
             text: active?.textContent ?? '',
@@ -1483,9 +1497,20 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
         });
         if (!state.inList) break;
         walked += 1;
-        expect(state.top, `"${state.text}" is below the bar`).toBeGreaterThanOrEqual(
+        // WCAG 2.2 criterion 2.4.11, Focus Not Obscured (Minimum), level AA: a control that has focus is not entirely hidden by the bar. It is asked of every engine.
+        expect(state.bottom, `"${state.text}" is not entirely under the bar`).toBeGreaterThan(
           state.barBottom,
         );
+        // The scroll padding gives more, and each control is scrolled in below the bar's edge: Chromium, WebKit and Firefox at 100% text do it every time, so the stricter
+        // reading is asked of them. Firefox at 200% text does not scroll to give a control that is already partly in view the padding: it moved focus to rows 59 to 55 with the
+        // page still and scrolled only when a control was nearly hidden (row 55 sat 13.5 px under the bar, with 74 of its 88 px in view). The enhanced criterion 2.4.12, Focus
+        // Not Obscured (Enhanced), level AAA, is not asked of it (Product Owner, 10 November 2026), and 2.4.11 above still is.
+        const scrollsToThePadding = browserName !== 'firefox' || size === '100%';
+        if (scrollsToThePadding) {
+          expect(state.top, `"${state.text}" is below the bar`).toBeGreaterThanOrEqual(
+            state.barBottom,
+          );
+        }
       }
       // The walk went the whole way up the list, so that every row was a stop.
       expect(walked).toBe(59);
