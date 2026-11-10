@@ -1,5 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { act, screen, waitFor, within } from '@testing-library/react';
+import { use } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSessionStore } from '../../../platform/session/session-context';
@@ -51,9 +52,16 @@ function Probe() {
   return <h1 tabIndex={-1}>Probe</h1>;
 }
 
+/** A page that is not drawn for a while (an engine under load, a chunk on its way): the page the person left stays on the screen until it is. */
+function NotYet(): null {
+  use(new Promise<never>(() => undefined));
+  return null;
+}
+
 const routes = [
   { path: 'probe', element: <Probe /> },
   { path: 'elsewhere', element: <h1 tabIndex={-1}>Elsewhere</h1> },
+  { path: 'not-yet', element: <NotYet /> },
 ];
 
 /** What follows the focus in the test that is running (`followFocus`), taken off when it ends. */
@@ -421,6 +429,22 @@ describe('the first binding: when the code is gone', () => {
     });
     await screen.findByRole('heading', { level: 1, name: 'Register a first device' });
 
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
+  });
+
+  // Break caught (found in WebKit on 9 November 2026, riders.spec.ts "is gone on navigation, and does not return with the back button"): the code let go of only when the page it was on is
+  // replaced. The page a navigation leads to may take a while to be drawn; until it is, the page the person left is still on the screen with the code on it, and a Back in that time shows it
+  // again. The code is let go of the moment the router moves.
+  it('is gone the moment the router moves, before the next page has been drawn', async () => {
+    const { router } = await shown();
+
+    await act(async () => {
+      void router.navigate('/not-yet');
+      await Promise.resolve();
+    });
+
+    expect(router.state.location.pathname).toBe('/not-yet');
     expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
     expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
   });

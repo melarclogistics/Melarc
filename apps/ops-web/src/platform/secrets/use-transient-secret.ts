@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { useLocation, type Location } from 'react-router';
+import { UNSAFE_DataRouterContext, useLocation, type Location } from 'react-router';
 
 import { useSessionStore } from '../session/session-context';
 
@@ -37,6 +37,14 @@ export type TransientScope = (location: Location) => string;
 
 export interface TransientSecretOptions {
   readonly scope?: TransientScope;
+  /**
+   * Let go of the secret **as soon as the router moves** out of the scope it was held in, and not only when the page that held it is replaced or removed (default: not). The page a
+   * navigation leads to may take a while to be drawn (a slow machine, an engine under load, a chunk on its way); until it is, the page the person left is still on the screen with its secret on
+   * it, and a Back in that time would show it again (the run of the browser tests in WebKit on 9 November 2026: the enrolment code came back after the Back button). A screen whose secret must
+   * never be drawn twice asks for it (the enrolment code does). It is not the default because a screen that sends the person away when its secret is gone (the sign-in's second step sends them
+   * back to the first when its challenge is gone) would then do so over the navigation the person made, while it is still mounted.
+   */
+  readonly releaseWhenRouterMoves?: boolean;
 }
 
 export interface TransientSecret<T> {
@@ -195,6 +203,26 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
   // Its cleanup runs when the scope is a new one (navigation within the component) and when the component is removed,
   // so it is also what stops the timer of a component that has gone and calls off the flow of one.
   useEffect(() => clear, [scopeKey, clear]);
+
+  // For a screen that asked for it (`releaseWhenRouterMoves`): the secret is also let go of when the router's location leaves the scope it was held in, **before** the next page is drawn, so
+  // that the page the person left, while it is still on the screen, holds nothing a Back could show again. Where there is no data router (a test, the showcase) the effect above is all there is.
+  const dataRouter = useContext(UNSAFE_DataRouterContext)?.router;
+  const scopeOf = useRef(options.scope);
+  useEffect(() => {
+    scopeOf.current = options.scope;
+  });
+  const releaseWhenRouterMoves = options.releaseWhenRouterMoves === true;
+  useEffect(() => {
+    if (dataRouter === undefined || !releaseWhenRouterMoves) return;
+    const scopeAt = (at: Location): string => scopeOf.current?.(at) ?? at.key;
+    let seen = scopeAt(dataRouter.state.location);
+    return dataRouter.subscribe((state) => {
+      const next = scopeAt(state.location);
+      if (next === seen) return;
+      seen = next;
+      clear();
+    });
+  }, [dataRouter, releaseWhenRouterMoves, clear]);
 
   // The page is going into the back-forward cache, or away: take the secret off the screen now, in this task.
   useEffect(() => {

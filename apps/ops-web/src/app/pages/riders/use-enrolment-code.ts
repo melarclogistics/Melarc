@@ -65,7 +65,8 @@ export interface EnrolmentCode<Command extends object> {
 export function useEnrolmentCode<Command extends object>(
   options: EnrolmentCodeOptions<Command>,
 ): EnrolmentCode<Command> {
-  const secret = useTransientSecret<EnrolmentGrantView>();
+  // The code is let go of the moment the router moves, and not when the page it was on is replaced: a Back in the time the next page takes to be drawn must not show it again.
+  const secret = useTransientSecret<EnrolmentGrantView>({ releaseWhenRouterMoves: true });
   const [withdrawn, setWithdrawn] = useState(false);
   const command = useConfirmedCommand<
     Command,
