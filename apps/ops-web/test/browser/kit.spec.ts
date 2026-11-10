@@ -595,27 +595,34 @@ test.describe('DataTable in a browser', () => {
     });
   }
 
-  // Break caught: a row action visible on every row at once (noise), or hidden from a keyboard that reaches it.
-  test('shows the inline act on hover, on focus and when the row is chosen, and not otherwise', async ({
+  // Break caught (the Product Owner, 10 November 2026): a row act that waits for the pointer (invisible until the row is hovered or has focus), so that a person on a keyboard, on a screen
+  // with no hover or whose pointer has not reached the row does not see that the row has one. It is drawn at rest, at the desk's width, on every row that has one.
+  test('draws the inline act at rest on every row that has one, with no pointer over the table', async ({
     page,
   }) => {
-    await openKit(page, 'data');
+    await openKit(page, 'data', { width: 1280, height: 900 });
     const two = specimen(page, 'Two lines (a code over a name)');
     const rows = two.getByRole('table').locator('tbody tr');
-    const action = (row: Locator) => row.getByRole('button', { name: /^Confirm ACC-PR/ });
-    const opacity = (locator: Locator) =>
-      locator.evaluate((element) => getComputedStyle(element).opacity);
+    const acts = two.getByRole('button', { name: /^Confirm ACC-PR/ });
 
     // The first row is waiting for confirmation; the second is confirmed already, so it has no act.
-    const waiting = rows.first();
-    await expect(action(rows.nth(1))).toHaveCount(0);
+    await expect(acts.first()).toBeVisible();
+    await expect(rows.nth(1).getByRole('button', { name: /^Confirm ACC-PR/ })).toHaveCount(0);
     await page.mouse.move(0, 0);
-    expect(await opacity(action(waiting))).toBe('0');
-    await waiting.hover();
-    await expect.poll(() => opacity(action(waiting))).toBe('1');
-    await page.mouse.move(0, 0);
-    await waiting.getByRole('button', { name: /^Open/ }).focus();
-    await expect.poll(() => opacity(action(waiting))).toBe('1');
+    const drawn = await acts.evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const style = getComputedStyle(button);
+        const reach = button.getBoundingClientRect();
+        return {
+          opacity: style.opacity,
+          visibility: style.visibility,
+          hasBox: reach.width > 0 && reach.height > 0,
+        };
+      }),
+    );
+    expect(drawn.length).toBeGreaterThan(0);
+    for (const one of drawn)
+      expect(one).toEqual({ opacity: '1', visibility: 'visible', hasBox: true });
   });
 
   // Break caught: a header that scrolls away with the rows, or one that sticks to the page and not to its own box.

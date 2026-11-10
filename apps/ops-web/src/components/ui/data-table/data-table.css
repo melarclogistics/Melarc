@@ -216,27 +216,13 @@
   cursor: pointer;
 }
 
+/*
+ * The usual next act of a row (the approver's Approve, the queue's Confirm) is drawn at rest, on every row that has one and on every device (the Product Owner, 10 November 2026): an act that
+ * waits for the pointer is not found by a person on a touch screen, by a keyboard, or by a pointer that has not reached the row. It is the page's secondary button and has no style of its own.
+ */
 .ui-data-table__actions {
   text-align: end;
   white-space: nowrap;
-}
-
-/* The usual next act: shown when the row is hovered, a control in it has focus or the row is chosen, and always where there is no hover to show it. It stays in the page and in the keyboard order. */
-.ui-data-table__action {
-  opacity: 0;
-  transition: opacity var(--motion-fast);
-}
-
-.ui-data-table__row:hover .ui-data-table__action,
-.ui-data-table__row:focus-within .ui-data-table__action,
-.ui-data-table__row[data-state='selected'] .ui-data-table__action {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .ui-data-table__action {
-    opacity: 1;
-  }
 }
 
 /* The code over a name: the code in the monospaced face (its own rule), the name quieter below it. */
@@ -481,12 +467,11 @@
   white-space: normal;
 }
 
-/* A card has no hover to show the act: it is always there, above the stretched button like the other controls. */
+/* In a card the act is above the stretched button like the other controls. */
 .ui-data-table__card .ui-data-table__action {
   position: relative;
   z-index: 1;
   align-self: flex-start;
-  opacity: 1;
 }
 
 .ui-data-table__footer {
