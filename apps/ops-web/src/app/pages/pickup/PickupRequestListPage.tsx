@@ -2,11 +2,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
-import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { QueuePager } from '../../../components/ui/templates/QueuePager';
@@ -384,29 +382,13 @@ export function PickupRequestListPage() {
     return { status: 'ready', rows };
   })();
 
-  // A page after the first can hold nothing without the queue being empty (requests move between reads): it says so, and does not go looking
-  // through the earlier pages on its own.
-  const pastTheEnd =
-    paging.page > 1 ? (
-      <EmptyStateV2
-        variant="filtered-empty"
-        title="No requests on this page"
-        headingLevel={3}
-        announce
-        action={
-          <Button type="button" variant="secondary" onClick={firstPage}>
-            Back to first page
-          </Button>
-        }
-      >
-        {`Page ${String(paging.page)} has no requests now. Earlier pages may still have some.`}
-      </EmptyStateV2>
-    ) : undefined;
-
   const emptiness = {
     noun: 'pickup requests',
     none: 'Requests booked at your hubs appear here, from WhatsApp, a walk-in sender or a vendor’s own booking.',
     announce: interacted,
+    // A page after the first can hold nothing without the queue being empty (requests move between reads): the template says so, as every list does, and does not go looking through the
+    // earlier pages on its own.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
   const empty: QueueEmptiness = filtering
@@ -504,7 +486,6 @@ export function PickupRequestListPage() {
           }
           result={result}
           empty={empty}
-          {...(pastTheEnd === undefined ? {} : { emptyState: pastTheEnd })}
           table={{
             label: 'Pickup requests',
             columns: QUEUE_COLUMNS,

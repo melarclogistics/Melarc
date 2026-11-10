@@ -1449,7 +1449,9 @@ test.describe('the queue: coming back from a request', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No pickup requests on this page' }),
+    ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No pickup requests yet' })).toHaveCount(0);
     expect(listReads(api)).toHaveLength(reads + 1);
 

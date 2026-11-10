@@ -317,7 +317,7 @@ describe('the queue, coming back from a request: focus and position', () => {
     [
       'nothing',
       () => page([]),
-      () => screen.findByRole('heading', { name: 'No requests on this page' }),
+      () => screen.findByRole('heading', { name: 'No pickup requests on this page' }),
     ],
   ])(
     'gives focus to the message when the page the officer comes back to comes back with %s',
@@ -541,7 +541,13 @@ describe('the queue: a later page that holds nothing', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup requests on this page' }),
+    ).toBeVisible();
+    // The words every list says it in (the queue template's): the page, what is not there, and the way back.
+    expect(
+      screen.getByText('Page 2 has no pickup requests now. Earlier pages may still have some.'),
+    ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'No pickup requests yet' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'No pickup requests match' })).toBeNull();
@@ -560,7 +566,7 @@ describe('the queue: a later page that holds nothing', () => {
     const table = await queueTable();
     expect(queryOf().has('page_token')).toBe(false);
     expect(within(table).getByRole('button', { name: openButton('ACC-PR-7KQ2MZ') })).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No requests on this page' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'No pickup requests on this page' })).toBeNull();
     await waitFor(() => {
       expect(table.closest('.ui-data-table__scroller')).toHaveFocus();
     });
@@ -572,7 +578,7 @@ describe('the queue: a later page that holds nothing', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    const message = await screen.findByRole('heading', { name: 'No requests on this page' });
+    const message = await screen.findByRole('heading', { name: 'No pickup requests on this page' });
     await waitFor(() => {
       expect(message.closest('.ui-data-table__scroller')).toHaveFocus();
     });
@@ -602,7 +608,7 @@ describe('the queue: a later page that holds nothing', () => {
     const view = open(emptyLater);
     await queueTable();
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
-    await screen.findByRole('heading', { name: 'No requests on this page' });
+    await screen.findByRole('heading', { name: 'No pickup requests on this page' });
 
     act(() => {
       filterButton().focus();
@@ -621,7 +627,9 @@ describe('the queue: a later page that holds nothing', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup requests on this page' }),
+    ).toBeVisible();
     expect(view.router.state.location.search).toBe('?state=PENDING&date=2026-11-03');
     expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
   });
@@ -637,7 +645,9 @@ describe('the queue: a later page that holds nothing', () => {
 
     await goBack(view);
 
-    expect(await screen.findByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup requests on this page' }),
+    ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
   });
 
