@@ -90,19 +90,6 @@
   color: var(--color-text-secondary);
 }
 
-/* Two facts in one cell of a queue (a name over an address, a person over a time), each on its own line. */
-.pickup-lines {
-  display: grid;
-  gap: var(--space-1);
-}
-
-/* A second line under the first, quieter: the sender under the code, the hub under the address, the booking type under the packages. */
-.pickup-support {
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
-}
-
 /*
  * The dash of a request that needs nothing, and its hidden words (the same device as the message log's, messages-page.css): the words are
  * positioned against their own dash, so that a table scrolled sideways takes them with it. The refresh's announcement uses the same hidden
@@ -121,51 +108,6 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-/* A request as a card (the queue's narrow drawing): the code with its state, the sender, then the facts. */
-.pickup-card__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-}
-
-.pickup-card__sender {
-  margin: var(--space-1) 0 0;
-}
-
-.pickup-card__facts {
-  margin: var(--space-4) 0 0;
-}
-
-/* A term beside its value where there is room for both, and over it where there is not: no width of the screen is assumed. */
-.pickup-card__fact {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-}
-
-.pickup-card__fact + .pickup-card__fact {
-  margin-top: var(--space-3);
-}
-
-.pickup-card__fact dt {
-  /*
-   * The longest term ("Packages / booking type") fits the basis on one line, and a term that has a line to itself grows to fill it, so that
-   * it never wraps where there is room. Beside a value it keeps the basis, because the value grows a hundred times as fast.
-   */
-  flex: 1 0 11rem;
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
-}
-
-.pickup-card__fact dd {
-  flex: 100 1 12rem;
-  min-width: 0;
-  margin: 0;
 }
 
 /* The booked request that replaces the form. */
