@@ -249,7 +249,52 @@ describe('QueueWorkspace', () => {
     expect(screen.getByText(/No pickup requests at Tema fit these filters/)).toBeVisible();
   });
 
-  // Break caught: a page that has to replace the template's states for a case of its own (an empty page after the first) and cannot.
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "No pickup requests yet" (as if nothing existed anywhere), or as each list had its own
+  // words for it, or with no way back to the first page; and a first page told as a later one.
+  it('tells an empty page after the first as that, in the same words for every list, whatever the filters and the hub are', async () => {
+    const user = userEvent.setup();
+    const onFirstPage = vi.fn();
+    const empty = { status: 'ready', rows: [] } as const;
+    const { rerender } = renderQueue({
+      result: empty,
+      empty: {
+        noun: 'staff profiles',
+        none: 'x',
+        filtered: true,
+        onClearFilters: () => undefined,
+        clearLabel: 'Show everyone',
+        filteredText: 'Nothing fits this view and search.',
+        hub: { name: 'Tema', onShowAllHubs: () => undefined },
+        laterPage: { page: 3, onFirstPage },
+      },
+    });
+
+    expect(screen.getByRole('heading', { name: 'No staff profiles on this page' })).toBeVisible();
+    expect(
+      screen.getByText('Page 3 has no staff profiles now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    // Neither the hub's way out nor the filters' is offered for a page that is only past the end.
+    expect(screen.queryByRole('button', { name: 'Show all hubs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show everyone' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+    expect(onFirstPage).toHaveBeenCalledTimes(1);
+
+    // The first page that holds nothing is the queue's own nothing, never "on this page".
+    rerender(
+      <MemoryRouter>
+        <QueueWorkspace<Row>
+          {...props({
+            result: empty,
+            empty: { noun: 'staff profiles', none: 'x', laterPage: { page: 1, onFirstPage } },
+          })}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('heading', { name: 'No staff profiles yet' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
+  });
+
+  // Break caught: a page that has to replace the template's states for a case of its own (the approver's queue worked down to nothing) and cannot.
   it('draws the page’s own state in place of the three kinds of nothing', () => {
     renderQueue({
       result: { status: 'ready', rows: [] },

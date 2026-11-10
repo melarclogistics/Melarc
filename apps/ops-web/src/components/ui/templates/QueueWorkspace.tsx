@@ -57,6 +57,12 @@ interface EmptinessBase {
    * nothing existed anywhere. The hub is the server's reading (`hub_id`) and the page's to pass; the template only words the state.
    */
   readonly hub?: { readonly name: string; readonly onShowAllHubs: () => void };
+  /**
+   * Set by a paged queue, with the page it shows (counted from 1) and the way back. A page after the first can hold nothing without the queue being empty (rows move between reads), so
+   * it says **"No <noun> on this page"** with *Back to first page*, whatever the filters and the hub are, and never "No <noun> yet" as if nothing existed anywhere: every list says it
+   * in the same words (the Product Owner, 10 November 2026). It does not go looking through the earlier pages on its own.
+   */
+  readonly laterPage?: { readonly page: number; readonly onFirstPage: () => void };
 }
 
 /** What an empty answer is, so that the template can tell nothing yet from nothing that fits. */
@@ -100,7 +106,7 @@ export interface QueueWorkspaceProps<Item> {
   readonly notice?: ReactNode;
   readonly result: QueueResult<Item>;
   readonly empty: QueueEmptiness;
-  /** A whole state of the page's own that replaces the three kinds of nothing (an empty page after the first of a paged queue). */
+  /** A whole state of the page's own that replaces the kinds of nothing (the approver's queue worked down to nothing, told as the good news it is). */
   readonly emptyState?: ReactNode;
   readonly table: QueueTableConfig<Item>;
   /** The record that is open beside the queue. The queue, its filters, its scroll and its chosen rows stay as they were: the panel is drawn beside the table and not instead of it. */
@@ -109,7 +115,24 @@ export interface QueueWorkspaceProps<Item> {
 
 /** The nothing of an answer that has no rows, in one of its three kinds (COMPONENT_PATTERNS, *EmptyState v2*): the page's `emptyState` takes its place. */
 function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
-  const { noun, none, announce = false, hub } = empty;
+  const { noun, none, announce = false, hub, laterPage } = empty;
+  if (laterPage !== undefined && laterPage.page > 1) {
+    return (
+      <EmptyStateV2
+        variant="filtered-empty"
+        title={`No ${noun} on this page`}
+        headingLevel={3}
+        announce
+        action={
+          <Button type="button" variant="secondary" onClick={laterPage.onFirstPage}>
+            Back to first page
+          </Button>
+        }
+      >
+        {`Page ${String(laterPage.page)} has no ${noun} now. Earlier pages may still have some.`}
+      </EmptyStateV2>
+    );
+  }
   const clear =
     empty.filtered === true ? (
       <Button type="button" variant="secondary" onClick={empty.onClearFilters}>
