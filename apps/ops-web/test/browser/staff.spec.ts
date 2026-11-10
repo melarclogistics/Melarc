@@ -5,6 +5,7 @@ import { expectShellAround, openAccountMenu, primaryNav } from './support/shell'
 import {
   ama,
   IDS,
+  kofi,
   PLANTED,
   stubStaffApi,
   world,
@@ -197,6 +198,37 @@ test.describe('the lists, drawn for the room they have', () => {
     await expect(queueCards(page, 'Staff profiles')).toHaveCount(0);
     // The stand-in plants a password hash in each profile the list answers with; the table's markup, attributes included, has no place for it.
     expect(await page.content()).not.toContain(PLANTED);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a staff table whose box (about 41rem at 768 px, the menu a rail) scrolls sideways, so that the person has to scroll
+  // to see who is waiting: here a work email that cannot be broken is as long as a real one can be, and its cell must wrap it (a cell that keeps it on a line, planted back, is what this holds
+  // against). The order the lesser columns go in is the unit test's (the marks) and the kit's (the fit); here it is only that the box does not scroll and nothing is cut off.
+  test('keeps the staff table whole at 768 px: no sideways scroll, a long email whole, the name and the status in view', async ({
+    page,
+  }) => {
+    const longEmail =
+      'nana.akosua.frimpomaa.ofori-atta.the-second@melarc-logistics-ghana.example.test';
+    await page.setViewportSize({ width: 768, height: 900 });
+    const { watch } = await open(page, '/admin/staff?view=all', {
+      identities: [
+        kofi({ full_name: 'Nana Akosua Frimpomaa Ofori-Atta', work_email: longEmail }),
+        ama(),
+      ],
+    });
+
+    const table = queueTable(page, 'Staff profiles');
+    await expect(table).toBeVisible();
+    await expect(queueCards(page, 'Staff profiles')).toHaveCount(0);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    await expect(table.getByRole('columnheader', { name: 'Name / work email' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Status' })).toBeVisible();
+    await expect(table.getByText(longEmail)).toBeVisible();
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     expect(watch.problems).toEqual([]);
   });

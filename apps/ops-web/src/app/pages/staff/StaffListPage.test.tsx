@@ -172,6 +172,27 @@ describe('the staff list: what it shows', () => {
     expect(within(card as HTMLElement).getByText('kofi.boateng@example.test')).toBeVisible();
     expect(within(card as HTMLElement).getByText('Ops Staff')).toBeVisible();
     expect(within(card as HTMLElement).getByText('Accra Central')).toBeVisible();
+    // Each fact beyond the name, the status and the email is a label and its value (CardFacts), the labels the columns have.
+    expect(
+      within(card as HTMLElement)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Role', 'Hub']);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold the four scrolls sideways where the hub and
+  // then the role could have gone. The name and the status, which a person is picked by, are never lesser; the hub is the most lesser.
+  it('marks the role and the hub as the lesser columns, the hub the most lesser, and the name and the status not', async () => {
+    open('/admin/staff?view=all', KEYS.approver);
+
+    const found = await table();
+    const priorities = Object.fromEntries(
+      within(found)
+        .getAllByRole('columnheader')
+        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    );
+    // A column that is not lesser carries no mark: it is always drawn.
+    expect(priorities).toEqual({ 'Name / work email': null, Status: null, Role: '2', Hub: '3' });
   });
 
   // Break caught: an id shown where a name was owed, or a hub the session does not act in named from nothing.

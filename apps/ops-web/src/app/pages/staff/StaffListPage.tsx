@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
-import type { DataColumn } from '../../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { Input } from '../../../components/ui/input/Input';
@@ -35,7 +36,6 @@ import {
   viewOf,
   type StaffView,
 } from './staff-presentation';
-import '../pickup/pickup-pages.css';
 
 /** The longest search the server accepts (`listStaffIdentities`, `q`). */
 const SEARCH_LIMIT = 128;
@@ -56,28 +56,9 @@ interface ProfileFacts {
   readonly hub: string;
 }
 
-/** Two facts that belong together, the second quieter beneath the first. */
-function Pair({ first, second }: { readonly first: ReactNode; readonly second: string }) {
-  return (
-    <span className="pickup-lines">
-      <span>{first}</span>
-      <span className="pickup-support">{second}</span>
-    </span>
-  );
-}
-
 /** The status as a badge, on one line: the column takes its width. */
 function Status({ status }: { readonly status: StaffStatus }) {
   return <StatusBadge status={status} map={STAFF_STATUS_MAP} />;
-}
-
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
 }
 
 const PERSON: DataColumn<ProfileFacts> = {
@@ -85,40 +66,46 @@ const PERSON: DataColumn<ProfileFacts> = {
   header: 'Name / work email',
   rowHeader: true,
   // The name is a link to the profile and is the row's header: a row opens a page and not a panel, so there is no button over the row.
-  cell: (row) => <Pair first={<Link to={row.href}>{row.name}</Link>} second={row.email} />,
+  cell: (row) => <RowTitle title={row.name} name={row.email} to={row.href} />,
 };
 const STATUS: DataColumn<ProfileFacts> = {
   id: 'status',
   header: 'Status',
   cell: (row) => <Status status={row.status} />,
 };
+// The name and the status are what a person is picked by. The role comes next, and the hub last: at a hub the people mostly share one, and it is the first to go where the box is short (the table
+// takes the lesser columns away, the most lesser first, only as far as it takes for it not to scroll sideways, and a card shows every fact).
 const ROLE: DataColumn<ProfileFacts> = {
   id: 'role',
   header: 'Role',
+  priority: 2,
   cell: (row) => row.role ?? '',
 };
-const HUB: DataColumn<ProfileFacts> = { id: 'hub', header: 'Hub', cell: (row) => row.hub };
+const HUB: DataColumn<ProfileFacts> = {
+  id: 'hub',
+  header: 'Hub',
+  priority: 3,
+  cell: (row) => row.hub,
+};
 
 /** The facts of a person in four columns, or in three for a session that may not read the roles. */
 const COLUMNS: readonly DataColumn<ProfileFacts>[] = [PERSON, STATUS, ROLE, HUB];
 const COLUMNS_WITHOUT_ROLE: readonly DataColumn<ProfileFacts>[] = [PERSON, STATUS, HUB];
 
 /**
- * A person as a card, for a room too narrow for the columns: the status, then the facts in the order a person reads them, each under the name of its column. It holds **no control**:
- * the name is the card's heading, outside the card, and the link to the profile.
+ * A person as a card, for a room too narrow for the columns: the status, the work email under it, then the facts in the order a person reads them, each a label and its value (`CardFacts`).
+ * It holds **no control**: the name is the card's heading, outside the card, and the link to the profile.
  */
 function ProfileCard({ facts }: { readonly facts: ProfileFacts }) {
   return (
-    <>
-      <div className="pickup-card__head">
-        <Status status={facts.status} />
-      </div>
-      <dl className="pickup-card__facts">
-        <Fact label="Work email">{facts.email}</Fact>
-        {facts.role === undefined ? null : <Fact label="Role">{facts.role}</Fact>}
-        <Fact label="Hub">{facts.hub}</Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<Status status={facts.status} />}
+      lead={facts.email}
+      facts={[
+        ...(facts.role === undefined ? [] : [{ label: 'Role', value: facts.role }]),
+        { label: 'Hub', value: facts.hub },
+      ]}
+    />
   );
 }
 
