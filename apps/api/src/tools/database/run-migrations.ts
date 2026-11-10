@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import pg from 'pg';
 
+import { ENGINEERING_DEFAULTS, integerBetween } from '../../platform/config/config-settings.js';
 import { ADVISORY_CLASSES } from '../../platform/database/policy-lock/lock-keys.js';
 import { postgresConnectionSettings } from '../../platform/database/postgres-url.js';
 import {
@@ -26,22 +27,34 @@ export interface MigrationResult {
   /** How long the whole run took, from the call to its end, on this process's monotonic clock. */
   readonly durationMs: number;
   /**
-   * How long the run held the policy keys, from the moment it had all of them to its commit (or rollback): the time every sign-in and every mutation of the application
-   * waited for it (run 5, Stage 1.3). Zero when the run took none: nothing to apply, or no file of it names a key.
+   * How long the run held the policy keys, from the moment it had all of them to its commit (or rollback): the stall of the application's sign-ins and mutations that need one
+   * (run 5, Stage 1.3). They wait for it, and fail with a retryable 503 once the application's lock timeout has passed (`applicationLockTimeoutMs`, run 6, Stage 1.1). Zero when
+   * the run took none: nothing to apply, or no file of it names a key.
    */
   readonly keysHeldMs: number;
+  /**
+   * How long the run waited for the keys before it held them, from its first attempt to the moment it had them: the attempts that timed out and the pauses between them
+   * included (run 6, Stage 1.1). What asks for one of the keys while the run waits queues behind the run, so this is a stall of the application as well. Zero when the run took none.
+   */
+  readonly keyWaitMs: number;
   /** How many attempts the wait for the keys took; zero when it took none. */
   readonly keyAttempts: number;
+  /** The application's lock timeout the wait was kept shorter than (`DATABASE_LOCK_TIMEOUT_MS`), in milliseconds. */
+  readonly applicationLockTimeoutMs: number;
 }
 
 /**
- * How the wait for the policy keys is bounded (run 5, Stage 1.3). The run needs every key its files name **exclusively**, so a transaction of the application that holds one
- * (shared) makes it wait, and what waits behind it waits too. Each attempt is a transaction of its own with a `lock_timeout` for the wait alone, so that a transaction that does not
- * end cannot hold the run, and the application behind it, for ever; the next attempt follows after a pause. Once the keys are held the run goes on under `runWaitMs`, which bounds
+ * How the wait for the policy keys is bounded (run 5, Stage 1.3; run 6, Stage 1.1). The run needs every key its files name **exclusively**, so a transaction of the application
+ * that holds one (shared) makes it wait, and what asks for the same key behind it queues behind it (a shared request waits behind a waiting exclusive one). The application takes
+ * its shared key under its own `lock_timeout` (`applicationLockTimeoutMs`), and a lock timeout there is a retryable 503, not a retry: so each attempt is a transaction of its own
+ * with a `lock_timeout` for the wait alone, **shorter than the application's**, that lets what queued behind it through before it times out, and is followed by a pause, then by the
+ * next attempt. A transaction that does not end cannot hold the run, and the application behind it, for ever. Once the keys are held the run goes on under `runWaitMs`, which bounds
  * the waits of its own statements (a table lock).
  */
 export interface KeyWaitSettings {
-  /** How long one attempt waits for the keys, in milliseconds. */
+  /** The application's own `lock_timeout` for its policy keys (`DATABASE_LOCK_TIMEOUT_MS`), in milliseconds: every attempt waits for less. */
+  readonly applicationLockTimeoutMs: number;
+  /** How long one attempt waits for the keys, in milliseconds: less than `applicationLockTimeoutMs`. */
   readonly waitMs: number;
   /** How many attempts are made before the run gives up. */
   readonly attempts: number;
@@ -51,35 +64,97 @@ export interface KeyWaitSettings {
   readonly runWaitMs: number;
 }
 
-/** The defaults of the wait: three attempts of ten seconds, two seconds apart, so that a run that cannot take its keys stops after about thirty-four seconds. */
-export const DEFAULT_KEY_WAIT = { waitMs: 10_000, attempts: 3, pauseMs: 2_000 } as const;
+/** What the application accepts for `DATABASE_LOCK_TIMEOUT_MS` (`config-settings.ts`): a whole number of milliseconds from 100 to 60000. */
+const APPLICATION_LOCK_TIMEOUT = { least: 100, most: 60_000 } as const;
+
+const isApplicationLockTimeout = (value: number): boolean =>
+  Number.isInteger(value) &&
+  value >= APPLICATION_LOCK_TIMEOUT.least &&
+  value <= APPLICATION_LOCK_TIMEOUT.most;
+
+/** About how long a run keeps trying for its keys before it gives up, the waits of its attempts and the pauses between them together. */
+export const KEY_WAIT_PATIENCE_MS = 30_000;
+
+/**
+ * The wait for the keys that goes with an application's lock timeout: attempts of three quarters of it (1.5 s for the default of 2 s), a quarter of it apart (so that what queued
+ * behind an attempt is served before the next begins), and as many as take about thirty seconds in all.
+ */
+export function keyWaitFor(applicationLockTimeoutMs: number): Omit<KeyWaitSettings, 'runWaitMs'> {
+  if (!isApplicationLockTimeout(applicationLockTimeoutMs)) {
+    throw new RangeError(
+      `The application's lock timeout (DATABASE_LOCK_TIMEOUT_MS) is a whole number of milliseconds from ${String(APPLICATION_LOCK_TIMEOUT.least)} to ${String(APPLICATION_LOCK_TIMEOUT.most)}, not ${String(applicationLockTimeoutMs)}`,
+    );
+  }
+  const waitMs = Math.floor((applicationLockTimeoutMs * 3) / 4);
+  const pauseMs = Math.floor(applicationLockTimeoutMs / 4);
+  return {
+    applicationLockTimeoutMs,
+    waitMs,
+    pauseMs,
+    attempts: Math.ceil(KEY_WAIT_PATIENCE_MS / (waitMs + pauseMs)),
+  };
+}
+
+/** The wait for the keys when the application runs with its own default lock timeout: fifteen attempts of 1.5 s, 0.5 s apart. */
+export const DEFAULT_KEY_WAIT = keyWaitFor(Number(ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS));
+
+/**
+ * The application's lock timeout as the environment of the run gives it (`DATABASE_LOCK_TIMEOUT_MS`, the setting the application reads under the same name and the same rules),
+ * or the application's own default when it gives none. The run keeps each attempt's wait shorter than it, so the environment of the release step carries the value the
+ * application runs with. A value the application would refuse is refused here, naming the setting and never what it held.
+ */
+export function applicationLockTimeoutOf(
+  environment: Readonly<Record<string, string | undefined>>,
+): number {
+  const given = environment.DATABASE_LOCK_TIMEOUT_MS;
+  if (given === undefined || given === '')
+    return Number(ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS);
+  const parsed = integerBetween(
+    APPLICATION_LOCK_TIMEOUT.least,
+    APPLICATION_LOCK_TIMEOUT.most,
+  ).safeParse(given);
+  if (!parsed.success) {
+    throw new RangeError(
+      `DATABASE_LOCK_TIMEOUT_MS is a whole number of milliseconds from ${String(APPLICATION_LOCK_TIMEOUT.least)} to ${String(APPLICATION_LOCK_TIMEOUT.most)}, as the application reads it: the migration run keeps its wait for the policy keys shorter than that`,
+    );
+  }
+  return parsed.data;
+}
 
 /** The run could not take the policy keys its files name, in as many attempts as it was allowed. Nothing of it was applied. */
 export class MigrationKeyWaitError extends Error {
   constructor(
     readonly attempts: number,
     readonly waitMs: number,
+    readonly pauseMs: number,
+    /** How long the run waited in all: its attempts, each timed out, and the pauses between them. */
+    readonly waitedMs: number,
     cause: unknown,
   ) {
     super(
-      `The migration run could not take the policy keys its files name: ${String(attempts)} attempts of ${String(waitMs)} ms each ended on a lock timeout, because a transaction of the application (a sign-in, a mutation, a change of a bundle or of a fixed policy) holds one of them. Nothing was applied. Run it again; if it keeps happening, look for a transaction that does not end (select pid, state, xact_start, query from pg_stat_activity where state like 'idle in transaction%').`,
+      `The migration run could not take the policy keys its files name: ${String(attempts)} attempts of ${String(waitMs)} ms each (${String(pauseMs)} ms apart) ended on a lock timeout, after waiting ${seconds(waitedMs)} in all, because a transaction of the application (a sign-in, a mutation, a change of a bundle or of a fixed policy) holds one of them. Nothing was applied. Run it again; if it keeps happening, look for a transaction that does not end (select pid, state, xact_start, query from pg_stat_activity where state like 'idle in transaction%').`,
       { cause },
     );
     this.name = 'MigrationKeyWaitError';
   }
 }
 
+/** Milliseconds as the tool's lines tell them: seconds, to a tenth. */
+function seconds(milliseconds: number): string {
+  return `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
 /**
- * The one line the tool tells for a run: what it applied, how long it took, and how long the application waited for the keys (the stall of a release, which is the
- * time they were held). The words `applied N migration(s)` and `up to date` are what the tests of the tool and of the upgrade read.
+ * The one line the tool tells for a run: what it applied, how long it took, how long it waited for the keys and how long it held them (the stall of a release: a sign-in or a
+ * mutation held up by the run waits, and fails with a retryable 503 once the application's lock timeout has passed). The words `applied N migration(s)` and `up to date` are what
+ * the tests of the tool and of the upgrade read.
  */
 export function describeRun(result: MigrationResult): string {
   if (result.applied === 0) return 'database is up to date, nothing applied';
-  const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(1)} s`;
   const applied = `applied ${String(result.applied)} migration${result.applied === 1 ? '' : 's'} in ${seconds(result.durationMs)}`;
   if (result.keysHeldMs === 0) return `${applied}; no policy key was taken`;
-  const attempt = result.keyAttempts > 1 ? `, taken at attempt ${String(result.keyAttempts)}` : '';
-  return `${applied}; the policy keys were held for ${seconds(result.keysHeldMs)}${attempt}, and every sign-in and mutation of the application waited that long`;
+  const attempt = result.keyAttempts > 1 ? ` (taken at attempt ${String(result.keyAttempts)})` : '';
+  return `${applied}; waited ${seconds(result.keyWaitMs)} for the policy keys${attempt} and held them for ${seconds(result.keysHeldMs)}; a sign-in or mutation held up by the run fails with a retryable 503 after the application's lock timeout of ${seconds(result.applicationLockTimeoutMs)}`;
 }
 
 /** The part of a client that the wait for the keys needs: what is sent, and nothing it answers. */
@@ -98,16 +173,22 @@ const isLockTimeout = (error: unknown): boolean =>
 
 /**
  * Begins the transaction of the run and takes in it the policy keys its files name, in the canonical order (`melarc.lock_policy_keys`), bounded and tried again as
- * `KeyWaitSettings` says. On success the transaction is **open** and holds the keys until it ends, and `takenAt` is the monotonic moment it had them; on failure nothing is
- * left open. A run with no key to take only begins. A failure that is not a lock timeout is not retried and is the caller's as it came. `pause` is the wait between two
- * attempts (the tests give one that does not wait).
+ * `KeyWaitSettings` says. On success the transaction is **open** and holds the keys until it ends, `takenAt` is the monotonic moment it had them and `waitedMs` how long it
+ * waited for them in all (the attempts that timed out and the pauses between them included); on failure nothing is left open. A run with no key to take only begins. A failure
+ * that is not a lock timeout is not retried and is the caller's as it came. Every attempt waits for less than the application's own lock timeout, and settings that say
+ * otherwise are refused before anything is sent. `pause` is the wait between two attempts and `now` the monotonic clock (the tests give one that does not wait, and one they hold).
  */
 export async function beginAndTakeKeys(
   client: Queryable,
   keys: PolicyKeys,
   settings: KeyWaitSettings,
   pause: (milliseconds: number) => Promise<void> = pauseFor,
-): Promise<{ readonly attempts: number; readonly takenAt: number | undefined }> {
+  now: () => number = () => performance.now(),
+): Promise<{
+  readonly attempts: number;
+  readonly takenAt: number | undefined;
+  readonly waitedMs: number;
+}> {
   for (const [name, value, least] of [
     ['wait', settings.waitMs, 1],
     ['attempts', settings.attempts, 1],
@@ -120,10 +201,21 @@ export async function beginAndTakeKeys(
       );
     }
   }
+  if (!isApplicationLockTimeout(settings.applicationLockTimeoutMs)) {
+    throw new RangeError(
+      `The application's lock timeout (DATABASE_LOCK_TIMEOUT_MS) is a whole number of milliseconds from ${String(APPLICATION_LOCK_TIMEOUT.least)} to ${String(APPLICATION_LOCK_TIMEOUT.most)}, not ${String(settings.applicationLockTimeoutMs)}`,
+    );
+  }
+  if (settings.waitMs >= settings.applicationLockTimeoutMs) {
+    throw new RangeError(
+      `An attempt to take the policy keys waits for less than the application's lock timeout (${String(settings.applicationLockTimeoutMs)} ms), not ${String(settings.waitMs)} ms: a sign-in or a mutation that queues behind the run would be refused by its own timeout before the attempt ended`,
+    );
+  }
   if (keys.bundleIds.length + keys.fixedTypes.length === 0) {
     await client.query('begin');
-    return { attempts: 0, takenAt: undefined };
+    return { attempts: 0, takenAt: undefined, waitedMs: 0 };
   }
+  const startedAt = now();
   for (let attempt = 1; ; attempt += 1) {
     await client.query('begin');
     try {
@@ -134,12 +226,19 @@ export async function beginAndTakeKeys(
         keys.fixedTypes,
       ]);
       await client.query(`set local lock_timeout = '${String(settings.runWaitMs)}ms'`);
-      return { attempts: attempt, takenAt: performance.now() };
+      const takenAt = now();
+      return { attempts: attempt, takenAt, waitedMs: takenAt - startedAt };
     } catch (error) {
       await client.query('rollback').catch(() => undefined);
       if (!isLockTimeout(error)) throw error;
       if (attempt >= settings.attempts) {
-        throw new MigrationKeyWaitError(settings.attempts, settings.waitMs, error);
+        throw new MigrationKeyWaitError(
+          settings.attempts,
+          settings.waitMs,
+          settings.pauseMs,
+          now() - startedAt,
+          error,
+        );
       }
       await pause(settings.pauseMs);
     }
@@ -202,9 +301,12 @@ async function policyKeysHeld(client: pg.Client): Promise<Set<string>> {
  * (`MigrationLockOrderError`). A database that does not have the primitive yet (0017) has no session that could wait,
  * and the run has no key to take first.
  *
- * **What it costs, and how the wait is bounded** (run 5, Stage 1.3). The keys are exclusive and are held to the commit, so every sign-in and every mutation of the
- * application waits for the **whole duration of the run** (the result says how long: `keysHeldMs`), and a run with nothing to apply takes nothing. The wait for the keys is
- * bounded by a `lock_timeout` of its own, tried again in a new transaction a few times, and ends in `MigrationKeyWaitError` with nothing applied (`beginAndTakeKeys`).
+ * **What it costs, and how the wait is bounded** (run 5, Stage 1.3; run 6, Stage 1.1). The keys are exclusive and are held to the commit, so every sign-in and every mutation
+ * of the application that needs one is held up for as long as the run holds them, and **fails with a retryable 503 once the application's lock timeout has passed** (it does not
+ * wait for the run; `keysHeldMs` says how long the hold was), and a run with nothing to apply takes nothing. The run's own wait for the keys is a stall as well, since what asks for
+ * a key queues behind a waiting exclusive request (`keyWaitMs`): each attempt waits for less than the application's lock timeout (`applicationLockTimeoutMs`), so that what queued
+ * behind it is let through before it times out, then pauses and tries again in a new transaction a number of times, and ends in `MigrationKeyWaitError` with nothing applied and
+ * the time it waited (`beginAndTakeKeys`).
  *
  * Safe to run twice at once: a session advisory lock makes a second run wait for the first and then find nothing to do. It never touches a database it was
  * not given, and it refuses any identity but `melarc_migration_elevated` before it connects, because who
@@ -218,8 +320,13 @@ export async function runMigrations(options: {
   readonly folder?: string;
   /** How long a run waits for another run to finish, and the `lock_timeout` of its own statements once it holds the policy keys. */
   readonly lockTimeoutMs?: number;
-  /** How the wait for the policy keys is bounded and tried again; what is not given is `DEFAULT_KEY_WAIT`. */
-  readonly keyWait?: Partial<Omit<KeyWaitSettings, 'runWaitMs'>>;
+  /**
+   * The application's own lock timeout (`DATABASE_LOCK_TIMEOUT_MS`), which every attempt to take the policy keys waits for less than (`applicationLockTimeoutOf` reads it from an
+   * environment); what is not given is the application's default, 2000.
+   */
+  readonly applicationLockTimeoutMs?: number;
+  /** How the wait for the policy keys is bounded and tried again; what is not given follows from `applicationLockTimeoutMs` (`keyWaitFor`). */
+  readonly keyWait?: Partial<Pick<KeyWaitSettings, 'waitMs' | 'attempts' | 'pauseMs'>>;
 }): Promise<MigrationResult> {
   const started = performance.now();
   const settings = postgresConnectionSettings(options.url);
@@ -243,8 +350,14 @@ export async function runMigrations(options: {
       const problems = [...files.problems, ...checkAgainstApplied(files.migrations, before)];
       if (problems.length > 0) throw new MigrationHistoryError(problems);
 
-      const wait: KeyWaitSettings = { ...DEFAULT_KEY_WAIT, ...options.keyWait, runWaitMs };
-      const { keysHeldMs, keyAttempts } = await applyPending(
+      const applicationLockTimeoutMs =
+        options.applicationLockTimeoutMs ?? Number(ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS);
+      const wait: KeyWaitSettings = {
+        ...keyWaitFor(applicationLockTimeoutMs),
+        ...options.keyWait,
+        runWaitMs,
+      };
+      const { keysHeldMs, keyWaitMs, keyAttempts } = await applyPending(
         client,
         folder,
         files.migrations,
@@ -254,7 +367,9 @@ export async function runMigrations(options: {
         applied: (await appliedMigrations(client)).length - before.length,
         durationMs: performance.now() - started,
         keysHeldMs,
+        keyWaitMs,
         keyAttempts,
+        applicationLockTimeoutMs,
       };
     } finally {
       await client.query(`select pg_advisory_unlock(${LOCK})`);
@@ -273,7 +388,11 @@ async function applyPending(
   folder: string,
   named: readonly { readonly tag: string; readonly when: number }[],
   wait: KeyWaitSettings,
-): Promise<{ readonly keysHeldMs: number; readonly keyAttempts: number }> {
+): Promise<{
+  readonly keysHeldMs: number;
+  readonly keyWaitMs: number;
+  readonly keyAttempts: number;
+}> {
   await client.query('CREATE SCHEMA IF NOT EXISTS "drizzle"');
   await client.query(
     'CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
@@ -285,7 +404,7 @@ async function applyPending(
   const pending = readMigrationFiles({ migrationsFolder: folder }).filter(
     (migration) => last === undefined || last === null || Number(last) < migration.folderMillis,
   );
-  if (pending.length === 0) return { keysHeldMs: 0, keyAttempts: 0 };
+  if (pending.length === 0) return { keysHeldMs: 0, keyWaitMs: 0, keyAttempts: 0 };
 
   const tagOf = new Map(named.map((migration) => [migration.when, migration.tag]));
   const files = pending.map((migration) => ({
@@ -299,7 +418,7 @@ async function applyPending(
   // are held until the commit, and that is how long the application's sign-ins and mutations wait (`keysHeldMs`). A database below 0017 has no primitive and no session that
   // could wait: the run has no key to take first.
   const guarded = await hasPolicyKeyPrimitive(client);
-  const { attempts, takenAt } = await beginAndTakeKeys(
+  const { attempts, takenAt, waitedMs } = await beginAndTakeKeys(
     client,
     guarded ? keys : { bundleIds: [], fixedTypes: [] },
     wait,
@@ -324,6 +443,7 @@ async function applyPending(
     await client.query('commit');
     return {
       keysHeldMs: takenAt === undefined ? 0 : performance.now() - takenAt,
+      keyWaitMs: waitedMs,
       keyAttempts: attempts,
     };
   } catch (error) {

@@ -143,6 +143,13 @@ describe('the chain applied from a database at 0073', () => {
       expect(failure).toBeInstanceOf(MigrationKeyWaitError);
       expect((failure as MigrationKeyWaitError).message).toContain('2 attempts of 300 ms');
       expect((failure as MigrationKeyWaitError).message).toContain('Nothing was applied');
+      // It says how long it waited in all (run 6, Stage 1.1): two attempts of 300 ms, each ended by the server's own lock timeout, and the pause between them; the message and
+      // the figure are the same time, to a tenth of a second.
+      const waited = failure as MigrationKeyWaitError;
+      expect(waited.waitedMs).toBeGreaterThanOrEqual(600);
+      expect(waited.message).toContain(
+        `after waiting ${(waited.waitedMs / 1000).toFixed(1)} s in all`,
+      );
       expect(
         await scalar<string>(built.admin, 'select count(*) from drizzle.__drizzle_migrations'),
       ).toBe(String(FIRST_NEW));
@@ -160,6 +167,63 @@ describe('the chain applied from a database at 0073', () => {
     } finally {
       await application.query('rollback').catch(() => undefined);
       await application.end();
+    }
+  }, 120_000);
+
+  // Break caught (run 6, Stage 1.1): an attempt that waits as long as the application's own lock timeout, or longer. The run is a waiting exclusive request, and a sign-in or a
+  // mutation that asks for the same key (shared) behind it queues behind it. Here a transaction of the application holds the key and does not end, the run waits for it with the
+  // wait it has by default (1.5 s, shorter than the application's lock timeout of 2 s), a request of the application then asks for the key under that lock timeout and queues
+  // behind the run: when the attempt ends and the run gives up it is served, where an attempt of ten seconds (run 5) would have let its own lock timeout refuse it first.
+  it("lets a request of the application that queued behind the run's wait through when the attempt ends, before its own lock timeout", async () => {
+    const holder: pg.Client = clientFor(built.target.urlFor('postgres'));
+    const queued: pg.Client = clientFor(built.target.urlFor('postgres'));
+    await holder.connect();
+    await queued.connect();
+    const key = bundleLockKey(SEEDED_BUNDLE);
+    const waitingForTheKey = (who: string) =>
+      scalar<string>(
+        built.admin,
+        `select count(*) from pg_locks l join pg_stat_activity a on a.pid = l.pid
+          where a.datname = current_database() and l.locktype = 'advisory' and not l.granted and ${who}`,
+      );
+    let run: ReturnType<typeof runMigrations> | undefined;
+    try {
+      await holder.query('begin');
+      await holder.query(
+        `select pg_advisory_xact_lock_shared(${String(AUTH_POLICY_BUNDLE)}, ${String(key)})`,
+      );
+
+      run = runMigrations({ url: built.target.urlFor(MIGRATION_ROLE), keyWait: { attempts: 1 } });
+      const ended = run.catch((error: unknown) => error);
+      await until(
+        async () => (await waitingForTheKey("a.application_name = 'melarc-migrate'")) === '1',
+        'the run to wait for the key',
+      );
+
+      // The application's own request, under the application's own lock timeout (its default, 2 s), queues behind the run.
+      await queued.query('begin');
+      await queued.query("set local lock_timeout = '2000ms'");
+      const asked = performance.now();
+      const outcome = queued
+        .query(`select pg_advisory_xact_lock_shared(${String(AUTH_POLICY_BUNDLE)}, ${String(key)})`)
+        .then(
+          () => 'served',
+          (error: unknown) => `refused (${(error as { code?: string }).code ?? 'no code'})`,
+        );
+      await until(
+        async () => (await waitingForTheKey("a.application_name <> 'melarc-migrate'")) === '1',
+        'the request of the application to queue behind the run',
+      );
+
+      expect(await ended).toBeInstanceOf(MigrationKeyWaitError);
+      expect(await outcome).toBe('served');
+      expect(performance.now() - asked).toBeLessThan(2_000);
+    } finally {
+      await queued.query('rollback').catch(() => undefined);
+      await holder.query('rollback').catch(() => undefined);
+      await queued.end();
+      await holder.end();
+      await run?.catch(() => undefined);
     }
   }, 120_000);
 
