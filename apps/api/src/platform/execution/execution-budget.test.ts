@@ -1068,6 +1068,86 @@ describe('ExecutionBudget: a child that has stopped leaves nothing on its parent
   });
 });
 
+/**
+ * A listener that acts on another budget while the parent is telling its listeners (run 6, Stage 1.7). A budget's expiry tells a snapshot of its listeners, one by one: a listener
+ * that finishes or cancels a sibling that is still to be told must not leave that sibling told twice, told after it was finished, or its other listeners untold. The parent's own
+ * listeners are the lookup service's `onClosed` / `cancel` and the database layer's relays in production; these are the shapes of them.
+ */
+describe('ExecutionBudget: a listener that stops another budget while the parent is telling', () => {
+  /** A parent, a listener of the parent's that runs `stopper` on the sibling, and the sibling (made after it, so that the parent tells the stopper first). */
+  function parentWithASibling(stopper: (sibling: ExecutionBudget) => void) {
+    const parent = new ExecutionBudget(clock, 'request', 1_000);
+    let sibling: ExecutionBudget | undefined;
+    const told: string[] = [];
+    parent.onExpiry(() => {
+      told.push('stopper');
+      if (sibling !== undefined) stopper(sibling);
+    });
+    sibling = parent.child('sibling', 800);
+    const siblingTold = vi.fn();
+    sibling.onExpiry(siblingTold);
+    parent.onExpiry(() => {
+      told.push('last');
+    });
+    return { parent, sibling, siblingTold, told };
+  }
+
+  // Break caught: a sibling that was finished by a listener while the parent was telling, and is then told it expired (by its relay, which the parent's snapshot still holds),
+  // so that its own listeners run for a budget that was finished, and the work it bounded is told it failed.
+  it('does not tell a sibling that was finished meanwhile that it expired, and tells the parent’s other listeners', () => {
+    const { parent, sibling, siblingTold, told } = parentWithASibling((each) => {
+      each.finish();
+    });
+
+    pass(1_000);
+
+    expect(told).toEqual(['stopper', 'last']);
+    expect(parent.expired).toBe(true);
+    expect(sibling.expired).toBe(false);
+    expect(sibling.closed).toBe(true);
+    expect(siblingTold).not.toHaveBeenCalled();
+    expect(parent.listenerFailures).toEqual([]);
+    expect(sibling.listenerFailures).toEqual([]);
+  });
+
+  // Break caught: a sibling that was cancelled by a listener while the parent was telling, and is then told again with the parent's error: its listeners would run twice, the
+  // second time with a reason that is not why it ended.
+  it('tells a sibling that was cancelled meanwhile once, with the reason it was cancelled for, and not again with the parent’s error', () => {
+    const { parent, sibling, siblingTold, told } = parentWithASibling((each) => {
+      each.cancel('abandoned by the client');
+    });
+
+    pass(1_000);
+
+    expect(told).toEqual(['stopper', 'last']);
+    expect(siblingTold).toHaveBeenCalledOnce();
+    const error = siblingTold.mock.calls[0]?.[0] as BudgetExpiredError;
+    expect(error).toBeInstanceOf(BudgetCancelledError);
+    expect((error as BudgetCancelledError).reason).toBe('abandoned by the client');
+    expect(sibling.expiredWith).toBe(error);
+    expect(parent.listenerFailures).toEqual([]);
+  });
+
+  // Break caught: a listener that finishes the budget that is telling it, which stops the others or raises.
+  it('is not disturbed by a listener that finishes the very budget that is telling it', () => {
+    const parent = new ExecutionBudget(clock, 'request', 1_000);
+    const told: string[] = [];
+    parent.onExpiry(() => {
+      told.push('first');
+      parent.finish();
+    });
+    parent.onExpiry(() => {
+      told.push('second');
+    });
+
+    pass(1_000);
+
+    expect(told).toEqual(['first', 'second']);
+    expect(parent.expired).toBe(true);
+    expect(parent.listenerFailures).toEqual([]);
+  });
+});
+
 describe('runWithBudget and currentBudget', () => {
   it('has no budget outside a request', () => {
     expect(currentBudget()).toBeUndefined();
