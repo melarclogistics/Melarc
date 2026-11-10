@@ -1,6 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 import { useLocation } from 'react-router';
 
+import { openerOf } from '../../components/ui/opener/opener';
+
 /**
  * Whether focus is on the page, inside the main landmark: after a client-side navigation the frame puts it on the new page's heading
  * (`AppFrame`), so a menu that closes *because the person went to a page* finds it there.
@@ -32,7 +34,8 @@ export function focusPageHeading(): void {
  * trigger and to nothing else (a dialog opened by a key, or by a button that is not its `Trigger`, leaves focus on the page's body), so it is given
  * back here:
  *
- * - **to whatever had focus when the dialog opened**, or to `fallback` (the ref of the button of the top bar, read when the dialog closes) when nothing did;
+ * - **to the control that opened it** (`openerOf`: the one that was pressed, and else the one that had focus when the dialog opened, since Safari's engine gives a
+ *   pressed button no focus), or to `fallback` (the ref of the button of the top bar, read when the dialog closes) when there was none;
  * - **unless the person went to a page by it**: the frame moved focus to the new page's heading, but a dialog that is still open when it does keeps
  *   focus inside itself (it traps it), so focus is on the body when the dialog has gone. It is put on the heading then, as the frame would have.
  *
@@ -50,11 +53,7 @@ export function useFocusReturn(fallback: RefObject<HTMLElement | null>) {
   });
 
   const remember = useCallback((): void => {
-    const active = document.activeElement;
-    opened.current = {
-      element: active instanceof HTMLElement && active !== document.body ? active : null,
-      path: now.current,
-    };
+    opened.current = { element: openerOf(), path: now.current };
   }, []);
 
   const onCloseAutoFocus = useCallback(

@@ -5,6 +5,7 @@ import { OperationalCode } from '../code/OperationalCode';
 import { IconButton } from '../icon-button/IconButton';
 import { Link } from '../link/Link';
 import { AnimatePresence, motion, useMotion } from '../motion/motion';
+import { openerOf } from '../opener/opener';
 import { InSidePanel } from './side-panel-context';
 import { SHEET_QUERY, useMediaQuery } from './use-media-query';
 import './side-panel.css';
@@ -22,8 +23,8 @@ export interface SidePanelProps {
   /** What the panel holds: the page's own summary of the record, with its own loading, failure and refusal in place. */
   readonly children: ReactNode;
   /**
-   * The control that opened the panel (the code button of a row). Focus goes back to it when the panel closes. Left out, it is whatever had focus when
-   * the panel opened, which for a press on a row's button is that button.
+   * The control that opened the panel (the code button of a row). Focus goes back to it when the panel closes. Left out, it is the control that was pressed to open the
+   * panel, and else the one that had focus (`openerOf`: in Safari's engine a pressed button takes no focus).
    */
   readonly returnFocusTo?: () => HTMLElement | null;
 }
@@ -48,8 +49,8 @@ export function SidePanel({
   const motionKit = useMotion();
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  /** What had focus when the panel (or the record in it) was last opened. */
-  const opener = useRef<Element | null>(null);
+  /** The control that was pressed, or had focus, when the panel (or the record in it) was last opened. */
+  const opener = useRef<HTMLElement | null>(null);
   /** The page's way back to the row, as it is now: the effect below must not run again because the page wrote a new function. */
   const returnTo = useRef(returnFocusTo);
   useLayoutEffect(() => {
@@ -59,7 +60,7 @@ export function SidePanel({
 
   const giveFocusBack = (): void => {
     const back = returnTo.current?.() ?? opener.current;
-    if (back instanceof HTMLElement && back.isConnected) back.focus();
+    if (back?.isConnected === true) back.focus();
   };
 
   // Docked: focus goes to the heading when the panel opens and when another record takes it, and back to the row when it closes. The sheet is a modal
@@ -68,9 +69,10 @@ export function SidePanel({
   useEffect(() => {
     if (!docked) return;
     if (open) {
-      // A press on another row's button moves focus out of the panel first: that button is the one to go back to.
-      if (!wasOpen.current || document.activeElement?.closest('.ui-side-panel') === null) {
-        opener.current = document.activeElement;
+      // A press on another row's button is the one to go back to, whether or not the engine moved focus to it (Safari's does not); a control inside the panel is not.
+      const from = openerOf();
+      if (!wasOpen.current || (from?.closest('.ui-side-panel') ?? null) === null) {
+        opener.current = from;
       }
       wasOpen.current = true;
       // Without a scroll: the panel is in view where it stands (it is sticky beside the list), and moving the page to the heading would shift the list under the person who opened it.
@@ -86,7 +88,7 @@ export function SidePanel({
         active === null || active === document.body || active.closest('.ui-side-panel') !== null;
       if (!wasInside) return;
       const back = returnTo.current?.() ?? opener.current;
-      if (back instanceof HTMLElement && back.isConnected) back.focus();
+      if (back?.isConnected === true) back.focus();
     }
   }, [docked, open, code]);
 
@@ -104,7 +106,7 @@ export function SidePanel({
           aria-describedby={undefined}
           onOpenAutoFocus={(event) => {
             // Radix would focus the first control; the heading says what has opened.
-            opener.current = document.activeElement;
+            opener.current = openerOf();
             event.preventDefault();
             heading.current?.focus();
           }}

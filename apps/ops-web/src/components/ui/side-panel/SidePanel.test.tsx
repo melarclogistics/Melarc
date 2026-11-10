@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { pressWithoutFocus } from '../../../test-support/press';
 import { wcagViolations } from '../../../test-support/wcag';
 import { MOTION_FALLBACK } from '../motion/motion-tokens';
 import { SidePanel, type SidePanelProps } from './SidePanel';
@@ -155,6 +156,40 @@ describe('SidePanel, beside the list', () => {
     expect(screen.getByRole('button', { name: 'Row two' })).toHaveFocus();
   });
 
+  // Break caught (Safari, decision of 10 November 2026): WebKit gives no focus to a button that a pointer pressed, so what had focus when the panel opened was the body and
+  // the panel had no row to give focus back to, in the kit's own specimen and in any page that does not name the way back. It remembers the control that was pressed.
+  it('goes back to the row that was pressed, in an engine that gives a pressed button no focus', async () => {
+    const user = userEvent.setup();
+    render(<Page />);
+    const row = screen.getByRole('button', { name: 'Row one' });
+
+    pressWithoutFocus(row);
+    expect(await screen.findByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(row).toHaveFocus();
+  });
+
+  // Break caught: the same, for a second row pressed while the panel is open: the way back is to the row that opened the panel last.
+  it('goes back to the row that took the panel last, pressed without focus too', async () => {
+    const user = userEvent.setup();
+    render(<Page />);
+
+    pressWithoutFocus(screen.getByRole('button', { name: 'Row one' }));
+    await screen.findByRole('heading', { name: 'ACC-PR-7KQ2MZ' });
+    pressWithoutFocus(screen.getByRole('button', { name: 'Row two' }));
+
+    expect(await screen.findByRole('heading', { name: 'ACC-PR-4HT9WD' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: 'Row two' })).toHaveFocus();
+  });
+
   // Break caught: the way back lost when the page says where it is: the page's own answer wins over what had focus.
   it('goes back to the control the page names, when it names one', async () => {
     const user = userEvent.setup();
@@ -290,6 +325,23 @@ describe('SidePanel, as a sheet at 768px and below', () => {
     const row = screen.getByRole('button', { name: 'Row one' });
 
     await user.click(row);
+    expect(await screen.findByRole('heading', { name: 'ACC-PR-7KQ2MZ' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(row).toHaveFocus();
+  });
+
+  // Break caught (Safari, decision of 10 November 2026): the same for the sheet of a tablet, the device Safari runs on at the hub: the row that was pressed is the way back.
+  it('gives focus back to the row that was pressed, in an engine that gives a pressed button no focus', async () => {
+    setScreen(TABLET);
+    const user = userEvent.setup();
+    render(<Page />);
+    const row = screen.getByRole('button', { name: 'Row one' });
+
+    pressWithoutFocus(row);
     expect(await screen.findByRole('heading', { name: 'ACC-PR-7KQ2MZ' })).toHaveFocus();
     await user.keyboard('{Escape}');
 
