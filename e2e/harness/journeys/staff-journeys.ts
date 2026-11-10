@@ -870,7 +870,10 @@ async function rememberThisBrowser({ page, context, stack }: JourneyContext): Pr
   await signInAs(page, bola);
   await openProfile(page, ada.person.fullName);
   const section = page.getByRole('region', { name: 'Trusted browsers' });
-  await expect(section.getByRole('table')).toBeVisible();
+  // A table where the main column of the record has room for one (40rem of its box), and cards, a list of the same name, under that (the profile has a side column): the browsers are listed in either.
+  await expect(
+    section.getByRole('table').or(section.getByRole('list', { name: /^Trusted browsers of / })),
+  ).toBeVisible();
   expect(
     (await page.locator('body').innerText()).includes(adaBrowser[0]?.value ?? 'unreachable'),
     "the profile shows no credential of the person's",
