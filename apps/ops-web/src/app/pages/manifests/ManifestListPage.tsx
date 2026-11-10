@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
@@ -12,7 +11,6 @@ import {
   type DataColumn,
 } from '../../../components/ui/data-table/DataTable';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
-import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { Link } from '../../../components/ui/link/Link';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
@@ -360,29 +358,13 @@ export function ManifestListPage() {
     return { status: 'ready', rows };
   })();
 
-  // A page after the first can hold nothing without the list being empty (pickup runs move between reads): it says so, and does not go looking
-  // through the earlier pages on its own.
-  const pastTheEnd =
-    paging.page > 1 ? (
-      <EmptyStateV2
-        variant="filtered-empty"
-        title="No pickup runs on this page"
-        headingLevel={3}
-        announce
-        action={
-          <Button type="button" variant="secondary" onClick={firstPage}>
-            Back to first page
-          </Button>
-        }
-      >
-        {`Page ${String(paging.page)} has no pickup runs now. Earlier pages may still have some.`}
-      </EmptyStateV2>
-    ) : undefined;
-
   const emptiness = {
     noun: 'pickup runs',
     none: 'A pickup run is built from the pool of confirmed pickups. It appears here once it is made.',
     announce: interacted,
+    // A page after the first can hold nothing without the list being empty (pickup runs move between reads): the template says so, as every list does, and does not go looking through the
+    // earlier pages on its own.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
     // A chosen hub is a filter too (audit B1): the list is empty at this hub, which says nothing of the others.
     ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
   };
@@ -460,7 +442,6 @@ export function ManifestListPage() {
           }}
           result={result}
           empty={empty}
-          {...(pastTheEnd === undefined ? {} : { emptyState: pastTheEnd })}
           table={{
             label: 'Pickup runs',
             columns: COLUMNS,
