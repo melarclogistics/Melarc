@@ -1852,6 +1852,28 @@ test.describe('the approver’s queue', () => {
     ).toHaveCount(0);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
+
+  // Break caught (the Product Owner's review of 499399c, Stage 3 item 7, found again in the pictures of run 5): an empty band above the table of a queue that has no views, no filters and no
+  // notice. The page card has no header, so it took 24px of its own above its content, and the body 16px more, above a header row that has nothing above it.
+  test('starts its table at the top of the page card, with no empty band above it', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    const head = await table.getByRole('row').first().boundingBox();
+    const card = await table
+      .locator(
+        'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ui-panel ")][1]',
+      )
+      .boundingBox();
+    expect(head).not.toBeNull();
+    expect(card).not.toBeNull();
+    // The card's own border is 1px, and nothing else is above the header row.
+    expect((head?.y ?? 0) - (card?.y ?? 0)).toBeLessThanOrEqual(2);
+  });
 });
 
 test.describe('every screen, at the verified widths', () => {

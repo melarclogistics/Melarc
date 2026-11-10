@@ -309,6 +309,43 @@ test.describe('the lists, drawn for the room they have', () => {
   });
 });
 
+test.describe('the lists with no views and no filters', () => {
+  /** The room between the top of the page card and the header row of the table inside it. */
+  async function roomAbove(page: Page, label: string): Promise<number> {
+    const table = page.getByRole('table', { name: label });
+    await expect(table).toBeVisible();
+    const head = await table.getByRole('row').first().boundingBox();
+    const card = await table
+      .locator(
+        'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ui-panel ")][1]',
+      )
+      .boundingBox();
+    expect(head).not.toBeNull();
+    expect(card).not.toBeNull();
+    return (head?.y ?? 0) - (card?.y ?? 0);
+  }
+
+  // Break caught (the Product Owner's review of 499399c, Stage 3 item 7, found again in the pictures of run 5): an empty band above the table of a queue that has no views, no filters and no
+  // notice: the page card has no header, so it took 24px of its own above its content, and the body 16px more, above a header row that has nothing above it. The card's border is 1px.
+  test('start the sessions table at the top of the page card, with no empty band above it', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`);
+
+    expect(await roomAbove(page, 'Open sessions')).toBeLessThanOrEqual(2);
+  });
+
+  test('start the person’s own trusted browsers at the top of the page card, with no empty band above them', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/account/trusted-browsers');
+
+    expect(await roomAbove(page, 'Your trusted browsers')).toBeLessThanOrEqual(2);
+  });
+});
+
 test.describe('times', () => {
   // Break caught: a time shown in the machine's zone: the same instant would read differently on every laptop that opens the page.
   test.describe('whatever the machine’s zone', () => {
