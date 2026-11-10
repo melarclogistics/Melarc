@@ -360,7 +360,8 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
    network, in parallel, with the content cache of the formatter and turbo's
    task cache (which serves lint, one task for each workspace) switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
-   a few minutes on cold caches, and exits 0 only when every check passed. It is not a gate and says nothing about a
+   a few minutes on cold caches, and exits 0 when no check failed: every check passed, or the one that did not pass cleanly is a
+   migration check that could not tell (`warned`, below), which does not fail it. It is not a gate and says nothing about a
    test, and it refuses to run while a gate runs. Its one weakness is turbo's cache of lint: a workspace whose files, and whose dependencies' files, did not
    change is not linted again, so a rule that reads something else can hide a finding that the gate's lint from scratch reports.
    `pnpm run precheck --uncached` runs the real commands. **The migration check** holds the migration files to the merge base of `HEAD` with main, and ends with one of three
@@ -371,8 +372,13 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    they fail on any exit but 0. `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the
    migrations to, and then it can decide. A base that is **named and empty** (`MELARC_MIGRATION_BASE=` with nothing after it, a variable that was not filled in, `--base ""`)
    or **mistyped** fails with exit `1` everywhere, and is never read as "none named"; the all-zero revision that a push event names for a new branch is none named. CI names
-   the revision a push to main came from by writing `MELARC_MIGRATION_BASE` to the environment of its later steps on a push only: an `env:` expression would be empty on a
-   pull request, and the workflow check (`scripts/ci-workflow.ts`) refuses it, as it refuses a step that sets `CI` to anything but `true`.
+   the revision a push to main came from in a step of its own before the guard (`node scripts/ci-migration-base.ts`), which writes `MELARC_MIGRATION_BASE` to the environment of
+   its later steps on a push only: an `env:` expression would be empty on a pull request, and a guard with no base compares the commit main is now at with itself and passes
+   whatever the push changed. **The workflow check (`scripts/ci-workflow.ts`) holds that step**: it must be there, before the guard in the same job, handed the event, the previous
+   revision and whether the push was forced, and it refuses `MELARC_MIGRATION_BASE` in an `env:` and a step that sets `CI` to anything but `true` or takes it away (`unset CI`,
+   `env -u CI`). **After a force push** the revision the push replaced is no longer in the checkout: the step fetches it by name (`git fetch origin <revision>`), and if the
+   server no longer has it **the run fails, in words that name the force push**; it never falls back to `origin/main`, which on a push is the revision under test. Refuse a force
+   push to main in the branch protection of the repository.
 3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
    edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
 4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It
