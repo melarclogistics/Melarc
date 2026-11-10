@@ -1,4 +1,5 @@
 import type { IconName } from '../../components/ui/icon/icons';
+import type { CapabilityWords } from '../../platform/problem/capability-words';
 import type { QueueName } from '../../platform/queue-summary/queue-summary-shape';
 import { isPermissionKey } from '../../platform/session/session-shape';
 
@@ -26,7 +27,7 @@ export type RouteAccess =
        * that reads pickup requests also reads pickup runs): a session without the key is refused in the page's words and not in another page's (the review of 499399c). The
        * sentence stays the table's; this only says what the page is.
        */
-      readonly capability?: string;
+      readonly capability?: CapabilityWords;
     };
 
 /**

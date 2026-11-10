@@ -1,6 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 
+import { KEY_PATTERN_FLAGS, keyPatternSource } from '../../support/permission-catalogue';
+import { watchForPermissionKeys } from '../../support/permission-key-watch';
+
 /**
  * WCAG 2.2 level A and AA, the tested baseline (DESIGN_SYSTEM section 14). It is a target and not a conformance claim.
  * axe-core 4.13 has one 2.2 AA rule, `target-size`, which needs layout and so can only run in a real browser. The other
@@ -81,10 +84,20 @@ export function reachableNames(page: Page, includeLinks: boolean): Promise<strin
   );
 }
 
-/** Records what a healthy page never does: log errors, throw, fail a request. Also lists its requests. */
+/**
+ * Records what a healthy page never does: log errors, throw, fail a request, **draw a permission key** (the runtime half of the guard that holds a key off every screen,
+ * `test/no-permission-key-on-screen.test.ts`: the page watches its own text and attributes as they are built and as they change, and reports a key of the catalogue as a
+ * console error, which is a problem here). Also lists its requests. Call it before the page is opened: the watch is installed in every document the page loads after that.
+ */
 export function watchPage(page: Page) {
   const problems: string[] = [];
   const requests: string[] = [];
+  // Not awaited: Playwright sends its messages in order, so the script is installed before whatever the caller does next; a refusal is an unhandled rejection, which fails the test.
+  void page.addInitScript(watchForPermissionKeys, {
+    source: keyPatternSource(),
+    flags: KEY_PATTERN_FLAGS,
+    log: true,
+  });
   page.on('console', (message) => {
     if (message.type() !== 'error' && message.type() !== 'warning') return;
     problems.push(`console ${message.type()}: ${message.text()} (${message.location().url})`);

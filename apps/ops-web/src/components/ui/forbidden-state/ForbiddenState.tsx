@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { PageHeading } from '../../PageHeading';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { cannotText, type CapabilityWords } from '../../../platform/problem/capability-words';
 import { Alert } from '../alert/Alert';
 
 /**
@@ -25,8 +25,8 @@ export type ForbiddenStateProps =
       readonly kind: 'permission-missing';
       /** The permission key the page needs. The refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key or a role. */
       readonly permission: string;
-      /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): the sentence stays the table’s. */
-      readonly capability?: string;
+      /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): words of the table, never free text. */
+      readonly capability?: CapabilityWords;
       readonly announce?: boolean;
     }
   | {
@@ -57,7 +57,7 @@ function Explanation({
 }: {
   readonly kind: ForbiddenKind;
   readonly permission?: string;
-  readonly capability?: string;
+  readonly capability?: CapabilityWords;
 }): ReactNode {
   switch (kind) {
     case 'permission-missing':

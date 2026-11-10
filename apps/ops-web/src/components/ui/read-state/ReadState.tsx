@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from 'react';
 
+import { type CapabilityWords } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { Alert } from '../alert/Alert';
 import { Button } from '../button/Button';
@@ -30,8 +31,8 @@ export interface ReadStateProps<Data> {
   readonly skeleton?: ReactNode;
   /** The permission key the read needs. A refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key. */
   readonly permission?: string;
-  /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): the sentence stays the table’s. */
-  readonly capability?: string;
+  /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): words of the table, never free text. */
+  readonly capability?: CapabilityWords;
   /** The `operationId` of the read, so that its failures are worded for it. */
   readonly operation?: string;
   readonly context?: string;
@@ -52,7 +53,7 @@ function RefusalOrFailure({
 }: {
   readonly problem: Problem;
   readonly permission: string | undefined;
-  readonly capability: string | undefined;
+  readonly capability: CapabilityWords | undefined;
   readonly onRetry: () => void;
   readonly retrying: boolean;
   readonly recovery: ReactNode;

@@ -12,6 +12,7 @@ import { queueSummaryObserver } from '../platform/queue-summary/queue-summary-re
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
 import { SessionStore, type SessionView } from '../platform/session/session-store';
+import { failWhenAPermissionKeyIsDrawn } from './permission-keys';
 import { sessionFixture } from './session-fixture';
 
 export interface ProvidersOptions {
@@ -25,9 +26,10 @@ export interface ProvidersOptions {
  * A component inside the real providers (query client, session store and boundary, scoped API client) and a router, without the
  * application's frame or routes, and with the store and the query client in hand so a test can end a session or read the cache. Only the
  * network is replaced (`installFakeApi`). What `AppProviders` does when a session ends is done the same way here, apart from the
- * navigation.
+ * navigation. The test fails if a permission key of the catalogue is drawn, as text or in an attribute, at any moment of it (`permission-keys.ts`).
  */
 export function renderWithProviders(ui: ReactElement, options: ProvidersOptions = {}) {
+  failWhenAPermissionKeyIsDrawn();
   const store = new SessionStore();
   if (options.signedIn !== undefined && options.signedIn !== false) {
     store.signedIn(options.signedIn === true ? sessionFixture() : options.signedIn);

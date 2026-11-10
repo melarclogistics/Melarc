@@ -33,6 +33,10 @@ const VERIFIED_VIEWPORTS = [
 /** From this width the sidebar is docked at the side; below it the top bar's button opens it in a sheet (the frame: 47.9375rem). */
 const DOCKED_FROM = 768;
 
+/** What the page watcher noted of a permission key on the screen (`watchPage`: the page reports each as a console error). */
+const keyProblems = (problems: readonly string[]) =>
+  problems.filter((problem) => problem.includes('A permission key is on the screen'));
+
 test.describe('the application shell in a browser', () => {
   // Break caught: a production build that does not start, logs errors, or reaches for anything other than its own
   // files. The one thing it asks of the API is who is signed in, once, on this origin (and the counts of the queues, which the stand-in answers
@@ -67,6 +71,61 @@ test.describe('the application shell in a browser', () => {
     for (const url of seen.requests) expect(new URL(url).origin, url).toBe(baseURL);
     expect(api.requests).toEqual([`GET ${SESSION_PATH}`]);
     expect(api.unexpected).toEqual([]);
+  });
+
+  // Break caught: a page watcher that does not look at what is drawn, so that a permission key put together at run time (a name built from a variable, a value an answer carried)
+  // reached a screen and every browser test passed (the review of f6cf02b; the source guard cannot see such a key). The page tells its console, which the watcher turns into a problem.
+  test('the page watcher reports a permission key drawn as text, in an attribute, or only for a moment', async ({
+    page,
+  }) => {
+    await stubApi(page);
+    const seen = watchPage(page);
+    await page.route('**/__key-probe', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
+          <p>This needs pickup.read.</p>
+          <button type="button" aria-label="staff.read">Go</button>
+          <script>
+            setTimeout(() => {
+              const moment = document.createElement('i');
+              moment.textContent = 'vendor.read';
+              document.body.append(moment);
+              setTimeout(() => moment.remove(), 20);
+            }, 50);
+          </script>
+        </body></html>`,
+      }),
+    );
+    await page.goto('/__key-probe');
+
+    await expect
+      .poll(() =>
+        keyProblems(seen.problems).map((problem) => /is on the screen: (\S+)/.exec(problem)?.[1]),
+      )
+      .toEqual(expect.arrayContaining(['pickup.read', 'staff.read', 'vendor.read']));
+    await expect(page.getByText('vendor.read')).toHaveCount(0);
+  });
+
+  // Break caught: a watcher so loose that it reports words (a refusal is told in plain words), which would fail every page of the portal.
+  test('the page watcher says nothing of a page that draws a refusal in plain words', async ({
+    page,
+  }) => {
+    await stubApi(page);
+    const seen = watchPage(page);
+    await page.route('**/__key-probe', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
+          <p>Your account can’t see pickup requests. Ask an administrator for access.</p>
+          <button type="button" aria-label="Open the request">Go</button>
+        </body></html>`,
+      }),
+    );
+    await page.goto('/__key-probe');
+
+    await expect(page.getByText('Ask an administrator for access.')).toBeVisible();
+    expect(keyProblems(seen.problems)).toEqual([]);
   });
 
   // Break caught: the guard rendering a signed-in page for somebody the API says is not signed in, for any moment, or
