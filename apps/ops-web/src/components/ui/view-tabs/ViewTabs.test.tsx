@@ -296,6 +296,99 @@ describe('ViewTabs on a narrow screen', () => {
     expect(row).toHaveAttribute('data-fade', 'end');
   });
 
+  // Break caught (the Product Owner, 10 November 2026): a view that takes focus (an arrow key, Tab, a press) left half under the fade at the edge of the row, because a browser scrolls a focused
+  // tab only when none of it is in view, or just into the row: the row moves it until it is whole and clear of the end by the width of the fade, and leaves one that is clear where it is.
+  it('brings a tab that takes focus clear of the fade, and leaves one that is clear where it is', () => {
+    const { container } = render(<Host />);
+    // The list is 520px wide in a row of 300px, so that it can scroll by 220px.
+    const row = measuredRow(container, { scrollWidth: 520, clientWidth: 300 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const rect = (left: number, right: number): DOMRect =>
+        ({
+          left,
+          right,
+          top: 0,
+          bottom: 30,
+          width: right - left,
+          height: 30,
+          x: left,
+          y: 0,
+        }) as DOMRect;
+      if (this.classList.contains('ui-view-tabs__scroll')) return rect(0, 300);
+      if (this.getAttribute('role') === 'tab') {
+        const place =
+          [...(this.parentElement?.children ?? [])].indexOf(this) * 120 - row.scrollLeft;
+        return rect(place, place + 110);
+      }
+      return rect(0, 0);
+    });
+    const reach = (name: string | RegExp) => {
+      act(() => {
+        fireEvent.focusIn(tab(name));
+      });
+    };
+
+    // The second view (120 to 230) is whole and clear of both ends by 24px: the row stays where it is.
+    reach(/^Confirmed/);
+    expect(row.scrollLeft).toBe(0);
+
+    // The third (240 to 350) is cut off at the end of a row of 300, as a browser leaves it: the row moves until it is clear of the end by 24px.
+    reach(/^Cancelled/);
+    expect(row.scrollLeft).toBe(350 - 300 + 24);
+
+    // The last (360 to 470, 286 to 396 where the row is now): the row moves on, and no further than its end.
+    reach('All');
+    expect(row.scrollLeft).toBe(194);
+
+    // Back to the first (-194 to -84 now): the row goes back until it is at its start, where nothing lies before the tab.
+    reach(/^Needs decision/);
+    expect(row.scrollLeft).toBe(0);
+  });
+
+  // Break caught (found by the browser test of a view reached by an arrow key): a clearance taken from the text of the row itself (14px, so 21px) and not from the root's (1.5rem of 16px, 24px), which
+  // leaves a tab 3px under the fade that the stylesheet draws over 1.5rem, and more as the text is enlarged.
+  it('keeps a tab clear of the fade by 1.5rem of the root text, whatever size the text of the row is', () => {
+    document.documentElement.style.fontSize = '20px';
+    try {
+      const { container } = render(<Host />);
+      const row = measuredRow(container, { scrollWidth: 520, clientWidth: 300 });
+      row.style.fontSize = '10px';
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const rect = (left: number, right: number): DOMRect =>
+          ({
+            left,
+            right,
+            top: 0,
+            bottom: 30,
+            width: right - left,
+            height: 30,
+            x: left,
+            y: 0,
+          }) as DOMRect;
+        if (this.classList.contains('ui-view-tabs__scroll')) return rect(0, 300);
+        if (this.getAttribute('role') === 'tab') {
+          const place =
+            [...(this.parentElement?.children ?? [])].indexOf(this) * 120 - row.scrollLeft;
+          return rect(place, place + 110);
+        }
+        return rect(0, 0);
+      });
+
+      act(() => {
+        fireEvent.focusIn(tab(/^Cancelled/));
+      });
+
+      // The third view (240 to 350) is cut off at the end of a row of 300: it is moved until it is clear by 1.5 x 20 = 30px, and not by 1.5 x 10.
+      expect(row.scrollLeft).toBe(350 - 300 + 30);
+    } finally {
+      document.documentElement.style.fontSize = '';
+    }
+  });
+
   // Break caught (found on the pickup queue at 320 and 390 px): the current view brought into view once, at the first draw, before the counts and the fonts have arrived and made the list longer,
   // so that the last view is cut off again and its end fades. The row keeps the current view in view while the list grows, until the person scrolls it themselves.
   it('keeps the current view in view while the list grows, and stops once the person has scrolled it', async () => {

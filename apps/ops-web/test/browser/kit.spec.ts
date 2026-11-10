@@ -360,6 +360,46 @@ test.describe('PageHeader, ViewTabs and FilterBar in a browser', () => {
     });
   }
 
+  // Break caught (the Product Owner, 10 November 2026): a view reached by an arrow key that the browser leaves half in view (Chromium scrolls a focused tab only when none of it is in view) or scrolls
+  // just into the list, so that its words lie under the fade at the edge, half erased, until the person scrolls. The row keeps the view clear of each end that fades by the width of the fade.
+  for (const width of [320, 390]) {
+    test(`keeps a view reached by the arrow keys out of the fade at the edge of the list, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await openKit(page, 'header', { width, height: 900 });
+      const views = specimen(page, 'In a narrow room: the list scrolls inside its own box');
+      const row = views.locator('.ui-view-tabs__scroll');
+      const count = await views.getByRole('tab').count();
+      expect(count).toBeGreaterThan(2);
+      const clearOfTheFade = () =>
+        row.evaluate((element) => {
+          const room = element.getBoundingClientRect();
+          const reached = document.activeElement?.getBoundingClientRect();
+          if (reached === undefined) return 'nothing has focus';
+          const fade = parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.5;
+          const startFades = element.scrollLeft > 1;
+          const endFades = element.scrollLeft + element.clientWidth < element.scrollWidth - 1;
+          const where = `the view is at ${String(Math.round(reached.left - room.left))} to ${String(Math.round(reached.right - room.left))} of a list ${String(Math.round(room.width))} wide, scrolled ${String(Math.round(element.scrollLeft))} of ${String(Math.round(element.scrollWidth - element.clientWidth))}, the fade ${String(fade)}`;
+          if (startFades && reached.left < room.left + fade - 1)
+            return `under the fade at the start: ${where}`;
+          if (endFades && reached.right > room.right - fade + 1)
+            return `under the fade at the end: ${where}`;
+          return 'clear';
+        });
+
+      await views.getByRole('tab').first().focus();
+      // Forward to the last view, then back to the first: each one reached lies clear of the end that fades.
+      const keys = [
+        ...Array.from({ length: count - 1 }, () => 'ArrowRight'),
+        ...Array.from({ length: count - 1 }, () => 'ArrowLeft'),
+      ];
+      for (const key of keys) {
+        await page.keyboard.press(key);
+        await expect.poll(clearOfTheFade).toBe('clear');
+      }
+    });
+  }
+
   // Break caught: a chip that cannot be removed with the keyboard, or one that loses the person's place.
   test('removes a chip from the keyboard and focus stays in the bar; the popover opens, takes focus and gives it back', async ({
     page,

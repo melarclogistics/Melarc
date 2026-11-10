@@ -12,6 +12,11 @@
 .ui-view-tabs__scroll {
   overflow-x: auto;
   scrollbar-width: thin;
+  /*
+   * A view reached by an arrow key is brought into view with 1.5rem to spare at each edge, the width of the fade below (the Product Owner, 10 November 2026): without it the browser scrolls the
+   * view just into the list, so that its words lie under the fade, half erased, until the person scrolls.
+   */
+  scroll-padding-inline: 1.5rem;
 }
 
 /*

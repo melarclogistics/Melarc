@@ -6,10 +6,28 @@ export type EdgeFade = '' | 'start' | 'end' | 'start end';
 /** A fade is 1.5rem wide (the stylesheet's); a tab brought into view stays clear of it by as much. */
 const FADE_REM = 1.5;
 
-/** The distance, in pixels, of a tab that is brought into view from the edge of the row: the width of the fade. */
+/**
+ * The distance, in pixels, of a tab that is brought into view from the edge of the row: the width of the fade. It is 1.5rem, so it is of the **root's** text, whatever size the row's own text is
+ * (the row's is smaller, and a distance taken from it left a tab 3px under the fade: found by the browser test of a view reached by an arrow key, 10 November 2026).
+ */
 function clearance(element: HTMLElement): number {
-  const size = Number.parseFloat(getComputedStyle(element).fontSize);
+  const size = Number.parseFloat(getComputedStyle(element.ownerDocument.documentElement).fontSize);
   return FADE_REM * (Number.isFinite(size) ? size : 16);
+}
+
+/**
+ * A tab is moved until it is whole and clear of the end it lies near by the width of the fade, and no further (a tab already clear is not moved). Only the row scrolls: `scrollLeft` is set,
+ * which no browser does to the page.
+ */
+function keepClear(element: HTMLElement, tab: HTMLElement): void {
+  const room = element.getBoundingClientRect();
+  const place = tab.getBoundingClientRect();
+  const margin = clearance(element);
+  if (place.left < room.left + margin) {
+    element.scrollLeft += place.left - room.left - margin;
+  } else if (place.right > room.right - margin) {
+    element.scrollLeft += place.right - room.right + margin;
+  }
 }
 
 /** What a person does to a row of tabs with their own hands: from then on its position is theirs, until the current view changes. */
@@ -19,8 +37,9 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
  * What a row of tabs that scrolls sideways needs on a narrow screen: which of its ends are cut off (so that the stylesheet can fade them: a row
  * that ends at the edge of the screen with a whole tab looks complete), and the current tab brought into view when it changes (a view chosen by
  * the address, by a link, or by the keys) and kept in view while the list grows (the counts arrive, the fonts load, the text is enlarged) until
- * the person scrolls the row themselves. It reads the row and sets nothing but its scroll position; it never takes focus. The row is measured
- * when it is drawn, when it is scrolled, and when its own box or its list changes size.
+ * the person scrolls the row themselves. **A tab that takes focus is brought clear of the fades too** (the Product Owner, 10 November 2026): a browser scrolls a focused tab into view only when
+ * none of it is in view (Chromium) or just into the row (the others), so that a view reached by an arrow key lay half under the fade at the edge, its words erased. It reads the row and sets
+ * nothing but its scroll position; it never takes focus. The row is measured when it is drawn, when it is scrolled, and when its own box or its list changes size.
  */
 export function useEdgeFade(current: string): {
   readonly scroller: RefObject<HTMLDivElement | null>;
@@ -48,17 +67,12 @@ export function useEdgeFade(current: string): {
     const tab = element?.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
     if (element === null || tab === null || tab === undefined) return;
     const tabs = [...element.querySelectorAll('[role="tab"]')];
-    const room = element.getBoundingClientRect();
-    const place = tab.getBoundingClientRect();
-    const margin = clearance(element);
     if (tab === tabs[0]) {
       element.scrollLeft = 0;
     } else if (tab === tabs[tabs.length - 1]) {
       element.scrollLeft = element.scrollWidth;
-    } else if (place.left < room.left + margin) {
-      element.scrollLeft += place.left - room.left - margin;
-    } else if (place.right > room.right - margin) {
-      element.scrollLeft += place.right - room.right + margin;
+    } else {
+      keepClear(element, tab);
     }
   }, []);
 
@@ -73,6 +87,12 @@ export function useEdgeFade(current: string): {
     const takeOver = (): void => {
       following.current = false;
     };
+    // A tab that takes focus, by the arrow keys, by Tab or by a press, is moved clear of the fades.
+    const onFocus = (event: FocusEvent): void => {
+      const tab = event.target;
+      if (tab instanceof HTMLElement && tab.getAttribute('role') === 'tab') keepClear(element, tab);
+    };
+    element.addEventListener('focusin', onFocus);
     element.addEventListener('scroll', measure, { passive: true });
     for (const type of BY_HAND) element.addEventListener(type, takeOver, { passive: true });
     const observer =
@@ -80,6 +100,7 @@ export function useEdgeFade(current: string): {
     observer?.observe(element);
     for (const child of element.children) observer?.observe(child);
     return () => {
+      element.removeEventListener('focusin', onFocus);
       element.removeEventListener('scroll', measure);
       for (const type of BY_HAND) element.removeEventListener(type, takeOver);
       observer?.disconnect();
