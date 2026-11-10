@@ -174,6 +174,32 @@ export function reachableNames(page: Page, includeLinks: boolean): Promise<strin
 }
 
 /**
+ * The two warnings that Firefox writes to the console of its own accord, about the test origin and about the page, and that no change of ours can prevent (Product Owner,
+ * 10 November 2026). Each is matched whole, by the text Firefox wrote (build 1543 of Playwright's Firefox), so that another warning, another wording or another host is a problem
+ * as before:
+ *
+ * - the bounce-tracker classification: Firefox's state-purging heuristic names an origin that is navigated to again and again with no user gesture, which is what a test run is, and
+ *   the test origin is the loopback address;
+ * - the scroll-linked positioning effect: Firefox's heuristic for a layer that a script positions as the page scrolls, which is how the popovers and the sticky offsets of the kit's
+ *   libraries are placed. It names the page it was found on.
+ */
+export const FIREFOX_OWN_WARNINGS: readonly RegExp[] = [
+  /^\[JavaScript Warning: "“127\.0\.0\.1” has been classified as a bounce tracker\. If it does not receive user activation within the next 3,600 seconds it will have its state purged\."\]$/,
+  /^\[JavaScript Warning: "This site appears to use a scroll-linked positioning effect\. This may not work well with asynchronous panning; see https:\/\/firefox-source-docs\.mozilla\.org\/performance\/scroll-linked_effects\.html for further details and to join the discussion on related tools and features!" \{file: "http:\/\/127\.0\.0\.1:\d+\/[^"]*" line: \d+\}\]$/,
+];
+
+/** Whether a console message is one of Firefox's own two (see `FIREFOX_OWN_WARNINGS`): a warning, from Firefox, with exactly their text. */
+export function isFirefoxOwnWarning(
+  engine: string | undefined,
+  type: string,
+  text: string,
+): boolean {
+  return (
+    engine === 'firefox' && type === 'warning' && FIREFOX_OWN_WARNINGS.some((own) => own.test(text))
+  );
+}
+
+/**
  * Records what a healthy page never does: log errors, throw, fail a request, **draw a permission key** (the runtime half of the guard that holds a key off every screen,
  * `test/no-permission-key-on-screen.test.ts`: the page watches its own text and attributes as they are built and as they change, and reports a key of the catalogue as a
  * console error, which is a problem here). Also lists its requests. Call it before the page is opened: the watch is installed in every document the page loads after that.
@@ -181,6 +207,7 @@ export function reachableNames(page: Page, includeLinks: boolean): Promise<strin
 export function watchPage(page: Page) {
   const problems: string[] = [];
   const requests: string[] = [];
+  const engine = page.context().browser()?.browserType().name();
   // Not awaited: Playwright sends its messages in order, so the script is installed before whatever the caller does next; a refusal is an unhandled rejection, which fails the test.
   void page.addInitScript(watchForPermissionKeys, {
     source: keyPatternSource(),
@@ -189,6 +216,7 @@ export function watchPage(page: Page) {
   });
   page.on('console', (message) => {
     if (message.type() !== 'error' && message.type() !== 'warning') return;
+    if (isFirefoxOwnWarning(engine, message.type(), message.text())) return;
     problems.push(`console ${message.type()}: ${message.text()} (${message.location().url})`);
   });
   page.on('pageerror', (error) => {
