@@ -217,6 +217,56 @@ describe('the log: what it shows', () => {
     ).toBeVisible();
   });
 
+  // Break caught (the Product Owner, 10 November 2026): a log that does not say when it was read, or gives no way to read it again that a person can see (every other list says "Updated ... ·
+  // Refresh" under its title), or that reads it again without saying so.
+  it('says when it was updated, with the way to refresh it, in the words of every list, and reads the page again when asked', async () => {
+    const { user } = open();
+    await logTable();
+
+    expect(await screen.findByText(/^Updated /)).toBeVisible();
+    const before = listRequests().length;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(listRequests()).toHaveLength(before + 1);
+    });
+    await logTable();
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a header of two sentences, so that the title is followed by a paragraph before the person reaches the log: it is one sentence.
+  it('says what the log is in one sentence', async () => {
+    open();
+    await logTable();
+
+    const description = screen.getByText(/^What became of each message/);
+    expect(description.textContent.match(/\./g)).toHaveLength(1);
+    expect(description).toHaveTextContent(/never what it said\.$/);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "no messages yet" (as if the platform had never said anything), or in words of its own, or
+  // with no way back to the first page: every list says it the same way, in the queue template's words.
+  it('tells an empty page after the first as that, in the words of every list, and goes back to the first page', async () => {
+    const { user } = open((request) =>
+      new URL(request.url).searchParams.get('page_token') === null
+        ? page([confirmed], 'next-1')
+        : page([]),
+    );
+    await logTable();
+
+    await user.click(await screen.findByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByRole('heading', { name: 'No messages on this page' })).toBeVisible();
+    expect(
+      screen.getByText('Page 2 has no messages now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No messages yet' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+
+    expect(await screen.findByRole('rowheader', { name: '29 Oct, 08:15' })).toBeVisible();
+    expect(queryOf().has('page_token')).toBe(false);
+  });
+
   // Break caught (the Product Owner, 9 November 2026): the order told as "as the server lists them", which is not what a person asks: it is newest first, and that is all it says.
   it('says the order in plain words: newest first', async () => {
     open();

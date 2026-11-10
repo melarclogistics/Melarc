@@ -309,6 +309,14 @@ export function MessageLogPage() {
 
   if (me === undefined) return null;
 
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
+
+  function refreshPage(): void {
+    // One read at a time: a press while a read is under way is that read's, and neither cancels it nor starts another.
+    void list.refetch({ cancelRefetch: false });
+  }
+
   const current: Narrowing = { state, audience, channel, subject, subjectType };
 
   /** Narrows the log to exactly this: what it leaves out is no filter. */
@@ -348,7 +356,10 @@ export function MessageLogPage() {
   const hubFilters = hub !== undefined && subject === undefined;
 
   const result: QueueResult<NotificationEntryView> = (() => {
-    if (list.status === 'pending') return { status: 'loading' };
+    // Any read of the page, a refresh asked for, a page or a filter, is not drawn as if the earlier rows answered it: the loading treatment takes their place.
+    if (list.status === 'pending' || (list.isFetching && list.status === 'success')) {
+      return { status: 'loading' };
+    }
     if (list.status === 'error') {
       const problem = problemOf(list.error, { operation: 'listNotifications' });
       // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
@@ -380,6 +391,8 @@ export function MessageLogPage() {
     noun: 'messages',
     none: 'Messages appear here when the platform tells someone about an act, for example a confirmed pickup request.',
     announce: interacted,
+    // A page after the first can hold nothing without the log being empty (messages are raised between reads): the template says so, as every list does.
+    laterPage: { page: paging.page, onFirstPage: paging.toFirstPage },
     ...(hub !== undefined && subject === undefined
       ? { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }
       : {}),
@@ -417,7 +430,12 @@ export function MessageLogPage() {
         header={{
           title: 'Messages',
           description:
-            'The messages the platform sent or kept for people about an act, newest first, and what became of each. It shows what became of a message, not what it said.',
+            'What became of each message the platform sent or kept for people about an act, newest first, never what it said.',
+          freshness: {
+            state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: refreshPage,
+          },
         }}
         views={{
           label: 'Views of the messages',
@@ -511,7 +529,7 @@ export function MessageLogPage() {
         }
         result={result}
         empty={empty}
-        {...(emptyOpsFeed && !hubFilters
+        {...(emptyOpsFeed && !hubFilters && paging.page === 1
           ? {
               emptyState: (
                 <EmptyStateV2
