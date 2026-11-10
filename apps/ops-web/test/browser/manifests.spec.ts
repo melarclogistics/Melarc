@@ -1331,6 +1331,50 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
   },
 ];
 
+test.describe('the pickup runs, drawn for the room they have (the Product Owner, 10 November 2026)', () => {
+  // Break caught: a table that scrolls sideways at 768px (a box of 41rem), where no table may, or that takes a column away that it has room for. The four columns fit, so all four are drawn and the box
+  // scrolls nowhere.
+  test('keeps the table at 768px with every column in view, and never scrolls it sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/manifests');
+
+    const table = page.getByRole('table', { name: 'Pickup runs' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Pickup run / hub',
+      'State',
+      'Service date',
+      'Rider / progress',
+    ]);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((box) => box.scrollWidth - box.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught: a card that tells less than the row it replaces (the rider and the progress, the hub or the day left out where the table has no room for its columns).
+  test('draws a card with every fact of a run at 390px, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/manifests');
+
+    const cards = page.getByRole('list', { name: 'Pickup runs' }).getByRole('listitem');
+    await expect(cards.first()).toBeVisible();
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Service date',
+      'Hub',
+      'Rider / progress',
+    ]);
+    await expect(cards.first().getByRole('definition').nth(1)).not.toBeEmpty();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+});
+
 test.describe('every screen, at the verified widths', () => {
   for (const { width, height } of VIEWPORTS) {
     for (const screen of SCREENS) {

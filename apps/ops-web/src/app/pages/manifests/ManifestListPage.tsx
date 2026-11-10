@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
-import { NoWrap, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import {
+  CellLines,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
@@ -83,16 +89,6 @@ function factsOf(
   };
 }
 
-/** Two facts that belong together, the second quieter beneath the first. */
-function Pair({ first, second }: { readonly first: string; readonly second: string }) {
-  return (
-    <span className="pickup-lines">
-      <span>{first}</span>
-      <span className="pickup-support">{second}</span>
-    </span>
-  );
-}
-
 /** The state as a badge, on one line: the column takes its width. */
 function State({ state }: { readonly state: RunFacts['state'] }) {
   return <StatusBadge status={state} map={MANIFEST_STATE_MAP} />;
@@ -100,7 +96,9 @@ function State({ state }: { readonly state: RunFacts['state'] }) {
 
 /**
  * The four facts of a pickup run in four columns: the code over the hub (the code is the row's header, and **a link to the run's own page**: a row opens a page and not a panel, so
- * there is no button over the row, and a keyboard, a middle click and a new tab all use the link), where the run stands, the day it is for, and the rider and how far it has come.
+ * there is no button over the row, and a keyboard, a middle click and a new tab all use the link), where the run stands, the day it is for, and the rider and how far it has come. **The
+ * rider and how far the run has come are the lesser column** (the Product Owner, 10 November 2026: each list marks its own): where the table's own box is too narrow for the four it is what
+ * goes, and the table does not scroll sideways; a card, under 40rem, shows every fact.
  */
 const COLUMNS: readonly DataColumn<RunFacts>[] = [
   {
@@ -114,37 +112,28 @@ const COLUMNS: readonly DataColumn<RunFacts>[] = [
   {
     id: 'rider',
     header: 'Rider / progress',
-    cell: (row) => <Pair first={row.rider} second={row.moments} />,
+    priority: 2,
+    cell: (row) => <CellLines first={row.rider} second={row.moments} />,
   },
 ];
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
 /**
- * A pickup run as a card, for a room too narrow for the columns: the state, then the facts in the order a person reads them, each under the name of its column. It holds **no control**:
+ * A pickup run as a card, for a room too narrow for the columns: the state, then the facts in the order a person reads them, each a label and its value (`CardFacts`). It holds **no control**:
  * its code is the card's heading, outside the card, and the link to the run.
  */
 function RunCard({ facts }: { readonly facts: RunFacts }) {
   return (
-    <>
-      <div className="pickup-card__head">
-        <State state={facts.state} />
-      </div>
-      <dl className="pickup-card__facts">
-        <Fact label="Service date">{facts.serviceDate}</Fact>
-        <Fact label="Hub">{facts.hub}</Fact>
-        <Fact label="Rider / progress">
-          <Pair first={facts.rider} second={facts.moments} />
-        </Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<State state={facts.state} />}
+      facts={[
+        { label: 'Service date', value: facts.serviceDate },
+        { label: 'Hub', value: facts.hub },
+        {
+          label: 'Rider / progress',
+          value: <CellLines first={facts.rider} second={facts.moments} />,
+        },
+      ]}
+    />
   );
 }
 
