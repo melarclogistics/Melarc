@@ -92,6 +92,14 @@ function open(
   return renderApp(path);
 }
 
+/** What the row of acts in the record's header holds, in the order they are drawn: the names of its buttons and links. `undefined` when no row is drawn. */
+function headerActs(): string[] | undefined {
+  const row = document.querySelector('.ui-record-header__actions');
+  return row === null
+    ? undefined
+    : Array.from(row.querySelectorAll('a, button'), (each) => each.textContent);
+}
+
 const posts = () => api.requests.filter((request) => request.method === 'POST');
 const reads = () =>
   api.requests.filter((request) => request.url.endsWith(`/staff-identities/${STAFF_ID}`));
@@ -1056,6 +1064,8 @@ describe('the profile: starting a password recovery (AC-SLICE-000-105)', () => {
 });
 
 describe('the profile: the other things to do with it', () => {
+  // Every key of the identity screens, and the one that starts a password recovery.
+  const RECOVERER = [...KEYS.everything, 'staff.credential.recover'];
   const withFactor = staffIdentityFixture({
     status: 'ACTIVE',
     mfa_enrolled: true,
@@ -1106,6 +1116,23 @@ describe('the profile: the other things to do with it', () => {
     );
   });
 
+  // Break caught (Stage 4.4): the sessions as a panel of their own that holds one button-link, or as an act in the header. They are a page beside this one, so they are a plain link in the panel of what is related.
+  it('puts the link to the sessions in the panel of what is related, as a link and not as a button', async () => {
+    open(KEYS.approver, { [RECORD]: () => json(200, active, etag('v2')) });
+    await heading('Kofi Boateng');
+
+    const page = within(screen.getByRole('main'));
+    const related = page
+      .getByRole('heading', { level: 2, name: 'Related' })
+      .closest('[data-slot="card"]');
+    expect(related).not.toBeNull();
+    const link = within(related as HTMLElement).getByRole('link', { name: 'See sessions' });
+    expect(link).toHaveClass('ui-link');
+    expect(link).not.toHaveClass('ui-button');
+    // No panel of its own, named for the sessions.
+    expect(page.queryByRole('heading', { name: 'Sessions' })).toBeNull();
+  });
+
   it('does not offer the sessions of a profile that waits, or to a person who cannot end them', async () => {
     const waiting = open(KEYS.approver);
     await heading('Kofi Boateng');
@@ -1118,8 +1145,8 @@ describe('the profile: the other things to do with it', () => {
     expect(screen.queryByRole('link', { name: 'See sessions' })).toBeNull();
   });
 
-  // Break caught: a panel of acts drawn empty for a profile there is nothing to do with. The acts are grouped by what they change, each group in a panel of its own.
-  it('has no panel of acts for a profile there is nothing to do with', async () => {
+  // Break caught: a row of acts or a panel drawn empty for a profile there is nothing to do with.
+  it('draws no act, and no panel of what is related, for a profile there is nothing to do with', async () => {
     open(KEYS.everything, {
       [RECORD]: () => json(200, staffIdentityFixture({ status: 'REJECTED' }), etag('v2')),
     });
@@ -1127,21 +1154,23 @@ describe('the profile: the other things to do with it', () => {
 
     // The page, not the menu beside it (which has a Sessions entry of its own).
     const page = within(screen.getByRole('main'));
-    expect(page.queryByRole('heading', { name: 'Credentials' })).toBeNull();
-    expect(page.queryByRole('heading', { name: 'Sessions' })).toBeNull();
+    expect(page.queryByRole('heading', { name: 'Related' })).toBeNull();
     expect(page.queryByRole('heading', { name: 'Trusted browsers' })).toBeNull();
     expect(
-      page.queryByRole('button', { name: /link|recovery|authenticator|browsers/i }),
+      page.queryByRole('button', { name: /link|recovery|authenticator|browsers|approve|reject/i }),
     ).toBeNull();
     expect(page.queryByRole('link', { name: /sessions|authenticator/i })).toBeNull();
-    // It could fail: the same page for an active profile of a person with an authenticator has all of them.
+    // No row of acts at all: an empty one would leave a gap under the name.
+    expect(headerActs()).toBeUndefined();
+    // It could fail: the same page for an active profile of a person with an authenticator has each of them (the next tests).
     expect(page.getAllByRole('heading', { level: 2 }).map((each) => each.textContent)).toEqual([
       'Profile',
     ]);
   });
 
-  it('groups the acts by what they change, each group in a panel of its own', async () => {
-    open(KEYS.everything, {
+  // Break caught (Stage 4.4): the acts on the credentials in a panel that holds nothing but their buttons. Every act of the record is in its header, beside the name.
+  it('puts the acts on the credentials in the header, beside the name, and keeps them out of the panels', async () => {
+    open(RECOVERER, {
       [RECORD]: () =>
         json(
           200,
@@ -1155,20 +1184,29 @@ describe('the profile: the other things to do with it', () => {
     });
     await heading('Kofi Boateng');
 
-    const credentials = (
-      await screen.findByRole('heading', { level: 2, name: 'Credentials' })
-    ).closest('[data-slot="card"]');
-    expect(credentials).not.toBeNull();
-    expect(
-      within(credentials as HTMLElement).getByRole('link', { name: 'Reset authenticator' }),
-    ).toBeVisible();
-    const sessions = screen
-      .getByRole('heading', { level: 2, name: 'Sessions' })
-      .closest('[data-slot="card"]');
-    expect(
-      within(sessions as HTMLElement).getByRole('link', { name: 'See sessions' }),
-    ).toBeVisible();
-    expect(screen.getByRole('region', { name: 'Trusted browsers' })).toBeVisible();
+    expect(headerActs()).toEqual(['Start password recovery', 'Reset authenticator']);
+
+    // The panels hold what the person reads: the facts, the browsers they chose to be remembered at, and what is related. None is a panel of acts.
+    const page = within(screen.getByRole('main'));
+    expect(page.getAllByRole('heading', { level: 2 }).map((each) => each.textContent)).toEqual([
+      'Profile',
+      'Trusted browsers',
+      'Related',
+    ]);
+    expect(page.queryByRole('heading', { name: 'Credentials' })).toBeNull();
+    expect(page.getByRole('region', { name: 'Trusted browsers' })).toBeVisible();
+  });
+
+  it('puts the decision and the other acts of a profile that waits, and the acts of one that has no password, in the header too', async () => {
+    const waiting = open(KEYS.everything);
+    await heading('Kofi Boateng');
+    expect(headerActs()).toEqual(['Approve profile', 'Reject profile']);
+    waiting.unmount();
+    api.restore();
+
+    open(RECOVERER, { [RECORD]: () => json(200, active, etag('v2')) });
+    await heading('Kofi Boateng');
+    expect(headerActs()).toEqual(['Send a new setup link', 'Start password recovery']);
   });
 });
 
