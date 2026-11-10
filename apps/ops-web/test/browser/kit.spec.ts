@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { settled, watchPage, wcagViolations } from './support/page';
+import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
 
 /**
  * The Melarc component kit in the development-only showcase (`/__showcase/kit/<group>`; redesign step R5; COMPONENT_PATTERNS section 37), in a real browser: the
@@ -712,7 +712,9 @@ test.describe('SidePanel, RecordHeader, DescriptionList, Panel and StatTile in a
     await expect(
       page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' }).getByRole('heading', { level: 2 }),
     ).toBeFocused();
-    await page.keyboard.press('Tab');
+    // The next stop after the heading is the link. Safari's Tab leaves links out of the order and Option+Tab reaches them, so the step is the one a person who reaches
+    // links makes in the engine (`stepIncludingLinks`): Tab where Tab does it, and what Option+Tab does where no key can be pressed to.
+    await stepIncludingLinks(page);
     await expect(page.getByRole('link', { name: 'Open full page' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeHidden();

@@ -154,13 +154,12 @@ test.describe('moving through the screens', () => {
   // Break caught: a link-button that shows no focus ring, or one a keyboard cannot reach.
   test('the primary action is a link a keyboard reaches, and it shows where focus is', async ({
     page,
-    browserName,
   }) => {
     await open(page, '/admin/staff');
     await page.getByRole('heading', { level: 1, name: 'Staff' }).waitFor();
 
-    // Safari's engine leaves links out of the Tab order unless the user turns on "Press Tab to highlight each item".
-    test.skip(browserName === 'webkit', 'WebKit for Windows never moves focus to a link by Tab.');
+    // The claim does not depend on which key an engine reaches a link with (Safari's Tab leaves links out of the order and Option+Tab reaches them: `stepIncludingLinks`):
+    // the link is among the stops that a person who can reach links walks, and it draws a ring when it has focus. It is asserted in every engine.
     const names = await reachableNames(page, true);
     expect(names).toContain('Add a staff profile');
     const link = page.getByRole('main').getByRole('link', { name: 'Add a staff profile' });

@@ -25,6 +25,95 @@ export async function tabReachesLinks(page: Page): Promise<boolean> {
   return reached;
 }
 
+/** How a person who can reach links moves focus in this engine: with Tab, with Option+Tab, or (where no key does) not by a key a test can press. */
+type LinkWalk = 'Tab' | 'Alt+Tab' | 'script';
+
+/** What each browser launched by a worker was found to do, asked once: the engine's behaviour does not change from one test to the next. */
+const linkWalks = new WeakMap<object, Promise<LinkWalk>>();
+
+/**
+ * Asks the engine, on a page of its own with nothing of the application in it, which key takes focus from a button to the link after it. Safari's engine leaves links
+ * out of the Tab order unless its user turns on "Press Tab to highlight each item", and Option+Tab reaches them; Chromium and Firefox reach them with Tab. Playwright's
+ * WebKit for Windows reaches a link with neither (the page sees Alt+Tab, and the engine ignores it), though a script can give a link focus.
+ */
+async function probeLinkWalk(page: Page): Promise<LinkWalk> {
+  const scratch = await page.context().newPage();
+  try {
+    await scratch.setContent(
+      '<button id="before">Before</button><a id="link" href="#link">A link</a><button id="after">After</button>',
+    );
+    for (const keys of ['Tab', 'Alt+Tab'] as const) {
+      await scratch.evaluate(() => {
+        document.getElementById('before')?.focus();
+      });
+      await scratch.keyboard.press(keys);
+      if (await scratch.evaluate(() => document.activeElement?.id === 'link')) return keys;
+    }
+    return 'script';
+  } finally {
+    await scratch.close();
+  }
+}
+
+/**
+ * Takes focus from the stop it is on to the next one (the one before, with `backwards`), as a person does who can reach links. A test that walks a page with links in it
+ * calls this and not `page.keyboard.press('Tab')`, so that it asserts the same thing in every engine and a product claim is never skipped on one:
+ *
+ * - where Tab reaches links (Chromium, Firefox) it presses Tab, and Shift+Tab backwards;
+ * - where Option+Tab does (Safari: Option+Tab, and Option+Shift+Tab backwards) it presses that;
+ * - where no key does (Playwright's WebKit for Windows) it gives focus to the next stop in the document order that Option+Tab walks, with a script, and the engine
+ *   scrolls it into view as it does for any focus. A key press is a model there and the walk is not: what a test asserts of each stop (its place, its ring) is the engine's.
+ */
+export async function stepIncludingLinks(
+  page: Page,
+  options: { readonly backwards?: boolean } = {},
+): Promise<void> {
+  const backwards = options.backwards === true;
+  const context = page.context();
+  const key: object = context.browser() ?? context;
+  let asked = linkWalks.get(key);
+  if (asked === undefined) {
+    asked = probeLinkWalk(page);
+    linkWalks.set(key, asked);
+  }
+  let walk: LinkWalk;
+  try {
+    walk = await asked;
+  } catch (error) {
+    linkWalks.delete(key);
+    throw error;
+  }
+  if (walk === 'Tab') {
+    await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab');
+  } else if (walk === 'Alt+Tab') {
+    await page.keyboard.press(backwards ? 'Alt+Shift+Tab' : 'Alt+Tab');
+  } else {
+    await page.evaluate((back) => {
+      const stops = [
+        ...document.querySelectorAll<HTMLElement>(
+          'a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, iframe, [contenteditable=""], [contenteditable="true"], [tabindex]',
+        ),
+      ].filter((element) => element.getAttribute('tabindex') !== '-1');
+      const from =
+        document.activeElement === null || document.activeElement === document.body
+          ? null
+          : document.activeElement;
+      // A stop that is not drawn, is disabled or lies inside something inert takes no focus, so it is passed over, as the keyboard passes over it.
+      for (const stop of back ? stops.reverse() : stops) {
+        if (from !== null) {
+          const where = from.compareDocumentPosition(stop);
+          const onTheWay = back
+            ? (where & Node.DOCUMENT_POSITION_PRECEDING) !== 0
+            : (where & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+          if (!onTheWay) continue;
+        }
+        stop.focus();
+        if (document.activeElement === stop) return;
+      }
+    }, backwards);
+  }
+}
+
 /**
  * The accessible-ish name of every element a keyboard can reach, in document order, with or without the links. An element that is not
  * drawn (`display: none`, `visibility: hidden`, as a menu that has slid out of sight is) or that lies inside something inert is not a stop.

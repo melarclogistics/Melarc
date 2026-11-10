@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { SESSION_PATH, stubApi } from './support/api';
-import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
+import {
+  reachableNames,
+  stepIncludingLinks,
+  tabReachesLinks,
+  watchPage,
+  wcagViolations,
+} from './support/page';
 import {
   accountButton,
   dockedSidebar,
@@ -1463,7 +1469,8 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
       await page.locator('#long-list a').last().focus();
       let walked = 0;
       for (let step = 0; step < 70; step += 1) {
-        await page.keyboard.press('Shift+Tab');
+        // The list is of links. Safari's Shift+Tab walks past links (Option+Shift+Tab reaches them), so the step is the one a person who reaches links makes in the engine.
+        await stepIncludingLinks(page, { backwards: true });
         const state = await page.evaluate(() => {
           const active = document.activeElement;
           return {
@@ -1542,5 +1549,44 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
     expect(violations).toEqual([]);
     expect(seen.problems).toEqual([]);
     expect(api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the step that includes links, which the tests that walk links take in every engine', () => {
+  // Break caught: a model of Option+Tab that walks only the controls a plain Tab walks in Safari's engine (so that a walk of links stands still), that passes over a link, steps
+  // into a control that takes no focus (disabled, not drawn) or ends on the wrong one, forward or back, or that starts from a heading focused by a script from the wrong place.
+  test('takes focus to each control and link in the order of the page, forward and back', async ({
+    page,
+  }) => {
+    await page.setContent(`
+      <h1 id="heading" tabindex="-1">A heading that a script focuses</h1>
+      <button id="first" type="button">First</button>
+      <a id="link-one" href="#one">A link</a>
+      <button id="off" type="button" disabled>Disabled</button>
+      <a id="not-drawn" href="#not-drawn" hidden>Not drawn</a>
+      <input id="field" aria-label="A field" />
+      <a id="link-two" href="#two">Another link</a>
+    `);
+    const active = (): Promise<string> =>
+      page.evaluate(() => document.activeElement?.id ?? 'nothing');
+
+    const forward: string[] = [];
+    for (let step = 0; step < 4; step += 1) {
+      await stepIncludingLinks(page);
+      forward.push(await active());
+    }
+    expect(forward).toEqual(['first', 'link-one', 'field', 'link-two']);
+
+    const back: string[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      await stepIncludingLinks(page, { backwards: true });
+      back.push(await active());
+    }
+    expect(back).toEqual(['field', 'link-one', 'first']);
+
+    // From a heading that a script focused (which is not a stop), the next stop is the first one after it in the document.
+    await page.locator('#heading').focus();
+    await stepIncludingLinks(page);
+    expect(await active()).toBe('first');
   });
 });
