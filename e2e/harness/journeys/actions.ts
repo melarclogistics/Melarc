@@ -1,4 +1,4 @@
-import { expect, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 import type { StackConnection } from '../connection.ts';
 import { Authenticator } from '../totp.ts';
@@ -131,9 +131,17 @@ export async function signInAs(page: Page, state: PersonState): Promise<void> {
   await expectLanding(page, state.person.fullName);
 }
 
+/**
+ * The Role field of the creation form. It is found as the field it is (a combobox named for it): a label that merely contains "Role" also matches the form's section "Role and hub", which
+ * holds the hub field as well, so its options would be read with the roles' (redesign step R7b, which drew the form on the task template).
+ */
+function roleField(page: Page): Locator {
+  return page.getByRole('combobox', { name: /Role/ });
+}
+
 /** The roles the creation screen offers, by name, without the note it adds to a role that needs a Platform Admin. */
 export async function offeredRoles(page: Page): Promise<string[]> {
-  const labels = await page.getByLabel('Role').locator('option').allTextContents();
+  const labels = await roleField(page).locator('option').allTextContents();
   return labels
     .filter((label) => label !== 'Choose a role')
     .map((label) => label.replace(/ \(needs a Platform Admin to approve\)$/, ''));
@@ -148,12 +156,12 @@ export async function createProfile(
   await expectHeading(page, 'Add a staff profile');
   await page.getByLabel('Full name').fill(profile.fullName);
   await page.getByLabel('Work email').fill(profile.workEmail);
-  const labels = await page.getByLabel('Role').locator('option').allTextContents();
+  const labels = await roleField(page).locator('option').allTextContents();
   const label = labels.find(
     (each) => each === profile.role || each.startsWith(`${profile.role} (`),
   );
   expect(label, `the role ${profile.role} is offered`).toBeDefined();
-  await page.getByLabel('Role').selectOption({ label: label ?? '' });
+  await roleField(page).selectOption({ label: label ?? '' });
   // A profile has no primary hub unless one is chosen, and a hub's own acts need one.
   if (profile.hub !== undefined)
     await page.getByLabel('Primary hub').selectOption({ label: profile.hub });

@@ -5,7 +5,7 @@ import { expect, type Page } from '@playwright/test';
 import { arrange } from '../database.ts';
 import { readMessages, readTexts } from '../messages.ts';
 import { signInAs } from './actions.ts';
-import { expectHeading, fromPage } from './pages.ts';
+import { clearBrowser, expectHeading, fromPage } from './pages.ts';
 import { readEnrolmentCode, RiderHandset } from './rider-handset.ts';
 import type { JourneyContext } from './staff-journeys.ts';
 import { worldOf, type RiderState } from './world.ts';
@@ -338,7 +338,11 @@ async function walk({ page, context, stack }: JourneyContext): Promise<void> {
   expect([closed.state, closed.assigned_rider_id]).toEqual(['COMPLETED', two.id]);
   expect(closed.completed_at).not.toBeNull();
 
-  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider.
+  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider, in a session of their own. A session's requests are limited to a number a minute (120): a
+  // person never comes near it (a heavy officer's walk was measured at 25 a minute, 32 at the busiest), but this journey goes at the speed of a machine and the pages read the run and
+  // the counts again after each act, so that the officer's one session had made about 110 requests in the minute before the last read of the journey and was refused it (429).
+  await clearBrowser(context);
+  await signInAs(page, ama);
   const second = await build(page, [codeOf(2), codeOf(3)], day);
   await assignAndDispatch(page, one.name);
   await startRun(one, tokenOne, second.id);
