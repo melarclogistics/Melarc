@@ -73,6 +73,22 @@ async function tabTo(page: Page, target: Locator, presses = 12): Promise<void> {
   await expect(target).toBeFocused();
 }
 
+/**
+ * Chooses an option of the closed select that has focus by typing the start of its name, and waits for the choice to reach the address. Chromium, Firefox and Playwright's WebKit
+ * for Windows take the choice as the key is typed. An engine that opens its list on a key press instead (what Safari's was noted to do, which is why this test skipped WebKit)
+ * takes it when Enter confirms the highlighted option, so Enter is pressed only when the typing alone did not choose within a moment: in Chromium Enter would open the list of a
+ * closed select, and the choice made already must not be disturbed. The claim, that a choice made by typing is put in the address, is asserted in every engine.
+ */
+async function chooseByTyping(page: Page, text: string, address: RegExp): Promise<void> {
+  await page.keyboard.type(text);
+  try {
+    await expect(page).toHaveURL(address, { timeout: 1500 });
+  } catch {
+    await page.keyboard.press('Enter');
+  }
+  await expect(page).toHaveURL(address);
+}
+
 /** The requests the page made for the list. */
 const lists = (api: MessagesApi) =>
   api.calls.filter((call) => call.path === '/api/v1/notifications');
@@ -280,25 +296,20 @@ test.describe('the log', () => {
 test.describe('the filters', () => {
   test('are reached in order by keyboard, chosen by typing, and put in the address', async ({
     page,
-    browserName,
   }) => {
-    test.skip(
-      browserName === 'webkit',
-      'Safari’s engine opens a list on a key press instead of changing a closed select.',
-    );
     const { api } = await open(page, LOG);
     await expect(table(page)).toBeVisible();
 
-    // The three choices are in the popover of the filter row. The keyboard opens it (Enter on the Filter button) and goes in with the Tab key, and the choices are reached in order.
+    // The three choices are in the popover of the filter row. The keyboard goes to the Filter button from the start of the page with the Tab key, opens the popover (Enter) and
+    // goes in with the Tab key, and the choices are reached in order. Each is chosen by typing (`chooseByTyping`), in every engine: the test used to skip WebKit.
     const status = page.getByRole('combobox', { name: 'Status' });
     const audience = page.getByRole('combobox', { name: 'For' });
     const channel = page.getByRole('combobox', { name: 'Channel' });
 
-    await page.getByRole('button', { name: 'Filter', exact: true }).focus();
+    await tabTo(page, page.getByRole('button', { name: 'Filter', exact: true }), 60);
     await page.keyboard.press('Enter');
     await tabTo(page, status);
-    await page.keyboard.type('Held');
-    await expect(page).toHaveURL(/[?&]state=SUPPRESSED(&|$)/);
+    await chooseByTyping(page, 'Held', /[?&]state=SUPPRESSED(&|$)/);
     // The choice is drawn (its chip) before the next is made: the address changes before the page is drawn again, and a choice made in that moment is made over the log as it was.
     await expect(
       page.getByRole('button', { name: 'Remove filter: Status: Held back' }),
@@ -309,8 +320,7 @@ test.describe('the filters', () => {
 
     await page.keyboard.press('Tab');
     await expect(audience).toBeFocused();
-    await page.keyboard.type('Ad');
-    await expect(page).toHaveURL(/audience=AD_HOC_SENDER/);
+    await chooseByTyping(page, 'Ad', /audience=AD_HOC_SENDER/);
     await expect(
       page.getByRole('button', { name: 'Remove filter: For: Ad-hoc sender' }),
     ).toBeVisible();
@@ -318,8 +328,7 @@ test.describe('the filters', () => {
 
     await page.keyboard.press('Tab');
     await expect(channel).toBeFocused();
-    await page.keyboard.type('In');
-    await expect(page).toHaveURL(/channel=FEED/);
+    await chooseByTyping(page, 'In', /channel=FEED/);
     await expect(
       page.getByRole('button', { name: 'Remove filter: Channel: In-app feed' }),
     ).toBeVisible();
