@@ -134,7 +134,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
   {
     path: '/manifests',
     element: <ManifestListPage />,
-    access: { permission: 'pickup.read' },
+    access: { permission: 'pickup.read', capability: 'see pickup runs' },
     menu: {
       place: 'sidebar',
       group: 'pickups',
@@ -163,7 +163,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
   {
     path: '/manifests/:id',
     element: <ManifestDetailPage />,
-    access: { permission: 'pickup.read' },
+    access: { permission: 'pickup.read', capability: 'see pickup runs' },
     menu: null,
   },
   {
@@ -309,6 +309,9 @@ export function signedInRouteObjects(
         <RequirePermission
           permission={route.access.permission}
           {...(route.access.decidedBy === undefined ? {} : { decidedBy: route.access.decidedBy })}
+          {...(route.access.capability === undefined
+            ? {}
+            : { capability: route.access.capability })}
         >
           {route.element}
         </RequirePermission>

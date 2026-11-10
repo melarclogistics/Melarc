@@ -21,6 +21,12 @@ export type RouteAccess =
        * decides, by this key, and not that it lacks access (`RequirePermission`).
        */
       readonly decidedBy?: string;
+      /**
+       * What the page reads or does with the key, in the words of a refusal ("see pickup runs"), where that is not what the table says for the key (`capability-words.ts`: the key
+       * that reads pickup requests also reads pickup runs): a session without the key is refused in the page's words and not in another page's (the review of 499399c). The
+       * sentence stays the table's; this only says what the page is.
+       */
+      readonly capability?: string;
     };
 
 /**

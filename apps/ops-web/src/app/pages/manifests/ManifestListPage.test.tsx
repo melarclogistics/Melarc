@@ -189,6 +189,20 @@ describe('the manifests: what the list shows', () => {
     ).toBeNull();
   });
 
+  // Break caught (the review of 499399c, over /manifests): a session that may not read is refused by the route's guard before the page is drawn, and the guard said "pickup requests" for a
+  // page of pickup runs. The words are the page's: what the key lets a person do here is see pickup runs.
+  it('refuses a session without the key in the words of the pickup runs, at the route', async () => {
+    open(undefined, ['staff.read']);
+
+    expect(
+      await screen.findByText(
+        'Your account can’t see pickup runs. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/pickup requests|pickup.read/);
+    expect(screen.queryByRole('table', { name: 'Pickup runs' })).toBeNull();
+  });
+
   // Break caught: a page shown in part when one entry in it is not a manifest.
   it('shows no list at all when one manifest in it is not a manifest', async () => {
     open(() => page([draft, { ...started, code: 'not a code' }]));

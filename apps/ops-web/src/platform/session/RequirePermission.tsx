@@ -17,10 +17,13 @@ import { useSession } from './session-context';
 export function RequirePermission({
   permission,
   decidedBy,
+  capability,
   children,
 }: {
   readonly permission: string;
   readonly decidedBy?: string;
+  /** What the page reads with the key, where it is not what the table says for it ("see pickup runs"); the sentence stays the table's. */
+  readonly capability?: string;
   readonly children: ReactNode;
 }) {
   const state = useSession();
@@ -28,5 +31,11 @@ export function RequirePermission({
   if (state.session.permissions?.includes(permission) === true) return children;
   if (decidedBy !== undefined)
     return <ForbiddenPage kind="approval-required" permission={decidedBy} />;
-  return <ForbiddenPage kind="permission-missing" permission={permission} />;
+  return (
+    <ForbiddenPage
+      kind="permission-missing"
+      permission={permission}
+      {...(capability === undefined ? {} : { capability })}
+    />
+  );
 }

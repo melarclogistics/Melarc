@@ -262,6 +262,18 @@ describe('the manifest: what it shows', () => {
     expect(within(second ?? document.body).queryByRole('link', { name: /^Skip stop/ })).toBeNull();
   });
 
+  // Break caught (the review of 499399c, over /manifests): the same refusal on the page of one run, which the guard said in the words of pickup requests.
+  it('refuses a session without the key in the words of the pickup runs, at the route', async () => {
+    open(undefined, ['staff.read']);
+
+    expect(
+      await screen.findByText(
+        'Your account can’t see pickup runs. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/pickup requests|pickup.read/);
+  });
+
   it('names the rider by name when the roster can say it', async () => {
     open(() =>
       answer(manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' })),

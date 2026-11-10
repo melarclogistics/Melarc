@@ -75,6 +75,26 @@ describe('RequirePermission', () => {
     expect(screen.queryByText('The protected content')).toBeNull();
   });
 
+  // Break caught (the review of 499399c, over /manifests): a page of pickup runs refused in the words of pickup requests, because the key that reads one reads the other and the guard knew
+  // only the table's words. A page that reads something else with the key says what it is, and the sentence stays the table's.
+  it('says what the page reads, where that is not what the table says for the key', () => {
+    render(
+      <MemoryRouter>
+        <SessionContext value={signedInWith(['staff.read'])}>
+          <RequirePermission permission="pickup.read" capability="see pickup runs">
+            <p>The protected content</p>
+          </RequirePermission>
+        </SessionContext>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('The protected content')).toBeNull();
+    expect(
+      screen.getByText('Your account can’t see pickup runs. Ask an administrator for access.'),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('pickup.read');
+  });
+
   // Break caught (ops-portal.md section 7, `/pickup-requests/{id}/exception`): a page whose request another person decides refused as "you lack
   // access", when the rule is that it reads as who decides, by the key, and never a role.
   it('tells a page that another person decides as who decides, by the key', () => {
