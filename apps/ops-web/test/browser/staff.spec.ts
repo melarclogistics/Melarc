@@ -303,6 +303,42 @@ test.describe('the lists, drawn for the room they have', () => {
     expect(watch.problems).toEqual([]);
   });
 
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a table that is wider than its box at 768 px (the menu a rail, a box of about 41rem), so that its box scrolls
+  // sideways and the act at the end of each row is out of view. The sessions of a person and a person's own trusted browsers are tables there, with every column, and do not scroll.
+  for (const [name, path, table, columns] of [
+    [
+      'the sessions of a person',
+      `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`,
+      'Open sessions',
+      ['Started', 'Last active', 'Expires', 'Action'],
+    ],
+    [
+      'the trusted browsers of the person',
+      '/account/trusted-browsers',
+      'Your trusted browsers',
+      ['Browser', 'Added', 'Last used', 'Ends', 'Action'],
+    ],
+  ] as const) {
+    test(`keeps ${name} a whole table at 768 px: every column, and no sideways scroll`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 768, height: 1024 });
+      const { watch } = await open(page, path);
+
+      const found = queueTable(page, table);
+      await expect(found).toBeVisible();
+      await expect(found.getByRole('columnheader')).toHaveText([...columns]);
+      await expect(queueCards(page, table)).toHaveCount(0);
+      expect(
+        await page
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      ).toBeLessThanOrEqual(0);
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(watch.problems).toEqual([]);
+    });
+  }
+
   test('draws the trusted browsers as a table at 1280 px and as cards, with their removal, at 390 px', async ({
     page,
   }) => {

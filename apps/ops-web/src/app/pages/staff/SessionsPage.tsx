@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import type { DataColumn } from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Link } from '../../../components/ui/link/Link';
@@ -24,7 +25,6 @@ import {
 import { useSessionRecords, useStaffIdentity } from '../../../platform/staff/use-staff-queries';
 import { formatInstant } from '../../../platform/time/format-time';
 import { UUID } from './WithProfile';
-import '../pickup/pickup-pages.css';
 import './staff-pages.css';
 
 /** What a person is called in the words of this page when only their kind is known. */
@@ -52,15 +52,6 @@ function ChooseAPerson() {
       </p>
       <ButtonLink to="/admin/staff">Go to staff</ButtonLink>
     </>
-  );
-}
-
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
   );
 }
 
@@ -132,8 +123,20 @@ function Sessions({
         </>
       ),
     },
-    { id: 'active', header: 'Last active', cell: (row) => <Time instant={row.last_activity_at} /> },
-    { id: 'expires', header: 'Expires', cell: (row) => <Time instant={row.expires_at} /> },
+    // When it was last active matters beside when it started; when it expires is the first to go where the box is short (the table takes the lesser columns away, the most lesser first,
+    // only as far as it takes for it not to scroll sideways, and a card shows every fact).
+    {
+      id: 'active',
+      header: 'Last active',
+      priority: 2,
+      cell: (row) => <Time instant={row.last_activity_at} />,
+    },
+    {
+      id: 'expires',
+      header: 'Expires',
+      priority: 3,
+      cell: (row) => <Time instant={row.expires_at} />,
+    },
     ...(canRevoke
       ? [{ id: 'action', header: 'Action', cell: (row: SessionRecordView) => endButton(row) }]
       : []),
@@ -227,19 +230,18 @@ function Sessions({
               Started <Time instant={row.issued_at} />
             </>
           ),
+          // A row of this table opens nothing, so its card may hold the act of the row (the table's rule: a card holds no control except where its row opens nothing).
           card: (row) => (
             <>
-              {row.id === me.session.id ? (
-                <span className="staff-session__mine">This is your session</span>
-              ) : null}
-              <dl className="pickup-card__facts">
-                <Fact label="Last active">
-                  <Time instant={row.last_activity_at} />
-                </Fact>
-                <Fact label="Expires">
-                  <Time instant={row.expires_at} />
-                </Fact>
-              </dl>
+              <CardFacts
+                {...(row.id === me.session.id
+                  ? { head: <span className="staff-session__mine">This is your session</span> }
+                  : {})}
+                facts={[
+                  { label: 'Last active', value: <Time instant={row.last_activity_at} /> },
+                  { label: 'Expires', value: <Time instant={row.expires_at} /> },
+                ]}
+              />
               {canRevoke ? endButton(row) : null}
             </>
           ),

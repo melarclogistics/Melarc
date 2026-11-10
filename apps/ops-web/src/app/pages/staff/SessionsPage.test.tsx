@@ -210,6 +210,27 @@ describe('the sessions: what it shows', () => {
     // The person's other session has no mark of being theirs, and its act names the session it ends.
     expect(found.getAllByText('This is your session')).toHaveLength(1);
     expect(found.getByRole('button', { name: 'End session started 22 Oct, 07:05' })).toBeVisible();
+    // Each fact beyond the mark and the act is a label and its value (CardFacts), the labels the columns have.
+    expect(
+      within(mine as HTMLElement)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Last active', 'Expires']);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold its columns scrolls sideways where the time it
+  // expires and then the time it was last active could have gone. The time it started, which names the session, and the act are never lesser.
+  it('marks when it was last active and when it expires as the lesser columns, the expiry the most lesser', async () => {
+    open();
+
+    const found = await table();
+    const priorities = Object.fromEntries(
+      within(found)
+        .getAllByRole('columnheader')
+        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    );
+    // A column that is not lesser carries no mark: it is always drawn.
+    expect(priorities).toMatchObject({ Started: null, 'Last active': '2', Expires: '3' });
   });
 
   // Break caught: a credential, a token hash or a bundle on a session row.

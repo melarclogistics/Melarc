@@ -151,6 +151,32 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
     expect(
       within(second as HTMLElement).getByRole('button', { name: 'Remove Safari on macOS' }),
     ).toBeVisible();
+    // Each fact beyond the mark and the act is a label and its value (CardFacts), the labels the columns have.
+    expect(
+      within(first as HTMLElement)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Added', 'Last used', 'Ends']);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold its columns scrolls sideways where the end and the
+  // day it was added could have gone. What a browser is called and when it was last used say which it is; the act is never lesser.
+  it('marks when it was added and when it ends as the lesser columns, the later of the two the first to go', async () => {
+    open();
+
+    const found = await table();
+    const priorities = Object.fromEntries(
+      within(found)
+        .getAllByRole('columnheader')
+        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    );
+    // A column that is not lesser carries no mark: it is always drawn.
+    expect(priorities).toMatchObject({
+      Browser: null,
+      Added: '3',
+      'Last used': '2',
+      Ends: '3',
+    });
   });
 
   it('says plainly that the password is still asked, and shows nothing that could sign anyone in', async () => {

@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import type { QueueTableConfig } from '../../../components/ui/templates/QueueWorkspace';
 import type { TrustedBrowserView } from '../../../platform/staff/staff-shape';
 import { formatInstant } from '../../../platform/time/format-time';
-import '../pickup/pickup-pages.css';
 import './account-pages.css';
 
 function Time({ instant }: { readonly instant: string }) {
@@ -20,15 +20,6 @@ function LastUsed({ instant }: { readonly instant: string | null }) {
 /** The browser asking is told in words, under what it is called. */
 function ThisBrowser({ browser }: { readonly browser: TrustedBrowserView }) {
   return browser.current ? <span className="trusted-browser__current">This browser</span> : null;
-}
-
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
 }
 
 /**
@@ -52,9 +43,15 @@ export function trustedBrowserRows(
         </>
       ),
     },
-    { id: 'added', header: 'Added', cell: (row) => <Time instant={row.created_at} /> },
-    { id: 'used', header: 'Last used', cell: (row) => <LastUsed instant={row.last_used_at} /> },
-    { id: 'ends', header: 'Ends', cell: (row) => <Time instant={row.expires_at} /> },
+    // What a browser is called and when it was last used say which it is; when it was added and when it ends go first where the box is short, the later of the two before the earlier.
+    { id: 'added', header: 'Added', priority: 3, cell: (row) => <Time instant={row.created_at} /> },
+    {
+      id: 'used',
+      header: 'Last used',
+      priority: 2,
+      cell: (row) => <LastUsed instant={row.last_used_at} />,
+    },
+    { id: 'ends', header: 'Ends', priority: 3, cell: (row) => <Time instant={row.expires_at} /> },
     ...(action === undefined
       ? []
       : [{ id: 'action', header: 'Action', cell: (row: TrustedBrowserView) => action(row) }]),
@@ -65,20 +62,17 @@ export function trustedBrowserRows(
     density: 'two-line',
     // The browser is the card's heading, for heading navigation.
     cardTitle: (row) => row.label,
+    // A row of this table opens nothing, so its card may hold the act of the row.
     card: (row) => (
       <>
-        <ThisBrowser browser={row} />
-        <dl className="pickup-card__facts">
-          <Fact label="Added">
-            <Time instant={row.created_at} />
-          </Fact>
-          <Fact label="Last used">
-            <LastUsed instant={row.last_used_at} />
-          </Fact>
-          <Fact label="Ends">
-            <Time instant={row.expires_at} />
-          </Fact>
-        </dl>
+        <CardFacts
+          {...(row.current ? { head: <ThisBrowser browser={row} /> } : {})}
+          facts={[
+            { label: 'Added', value: <Time instant={row.created_at} /> },
+            { label: 'Last used', value: <LastUsed instant={row.last_used_at} /> },
+            { label: 'Ends', value: <Time instant={row.expires_at} /> },
+          ]}
+        />
         {action?.(row)}
       </>
     ),
