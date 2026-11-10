@@ -902,6 +902,42 @@ test.describe('replacing the handset', () => {
     await expect(page.locator('body')).not.toContainText('staff.device.reregister');
     await expect(page.getByRole('textbox', { name: /How you verified/ })).toHaveCount(0);
   });
+
+  // Break caught (Stage 4.9): the verification note an officer has typed lost to a stray click on a menu entry, without a word. The page asks first and the safe answer, to stay, has the
+  // focus; what was typed is still there after it, and the other answer goes where the click was going.
+  test('a typed verification note survives a stray click on a menu entry: staying keeps it, and leaving goes', async ({
+    page,
+  }) => {
+    const { api } = await open(page, DEVICE);
+    await fillReplacement(page, 'Checked the rider’s Ghana card in person.');
+    const note = page.getByRole('textbox', {
+      name: 'How you verified the rider in person (required)',
+    });
+    const entry = page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: 'Riders' });
+
+    await entry.click();
+
+    const question = page.getByRole('alertdialog', { name: 'Leave this page?' });
+    await expect(question).toBeVisible();
+    await expect(question.getByRole('button', { name: 'Stay here' })).toBeFocused();
+    await question.getByRole('button', { name: 'Stay here' }).click();
+    await expect(question).toHaveCount(0);
+    await expect(page).toHaveURL(DEVICE);
+    await expect(note).toHaveValue('Checked the rider’s Ghana card in person.');
+    await expect(page.getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'HANDSET_REPLACED',
+    );
+    expect(acts(api)).toHaveLength(0);
+
+    await entry.click();
+    await page
+      .getByRole('alertdialog', { name: 'Leave this page?' })
+      .getByRole('button', { name: 'Leave the page' })
+      .click();
+    await expect(page).toHaveURL('/admin/riders');
+  });
 });
 
 test.describe('a credential has nowhere to go', () => {

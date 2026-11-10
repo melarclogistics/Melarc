@@ -668,6 +668,105 @@ describe('the device page: replacing the handset', () => {
   });
 });
 
+describe('the device page: leaving the replacement with what was entered (Stage 4.9)', () => {
+  type View = Awaited<ReturnType<typeof open>>;
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+  const leaving = async (view: View) => {
+    await act(async () => {
+      await view.router.navigate('/elsewhere');
+    });
+  };
+  const typeNote = async (view: View, note: string) => {
+    await view.user.click(await screen.findByRole('textbox', { name: NOTE_NAME }));
+    await view.user.paste(note);
+  };
+
+  // Break caught: a verification note typed with care and lost to a link or the browser's Back, without a word.
+  it('asks before the application leaves a replacement that holds a reason and a note, and the safe answer is to stay', async () => {
+    const view = await open(REPLACER);
+    await fillReplacement(view);
+
+    await leaving(view);
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(view.router.state.location.pathname).toBe(`/admin/riders/${RIDER_ID}/device`);
+    await view.user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: NOTE_NAME })).toHaveValue(
+      'Checked the rider’s Ghana card in person.',
+    );
+    expect(screen.getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'HANDSET_REPLACED',
+    );
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const view = await open(REPLACER);
+    await fillReplacement(view);
+
+    await leaving(view);
+    await view.user.click(
+      within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.state.location.pathname).toBe('/elsewhere');
+    });
+  });
+
+  // Break caught: only one of the two fields counted as something entered.
+  it('asks after only a reason was chosen, and after only a note was typed', async () => {
+    const reason = await open(REPLACER);
+    await reason.user.selectOptions(
+      await screen.findByRole('combobox', { name: 'Reason (required)' }),
+      'HANDSET_REPLACED',
+    );
+    await leaving(reason);
+    expect(await leaveQuestion()).toBeVisible();
+    reason.unmount();
+    api.restore();
+
+    const note = await open(REPLACER);
+    await typeNote(note, 'Checked the card.');
+    await leaving(note);
+    expect(await leaveQuestion()).toBeVisible();
+  });
+
+  // Break caught: a form that asks about nothing it holds, or about blanks.
+  it('asks nothing of a replacement that holds nothing, or only spaces in the note', async () => {
+    const empty = await open(REPLACER);
+    await screen.findByRole('combobox', { name: 'Reason (required)' });
+    await leaving(empty);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(empty.router.state.location.pathname).toBe('/elsewhere');
+    empty.unmount();
+    api.restore();
+
+    const spaces = await open(REPLACER);
+    await typeNote(spaces, '     ');
+    await leaving(spaces);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(spaces.router.state.location.pathname).toBe('/elsewhere');
+  });
+
+  // Break caught: the guard left on once the code is made, so that the person is asked about a form that was sent.
+  it('asks nothing once the code is shown', async () => {
+    const view = await open(REPLACER, {
+      [REREGISTER]: () => json(200, enrolmentGrantFixture({}, LIFETIME_MS)),
+    });
+    await fillReplacement(view);
+    await view.user.click(screen.getByRole('button', { name: 'Show the QR code' }));
+    await screen.findByRole('img', { name: QR_NAME });
+
+    await leaving(view);
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/elsewhere');
+  });
+});
+
 describe('the device page: when the replacement is refused or in doubt', () => {
   async function submit(handler: Handler, extra: Record<string, Handler> = {}) {
     const view = await open(REPLACER, { [REREGISTER]: handler, ...extra });

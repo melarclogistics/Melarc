@@ -153,6 +153,8 @@ function Reset({
       <TaskForm
         header={header}
         onSubmit={ask}
+        // The only thing entered on this page is in the question of the act (its reason and note, in its dialog): while the question is open, leaving asks first.
+        dirty={asking}
         actions={
           <>
             <Button type="submit" variant="danger">

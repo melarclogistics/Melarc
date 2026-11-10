@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
@@ -499,6 +499,96 @@ describe('the reset of an authenticator: the session', () => {
     expect(screen.queryByRole('heading', { name: 'Authenticator reset' })).toBeNull();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(document.body.textContent).not.toContain('Kofi Boateng');
+  });
+});
+
+describe('the reset of an authenticator: leaving it while its question is open (Stage 4.9)', () => {
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+  const resetQuestion = () =>
+    screen.findByRole('alertdialog', { name: 'Reset the authenticator of Kofi Boateng?' });
+  const leaving = async (view: ReturnType<typeof open>) => {
+    await act(async () => {
+      await view.router.navigate('/');
+    });
+  };
+  /** Opens the question of the act, in its own dialog, and chooses the reason. */
+  async function ask(view: ReturnType<typeof open>) {
+    await view.user.click(await screen.findByRole('button', { name: 'Reset authenticator' }));
+    const dialog = await resetQuestion();
+    await view.user.selectOptions(
+      await within(dialog).findByRole('combobox', { name: 'Reason (required)' }),
+      'PHONE_LOST',
+    );
+    return dialog;
+  }
+
+  // Break caught: the reason an officer has chosen for an act that ends a person's sessions lost to a link or the browser's Back, without a word.
+  it('asks before the application leaves the page while the question is open, and staying keeps the question and its reason', async () => {
+    const view = open();
+    await ask(view);
+
+    await leaving(view);
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(view.router.state.location.pathname).toBe(PATH);
+    await view.user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    const dialog = await resetQuestion();
+    expect(within(dialog).getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'PHONE_LOST',
+    );
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const view = open();
+    await ask(view);
+
+    await leaving(view);
+    await view.user.click(
+      within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.state.location.pathname).toBe('/');
+    });
+  });
+
+  // Break caught: a page that asks about what it does not hold: nothing is entered before the question is opened.
+  it('asks nothing before the question is opened', async () => {
+    const view = open();
+    await screen.findByRole('button', { name: 'Reset authenticator' });
+
+    await leaving(view);
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the guard left on after the question was closed again, or once the act is done.
+  it('asks nothing once the question is closed again, nor once the reset is done', async () => {
+    const closed = open();
+    const dialog = await ask(closed);
+    await closed.user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('alertdialog', { name: 'Reset the authenticator of Kofi Boateng?' }),
+      ).toBeNull();
+    });
+    await leaving(closed);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(closed.router.state.location.pathname).toBe('/');
+    closed.unmount();
+    api.restore();
+
+    const done = open(KEYS.everything, {
+      [RESET]: () => json(200, { sessions_terminated: 1, reenrolment_grant_issued: true }),
+    });
+    await reset(done);
+    await screen.findByRole('heading', { name: 'Authenticator reset' });
+    await leaving(done);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(done.router.state.location.pathname).toBe('/');
   });
 });
 

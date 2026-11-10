@@ -190,12 +190,16 @@ function ReplaceDevice({
   const showing = code.grant !== undefined;
   const lapsed = !showing && code.status === 'expired';
   const asks = !showing && !lapsed;
+  // What the officer has entered and not sent: leaving asks first. Once a code is made (or has lapsed), or while the request for one is on its way, the form was sent and nothing in it is unsaved
+  // (a code whose answer arrives after the officer has left is shown and kept nowhere); a note of spaces is nothing entered.
+  const unsaved = asks && command.phase !== 'sending' && (reasonCode !== '' || note.trim() !== '');
 
   return (
     <TaskForm
       header={header}
       formRef={form}
       busy={command.phase === 'sending'}
+      dirty={unsaved}
       onSubmit={submit}
       alerts={
         <>

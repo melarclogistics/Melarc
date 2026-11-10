@@ -810,6 +810,98 @@ describe('the staff creation form: the session', () => {
   });
 });
 
+describe('the staff creation form: leaving it with what was typed (Stage 4.9)', () => {
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+
+  // Break caught: a form that loses what was typed to a link or the browser's Back, without a word.
+  it('asks before the application leaves a form that holds what was typed, and the safe answer is to stay', async () => {
+    const { user, router } = open();
+    await user.type(await field(/Full name/), 'Kofi Boateng');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe('/admin/staff/new');
+    await user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/admin/staff/new');
+    expect(screen.getByRole('textbox', { name: /Full name/ })).toHaveValue('Kofi Boateng');
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const { user, router } = open();
+    await user.type(await field(/Work email/), 'kofi.boateng@example.test');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+    await user.click(within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/');
+    });
+  });
+
+  // Break caught: a choice in a field that is not a text field (the role) taken for nothing, so that a form with only a role chosen is left without a word.
+  it('asks after a role was chosen and nothing else was typed', async () => {
+    const { user, router } = open();
+    await user.selectOptions(await role(), BUNDLE_ID);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(await leaveQuestion()).toBeVisible();
+  });
+
+  // Break caught: a form that asks for what the session gave it: a person who acts in one hub is placed in it before they have typed anything.
+  it('asks nothing of a form that holds only what it began with, the hub of a session that acts in one among it', async () => {
+    const { router } = open();
+    await field(/Full name/);
+    expect(screen.getByRole('combobox', { name: /Primary hub/ })).toHaveValue(HUB_ID);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the form compared by the object that holds it and not by what it holds, so that a letter typed and taken back is still asked about.
+  it('asks nothing once what was typed has been taken back', async () => {
+    const { user, router } = open();
+    const name = await field(/Full name/);
+    await user.type(name, 'Kofi');
+    await user.clear(name);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the guard left on after the profile was made, so that the person is asked about a form that was sent.
+  it('asks nothing once the profile is created', async () => {
+    const view = open();
+    await fill(view);
+    await view.user.click(submit());
+    await screen.findByRole('heading', { name: 'Profile created' });
+
+    await act(async () => {
+      await view.router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/');
+  });
+});
+
 describeInterfaceStates('The staff creation form', {
   loading: {
     test: async () => {

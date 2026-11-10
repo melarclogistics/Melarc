@@ -114,6 +114,11 @@ function CreateForm({
     // they chose All hubs.
     hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : (activeHub ?? ''),
   });
+  /** What the form began with: the hub the session starts on is not something the person entered. Leaving asks first once any field differs from it. */
+  const [initialValues] = useState(values);
+  const unsaved = (Object.keys(values) as (keyof Values)[]).some(
+    (field) => values[field] !== initialValues[field],
+  );
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);
   const form = useRef<HTMLFormElement>(null);
@@ -179,6 +184,7 @@ function CreateForm({
       formRef={form}
       onSubmit={send}
       busy={command.phase === 'sending'}
+      dirty={unsaved}
       alerts={
         <>
           {command.phase === 'unknown' ? (
