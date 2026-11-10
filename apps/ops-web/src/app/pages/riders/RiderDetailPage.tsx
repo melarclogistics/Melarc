@@ -1,4 +1,4 @@
-import { useLayoutEffect, type ReactNode } from 'react';
+import { useLayoutEffect } from 'react';
 import { useParams } from 'react-router';
 
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
