@@ -366,32 +366,36 @@ test.describe('My work, policy and accessibility', () => {
       { width: 320, height: 640 },
     ] as const) {
       // Break caught: a state of the page that fails contrast, naming or target size in either theme, that clips, or that makes the page scroll
-      // sideways at a verified width.
-      test(`has no WCAG 2.2 A or AA violation and no sideways scrolling at ${String(width)} px in the ${scheme} theme, in each state`, async ({
-        page,
-      }) => {
-        await page.emulateMedia({ colorScheme: scheme });
-        await page.setViewportSize({ width, height });
+      // sideways at a verified width. One test for each width, theme and state: a scan of the whole page takes seconds, and the four states of a width
+      // and a theme in one test took 22 to 26 of its 30 seconds on the development server, and ran out of them when the machine was busy (the review
+      // of f6cf02b).
+      for (const state of ['loading', 'nothing waiting', 'cards', 'failed'] as const) {
+        test(`has no WCAG 2.2 A or AA violation and no sideways scrolling at ${String(width)} px in the ${scheme} theme: ${state}`, async ({
+          page,
+        }) => {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.setViewportSize({ width, height });
 
-        const loading = await open(page, 'held');
-        await expect(page.getByRole('status')).toContainText('Checking what is waiting…');
-        expect(await wcagViolations(page), 'loading').toEqual([]);
-        expect(await overflowOf(page), 'loading').toBeLessThanOrEqual(0);
-        loading.release();
-        await expect(page.getByText('Nothing is waiting.')).toBeVisible();
-        expect(await wcagViolations(page), 'nothing waiting').toEqual([]);
+          if (state === 'loading') {
+            await open(page, 'held');
+            await expect(page.getByRole('status')).toContainText('Checking what is waiting…');
+          } else if (state === 'nothing waiting') {
+            const held = await open(page, 'held');
+            held.release();
+            await expect(page.getByText('Nothing is waiting.')).toBeVisible();
+          } else if (state === 'cards') {
+            await open(page, QUEUES);
+            await expect(cards(page)).toBeVisible();
+          } else {
+            await open(page, 'fails');
+            await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+          }
 
-        await page.unrouteAll({ behavior: 'ignoreErrors' });
-        await open(page, QUEUES);
-        await expect(cards(page)).toBeVisible();
-        expect(await wcagViolations(page), 'cards').toEqual([]);
-        expect(await overflowOf(page), 'cards').toBeLessThanOrEqual(0);
-
-        await page.unrouteAll({ behavior: 'ignoreErrors' });
-        await open(page, 'fails');
-        await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
-        expect(await wcagViolations(page), 'failed').toEqual([]);
-      });
+          expect(await wcagViolations(page), state).toEqual([]);
+          // Sideways scrolling is looked for in every state, as the name says (before the split only two of the four were: loading and the cards).
+          expect(await overflowOf(page), state).toBeLessThanOrEqual(0);
+        });
+      }
     }
   }
 
