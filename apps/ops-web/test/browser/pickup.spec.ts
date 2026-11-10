@@ -1237,10 +1237,10 @@ test.describe('the queue: coming back from a request', () => {
     });
   }
 
-  // Break caught: a place that outlives the page, or one kept where a reload, the menu or an address could find it.
-  test('starts at the first page after a reload, from the menu and from a typed address', async ({
-    page,
-  }) => {
+  // Break caught: a place that outlives the page, or one kept where a reload, the menu or an address could find it. One test for each of the three ways in (they were one
+  // test that walked all three, which took 27 of its 30 seconds on the development server in the review of f6cf02b): each goes to the request on the second page, as the
+  // officer does, and then leaves it that way.
+  test('starts at the first page after a reload', async ({ page }) => {
     await toTheRequest(page);
     await backLink(page).click();
     await expect(page.getByText(/on page 2/)).toBeVisible();
@@ -1248,17 +1248,19 @@ test.describe('the queue: coming back from a request', () => {
     await page.reload();
     await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
+  });
 
-    await page.getByRole('button', { name: 'Next page' }).click();
-    await goToRequest(page, opened);
-    await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
+  test('starts at the first page from the menu', async ({ page }) => {
+    await toTheRequest(page);
+
     await menuEntry(page, 'Requests').click();
     await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
+  });
 
-    await page.getByRole('button', { name: 'Next page' }).click();
-    await goToRequest(page, opened);
-    await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
+  test('starts at the first page from a typed address', async ({ page }) => {
+    await toTheRequest(page);
+
     await page.goto('/pickup-requests?state=PENDING');
     await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
