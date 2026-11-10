@@ -136,6 +136,23 @@ describe('isUnclaimed: focus nobody has taken', () => {
     expect(isUnclaimed(filter)).toBe(false);
     expect(isUnclaimed(control)).toBe(false);
   });
+
+  // Break caught (the engines run of 10 November 2026): after an act made in the panel, Safari's engine leaves focus on the panel's content region (it gives no focus to a pressed button and gives
+  // it to the nearest ancestor that can have it), which the page took for the officer's own and so never gave the row that changed its focus. A container reached only by a script is nobody's
+  // choice; a control with that tabindex still is.
+  it('is focus on a container that only a script or a press inside it gives focus to, and not on a control', () => {
+    const region = document.createElement('div');
+    region.setAttribute('tabindex', '-1');
+    const parked = document.createElement('button');
+    parked.setAttribute('tabindex', '-1');
+    const reachable = document.createElement('div');
+    reachable.setAttribute('tabindex', '0');
+    document.body.append(region, parked, reachable);
+
+    expect(isUnclaimed(region)).toBe(true);
+    expect(isUnclaimed(parked)).toBe(false);
+    expect(isUnclaimed(reachable)).toBe(false);
+  });
 });
 
 describe('restoreQueuePlace: the position and the focus, given back through the table (the review of 5edada2, M4)', () => {
