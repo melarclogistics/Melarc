@@ -421,6 +421,31 @@ test.describe('DataTable in a browser', () => {
     });
   }
 
+  // Break caught (the older Table's browser test, held here since run 5 Stage 4 retired it): an order that is asked for with the mouse and not with the keyboard, or shown by an arrow alone.
+  // `aria-sort` is what assistive technology reads, and focus must stay on the control that was used, which the page's new order must not replace.
+  test('asks for an order from the keyboard, says it with aria-sort, and keeps focus on the control', async ({
+    page,
+  }) => {
+    await openKit(page, 'data');
+    const ordered = specimen(page, 'Ordered by a column');
+    const heading = ordered.getByRole('columnheader', { name: 'Service date' });
+    const button = heading.getByRole('button', { name: 'Service date' });
+    const firstDate = () => ordered.locator('tbody tr').first().locator('td').nth(1).textContent();
+    await expect(heading).toHaveAttribute('aria-sort', 'ascending');
+    const ascending = await firstDate();
+
+    await button.focus();
+    await page.keyboard.press('Enter');
+
+    await expect(heading).toHaveAttribute('aria-sort', 'descending');
+    await expect(button).toBeFocused();
+    expect(await firstDate()).not.toBe(ascending);
+    await page.keyboard.press('Space');
+    await expect(heading).toHaveAttribute('aria-sort', 'ascending');
+    await expect(button).toBeFocused();
+    expect(await firstDate()).toBe(ascending);
+  });
+
   // Break caught: the code in the body face, or too light.
   test('sets the codes in the monospaced face at weight 600', async ({ page }) => {
     await openKit(page, 'data');

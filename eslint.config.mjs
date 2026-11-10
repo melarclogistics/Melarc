@@ -87,17 +87,6 @@ const TANSTACK_PATTERNS = [
   },
 ];
 
-// The page header of the redesign is `components/ui/page-header/PageHeader`. The older `components/PageHeader` stays only for the screens that are not rebuilt
-// yet: each of them names it on a line that carries its own `eslint-disable-next-line no-restricted-imports`, so that the list is the lines of that
-// directive, can only shrink (an unused directive is an error), and a new screen cannot import the old one without saying so (task R5.2, M12).
-const OLD_PAGE_HEADER_PATTERNS = [
-  {
-    group: ['**/components/PageHeader', '@/components/PageHeader'],
-    message:
-      'Use the PageHeader of components/ui/page-header (the redesign). The older components/PageHeader is kept only by the screens that are not rebuilt yet (each carries an eslint-disable-next-line for it); it is not imported by a new one.',
-  },
-];
-
 // The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
 // (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
 const DOOR_PACKAGES =
@@ -263,7 +252,6 @@ export default defineConfig(
             ...PRIMITIVE_LIBRARY_PATTERNS,
             ...PRIMITIVE_FILES_PATTERNS,
             ...TANSTACK_PATTERNS,
-            ...OLD_PAGE_HEADER_PATTERNS,
           ],
         },
       ],
@@ -326,11 +314,7 @@ export default defineConfig(
         'error',
         {
           paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS, ...TANSTACK_PATHS],
-          patterns: [
-            ...PRIMITIVE_LIBRARY_PATTERNS,
-            ...TANSTACK_PATTERNS,
-            ...OLD_PAGE_HEADER_PATTERNS,
-          ],
+          patterns: [...PRIMITIVE_LIBRARY_PATTERNS, ...TANSTACK_PATTERNS],
         },
       ],
     },
@@ -345,7 +329,7 @@ export default defineConfig(
         'error',
         {
           paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
-          patterns: [...PRIMITIVE_LIBRARY_PATTERNS, ...OLD_PAGE_HEADER_PATTERNS],
+          patterns: [...PRIMITIVE_LIBRARY_PATTERNS],
         },
       ],
     },
@@ -369,7 +353,6 @@ export default defineConfig(
             ...MOTION_PATTERNS,
             ...PRIMITIVE_LIBRARY_PATTERNS,
             ...TANSTACK_PATTERNS,
-            ...OLD_PAGE_HEADER_PATTERNS,
           ],
         },
       ],
@@ -386,7 +369,7 @@ export default defineConfig(
         'error',
         {
           paths: [...API_RESTRICTED_PATHS, ...MOTION_PATHS, ...TANSTACK_PATHS],
-          patterns: [...MOTION_PATTERNS, ...TANSTACK_PATTERNS, ...OLD_PAGE_HEADER_PATTERNS],
+          patterns: [...MOTION_PATTERNS, ...TANSTACK_PATTERNS],
         },
       ],
     },

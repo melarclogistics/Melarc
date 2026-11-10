@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -342,88 +341,6 @@ describe('the Ops Portal reaches the API through the generated client only', () 
   it('lets TanStack Query through', () => {
     assert.deepEqual(messagesFor(OPS, "import { useQuery } from '@tanstack/react-query';"), []);
     assert.deepEqual(messagesFor(OPS, "const query = await import('@tanstack/react-query');"), []);
-  });
-
-  // Break caught: a new screen that takes the older page header (`components/PageHeader`) in place of the redesign's (`components/ui/page-header`), so that the one header
-  // the redesign decided on is never the only one (task R5.2, M12). The screens that are not rebuilt yet name the older one on a line of their own that carries a disable
-  // directive: the directive is the list, an unused one is an error, and a screen that moves to the kit's header deletes both lines.
-  it('refuses the older page header unless the import carries its own directive, and never the kit’s', () => {
-    for (const code of [
-      "import { PageHeader } from '../../../components/PageHeader';",
-      "import { PageHeader } from '../components/PageHeader';",
-      "import { PageHeader } from '@/components/PageHeader';",
-    ]) {
-      for (const path of [
-        OPS,
-        'apps/ops-web/src/app/pages/pickup/Probe.tsx',
-        'apps/ops-web/src/showcase/Probe.tsx',
-        'apps/ops-web/src/components/ui/panel/Probe.tsx',
-        'apps/ops-web/src/components/ui/data-table/DataTable.tsx',
-      ]) {
-        assert.match(
-          messagesFor(path, code).join('\n'),
-          /Use the PageHeader of components\/ui\/page-header/,
-          `${path} was not refused: ${code}`,
-        );
-        assert.deepEqual(
-          messagesFor(
-            path,
-            `// eslint-disable-next-line no-restricted-imports -- grandfathered\n${code}`,
-          ),
-          [],
-          `${path} was refused though its line carries the directive: ${code}`,
-        );
-      }
-    }
-    for (const code of [
-      "import { PageHeader } from '../../../components/ui/page-header/PageHeader';",
-      "import { PageHeader } from '../../components/ui/page-header/PageHeader';",
-      "import { PageHeader } from '../page-header/PageHeader';",
-    ]) {
-      assert.deepEqual(messagesFor(OPS, code), [], `the kit's header was refused: ${code}`);
-    }
-  });
-
-  // Break caught: a list that outlives what it lists, or a screen that imports the older header without being on it. The directive is the list, so the two are held
-  // together here by reading the sources: every import of the older header carries the directive on the line before it, and no directive stands before a line that is
-  // something else. (ESLint's own `reportUnusedDisableDirectives` says the same of a directive whose import was removed; this is the check that does not depend on it.)
-  it('keeps the list of screens on the older page header exactly the screens that import it', () => {
-    const directive = '// eslint-disable-next-line no-restricted-imports -- the older PageHeader';
-    const olderHeader = /^import \{ PageHeader \} from '(?:\.\.\/)+components\/PageHeader';$/;
-    const sources: string[] = [];
-    const walk = (directory: string): void => {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        const full = resolve(directory, entry.name);
-        if (entry.isDirectory()) walk(full);
-        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name))
-          sources.push(full);
-      }
-    };
-    walk(resolve(root, 'apps/ops-web/src'));
-    const importers: string[] = [];
-    for (const file of sources) {
-      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
-      lines.forEach((line, index) => {
-        const name = file.slice(root.length + 1).replaceAll('\\', '/');
-        if (olderHeader.test(line)) {
-          importers.push(name);
-          assert.ok(
-            lines[index - 1]?.startsWith(directive),
-            `${name} imports the older page header without its directive`,
-          );
-        } else if (line.startsWith(directive)) {
-          assert.match(
-            lines[index + 1] ?? '',
-            /components\/PageHeader'/,
-            `${name} has the directive of the older page header before another line`,
-          );
-        }
-      });
-    }
-    assert.ok(
-      importers.length > 0,
-      'no importer of the older page header was found: has the pattern moved?',
-    );
   });
 
   // Break caught: the net cast so wide that it catches a package that merely begins like one of them.

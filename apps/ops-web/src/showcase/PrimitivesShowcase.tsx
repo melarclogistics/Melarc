@@ -116,8 +116,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/primitives/tooltip';
-// eslint-disable-next-line no-restricted-imports -- the older PageHeader: this screen moves to the kit's when it is rebuilt (task R5.2, M12)
-import { PageHeader } from '../components/PageHeader';
+import { PageHeader } from '../components/ui/page-header/PageHeader';
 import { Icon } from '../components/ui/icon/Icon';
 import { TablePrimitiveDemo } from './TablePrimitiveDemo';
 import './showcase.css';

@@ -399,7 +399,7 @@ test.describe('the components in a browser: forced colours and reduced motion', 
     const borders = await page.evaluate(() =>
       [
         ...document.querySelectorAll<HTMLElement>(
-          '.ui-button:not(:disabled), .ui-input, .ui-textarea, .ui-select, .ui-alert, .ui-status-badge, .ui-empty-state, .ui-table__scroller',
+          '.ui-button:not(:disabled), .ui-input, .ui-textarea, .ui-select, .ui-alert, .ui-status-badge, .ui-empty-state',
         ),
       ].map((element) => {
         const style = getComputedStyle(element);
@@ -449,82 +449,6 @@ test.describe('the components in a browser: forced colours and reduced motion', 
 });
 
 test.describe('the table and the state components in a browser', () => {
-  const region = (page: Page) => page.getByRole('region', { name: 'Demo table' });
-  const firstRowName = (page: Page): Promise<string | null> =>
-    region(page).getByRole('rowheader').first().textContent();
-
-  // Break caught: a sort that works with the mouse and not with the keyboard, or an order shown by an arrow alone. `aria-sort` is what
-  // assistive technology reads, and focus must stay on the control that was used.
-  test('sorts from the keyboard, says so with aria-sort, and keeps focus on the control', async ({
-    page,
-  }) => {
-    await openShowcase(page);
-    const button = region(page).getByRole('button', { name: 'Parcels' });
-    const header = region(page).getByRole('columnheader', { name: 'Parcels' });
-    await expect(header).not.toHaveAttribute('aria-sort', /./);
-    await button.focus();
-
-    await page.keyboard.press('Enter');
-    await expect(header).toHaveAttribute('aria-sort', 'ascending');
-    await expect(page.getByText('Demo order: parcels ascending')).toBeVisible();
-    expect(await firstRowName(page)).toBe('Demo row epsilon');
-    await expect(button).toBeFocused();
-
-    await page.keyboard.press('Space');
-    await expect(header).toHaveAttribute('aria-sort', 'descending');
-    expect(await firstRowName(page)).toBe('Demo row gamma');
-    await expect(button).toBeFocused();
-  });
-
-  test('has compact rows of about 40 to 44 px', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await openShowcase(page);
-
-    const box = await region(page).getByRole('row').nth(2).boundingBox();
-
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(39);
-    expect(box?.height ?? 0).toBeLessThanOrEqual(46);
-  });
-
-  // Break caught: a wide table that makes the page scroll in two directions (WCAG 1.4.10), or one whose overflow a keyboard cannot reach.
-  test('scrolls inside its own region at 320 px, which a keyboard can reach and scroll, without moving the page', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 320, height: 640 });
-    await openShowcase(page);
-    const scroller = region(page);
-    await scroller.scrollIntoViewIfNeeded();
-
-    expect(await overflow(page)).toBeLessThanOrEqual(0);
-    expect(await scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
-      true,
-    );
-    await scroller.focus();
-    await expect(scroller).toBeFocused();
-    // The table keeps the width of a readable table (30rem) and scrolls, rather than squeezing its columns into 320px.
-    expect((await scroller.getByRole('table').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(
-      479,
-    );
-    await page.keyboard.press('ArrowRight');
-
-    await expect.poll(() => scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-    expect(await overflow(page)).toBeLessThanOrEqual(0);
-  });
-
-  test('grows with text enlarged to 200% and does not push the page sideways', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await openShowcase(page);
-    const row = region(page).getByRole('row').nth(2);
-    const normal = (await row.boundingBox())?.height ?? 0;
-
-    await page.evaluate(() => {
-      document.documentElement.style.fontSize = '200%';
-    });
-
-    expect((await row.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(normal * 1.8);
-    expect(await overflow(page)).toBeLessThanOrEqual(0);
-  });
-
   test('draws a status as its words, and a value it does not know as an unknown status', async ({
     page,
   }) => {
@@ -916,26 +840,6 @@ test.describe('the components of the pickup screens', () => {
     await expect(page.getByRole('searchbox', { name: /Search demo shops by name/ })).toBeFocused();
   });
 
-  test('the queue table pages by keyboard and puts focus on the rows of the page it moved to', async ({
-    page,
-  }) => {
-    await openShowcase(page);
-    await expect(
-      page.getByText('Showing 2 demo rows. More follow on the next page.'),
-    ).toBeVisible();
-
-    await page
-      .getByRole('navigation', { name: 'Pages of demo queue' })
-      .getByRole('button', { name: 'Next page' })
-      .focus();
-    await page.keyboard.press('Enter');
-
-    await expect(
-      page.getByText('Showing 2 demo rows on page 2. More follow on the next page.'),
-    ).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
-  });
-
   test('the timeline is an ordered list that marks its current step in words and to assistive technology', async ({
     page,
   }) => {
@@ -1024,9 +928,10 @@ test.describe('the components of the pickup screens', () => {
 });
 
 /**
- * The three components of the manifest screens (S1.25) in a real browser: the stop-reordering control, the queue table's row selection and the
- * rider picker. The showcase-wide checks above (WCAG 2.2 at three widths, 320 px, 200% text) already sweep their demos; these are the keyboard
- * checks of each, which only a real browser can show: where focus is after an item moves, and what is kept when the queue changes page.
+ * The components of the manifest screens (S1.25) in a real browser: the stop-reordering control and the rider picker (the queue table's row selection was
+ * the third until run 5 retired that component: the data table holds it, in `kit.spec.ts` and in the builder's pool in `manifests.spec.ts`). The showcase-wide
+ * checks above (WCAG 2.2 at three widths, 320 px, 200% text) already sweep their demos; these are the keyboard checks of each, which only a real browser
+ * can show: where focus is after an item moves.
  */
 test.describe('the components of the manifest screens', () => {
   // Break caught: a reordering control that works with a pointer alone, that drops focus when an item moves, or that moves an item onto a place
@@ -1054,32 +959,6 @@ test.describe('the components of the manifest screens', () => {
       page.getByRole('status').filter({ hasText: 'moved to place 4 of 4' }),
     ).toBeVisible();
     await expect(page.getByRole('button', { name: /Move Demo stop gamma/ })).toHaveCount(0);
-  });
-
-  test('the queue table’s boxes are chosen by the keyboard and kept across pages', async ({
-    page,
-  }) => {
-    await openShowcase(page);
-    await page.getByRole('checkbox', { name: 'Choose demo rows' }).check();
-    const first = page.getByRole('checkbox', { name: 'Choose Demo row alpha' });
-
-    await first.focus();
-    await page.keyboard.press('Space');
-    await expect(first).toBeChecked();
-    await expect(page.getByText('1 demo row chosen.')).toBeVisible();
-
-    await page
-      .getByRole('navigation', { name: 'Pages of demo queue' })
-      .getByRole('button', { name: 'Next page' })
-      .click();
-    await page.getByRole('checkbox', { name: 'Choose Demo row gamma' }).check();
-    await expect(page.getByText('2 demo rows chosen.')).toBeVisible();
-    await page
-      .getByRole('navigation', { name: 'Pages of demo queue' })
-      .getByRole('button', { name: 'Previous page' })
-      .click();
-
-    await expect(page.getByRole('checkbox', { name: 'Choose Demo row alpha' })).toBeChecked();
   });
 
   test('the rider picker lists the riders at once, narrows by search and chooses with a button', async ({

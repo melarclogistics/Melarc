@@ -128,6 +128,32 @@ describe('DataTable', () => {
     expect(region).toHaveAttribute('tabindex', '0');
   });
 
+  // Break caught (the older Table's test, held here since run 5 Stage 4 retired it): a row whose text the server gave is taken for markup. A name or a label is the server's text, and text is
+  // text, in a cell and in a card.
+  it('draws what a cell returns, and text is text', () => {
+    const hostile = '<img src=x onerror="document.title=1">Eve';
+    const { container } = render(<Table rows={[{ ...FIRST, sender: hostile }]} />);
+
+    expect(screen.getByText(hostile)).toBeVisible();
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  // Break caught (the older Table's test, held here since run 5 Stage 4 retired it): a row whose element is made again when the rows are put in another order, which loses what is in it (a
+  // field being typed in, the focus a keyboard is on) and is what the row's key is for.
+  it('keeps a row’s element when the rows are put in another order', () => {
+    const { rerender } = render(<Table />);
+    const second = screen.getByRole('rowheader', { name: /ACC-PR-4HT9WD/ });
+
+    rerender(<Table rows={[...REQUESTS].reverse()} />);
+
+    expect(screen.getByRole('rowheader', { name: /ACC-PR-4HT9WD/ })).toBe(second);
+    expect(screen.getAllByRole('rowheader').map((cell) => cell.textContent)).toEqual([
+      expect.stringContaining('ACC-PR-2MX8RC'),
+      expect.stringContaining('ACC-PR-4HT9WD'),
+      expect.stringContaining('ACC-PR-7KQ2MZ'),
+    ]);
+  });
+
   // Break caught: a code set in the body face, cut short, or lost from the cell that names the row.
   it('names each row by its code in the code face, whole, over the name', () => {
     render(<Table />);
