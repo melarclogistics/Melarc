@@ -24,7 +24,7 @@ import {
 } from '../../../platform/manifest/manifest-commands';
 import type { ManifestView } from '../../../platform/manifest/manifest-shape';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { lackedText } from '../../../platform/problem/capability-words';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { NoteActDialog } from '../pickup/PickupActDialogs';
@@ -49,15 +49,20 @@ export interface CreatedState {
 
 /**
  * The one short line under the acts, only when it changes whether to act now (the Product Owner, 9 November 2026: a rule lives in the confirmation of the act, where the choice is made, and
- * not in paragraphs above the content). A draft whose acts are offered says what the rider sees until it is sent out; a run to which a rider is bound says how to give it to another; a
- * run that has started says it cannot be cancelled and where the way out is. A finished run says nothing: the header's sentence says where it stands.
+ * not in paragraphs above the content). A draft says what has to come first (a rider, before the dispatch: the page decides nothing and keeps the act, the server refuses a dispatch with no
+ * rider) or what the rider sees until it is sent out, and what the session cannot do; a run to which a rider is bound says how to give it to another; a run that has started says it cannot be
+ * cancelled and where the way out is, the skip of a stop and the handover in the custody panel. A finished run says nothing: the header's sentence says where it stands. **The rule is said once**:
+ * the header's sentence of a draft says where it stands and not what comes first (the Product Owner, 10 November 2026).
  */
+const NEEDS_A_RIDER_NOTE = 'Assign a rider before you dispatch.';
+const NEEDS_A_RIDER_FOR_ANOTHER_NOTE =
+  'A rider has to be assigned before the pickup run is dispatched.';
 const DISPATCH_NOTE = 'The rider sees nothing until you dispatch.';
 const NOT_YET_NOTE = 'The rider sees nothing until the pickup run is dispatched.';
 const NO_NEW_RIDER_NOTE =
   'A rider cannot be changed once the pickup run is dispatched: cancel it and plan its requests again.';
 const STARTED_NOTE =
-  'A run that has started cannot be cancelled. Skip a stop that cannot be worked, below.';
+  'A run that has started cannot be cancelled. Skip a stop that cannot be worked, below. If the rider cannot go on, hand the parcels to another rider or to the hub, in the custody panel.';
 
 /**
  * The way a pickup run goes, for the tracker (`contracts/state-machines.md` section 4): **one forward path**, draft, dispatched, in progress and completed, and one end, cancelled (from a
@@ -269,14 +274,29 @@ function Manifest({
         ]
       : [];
 
-  // The one short line under the acts (see DISPATCH_NOTE): what changes whether to act now, and nothing a dialog says. What each act does and closes is said where the choice is made, in the
-  // act's own question. A session that can take no act of a draft is told so once, in the words of the table (the first of the two it lacks); a run that is finished says nothing.
+  // The one short line under the acts (see NEEDS_A_RIDER_NOTE): what changes whether to act now, and nothing a dialog says. What each act does and closes is said where the choice is made, in the
+  // act's own question. A draft says what comes first, and, for a session that holds some of the acts of a draft and not others (or none), what it cannot do, **in one sentence naming every one it
+  // lacks** (the table's words, `cannotAllText`); a run that is finished says nothing.
+  const lacks = draft
+    ? lackedText(me.holds, [
+        'pickup.manifest.assign',
+        'pickup.manifest.dispatch',
+        'pickup.manifest.create',
+      ])
+    : undefined;
+  const first = !draft
+    ? undefined
+    : holdsDispatch
+      ? riderId === undefined
+        ? holdsAssign
+          ? NEEDS_A_RIDER_NOTE
+          : NEEDS_A_RIDER_FOR_ANOTHER_NOTE
+        : DISPATCH_NOTE
+      : holdsAssign
+        ? NOT_YET_NOTE
+        : undefined;
   const note: string | undefined = draft
-    ? !holdsAssign && !holdsDispatch
-      ? cannotText('pickup.manifest.assign')
-      : holdsDispatch
-        ? DISPATCH_NOTE
-        : NOT_YET_NOTE
+    ? [first, lacks].filter((line) => line !== undefined).join(' ')
     : dispatched
       ? holdsCancel
         ? NO_NEW_RIDER_NOTE

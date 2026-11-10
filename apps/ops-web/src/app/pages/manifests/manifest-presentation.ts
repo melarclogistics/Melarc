@@ -25,8 +25,8 @@ export const MANIFEST_STATE_MAP: StatusMap<ManifestState> = {
 
 /** What each state of a manifest means to the officer looking at it, in one sentence: where it stands and what comes next. */
 export const MANIFEST_STATE_SENTENCES: Readonly<Record<ManifestState, string>> = {
-  DRAFT:
-    'It is a draft. Order its stops, give it a rider and dispatch it: the rider sees nothing until it is dispatched.',
+  // The situation only: what has to happen before a draft is dispatched is said once, in the line under the acts and in the question of the dispatch (the Product Owner, 10 November 2026).
+  DRAFT: 'It is a draft. Nothing has been sent to a rider.',
   DISPATCHED:
     'It is dispatched. Its rider can see the stops and starts the run on the run’s day. Until then it can still be cancelled.',
   IN_PROGRESS: 'The run is in progress. A stop is worked by the rider, or skipped by Ops.',

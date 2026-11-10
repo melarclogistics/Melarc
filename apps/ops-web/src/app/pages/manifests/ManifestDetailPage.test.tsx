@@ -29,7 +29,7 @@ import { renderApp } from '../../../test-support/render-app';
 import { RIDER_ID, riderFixture } from '../../../test-support/rider-fixture';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
-import { cannotText } from '../../../platform/problem/capability-words';
+import { cannotAllText } from '../../../platform/problem/capability-words';
 
 /**
  * `/manifests/{id}` (`getPickupManifest` and the acts on one run; S1.25). The record: where the run stands, the rider, the stops in their
@@ -133,9 +133,8 @@ describe('the manifest: what it shows', () => {
       'aria-current',
       'step',
     );
-    expect(
-      screen.getByText(/It is a draft\. Order its stops, give it a rider and dispatch it/),
-    ).toBeVisible();
+    // The situation only (the Product Owner, 10 November 2026): what comes first is said once, in the line under the acts.
+    expect(screen.getByText('It is a draft. Nothing has been sent to a rider.')).toBeVisible();
     const facts = within(screen.getByText('Service date').closest('dl') as HTMLElement);
     expect(facts.getByText('Wed 4 Nov 2026')).toBeVisible();
     expect(facts.getByText('Accra Central')).toBeVisible();
@@ -159,7 +158,7 @@ describe('the manifest: what it shows', () => {
     ]) {
       expect(screen.queryByText(rule)).toBeNull();
     }
-    expect(screen.getByText('The rider sees nothing until you dispatch.')).toHaveClass(
+    expect(screen.getByText('Assign a rider before you dispatch.')).toHaveClass(
       'ui-record-header__note',
     );
 
@@ -170,6 +169,87 @@ describe('the manifest: what it shows', () => {
         /closes the vendor’s own cancellation/,
       ),
     ).toBeVisible();
+  });
+
+  // Break caught (the review of f6cf02b, the Product Owner, 10 November 2026): the rule an officer needs before dispatching was gone from the screen: a draft with no rider still offers
+  // Dispatch (the page decides nothing and keeps the act, the server refuses), and nothing said that a rider comes first. The one muted line says so when the read shows no rider, and
+  // says what the rider sees when there is one; the rule is said once, never in the header's sentence as well.
+  it('tells a draft with no rider that a rider comes first, once, and one with a rider what the rider sees', async () => {
+    open();
+    await ready();
+
+    expect(screen.getByText('Assign a rider before you dispatch.')).toHaveClass(
+      'ui-record-header__note',
+    );
+    expect(screen.queryByText('The rider sees nothing until you dispatch.')).toBeNull();
+    // The act is kept: the page decides nothing.
+    expect(screen.getByRole('button', { name: 'Dispatch the pickup run' })).toBeVisible();
+    // Said once: the header's sentence of a draft is the situation and carries none of it.
+    const header = screen.getByText('It is a draft. Nothing has been sent to a rider.');
+    expect(header.textContent).not.toMatch(/rider before|give it a rider|dispatch/i);
+  });
+
+  it('tells a draft with a rider what the rider sees until it is dispatched', async () => {
+    open(() =>
+      answer(manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' })),
+    );
+    await ready();
+
+    expect(screen.getByText('The rider sees nothing until you dispatch.')).toHaveClass(
+      'ui-record-header__note',
+    );
+    expect(screen.queryByText('Assign a rider before you dispatch.')).toBeNull();
+  });
+
+  // Break caught: the question of the dispatch that does not state the rule (it spoke of "the assigned rider", for a draft that may have none).
+  it('states the rule in the question of the dispatch', async () => {
+    const { user } = open();
+    await ready();
+
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    expect(
+      within(dialog).getByText(
+        /A pickup run needs a rider, and a stop still to be worked, to be dispatched\./,
+      ),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/the assigned rider/)).toBeNull();
+  });
+
+  // Break caught (the review of f6cf02b): a session that holds some of the acts of a run and not others was told of the first it lacked, or of none. The line names every act it cannot do, in one sentence.
+  it.each([
+    [
+      'every key but the one that cancels',
+      ALL.filter((key) => key !== 'pickup.manifest.create'),
+      'Assign a rider before you dispatch.',
+      ['pickup.manifest.create'],
+    ],
+    [
+      'every key but the one that assigns',
+      ALL.filter((key) => key !== 'pickup.manifest.assign'),
+      'A rider has to be assigned before the pickup run is dispatched.',
+      ['pickup.manifest.assign'],
+    ],
+    [
+      'every key but the one that dispatches',
+      ALL.filter((key) => key !== 'pickup.manifest.dispatch'),
+      'The rider sees nothing until the pickup run is dispatched.',
+      ['pickup.manifest.dispatch'],
+    ],
+    [
+      'only the key that assigns',
+      ['pickup.read', 'pickup.manifest.assign'],
+      'The rider sees nothing until the pickup run is dispatched.',
+      ['pickup.manifest.dispatch', 'pickup.manifest.create'],
+    ],
+  ])('names, in one line, what a session with %s cannot do', async (_name, keys, first, lacks) => {
+    open(undefined, keys);
+    await ready();
+
+    const line = document.querySelector('.ui-record-header__note');
+    expect(line?.textContent).toBe(`${first} ${cannotAllText(lacks)}`);
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(1);
   });
 
   // Break caught (owner item c of the Product Owner, 9 November 2026): a history that begins with the first thing the record says of the run's progress and says nothing of when the run was made,
@@ -844,11 +924,17 @@ describe('the manifest: assigning a rider and dispatching are separate acts', ()
 
     expect(screen.queryByRole('button', { name: 'Assign a rider' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
-    expect(screen.getByText(cannotText('pickup.manifest.assign'))).toHaveClass(
-      'ui-record-header__note',
-    );
-    // One line for the draft, not one for each act it cannot take.
-    expect(screen.queryByText(cannotText('pickup.manifest.dispatch'))).toBeNull();
+    // One line for the draft, naming every act it cannot take (the line named the first of them only).
+    expect(
+      screen.getByText(
+        cannotAllText([
+          'pickup.manifest.assign',
+          'pickup.manifest.dispatch',
+          'pickup.manifest.create',
+        ]),
+      ),
+    ).toHaveClass('ui-record-header__note');
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(1);
   });
 
   it('says a rider cannot be changed once the pickup run is dispatched, in one line under the acts, and offers neither act', async () => {
@@ -954,6 +1040,10 @@ describe('the manifest: cancelling it', () => {
     expect(screen.getByText(/A run that has started cannot be cancelled/)).toHaveClass(
       'ui-record-header__note',
     );
+    // The way out for a rider who cannot go on is the handover, in the custody panel (the line of the old rules, back where an officer looks for it).
+    expect(
+      screen.getByText(/hand the parcels to another rider or to the hub, in the custody panel/),
+    ).toHaveClass('ui-record-header__note');
   });
 });
 

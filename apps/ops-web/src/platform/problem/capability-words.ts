@@ -86,6 +86,36 @@ export function cannotText(permission: string | undefined, doing?: CapabilityWor
 }
 
 /**
+ * What a session cannot do, in ONE sentence, when it lacks several keys of one page (a draft pickup run offers three acts): "Your account can’t assign a rider to a pickup run or send a pickup run
+ * out. Ask an administrator for access." Each key is told in its words (a key with none as "do this"), once, and the way out is said once at the end.
+ */
+export function cannotAllText(permissions: readonly string[]): string {
+  const words = [
+    ...new Set(permissions.map((permission) => capabilityOf(permission) ?? 'do this')),
+  ];
+  const last = words.at(-1);
+  const list =
+    last === undefined
+      ? 'do this'
+      : words.length === 1
+        ? last
+        : `${words.slice(0, -1).join(', ')} or ${last}`;
+  return `Your account can’t ${list}. ${ASK_FOR_ACCESS}`;
+}
+
+/**
+ * What a session lacks of the keys one page offers acts for, in one sentence ({@link cannotAllText}), or `undefined` when it holds every one: the page asks the session's `holds` and
+ * names the keys, and writes no words.
+ */
+export function lackedText(
+  holds: (permission: string) => boolean,
+  permissions: readonly string[],
+): string | undefined {
+  const lacking = permissions.filter((permission) => !holds(permission));
+  return lacking.length === 0 ? undefined : cannotAllText(lacking);
+}
+
+/**
  * What a refusal for a hub says of what a page holds, by what the page holds. A page names what it lists (`of: 'riders'`, a member of this list) and writes no sentence of its own (the review of
  * f6cf02b: six pages each wrote "These … are at a hub your account does not work in."), so that the words of a refusal are one table's whatever the screen. A list is "these"; a person and a
  * linked request are one.

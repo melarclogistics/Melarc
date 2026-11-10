@@ -24,6 +24,8 @@ const WORDS_FILE = 'platform/problem/capability-words.ts';
 const KEY_CALLS: ReadonlyMap<string, number> = new Map([
   ['holds', 0],
   ['cannotText', 0],
+  ['cannotAllText', 0],
+  ['lackedText', 1],
   ['refusalText', 1],
 ]);
 
@@ -135,6 +137,8 @@ function isKeyOfTheTable(node: ts.Node, file: string): boolean {
 function isKeyPosition(node: ts.Node): boolean {
   const at = outward(node);
   const parent = at.parent;
+  // The keys of a list handed to a call that takes keys (`lackedText(holds, ['a.b', 'c.d'])`) are each in the key's place.
+  if (ts.isArrayLiteralExpression(parent)) return isKeyPosition(parent);
   if (ts.isCallExpression(parent)) {
     const name = calleeName(parent);
     const place = name === undefined ? undefined : KEY_CALLS.get(name);
@@ -466,6 +470,13 @@ describe('the source of the portal', () => {
     expect(wrong(`const t = refusalText(kind, 'pickup.read', { doing: 'pickup.read' });`)).toBe(1);
     expect(wrong(`const t = refusalText('pickup.read', undefined);`)).toBe(1);
     expect(wrong(`const t = refusalText(kind, undefined, { of: 'staff.read' });`)).toBe(1);
+    // A list of keys is in the key's place only as the list a key-taking call is given; anywhere else each is drawn as written.
+    expect(
+      wrong(`const t = lackedText(holds, ['pickup.read', 'staff.read'], ['pickup.read']);`),
+    ).toBe(1);
+    expect(wrong(`const t = lackedText(['pickup.read'], holds);`)).toBe(1);
+    expect(wrong(`const t = shown(['pickup.read']);`)).toBe(1);
+    expect(wrong(`const t = [cannotAllText(['pickup.read']), 'staff.read'];`)).toBe(1);
     expect(wrong(`const t = cannotText('pickup.read', 'pickup.read');`)).toBe(1);
     expect(wrong(`const t = cannotText(key, 'needs pickup.read');`)).toBe(1);
     expect(wrong(`const t = cannotText(undefined, 'staff.read');`)).toBe(1);
@@ -581,6 +592,11 @@ describe('the source of the portal', () => {
     ).toEqual([]);
     expect(fine(`const t = cannotText('pickup.exception.approve');`)).toEqual([]);
     expect(fine(`const t = cannotText('pickup.read', 'see pickup runs');`)).toEqual([]);
+    expect(
+      fine(
+        `const t = lackedText(me.holds, ['pickup.read', 'staff.read']) ?? cannotAllText(['pickup.read']);`,
+      ),
+    ).toEqual([]);
     expect(
       fine(`const t = refusalText(problem.forbidden, 'pickup.read', { of: 'pickup requests' });`),
     ).toEqual([]);

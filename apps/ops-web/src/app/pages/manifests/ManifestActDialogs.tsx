@@ -227,7 +227,7 @@ function OpenAssign<Result>({
 
 export interface DispatchDialogProps<Result> {
   readonly open: boolean;
-  /** Who the stops are shown to: the assigned rider, by name when it is known. */
+  /** Who the stops are shown to: the run's rider, by name when it is known. */
   readonly riderName: string | undefined;
   readonly version: string;
   readonly send: (version: string) => Promise<Result>;
@@ -258,10 +258,10 @@ export function DispatchDialog<Result>({
       title="Dispatch this pickup run?"
       consequence={
         <p>
-          The pickup run becomes dispatched and its stops are shown to{' '}
-          {riderName ?? 'the assigned rider'}, and to no other rider. A text message for the rider
-          is queued with it. Dispatching does not start the run: the rider starts it on the run’s
-          day. A cancelled pickup is never sent.
+          A pickup run needs a rider, and a stop still to be worked, to be dispatched. The pickup
+          run becomes dispatched and its stops are shown to {riderName ?? 'its rider'}, and to no
+          other rider. A text message for the rider is queued with it. Dispatching does not start
+          the run: the rider starts it on the run’s day. A cancelled pickup is never sent.
         </p>
       }
       confirmLabel="Dispatch the pickup run"

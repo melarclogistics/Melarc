@@ -9,6 +9,8 @@ import {
   OUTSIDE_HUBS_SENTENCES,
   ASK_FOR_ACCESS,
   capabilityOf,
+  cannotAllText,
+  lackedText,
   cannotText,
   refusalText,
 } from '../src/platform/problem/capability-words';
@@ -164,6 +166,40 @@ describe('the words of a refusal', () => {
       expect(sentence).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance|Auditor/);
       for (const key of catalogue) expect(sentence).not.toContain(key);
     }
+  });
+
+  // Break caught (the review of f6cf02b): a page that lacks several keys told only the first (a draft pickup run offers three acts). One sentence names every one, each in its words, once.
+  it('name every key a session lacks, in one sentence with the way out said once', () => {
+    expect(cannotAllText(['pickup.manifest.assign'])).toBe(cannotText('pickup.manifest.assign'));
+    expect(cannotAllText(['pickup.manifest.assign', 'pickup.manifest.dispatch'])).toBe(
+      `Your account can’t assign a rider to a pickup run or send a pickup run out. ${ASK_FOR_ACCESS}`,
+    );
+    expect(
+      cannotAllText([
+        'pickup.manifest.assign',
+        'pickup.manifest.dispatch',
+        'pickup.manifest.create',
+      ]),
+    ).toBe(
+      `Your account can’t assign a rider to a pickup run, send a pickup run out or build or cancel a pickup run. ${ASK_FOR_ACCESS}`,
+    );
+    // A key with no words is told as "do this", once, and none at all is told so as well; never as the key.
+    expect(cannotAllText(['made.up.key', 'another.made.up'])).toBe(
+      `Your account can’t do this. ${ASK_FOR_ACCESS}`,
+    );
+    expect(cannotAllText([])).toBe(`Your account can’t do this. ${ASK_FOR_ACCESS}`);
+    for (const key of CAPABILITY_KEYS)
+      expect(cannotAllText([key, 'pickup.read'])).not.toContain(key);
+  });
+
+  it('tell what a session lacks of the keys a page names, and nothing when it holds them all', () => {
+    const keys = ['pickup.manifest.assign', 'pickup.manifest.dispatch', 'pickup.manifest.create'];
+    expect(lackedText(() => true, keys)).toBeUndefined();
+    expect(lackedText((key) => key === 'pickup.manifest.dispatch', keys)).toBe(
+      cannotAllText(['pickup.manifest.assign', 'pickup.manifest.create']),
+    );
+    expect(lackedText(() => false, keys)).toBe(cannotAllText(keys));
+    expect(lackedText(() => false, [])).toBeUndefined();
   });
 
   // Break caught: a key that has no words told as the key.
