@@ -48,6 +48,21 @@
   padding-block-start: var(--space-4);
 }
 
+/*
+ * A queue with no views, no filters and no notice has nothing above its rows, so they start at the top of the page card, which cuts them to its rounded corners. Neither the
+ * body's own top padding nor the 24px that a page card with no header takes above its content (panel.css: it beats `padding: none` by its selector, and it is right above views
+ * and filters) is drawn there as an empty band. The selector is the longer one so that it wins whatever the order of the two stylesheets.
+ */
+.ui-queue-workspace__body[data-bare='true'] {
+  padding-block-start: 0;
+}
+
+.ui-queue-workspace__main
+  .ui-panel[data-padding='none']
+  .ui-panel__body:has(> .ui-queue-workspace__body[data-bare='true']) {
+  padding-top: 0;
+}
+
 .ui-queue-workspace__filters,
 .ui-queue-workspace__notice {
   padding-inline: var(--space-4);

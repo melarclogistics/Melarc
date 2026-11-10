@@ -95,6 +95,42 @@ describe('QueueWorkspace', () => {
     expect(screen.getByRole('table', { name: 'Pickup requests' })).toBeInTheDocument();
   });
 
+  // Break caught (the pictures of run 5, the Product Owner's item 7 of Stage 3): an empty band above the table of a queue that has no views, no filters and no notice. The template says so
+  // on its body (the stylesheet draws no top padding for it); a queue with any of the three is not bare, because what is above its rows needs the room.
+  describe('when nothing is drawn above its rows', () => {
+    const bodyOf = (container: HTMLElement): HTMLElement => {
+      const body = container.querySelector<HTMLElement>('.ui-queue-workspace__body');
+      if (body === null) throw new Error('The workspace draws no body.');
+      return body;
+    };
+
+    it('marks its body bare', () => {
+      const { container } = renderQueue();
+
+      expect(bodyOf(container)).toHaveAttribute('data-bare', 'true');
+    });
+
+    it('does not mark it bare with views, with filters or with a notice', () => {
+      const views = {
+        label: 'Views of the pickup queue',
+        value: 'all',
+        onValueChange: () => undefined,
+        tabs: [{ id: 'all', label: 'All', count: 2 }],
+      };
+      const filters = {
+        label: 'Filters',
+        chips: [{ id: 'hub', label: 'Hub: Accra Central' }],
+        onRemove: () => undefined,
+      };
+
+      expect(bodyOf(renderQueue({ views }).container)).not.toHaveAttribute('data-bare');
+      expect(bodyOf(renderQueue({ filters }).container)).not.toHaveAttribute('data-bare');
+      expect(bodyOf(renderQueue({ notice: <p>Done.</p> }).container)).not.toHaveAttribute(
+        'data-bare',
+      );
+    });
+  });
+
   // Break caught: a failure told in the API's words, or one with no way to try again, or loading rows drawn as if they were an answer.
   it('tells loading and a failure in the page’s words, with the way to try again', async () => {
     const user = userEvent.setup();

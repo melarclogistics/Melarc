@@ -273,8 +273,10 @@ export function QueueWorkspace<Item>({
       emptyState={emptyState ?? <Emptiness empty={empty} />}
     />
   );
+  // A queue with no views, no filters and no notice has nothing above its rows: they start at the top of the page card (queue-workspace.css), and not under an empty band.
+  const bare = views === undefined && filters === undefined && notice === undefined;
   const body = (
-    <div className="ui-queue-workspace__body">
+    <div className="ui-queue-workspace__body" data-bare={bare ? 'true' : undefined}>
       {filters === undefined ? null : (
         <div className="ui-queue-workspace__filters">
           <FilterBar {...filters} />
