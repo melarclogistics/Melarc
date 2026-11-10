@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { RouteObject } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MAX_HOLD_MS } from '../../../platform/secrets/use-transient-secret';
@@ -14,6 +15,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { NeverReady } from '../../../test-support/never-ready';
 import { renderApp } from '../../../test-support/render-app';
 import { sessionFixture } from '../../../test-support/session-fixture';
 
@@ -45,13 +47,14 @@ type View = ReturnType<typeof renderApp>;
 async function atTheSecondStep(
   second?: Handler,
   extra: Record<string, Handler> = {},
+  routes: RouteObject[] = [],
 ): Promise<View> {
   api = installFakeApi({
     [SIGN_IN]: () => json(202, CHALLENGE),
     ...(second === undefined ? {} : { [SECOND_STEP]: second }),
     ...extra,
   });
-  const view = renderApp('/sign-in');
+  const view = renderApp('/sign-in', routes);
   await view.user.type(await screen.findByLabelText('Work email (required)'), 'admin@example.test');
   await view.user.type(screen.getByLabelText('Password (required)'), 'a long enough passphrase');
   await view.user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -519,6 +522,48 @@ describe('the choice to remember the browser (staff-authentication.md section 5.
 
     await screen.findByRole('heading', { level: 1, name: 'My work' });
     expect(document.body.innerHTML).not.toContain('SENTINEL');
+  });
+});
+
+// Break caught (the review of f6cf02b): the challenge, which stands for a password that was proved, still held while the page the person went to is awaited (it was let go of when the page that held
+// it was replaced, which a slow page delays), and, once it is let go of at the moment the router moves, the second step sending the person back to the first over the navigation they made.
+describe('the challenge when the router moves', () => {
+  it('is gone the moment the router moves, before the next page is drawn, and the page sends the person nowhere', async () => {
+    const view = await atTheSecondStep(undefined, {}, [{ path: 'later', element: <NeverReady /> }]);
+    expect(screen.getByLabelText('Authenticator code (required)')).toBeVisible();
+
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    // The router is where the person asked to go, and not back at the first step; what is drawn is the page they left, without its form.
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify and sign in' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Sign in' })).toBeNull();
+  });
+
+  // Break caught: the second step drawn again, with its challenge, by Back or by Forward in the moment the page the person went to has not appeared.
+  it('does not come back with Back, or with Forward, while the next page is awaited', async () => {
+    const view = await atTheSecondStep(undefined, {}, [{ path: 'later', element: <NeverReady /> }]);
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+    // Back at the second step, which holds no challenge now: it sends the person to the first step, as it does for a visit with none.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
+
+    await act(async () => {
+      await view.router.navigate(1);
+    });
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
   });
 });
 

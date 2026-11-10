@@ -158,6 +158,8 @@ export function SetupMfaPage() {
   });
 
   if (leaving) return null;
+  // The router has moved on and the material went with it (the review of f6cf02b): the page is on its way out and draws nothing, not the link's error in the place of the picture.
+  if (enrolment.moved) return null;
   if (grant.reading) return <NoReferrer />;
 
   if (refused) {

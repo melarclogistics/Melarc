@@ -63,6 +63,12 @@ export interface TransientSecret<T> {
   readonly hold: (flow: SecretFlow, secret: T, lifetimeMs: number) => boolean;
   /** The secret has done its work: it is gone at once, and every flow in flight is called off. */
   readonly clear: () => void;
+  /**
+   * The router has moved out of the scope the secret was held in and the secret was let go of for that (`releaseWhenRouterMoves`), and the page that held it is still what is drawn, awaiting the next:
+   * it is on its way out, so it draws nothing in the secret's place and does nothing about the secret being gone (no redirect, no refusal, no error). It is `false` again once the new
+   * location has been drawn, and when a new ask begins. Always `false` for a screen that did not ask for the early release.
+   */
+  readonly moved: boolean;
 }
 
 /** When a held secret ends, on both clocks: it ends at the earlier. */
@@ -126,6 +132,8 @@ export function lifetimeFromExpiry(
 export function useTransientSecret<T>(options: TransientSecretOptions = {}): TransientSecret<T> {
   const store = useSessionStore();
   const [state, setState] = useState<Held<T>>(NONE);
+  /** The scope the router left while it was drawn (`releaseWhenRouterMoves`): the page of that scope is on its way out for as long as it is still what is drawn. */
+  const [movedFrom, setMovedFrom] = useState<string | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const location = useLocation();
   // What the secret is scoped to, as text: the effect below runs again, and lets go, only when this changes.
@@ -157,6 +165,7 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
   }, [stopTimer]);
 
   const begin = useCallback((): SecretFlow => {
+    setMovedFrom(undefined);
     controller.current?.abort();
     epoch.current += 1;
     const mine = epoch.current;
@@ -206,10 +215,19 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
 
   // For a screen that asked for it (`releaseWhenRouterMoves`): the secret is also let go of when the router's location leaves the scope it was held in, **before** the next page is drawn, so
   // that the page the person left, while it is still on the screen, holds nothing a Back could show again. Where there is no data router (a test, the showcase) the effect above is all there is.
+  //
+  // **Why the router object and not a public hook** (the review of f6cf02b asked whether one gives the same signal; none does, as of React Router 8.4): `useLocation`, `useNavigation` and
+  // the unstable `useRouterState` all read what React has rendered, which is exactly what lags (the router commits its new location, and React draws the page it leads to later, in a
+  // transition, and later still when the page is a chunk on its way); `useBlocker` runs before a navigation, but a router supports one blocker at a time and the unsaved-changes guard of the
+  // task forms owns it. `router.subscribe` is the one synchronous signal, and `UNSAFE_DataRouterContext` is the only public door to the router from inside a component. A change of the library
+  // that moves it is caught by `use-transient-secret-navigation.test.tsx` (the secret is gone before the next page is drawn) and by the same claim in each page that asks for it.
   const dataRouter = useContext(UNSAFE_DataRouterContext)?.router;
   const scopeOf = useRef(options.scope);
+  /** The scope of what is drawn: a router that comes back to it (a navigation undone before the next page appeared) has nothing on its way out. */
+  const drawnScope = useRef(scopeKey);
   useEffect(() => {
     scopeOf.current = options.scope;
+    drawnScope.current = scopeKey;
   });
   const releaseWhenRouterMoves = options.releaseWhenRouterMoves === true;
   useEffect(() => {
@@ -220,7 +238,12 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
       const next = scopeAt(state.location);
       if (next === seen) return;
       seen = next;
+      if (next === drawnScope.current) {
+        setMovedFrom(undefined);
+        return;
+      }
       clear();
+      setMovedFrom(drawnScope.current);
     });
   }, [dataRouter, releaseWhenRouterMoves, clear]);
 
@@ -278,5 +301,7 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
     begin,
     hold,
     clear,
+    // On its way out while the scope the router left is still the one that is drawn; once the new location has been drawn, nothing is.
+    moved: movedFrom !== undefined && movedFrom === scopeKey,
   };
 }

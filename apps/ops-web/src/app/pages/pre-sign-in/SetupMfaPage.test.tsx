@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { RouteObject } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { groupedKey } from '../../../platform/secrets/otpauth';
@@ -13,6 +14,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { NeverReady } from '../../../test-support/never-ready';
 import { decodeRenderedSvg } from '../../../test-support/qr-decode';
 import { renderApp } from '../../../test-support/render-app';
 
@@ -52,9 +54,12 @@ afterEach(() => {
 type View = ReturnType<typeof renderApp>;
 
 /** The way in for a new privileged employee: the first password, answered with the material of an authenticator. */
-async function viaCredential(handlers: Record<string, Handler> = {}): Promise<View> {
+async function viaCredential(
+  handlers: Record<string, Handler> = {},
+  routes: RouteObject[] = [],
+): Promise<View> {
   api = installFakeApi({ [SETUP]: () => json(200, PRIVILEGED), ...handlers });
-  const view = renderApp(`/setup/credential#token=${GRANT}`);
+  const view = renderApp(`/setup/credential#token=${GRANT}`, routes);
   await view.user.type(await screen.findByLabelText('New password (required)'), PASSWORD);
   await view.user.click(screen.getByRole('button', { name: 'Set password' }));
   await screen.findByRole('region', { name: 'Authenticator set-up' });
@@ -608,6 +613,46 @@ describe('the seed is transient (OB-23)', () => {
     });
 
     expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught (the review of f6cf02b): the authenticator's material, a bearer secret, still drawn while the page the person went to is awaited (it is let go of when the page that held it is
+  // replaced, which a slow page delays), and the page, once it was let go of, telling a person who navigated that the link cannot be used in the picture's place.
+  it('is gone the moment the router moves, before the next page is drawn, and the page draws nothing in its place', async () => {
+    const view = await viaCredential({}, [{ path: 'later', element: <NeverReady /> }]);
+    expect(whereIsTheSeed()).toEqual(['page']);
+
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    // The router is at the new page; what is drawn is still the page the person left, with nothing of the seed on it, and not the link's error either.
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(whereIsTheSeed()).toEqual([]);
+    expect(screen.queryByRole('region', { name: 'Authenticator set-up' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'This link cannot be used' })).toBeNull();
+  });
+
+  // Break caught: the picture back when the person presses Back, or Forward, in the moment the page they went to has not appeared (the WebKit run of 9 November 2026).
+  it('does not come back with Back, or with Forward, while the next page is awaited', async () => {
+    const view = await viaCredential({}, [{ path: 'later', element: <NeverReady /> }]);
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+    // Back at the page, which has nothing to set up: the link's one error, and no picture.
+    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(whereIsTheSeed()).toEqual([]);
+
+    await act(async () => {
+      await view.router.navigate(1);
+    });
+    expect(view.router.state.location.pathname).toBe('/later');
     expect(whereIsTheSeed()).toEqual([]);
   });
 

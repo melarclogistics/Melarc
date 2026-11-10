@@ -161,6 +161,9 @@ export function SignInMfaPage() {
   });
 
   if (leaving) return null;
+  // The router has moved on and the challenge went with it (the review of f6cf02b): the page is on its way out and draws nothing, and does not send the person back to the first step over the
+  // navigation they made.
+  if (challenge.moved) return null;
   // The number of days is the server's, held with the challenge; a page that has none has no challenge to offer it for.
   const days = challenge.value?.trusted_browser_days ?? 0;
 

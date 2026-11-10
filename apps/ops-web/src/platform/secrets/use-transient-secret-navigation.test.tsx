@@ -1,8 +1,9 @@
 import { act, render, screen } from '@testing-library/react';
-import { Suspense, use } from 'react';
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
+import { Suspense } from 'react';
+import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
+import { NeverReady } from '../../test-support/never-ready';
 import { sessionFixture } from '../../test-support/session-fixture';
 import { SessionProvider } from '../session/SessionProvider';
 import { SessionStore } from '../session/session-store';
@@ -14,12 +15,6 @@ import { useTransientSecret, type TransientSecret } from './use-transient-secret
  * browser tests in WebKit on 9 November 2026 (riders.spec.ts, "is gone on navigation, and does not return with the back button"), where the code came back after the Back.
  */
 const SECRET = 'otpauth://totp/Melarc:test?secret=SENTINELSENTINEL22';
-
-/** A page that is never ready: while it is awaited the router has moved and the page the person left is still what is drawn. */
-function NeverReady(): null {
-  use(new Promise<never>(() => undefined));
-  return null;
-}
 
 function Holder({
   onReady,
@@ -152,6 +147,135 @@ describe('useTransientSecret: a navigation that has begun', () => {
       await Promise.resolve();
     });
     expect(screen.getByText('none: -')).toBeInTheDocument();
+  });
+});
+
+describe('useTransientSecret: Back and Forward while the next page is awaited', () => {
+  // Break caught (the review of f6cf02b: Back and Forward tests for the early release): the secret on the screen again when the person presses Back, or Forward, in the moment the page they
+  // went to has not appeared (the WebKit run of 9 November 2026: the enrolment code came back after the Back button). The router returns to the page that held it, and it holds nothing.
+  it('does not bring the secret back with Back, or with Forward', async () => {
+    const { router, secret } = setup((onReady) => [
+      { path: '/a', element: <Holder onReady={onReady} /> },
+      { path: '/b', element: <NeverReady /> },
+    ]);
+    act(() => {
+      secret().hold(secret().begin(), SECRET, 60_000);
+    });
+    await act(async () => {
+      void router.navigate('/b');
+      await Promise.resolve();
+    });
+    expect(screen.getByText('none: -')).toBeInTheDocument();
+
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    expect(router.state.location.pathname).toBe('/a');
+    expect(screen.getByText('none: -')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('SENTINEL');
+
+    await act(async () => {
+      await router.navigate(1);
+    });
+    expect(router.state.location.pathname).toBe('/b');
+    expect(screen.getByText('none: -')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('SENTINEL');
+  });
+});
+
+/** A layout that holds the secret for the family of addresses under `/a`, as the pre-sign-in layout does, and says whether the page is on its way out. */
+function LayoutHolder({
+  onReady,
+  release = true,
+}: {
+  readonly onReady: (secret: TransientSecret<string>) => void;
+  readonly release?: boolean;
+}) {
+  const secret = useTransientSecret<string>({
+    scope: (location) => (location.pathname.startsWith('/a') ? 'a' : 'elsewhere'),
+    releaseWhenRouterMoves: release,
+  });
+  onReady(secret);
+  return (
+    <>
+      <p>
+        {secret.status}: {secret.value ?? '-'} · moved: {String(secret.moved)}
+      </p>
+      <Outlet />
+    </>
+  );
+}
+
+describe('useTransientSecret: the page that held the secret while it is on its way out', () => {
+  const layout = (
+    onReady: (secret: TransientSecret<string>) => void,
+    release = true,
+  ): RouteObject[] => [
+    {
+      element: <LayoutHolder onReady={onReady} release={release} />,
+      children: [
+        { path: '/a', element: <p>Page A</p> },
+        { path: '/b', element: <NeverReady /> },
+        { path: '/c', element: <p>Page C</p> },
+      ],
+    },
+  ];
+
+  // Break caught: a page that cannot tell that it is leaving, and so does what it does when its secret is gone (sends the person back to a first step, or tells them a link is bad) over the
+  // navigation they made. `moved` is true from the moment the router leaves the scope until the new location is drawn.
+  it('says it is on its way out while the next page is awaited, and not once that page has been drawn', async () => {
+    const { router, secret } = setup((onReady) => layout(onReady));
+    act(() => {
+      secret().hold(secret().begin(), SECRET, 60_000);
+    });
+    expect(screen.getByText(`held: ${SECRET} · moved: false`)).toBeInTheDocument();
+
+    await act(async () => {
+      void router.navigate('/b');
+      await Promise.resolve();
+    });
+    expect(screen.getByText('none: - · moved: true')).toBeInTheDocument();
+
+    await act(async () => {
+      await router.navigate('/c');
+    });
+    expect(await screen.findByText('Page C')).toBeInTheDocument();
+    expect(screen.getByText('none: - · moved: false')).toBeInTheDocument();
+  });
+
+  // Break caught: a page left stuck on its way out when the person came back to it before the next page appeared (Back), so that it drew nothing at all.
+  it('is not on its way out when the router comes back to what is drawn', async () => {
+    const { router, secret } = setup((onReady) => layout(onReady));
+    await act(async () => {
+      await router.navigate('/a');
+    });
+    act(() => {
+      secret().hold(secret().begin(), SECRET, 60_000);
+    });
+    await act(async () => {
+      void router.navigate('/b');
+      await Promise.resolve();
+    });
+    expect(screen.getByText('none: - · moved: true')).toBeInTheDocument();
+
+    await act(async () => {
+      await router.navigate(-1);
+    });
+
+    expect(router.state.location.pathname).toBe('/a');
+    expect(screen.getByText('none: - · moved: false')).toBeInTheDocument();
+  });
+
+  it('is never on its way out for a screen that did not ask for the early release', async () => {
+    const { router, secret } = setup((onReady) => layout(onReady, false));
+    act(() => {
+      secret().hold(secret().begin(), SECRET, 60_000);
+    });
+    await act(async () => {
+      void router.navigate('/b');
+      await Promise.resolve();
+    });
+    expect(screen.getByText(`held: ${SECRET} · moved: false`)).toBeInTheDocument();
   });
 });
 
