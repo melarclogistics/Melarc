@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
-import { NoWrap, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { CellLines, NoWrap, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Field } from '../../../components/ui/field/Field';
 import { Link } from '../../../components/ui/link/Link';
@@ -52,7 +53,6 @@ import {
   whatHappenedText,
   wordingVersionText,
 } from './message-presentation';
-import '../pickup/pickup-pages.css';
 import './messages-page.css';
 
 /** What the log is narrowed to. Every part is in the address, so that a view can be linked. */
@@ -87,13 +87,21 @@ function Dash({ means }: { readonly means: string }) {
 /** What became of a message: why it was held back, or how it ended, and the provider's own word beneath it. */
 function WhatHappened({ entry }: { readonly entry: NotificationEntryView }) {
   const words = whatHappenedText(entry);
-  return (
-    <span className="messages-lines">
-      <span>{words ?? <Dash means={NOTHING_TO_REPORT} />}</span>
-      {entry.provider_outcome_class === undefined ? null : (
-        <span className="messages-support">{providerWordText(entry.provider_outcome_class)}</span>
-      )}
-    </span>
+  const first =
+    words === undefined ? (
+      <Dash means={NOTHING_TO_REPORT} />
+    ) : (
+      <span className="messages-words">{words}</span>
+    );
+  return entry.provider_outcome_class === undefined ? (
+    first
+  ) : (
+    <CellLines
+      first={first}
+      second={
+        <span className="messages-provider">{providerWordText(entry.provider_outcome_class)}</span>
+      }
+    />
   );
 }
 
@@ -120,20 +128,20 @@ function RecordLink({ entry }: { readonly entry: NotificationEntryView }) {
 /** A message over the version of its wording, in a cell or in a card. */
 function WhichMessage({ entry }: { readonly entry: NotificationEntryView }) {
   return (
-    <span className="messages-lines">
-      <span>{messageKindLabel(entry.message_kind)}</span>
-      <span className="messages-support">{wordingVersionText(entry.template_version)}</span>
-    </span>
+    <CellLines
+      first={<span className="messages-words">{messageKindLabel(entry.message_kind)}</span>}
+      second={<span className="messages-words">{wordingVersionText(entry.template_version)}</span>}
+    />
   );
 }
 
-/** Who a message is for, over the channel it goes by (the channel is the lesser fact, muted under the audience). */
+/** Who a message is for, over the channel it goes by (the channel is the lesser fact, quiet under the audience). */
 function ToAndChannel({ entry }: { readonly entry: NotificationEntryView }) {
   return (
-    <span className="messages-lines">
-      <span className="messages-words">{AUDIENCE_LABELS[entry.audience]}</span>
-      <span className="messages-support messages-words">{CHANNEL_LABELS[entry.channel]}</span>
-    </span>
+    <CellLines
+      first={<span className="messages-words">{AUDIENCE_LABELS[entry.audience]}</span>}
+      second={<span className="messages-words">{CHANNEL_LABELS[entry.channel]}</span>}
+    />
   );
 }
 
@@ -143,30 +151,56 @@ function ToAndChannel({ entry }: { readonly entry: NotificationEntryView }) {
  */
 function StatusAndOutcome({ entry }: { readonly entry: NotificationEntryView }) {
   const words = whatHappenedText(entry);
-  return (
-    <span className="messages-lines">
-      <span>
-        <StatusBadge status={entry.state} map={stateMapFor(entry.channel)} />
-      </span>
-      {words === undefined ? (
-        <span className="messages-hidden">{NOTHING_TO_REPORT}</span>
-      ) : (
-        <span className="messages-support messages-words">{words}</span>
-      )}
-      {entry.provider_outcome_class === undefined ? null : (
-        <span className="messages-support">{providerWordText(entry.provider_outcome_class)}</span>
-      )}
-      {entry.attempt_count > 1 ? (
-        <span className="messages-support messages-words">{`${String(entry.attempt_count)} tries`}</span>
-      ) : null}
-    </span>
+  const badge = <StatusBadge status={entry.state} map={stateMapFor(entry.channel)} />;
+  const quiet = [
+    ...(words === undefined
+      ? []
+      : [
+          <span key="words" className="messages-words">
+            {words}
+          </span>,
+        ]),
+    ...(entry.provider_outcome_class === undefined
+      ? []
+      : [
+          <span key="provider" className="messages-provider">
+            {providerWordText(entry.provider_outcome_class)}
+          </span>,
+        ]),
+    ...(entry.attempt_count > 1
+      ? [
+          <span key="tries" className="messages-words">
+            {`${String(entry.attempt_count)} tries`}
+          </span>,
+        ]
+      : []),
+  ];
+  const nothing =
+    words === undefined ? <span className="messages-hidden">{NOTHING_TO_REPORT}</span> : null;
+  return quiet.length === 0 ? (
+    <>
+      {badge}
+      {nothing}
+    </>
+  ) : (
+    <CellLines
+      first={badge}
+      second={
+        <span className="messages-stack">
+          {quiet}
+          {nothing}
+        </span>
+      }
+    />
   );
 }
 
 /**
- * The nine facts of a message in six columns, none dropped (the Product Owner, owner item a of 9 November 2026): when; the message over the version of its wording; who it is for over the
- * channel; the status over what became of it, the provider's word and the number of tries when more than one; the number (the masked hint only); and the record. They fit a table at 1280 px
- * with the menu open, and under 40rem each message is a card with the same nine facts, each under its own name.
+ * The nine facts of a message in six columns, none lost (the Product Owner, owner item a of 9 November 2026): when; the message over the version of its wording; who it is for over the
+ * channel; the status over what became of it, the provider's word and the number of tries when more than one; the number (the masked hint only); and the record. **The columns that go when the
+ * table's own box is narrow are this list's own choice** (the Product Owner, 10 November 2026), and the table takes them away only as far as it takes for the box not to scroll sideways: the number
+ * first (weight 3, the masked hint of the destination), then who it is for with the channel (weight 2). The time, the message, the status and the record stay. They fit a table at 1280 px with the
+ * menu open, and under 40rem each message is a card with the same nine facts, each a label and its value.
  */
 const COLUMNS: readonly DataColumn<NotificationEntryView>[] = [
   {
@@ -176,56 +210,38 @@ const COLUMNS: readonly DataColumn<NotificationEntryView>[] = [
     cell: (row) => <NoWrap>{formatInstant(row.created_at)}</NoWrap>,
   },
   { id: 'message', header: 'Message', cell: (row) => <WhichMessage entry={row} /> },
-  { id: 'to', header: 'To', cell: (row) => <ToAndChannel entry={row} /> },
+  { id: 'to', header: 'To', priority: 2, cell: (row) => <ToAndChannel entry={row} /> },
   { id: 'status', header: 'Status', cell: (row) => <StatusAndOutcome entry={row} /> },
-  { id: 'number', header: 'Number', cell: (row) => <NumberHint entry={row} /> },
+  { id: 'number', header: 'Number', priority: 3, cell: (row) => <NumberHint entry={row} /> },
   { id: 'record', header: 'Record', cell: (row) => <RecordLink entry={row} /> },
 ];
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
 /**
- * A message as a card, for a room too narrow for the columns: its kind is the card's heading (outside the card), then the status, and every fact of the row under the name of its
- * column. The number is the masked hint the server sent, or a dash with its meaning, as in the row, and the record is its link, as in the row.
+ * A message as a card, for a room too narrow for the columns: its kind is the card's heading (outside the card), then the status, and every fact of the row, each a label and its value
+ * (`CardFacts`). The number is the masked hint the server sent, or a dash with its meaning, as in the row, and the record is its link, as in the row (a message opens nothing, so its card
+ * may hold the link).
  */
 function MessageCard({ entry }: { readonly entry: NotificationEntryView }) {
   return (
-    <>
-      <div className="pickup-card__head">
-        <StatusBadge status={entry.state} map={stateMapFor(entry.channel)} />
-      </div>
-      <dl className="pickup-card__facts">
-        <Fact label="When">
-          <NoWrap>{formatInstant(entry.created_at)}</NoWrap>
-        </Fact>
-        <Fact label="Message">
-          <WhichMessage entry={entry} />
-        </Fact>
-        <Fact label="For">
-          <span className="messages-words">{AUDIENCE_LABELS[entry.audience]}</span>
-        </Fact>
-        <Fact label="Channel">
-          <span className="messages-words">{CHANNEL_LABELS[entry.channel]}</span>
-        </Fact>
-        <Fact label="What happened">
-          <WhatHappened entry={entry} />
-        </Fact>
-        <Fact label="Number">
-          <NumberHint entry={entry} />
-        </Fact>
-        <Fact label="Tries">{String(entry.attempt_count)}</Fact>
-        <Fact label="Record">
-          <RecordLink entry={entry} />
-        </Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<StatusBadge status={entry.state} map={stateMapFor(entry.channel)} />}
+      facts={[
+        { label: 'When', value: <NoWrap>{formatInstant(entry.created_at)}</NoWrap> },
+        { label: 'Message', value: <WhichMessage entry={entry} /> },
+        {
+          label: 'For',
+          value: <span className="messages-words">{AUDIENCE_LABELS[entry.audience]}</span>,
+        },
+        {
+          label: 'Channel',
+          value: <span className="messages-words">{CHANNEL_LABELS[entry.channel]}</span>,
+        },
+        { label: 'What happened', value: <WhatHappened entry={entry} /> },
+        { label: 'Number', value: <NumberHint entry={entry} /> },
+        { label: 'Tries', value: String(entry.attempt_count) },
+        { label: 'Record', value: <RecordLink entry={entry} /> },
+      ]}
+    />
   );
 }
 

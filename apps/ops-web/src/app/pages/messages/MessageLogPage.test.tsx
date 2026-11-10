@@ -86,6 +86,10 @@ function open(
   return renderApp(path);
 }
 
+/** Whether a piece of text is on the quiet second line of its cell (the kit's CellLines draws it so). */
+const quiet = (element: HTMLElement): boolean =>
+  element.closest('.ui-data-table__support') !== null;
+
 const listRequests = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/notifications');
 const queryOf = (index = -1) => new URL(listRequests().at(index)?.url ?? 'http://x/').searchParams;
@@ -193,16 +197,20 @@ describe('the log: what it shows', () => {
     expect(cells).toHaveLength(5);
     const [message, to, status, number, record] = cells;
     expect(message).toHaveTextContent(/^Pickup request confirmedWording version 1$/);
-    expect(within(message ?? document.body).getByText('Wording version 1')).toHaveClass(
-      'messages-support',
+    // The lesser fact is the second line of its cell, which the kit's CellLines draws quiet; the first is not.
+    expect(quiet(within(message ?? document.body).getByText('Wording version 1'))).toBe(true);
+    expect(quiet(within(message ?? document.body).getByText('Pickup request confirmed'))).toBe(
+      false,
     );
     expect(to).toHaveTextContent(/^Ad-hoc senderText message$/);
-    expect(within(to ?? document.body).getByText('Text message')).toHaveClass('messages-support');
+    expect(quiet(within(to ?? document.body).getByText('Text message'))).toBe(true);
+    expect(quiet(within(to ?? document.body).getByText('Ad-hoc sender'))).toBe(false);
     expect(within(status ?? document.body).getByText('Failed')).toBeVisible();
     expect(status).toHaveTextContent(
       /The provider refused itProvider’s word: REQUEST_INVALID3 tries$/,
     );
-    expect(within(status ?? document.body).getByText('3 tries')).toHaveClass('messages-support');
+    expect(quiet(within(status ?? document.body).getByText('3 tries'))).toBe(true);
+    expect(quiet(within(status ?? document.body).getByText('Failed'))).toBe(false);
     expect(number).toHaveTextContent(HINT);
     expect(
       within(record ?? document.body).getByRole('link', { name: 'Pickup request' }),

@@ -645,6 +645,45 @@ test.describe('the log in six columns, and cards under 40rem (owner item a, 9 No
     ]) {
       await expect(first.getByText(name, { exact: true })).toBeVisible();
     }
+    // Each is a label and its value, as a list of terms and definitions (CardFacts).
+    await expect(first.getByRole('term')).toHaveText([
+      'When',
+      'Message',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
+      'Record',
+    ]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the six columns need 74px more than a box of 41rem (768px) has, so the box scrolled sideways with the record out of
+  // view. Each list marks its own lesser columns: the number (the masked hint, weight 3) is what goes first, and the audience with the channel (2) after it, only as far as it takes.
+  test('keeps the table at 768px without its number, and never scrolls it sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, LOG);
+
+    await expect(table(page).getByRole('columnheader')).toHaveText([
+      'When',
+      'Message',
+      'To',
+      'Status',
+      'Record',
+    ]);
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? Number.NaN : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(0);
+    await expect(table(page).getByRole('columnheader', { name: 'Record' })).toBeInViewport({
+      ratio: 1,
+    });
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 });
 
