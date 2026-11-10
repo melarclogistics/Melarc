@@ -241,6 +241,44 @@ test.describe('the vendor screens', () => {
     });
   }
 
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that where its cells ask for more than a box of 768 px has (a style that
+  // gives every cell 9.5rem on one line stands for a long organisation, a long status) its box scrolls sideways. It takes its lesser columns away instead, the hub first, and the account and the
+  // status stay.
+  test('takes its lesser columns away, the hub first, rather than scroll sideways at 768 px, when its cells cannot wrap', async ({
+    page,
+  }) => {
+    const seen = await signedInWith(page, ['vendor.read'], {
+      'GET /api/v1/ops/vendors': (route) =>
+        route.fulfill({
+          status: 200,
+          json: { items: [ACCOUNT_BODY], next_page_token: null },
+        }),
+    });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto('/admin/vendors');
+
+    const table = page.getByRole('table', { name: 'Vendor accounts' });
+    await expect(table).toBeVisible();
+    // Every cell asks for 9.5rem on one line, and the table is made to measure its box again (two pixels wider, then as it was): five columns ask for more than the box has.
+    await page.addStyleTag({
+      content:
+        '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
+    });
+    await page.setViewportSize({ width: 770, height: 1024 });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    // The lesser columns go, the most lesser first: the hub is the first to be taken away.
+    await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    const headers = await table.getByRole('columnheader').allTextContents();
+    for (const kept of ['Account / organisation', 'Status']) expect(headers).toContain(kept);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(seen.unexpected).toEqual([]);
+  });
+
   for (const size of [
     { width: 390, height: 844 },
     { width: 320, height: 640 },

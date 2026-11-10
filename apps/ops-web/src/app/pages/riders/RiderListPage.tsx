@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
-import { type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { Field } from '../../../components/ui/field/Field';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
@@ -84,52 +85,38 @@ function State({ status }: { readonly status: RiderStatus }) {
 /**
  * The five facts of a rider in five columns: the name over the phone (the name is the row's header, and **a link to the rider's own page**: a row opens a page and not a panel, so there is
  * no button over the row, and a keyboard, a middle click and a new tab all use the link), where the rider stands (administratively), then whether a PIN is set and whether a device is
- * active (readiness, told as facts and apart from the status), and the hub.
+ * active (readiness, told as facts and apart from the status), and the hub. The name, the status and the device are what an officer acts on (a device is registered, replaced or reported lost);
+ * the PIN is a readiness fact beside it (marked lesser, 2) and the hub the last (3), the first to go where the box is short: the table takes the lesser columns away only as far as it takes for
+ * it not to scroll sideways, and a card shows every fact.
  */
 const COLUMNS: readonly DataColumn<RiderFacts>[] = [
   {
     id: 'rider',
     header: 'Rider / phone',
     rowHeader: true,
-    cell: (row) => (
-      <span className="rider-title">
-        <Link to={row.href}>{row.name}</Link>
-        <span className="rider-title__support">{row.phone}</span>
-      </span>
-    ),
+    cell: (row) => <RowTitle title={row.name} name={row.phone} to={row.href} />,
   },
   { id: 'status', header: 'Status', cell: (row) => <State status={row.status} /> },
-  { id: 'pin', header: 'PIN', cell: (row) => row.pinSaid },
+  { id: 'pin', header: 'PIN', priority: 2, cell: (row) => row.pinSaid },
   { id: 'device', header: 'Device', cell: (row) => row.deviceSaid },
-  { id: 'hub', header: 'Hub', cell: (row) => row.hub },
+  { id: 'hub', header: 'Hub', priority: 3, cell: (row) => row.hub },
 ];
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="rider-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
 /**
- * A rider as a card, for a room too narrow for the columns: the status, then the facts in the order a person reads them, each under the name of its column. It holds **no control**: the
- * name is the card's heading, outside the card, and the link to the rider.
+ * A rider as a card, for a room too narrow for the columns: the status, the phone under it, then the facts in the order a person reads them, each a label and its value (`CardFacts`). It
+ * holds **no control**: the name is the card's heading, outside the card, and the link to the rider.
  */
 function RiderCard({ facts }: { readonly facts: RiderFacts }) {
   return (
-    <>
-      <div className="rider-card__head">
-        <State status={facts.status} />
-      </div>
-      <dl className="rider-card__facts">
-        <Fact label="Phone">{facts.phone}</Fact>
-        <Fact label="PIN">{facts.pinSaid}</Fact>
-        <Fact label="Device">{facts.deviceSaid}</Fact>
-        <Fact label="Hub">{facts.hub}</Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<State status={facts.status} />}
+      lead={facts.phone}
+      facts={[
+        { label: 'PIN', value: facts.pinSaid },
+        { label: 'Device', value: facts.deviceSaid },
+        { label: 'Hub', value: facts.hub },
+      ]}
+    />
   );
 }
 

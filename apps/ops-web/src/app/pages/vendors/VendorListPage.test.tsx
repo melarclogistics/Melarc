@@ -140,6 +140,33 @@ describe('the vendor list: what it shows', () => {
     expect(facts.getByText('Not set yet')).toBeVisible();
     expect(facts.getByText('Accra Central')).toBeVisible();
     expect(facts.getByText('0')).toBeVisible();
+    // Each fact beyond the status and the organisation is a label and its value (CardFacts), the labels the columns have.
+    expect(facts.getAllByRole('term').map((term) => term.textContent)).toEqual([
+      'Secret',
+      'Active browsers',
+      'Hub',
+    ]);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold the five scrolls sideways where the hub, the
+  // browsers and the secret could have gone. The account and its status are never lesser; the hub is the most lesser.
+  it('marks the secret, the browsers and the hub as the lesser columns, the hub the most lesser, and the account and the status not', async () => {
+    open();
+
+    const found = await table();
+    const priorities = Object.fromEntries(
+      within(found)
+        .getAllByRole('columnheader')
+        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    );
+    // A column that is not lesser carries no mark: it is always drawn.
+    expect(priorities).toEqual({
+      'Account / organisation': null,
+      Status: null,
+      Secret: '2',
+      'Active browsers': '2',
+      Hub: '3',
+    });
   });
 
   // Break caught: an id shown where a person needs a name, or a hub the session does not act in named as if it were its own.

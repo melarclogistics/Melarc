@@ -150,6 +150,33 @@ describe('the rider list: what it shows', () => {
     expect(facts.getByText('Not set yet')).toBeVisible();
     expect(facts.getByText('No active device')).toBeVisible();
     expect(facts.getByText('Accra Central')).toBeVisible();
+    // Each fact beyond the name, the status and the phone is a label and its value (CardFacts), the labels the columns have.
+    expect(facts.getAllByRole('term').map((term) => term.textContent)).toEqual([
+      'PIN',
+      'Device',
+      'Hub',
+    ]);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold the five scrolls sideways where the hub and
+  // then the PIN could have gone. The name, the status and the device, which an officer acts on, are never lesser; the hub is the most lesser.
+  it('marks the PIN and the hub as the lesser columns, the hub the most lesser, and the name, the status and the device not', async () => {
+    open();
+
+    const found = await table();
+    const priorities = Object.fromEntries(
+      within(found)
+        .getAllByRole('columnheader')
+        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    );
+    // A column that is not lesser carries no mark: it is always drawn.
+    expect(priorities).toEqual({
+      'Rider / phone': null,
+      Status: null,
+      PIN: '2',
+      Device: null,
+      Hub: '3',
+    });
   });
 
   // Break caught: a hub the session does not act in named by its id, or as if it were the officer's own.

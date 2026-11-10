@@ -56,58 +56,6 @@
   min-width: min(20rem, 100%);
 }
 
-/* A rider's name over the phone: the row's header (the name is the link), the phone quieter below it and never broken in the middle. */
-.rider-title {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.rider-title__support {
-  color: var(--color-text-muted);
-  font-size: var(--text-caption-size);
-  font-weight: var(--text-caption-weight);
-  line-height: var(--text-caption-line-height);
-  white-space: nowrap;
-}
-
-/* A rider as a card (the queue's narrow drawing): the status, then the facts. */
-.rider-card__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-2) var(--space-3);
-}
-
-.rider-card__facts {
-  margin: var(--space-4) 0 0;
-}
-
-/* A term beside its value where there is room for both, and over it where there is not: no width of the screen is assumed. */
-.rider-card__fact {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-}
-
-.rider-card__fact + .rider-card__fact {
-  margin-top: var(--space-3);
-}
-
-.rider-card__fact dt {
-  flex: 1 0 9rem;
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
-}
-
-.rider-card__fact dd {
-  flex: 100 1 12rem;
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 /* The enrolment code and what is said around it: a column of readable width, with the picture set apart from the prose (the section of the task form around it gives the space above). */
 .rider-code {
   max-width: 40rem;

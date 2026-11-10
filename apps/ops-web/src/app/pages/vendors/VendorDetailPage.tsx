@@ -4,6 +4,7 @@ import { useParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
@@ -81,7 +82,7 @@ function NoAccess() {
   return <ForbiddenPage kind="permission-missing" permission="vendor.read" />;
 }
 
-/** One browser of the account as a card, for a room too narrow for the columns: its status, then the facts, each under its name. */
+/** One browser of the account as a card, for a room too narrow for the columns: its status, then the facts, each a label and its value (`CardFacts`). */
 function BrowserCard({
   device,
   organisation,
@@ -90,25 +91,19 @@ function BrowserCard({
   readonly organisation: ReactNode;
 }) {
   return (
-    <>
-      <div className="vendor-card__head">
-        <StatusBadge status={device.status} map={DEVICE_STATUS_MAP} />
-      </div>
-      <dl className="vendor-card__facts">
-        <div className="vendor-card__fact">
-          <dt>Registered</dt>
-          <dd>
-            {device.registered_at === undefined
+    <CardFacts
+      head={<StatusBadge status={device.status} map={DEVICE_STATUS_MAP} />}
+      facts={[
+        {
+          label: 'Registered',
+          value:
+            device.registered_at === undefined
               ? 'Not recorded'
-              : (formatInstant(device.registered_at) ?? 'Not recorded')}
-          </dd>
-        </div>
-        <div className="vendor-card__fact">
-          <dt>Registered by</dt>
-          <dd>{organisation}</dd>
-        </div>
-      </dl>
-    </>
+              : (formatInstant(device.registered_at) ?? 'Not recorded'),
+        },
+        { label: 'Registered by', value: organisation },
+      ]}
+    />
   );
 }
 

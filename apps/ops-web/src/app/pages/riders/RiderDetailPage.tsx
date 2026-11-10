@@ -2,6 +2,7 @@ import { useLayoutEffect } from 'react';
 import { useParams } from 'react-router';
 
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
@@ -75,24 +76,16 @@ export function RiderNoAccess() {
   return <ForbiddenPage kind="permission-missing" permission="dispatch.read" />;
 }
 
-/** One device of the rider as a card, for a room too narrow for the columns: its status, then the facts, each under its name. */
+/** One device of the rider as a card, for a room too narrow for the columns: its status, then the facts, each a label and its value (`CardFacts`). */
 function DeviceCard({ device }: { readonly device: RiderDeviceView }) {
   return (
-    <>
-      <div className="rider-card__head">
-        <StatusBadge status={device.status} map={RIDER_DEVICE_STATUS_MAP} />
-      </div>
-      <dl className="rider-card__facts">
-        <div className="rider-card__fact">
-          <dt>Registered</dt>
-          <dd>{registeredAt(device)}</dd>
-        </div>
-        <div className="rider-card__fact">
-          <dt>Registered by</dt>
-          <dd>{registeredBySentence(device)}</dd>
-        </div>
-      </dl>
-    </>
+    <CardFacts
+      head={<StatusBadge status={device.status} map={RIDER_DEVICE_STATUS_MAP} />}
+      facts={[
+        { label: 'Registered', value: registeredAt(device) },
+        { label: 'Registered by', value: registeredBySentence(device) },
+      ]}
+    />
   );
 }
 

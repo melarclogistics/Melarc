@@ -40,6 +40,21 @@ const LONG_NAME = 'Kwabena Owusu-Ansah Boateng Mensah-Darko the Third of Kumasi 
 const REGISTER = `/admin/riders/${IDS.esi}/device/register`;
 const DEVICE = `/admin/riders/${IDS.kwame}/device`;
 
+/**
+ * Every cell of the table asks for 9.5rem and is kept on one line, as a long name, a long phone or a long status would ask, and the table measures its box again (the box is made two pixels wider
+ * and then as it was: a table measures when its box changes width): five columns ask for more than a box of 768 px has, and the lesser columns have to go for it not to scroll sideways.
+ */
+async function cannotWrap(page: Page): Promise<void> {
+  const size = page.viewportSize();
+  if (size === null) throw new Error('the page has no size');
+  await page.addStyleTag({
+    content:
+      '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
+  });
+  await page.setViewportSize({ width: size.width + 2, height: size.height });
+  await page.setViewportSize(size);
+}
+
 async function overflowOf(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 }
@@ -246,6 +261,31 @@ test.describe('moving through the screens', () => {
       expect(watch.problems).toEqual([]);
     });
   }
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a roster that marks no column lesser, so that where its cells ask for more than a box of 768 px has (a style that
+  // gives every cell 9.5rem on one line stands for a long name, a long phone, a long status) its box scrolls sideways. It takes its lesser columns away instead, the hub first, and the name, the
+  // status and the device stay.
+  test('takes its lesser columns away, the hub first, rather than scroll sideways at 768 px, when its cells cannot wrap', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const { watch } = await open(page, '/admin/riders');
+
+    const table = page.getByRole('table', { name: 'Riders' });
+    await expect(table).toBeVisible();
+    await cannotWrap(page);
+    // The lesser columns go, the most lesser first: the hub is the first to be taken away.
+    await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    const headers = await table.getByRole('columnheader').allTextContents();
+    for (const kept of ['Rider / phone', 'Status', 'Device']) expect(headers).toContain(kept);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
 
   for (const size of [
     { width: 390, height: 844 },

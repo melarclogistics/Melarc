@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Button } from '../../../components/ui/button/Button';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { Field } from '../../../components/ui/field/Field';
@@ -69,7 +70,9 @@ function State({ status }: { readonly status: AccountFacts['status'] }) {
 /**
  * The five facts of an account in five columns: the identifier over the organisation (the identifier is the row's header, and **a link to the account's own page**: a row opens a page
  * and not a panel, so there is no button over the row, and a keyboard, a middle click and a new tab all use the link), where the account stands, whether the vendor has set its
- * shared secret (said, never shown), how many browsers are active, and the hub.
+ * shared secret (said, never shown), how many browsers are active, and the hub. The account and its status are what an officer finds an account by; the secret and the count of browsers are
+ * facts beside them (marked lesser, 2) and the hub the last (3): the table takes the lesser columns away, the most lesser first, only as far as it takes for it not to scroll sideways, and a card
+ * shows every fact.
  */
 const COLUMNS: readonly DataColumn<AccountFacts>[] = [
   {
@@ -79,37 +82,32 @@ const COLUMNS: readonly DataColumn<AccountFacts>[] = [
     cell: (row) => <RowTitle code={row.code} name={row.organisation} to={row.href} />,
   },
   { id: 'status', header: 'Status', cell: (row) => <State status={row.status} /> },
-  { id: 'secret', header: 'Secret', cell: (row) => row.secret },
-  { id: 'browsers', header: 'Active browsers', align: 'end', cell: (row) => row.browsers },
-  { id: 'hub', header: 'Hub', cell: (row) => row.hub },
+  { id: 'secret', header: 'Secret', priority: 2, cell: (row) => row.secret },
+  {
+    id: 'browsers',
+    header: 'Active browsers',
+    align: 'end',
+    priority: 2,
+    cell: (row) => row.browsers,
+  },
+  { id: 'hub', header: 'Hub', priority: 3, cell: (row) => row.hub },
 ];
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="vendor-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
 /**
- * An account as a card, for a room too narrow for the columns: the status, then the facts in the order a person reads them, each under the name of its column. It holds **no control**:
- * its identifier is the card's heading, outside the card, and the link to the account.
+ * An account as a card, for a room too narrow for the columns: the status, the organisation under it, then the facts in the order a person reads them, each a label and its value
+ * (`CardFacts`). It holds **no control**: its identifier is the card's heading, outside the card, and the link to the account.
  */
 function AccountCard({ facts }: { readonly facts: AccountFacts }) {
   return (
-    <>
-      <div className="vendor-card__head">
-        <State status={facts.status} />
-      </div>
-      <dl className="vendor-card__facts">
-        <Fact label="Organisation">{facts.organisation}</Fact>
-        <Fact label="Secret">{facts.secret}</Fact>
-        <Fact label="Active browsers">{facts.browsers}</Fact>
-        <Fact label="Hub">{facts.hub}</Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<State status={facts.status} />}
+      lead={facts.organisation}
+      facts={[
+        { label: 'Secret', value: facts.secret },
+        { label: 'Active browsers', value: facts.browsers },
+        { label: 'Hub', value: facts.hub },
+      ]}
+    />
   );
 }
 
