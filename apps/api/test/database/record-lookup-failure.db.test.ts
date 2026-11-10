@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import type { TransactionHandle } from '../../src/platform/auth/ports/unit-of-work.port.js';
 import { RECORD_LOOKUP_BUDGET_MS } from '../../src/platform/lookup/record-lookup.service.js';
 import { insertPickupRequest, pickupRequestRow } from './support/pickups.js';
 import { insertRider, riderRow } from './support/riders.js';
@@ -18,16 +19,59 @@ import { insertVendor, vendorRow } from './support/vendors.js';
  *
  * The two hubs each hold a vendor, a request and a rider whose names share a word, so that a Platform Admin without a hub of its own meets both hubs in the first keys it
  * is searched for (pickup.read, vendor.read) before the key that is held (dispatch.read, the riders; or pickup.read, the requests).
+ *
+ * **The bound a statement has on the server is explicit here** (run 6, Stage 1.5). The application asks the server for at most three seconds of **real** time for each statement of
+ * a lookup (`limitStatements`, `AC-LOOKUP-15`) while its budget runs on the kit's manual clock, so a scenario that took three real seconds to set up (a loaded machine) was ended by the
+ * server's own timer and not by the cause it names: the abandon test then read a statement timeout where it expects "abandoned by the client", and the test of the budget passed
+ * without the budget doing anything. Every scenario but one therefore gives the server a bound far beyond what it takes (`CEILING_MS`, through a wrapper of `limitStatements`
+ * that passes everything else through), so that the one thing that can end its statement is the cause it names; the one that does not (the last) asks the application for its
+ * bound as it ships and reads from the server what the transaction holds (`current_setting`), which proves that the bound is applied without waiting three seconds for it.
  */
 const LOOKUP = `${API}/ops/lookup`;
+
+/** What the wrapper of `limitStatements` below does, and keeps. */
+const bound = vi.hoisted(() => ({
+  /** When set, the bound the server is given instead of the application's: the scenarios raise it so that the server's own timer is never what ends their statement. */
+  ceiling: undefined as number | undefined,
+  /** For each call the application made: the bound it asked for, and what the transaction held the moment after (`current_setting('statement_timeout')`). */
+  asked: [] as { milliseconds: number; effective: string }[],
+}));
+
+vi.mock('../../src/platform/queue-summary/statement-limit.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/platform/queue-summary/statement-limit.js')>();
+  const { sql } = await import('drizzle-orm');
+  const { transactionOf } = await import('../../src/platform/database/transaction-handle.js');
+  return {
+    ...original,
+    limitStatements: async (handle: TransactionHandle, milliseconds: number): Promise<void> => {
+      await original.limitStatements(handle, bound.ceiling ?? milliseconds);
+      const held = await transactionOf(handle).execute(
+        sql`select current_setting('statement_timeout') as setting`,
+      );
+      const [row] = held.rows as unknown as { setting: string }[];
+      bound.asked.push({ milliseconds, effective: row?.setting ?? '' });
+    },
+  };
+});
+
+/** The bound the scenarios give the server instead of three seconds: a minute, far beyond any of them. */
+const CEILING_MS = 60_000;
 
 let routes: VendorRoutes;
 
 beforeAll(async () => {
-  // The configured bounds nest as the configuration requires (lock wait inside statement time inside transaction time, 10 s): the lock wait (4 s) is longer than the
-  // lookup's own bound (3 s), and the pool's statement timeout (6 s) is longer than both. Nothing here waits for any of them: the test ends every wait itself.
+  // The configured bounds nest as the configuration requires (lock wait inside statement time inside transaction time): the pool's are far beyond what a scenario takes
+  // (the lock wait 60 s, the statement 120 s, the transaction 300 s), so that the only bound a statement has on the server is the one the application sets for the lookup,
+  // which the scenarios raise to `CEILING_MS` (below the pool's, which it can only lower) and the last scenario leaves as it ships. Nothing here waits for any of them:
+  // the test ends every wait itself.
+  bound.ceiling = CEILING_MS;
   routes = await startVendorRoutes({
-    env: { DATABASE_STATEMENT_TIMEOUT_MS: '6000', DATABASE_LOCK_TIMEOUT_MS: '4000' },
+    env: {
+      DATABASE_LOCK_TIMEOUT_MS: '60000',
+      DATABASE_STATEMENT_TIMEOUT_MS: '120000',
+      DATABASE_TRANSACTION_TIMEOUT_MS: '300000',
+    },
   });
   for (const [hub, suffix] of [
     [HUB_A, 'Alpha'],
@@ -262,5 +306,29 @@ describe('a client that leaves while its lookup runs (run 4, Stage 1, A4.1 and A
     // The session's slot is free: the next lookup is whole, and not a 429.
     const again = await ask(admin, 'zuko');
     expect(again.status).toBe(200);
+  }, 60_000);
+});
+
+describe('every statement of a lookup has the bound of three seconds on the server (AC-LOOKUP-15; run 6, Stage 1.5)', () => {
+  // Break caught: the bound removed (or not applied, or another figure), which no scenario above can see: each of them ends its wait itself, by a cancel, by the clock or by the
+  // client leaving, so a lookup with no bound on its statements passed them all. Here nothing is held and nothing is raised: the application is asked, as it ships, for the bound of
+  // each key's transaction, and the transaction is asked what it holds. The server's own answer is the evidence, so nothing waits three seconds for a timeout to fire. A platform
+  // admin is searched by name under three keys (the requests, the vendors, the riders: one transaction each).
+  it('asks the server for three seconds before the first search of each key, and the transaction holds three seconds', async () => {
+    const admin = await routes.platformAdmin();
+    bound.ceiling = undefined;
+    bound.asked.length = 0;
+    try {
+      const answer = await ask(admin, 'zuko');
+
+      expect(answer.status).toBe(200);
+    } finally {
+      bound.ceiling = CEILING_MS;
+    }
+
+    // One call for each key's transaction (the requests, the vendors, the riders and the runs): at least the three of a platform admin's name search, never none. The figure is
+    // the acceptance criterion's, written here as the number it names and not as the constant the application reads.
+    expect(bound.asked.length).toBeGreaterThanOrEqual(3);
+    for (const each of bound.asked) expect(each).toEqual({ milliseconds: 3000, effective: '3s' });
   }, 60_000);
 });
