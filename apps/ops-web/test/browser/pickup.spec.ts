@@ -1870,6 +1870,76 @@ test.describe('the approver’s queue', () => {
     // The card's own border is 1px, and nothing else is above the header row.
     expect((head?.y ?? 0) - (card?.y ?? 0)).toBeLessThanOrEqual(2);
   });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the approver's table keeping a column it has no room for, so that its box scrolls and the act is out of view.
+  // At 768px (a box of 41rem) the table takes its lesser columns away, the packages and the hub, and keeps the request with its sender, the recipient, why, who asked, the state and the act, in view.
+  test('keeps the table at 768px without its lesser columns, and never scrolls it sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Request / sender',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Request state',
+      'Actions',
+    ]);
+    await expect(
+      table.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
+    ).toBeInViewport({ ratio: 1 });
+    expect(await overflowingInQueue(page)).toEqual([]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught: a card that tells less than the row it replaces (the facts of the lesser columns, or what is said under the state, left out where there is no room for them).
+  test('draws a card with every fact of the exception at 390px, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/approvals', {
+      requests: [
+        waiting(IDS.colleague),
+        { ...waiting(IDS.colleague), id: IDS.single, code: 'ACC-PR-2SY7Z5', state: 'CANCELLED' },
+      ],
+    });
+
+    const cards = page
+      .getByRole('list', { name: 'One-package exceptions waiting for approval' })
+      .getByRole('listitem');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+    ]);
+    for (const fact of [
+      'Abena Demo',
+      '9 Demo Street, Tema',
+      'Bridal gown, urgent',
+      'Accra Central',
+    ]) {
+      await expect(cards.first()).toContainText(fact);
+    }
+    // A request that is no longer waiting for confirmation says so in its card, as it does under its state in the table.
+    await expect(cards.nth(1).getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+      'Request state',
+    ]);
+    await expect(cards.nth(1)).toContainText(
+      'Nothing to approve: the request is no longer waiting for confirmation.',
+    );
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
 });
 
 test.describe('every screen, at the verified widths', () => {

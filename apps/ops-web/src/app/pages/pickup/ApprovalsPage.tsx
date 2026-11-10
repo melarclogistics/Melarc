@@ -2,7 +2,13 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { ConfirmationDialog } from '../../../components/ui/confirmation/ConfirmationDialog';
-import { RowTitle, NoWrap, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import {
+  CellLines,
+  RowTitle,
+  NoWrap,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { Link } from '../../../components/ui/link/Link';
 import { QueuePager } from '../../../components/ui/templates/QueuePager';
@@ -55,63 +61,51 @@ const rowsOf = (page: PickupRequestPageView): Waiting[] =>
 
 const NOTHING_TO_APPROVE = 'Nothing to approve: the request is no longer waiting for confirmation.';
 
-/** Two facts that belong together, the second quieter beneath the first. */
-function Pair({ first, second }: { readonly first: string; readonly second: string }) {
-  return (
-    <span className="pickup-lines">
-      <span>{first}</span>
-      <span className="pickup-support">{second}</span>
-    </span>
-  );
-}
-
-/** One exception waiting, as a card for a room too narrow for the columns: every fact, and no control (the table draws the card's one button, and the approval). */
+/**
+ * One exception waiting, as a card for a room too narrow for the columns: every fact of the row, each a label and its value (`CardFacts`), and no control (the table draws the card's one
+ * button, and the approval). What is said under the request's state in the table (it is no longer waiting, or the account may not approve) is its own fact, so that the card tells it too.
+ */
 function WaitingCard({
   row,
   principalId,
   hubs,
+  stateNote,
 }: {
   readonly row: Waiting;
   readonly principalId: string | undefined;
   readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
+  readonly stateNote: string | undefined;
 }) {
   const { request, exception } = row;
   return (
-    <>
-      <p className="pickup-card__head">
-        <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
-      </p>
-      <p className="pickup-card__sender pickup-support">{request.sender_name ?? 'Not recorded'}</p>
-      <dl className="pickup-card__facts">
-        <div className="pickup-card__fact">
-          <dt>Packages</dt>
-          <dd>{packagesText(request)}</dd>
-        </div>
-        <div className="pickup-card__fact">
-          <dt>Recipient</dt>
-          <dd>
-            <Pair first={exception.recipient.name} second={exception.recipient.location.address} />
-          </dd>
-        </div>
-        <div className="pickup-card__fact">
-          <dt>Why</dt>
-          <dd>{exception.note}</dd>
-        </div>
-        <div className="pickup-card__fact">
-          <dt>Asked</dt>
-          <dd>
-            <Pair
+    <CardFacts
+      head={<StatusBadge status={request.state} map={PICKUP_STATE_MAP} />}
+      lead={request.sender_name ?? 'Not recorded'}
+      facts={[
+        { label: 'Packages', value: packagesText(request) },
+        {
+          label: 'Recipient',
+          value: (
+            <CellLines
+              first={exception.recipient.name}
+              second={exception.recipient.location.address}
+            />
+          ),
+        },
+        { label: 'Why', value: exception.note },
+        {
+          label: 'Asked',
+          value: (
+            <CellLines
               first={actorText(exception.requested_by, principalId)}
               second={formatInstant(exception.requested_at) ?? ''}
             />
-          </dd>
-        </div>
-        <div className="pickup-card__fact">
-          <dt>Hub</dt>
-          <dd>{hubNameOf(request.responsible_hub_id, hubs)}</dd>
-        </div>
-      </dl>
-    </>
+          ),
+        },
+        { label: 'Hub', value: hubNameOf(request.responsible_hub_id, hubs) },
+        ...(stateNote === undefined ? [] : [{ label: 'Request state', value: stateNote }]),
+      ]}
+    />
   );
 }
 
@@ -223,6 +217,14 @@ export function ApprovalsPage() {
       });
   }
 
+  /** What is said under a request's state when something needs saying: it is no longer waiting for confirmation, or this account may not approve. */
+  const stateNoteOf = (request: PickupRequestView): string | undefined =>
+    request.state !== 'PENDING'
+      ? NOTHING_TO_APPROVE
+      : mayApprove
+        ? undefined
+        : cannotText('pickup.exception.approve');
+
   const columns: DataColumn<Waiting>[] = [
     {
       id: 'request',
@@ -246,7 +248,7 @@ export function ApprovalsPage() {
       id: 'recipient',
       header: 'Recipient',
       cell: ({ exception }) => (
-        <Pair first={exception.recipient.name} second={exception.recipient.location.address} />
+        <CellLines first={exception.recipient.name} second={exception.recipient.location.address} />
       ),
     },
     { id: 'why', header: 'Why', cell: ({ exception }) => exception.note },
@@ -254,7 +256,7 @@ export function ApprovalsPage() {
       id: 'asked',
       header: 'Asked',
       cell: ({ exception }) => (
-        <Pair
+        <CellLines
           first={actorText(exception.requested_by, principalId)}
           second={formatInstant(exception.requested_at) ?? ''}
         />
@@ -269,16 +271,11 @@ export function ApprovalsPage() {
     {
       id: 'state',
       header: 'Request state',
-      cell: ({ request }) => (
-        <span className="pickup-lines">
-          <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
-          {request.state !== 'PENDING' ? (
-            <span className="pickup-support">{NOTHING_TO_APPROVE}</span>
-          ) : mayApprove ? null : (
-            <span className="pickup-support">{cannotText('pickup.exception.approve')}</span>
-          )}
-        </span>
-      ),
+      cell: ({ request }) => {
+        const note = stateNoteOf(request);
+        const badge = <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />;
+        return note === undefined ? badge : <CellLines first={badge} second={note} />;
+      },
     },
   ];
 
@@ -392,7 +389,14 @@ export function ApprovalsPage() {
             columns,
             rowId: ({ request }) => request.id,
             density: 'two-line',
-            card: (row) => <WaitingCard row={row} principalId={principalId} hubs={hubs} />,
+            card: (row) => (
+              <WaitingCard
+                row={row}
+                principalId={principalId}
+                hubs={hubs}
+                stateNote={stateNoteOf(row.request)}
+              />
+            ),
             // The code is the heading of each card and the link to the request's own page.
             cardTitle: ({ request }) => (
               <Link to={`/pickup-requests/${request.id}`}>
