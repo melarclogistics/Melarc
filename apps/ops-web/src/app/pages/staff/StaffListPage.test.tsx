@@ -111,18 +111,16 @@ describe('the staff list: nothing that could sign anyone in, in either drawing',
     ['the cards', true],
   ] as const)('draws no credential in %s, in any text or attribute', async (_name, narrow) => {
     if (narrow) narrowRoom();
+    // A variable and not a literal in the call: a server's answer can be wider than the type the helper takes, and the helper's type would refuse the extra fields written in place.
+    const planted = {
+      ...kofi,
+      password_hash: 'SENTINEL-PASSWORD-HASH',
+      token: 'SENTINEL-TOKEN',
+      setup_token: 'SENTINEL-SETUP',
+      link: 'https://example.test/setup/credential#token=SENTINEL-SETUP',
+    };
     open('/admin/staff?view=all', KEYS.approver, {
-      [LIST]: () =>
-        staffPage([
-          {
-            ...kofi,
-            password_hash: 'SENTINEL-PASSWORD-HASH',
-            token: 'SENTINEL-TOKEN',
-            setup_token: 'SENTINEL-SETUP',
-            link: 'https://example.test/setup/credential#token=SENTINEL-SETUP',
-          },
-          ama,
-        ]),
+      [LIST]: () => staffPage([planted, ama]),
     });
     await (narrow ? cards() : table());
 
