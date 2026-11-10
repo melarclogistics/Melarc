@@ -215,6 +215,12 @@ describe('booking a vendor’s own packages', () => {
       'href',
       `/pickup-requests/${REQUEST_ID}`,
     );
+    // The page keeps the trail of its parents once the booking is made.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Pickup requests',
+      }),
+    ).toHaveAttribute('href', '/pickup-requests');
   });
 
   it('leaves the location out for the vendor’s default, and sends an override for this pickup only', async () => {
@@ -916,6 +922,27 @@ describe('booking: the task form', () => {
     // The booking states no price and the rail works none out: the estimate is the server's, once the booking is made.
     expect(within(rail).getByText(/an estimate, not a price/)).toBeVisible();
     expect(rail.textContent).not.toMatch(/GH₵|GHS|\d+\.\d\d/);
+  });
+
+  // Break caught (Stage 4.5): a task with no way back, or a link to a queue that would refuse the session. The way back is the breadcrumb of the parents, drawn for a session that can read the
+  // queue, and nothing beside it.
+  it('has the queue above it, as its way back, for a session that can read the queue, and no link for one that cannot', async () => {
+    const reader = open();
+    await screen.findByRole('heading', { level: 1, name: 'Book a pickup' });
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Pickup requests',
+      }),
+    ).toHaveAttribute('href', '/pickup-requests');
+    reader.unmount();
+    api.restore();
+
+    open(CREATOR.filter((key) => key !== 'pickup.read'));
+    await screen.findByRole('heading', { level: 1, name: 'Book a pickup' });
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+    expect(
+      within(screen.getByRole('main')).queryByRole('link', { name: 'Pickup requests' }),
+    ).toBeNull();
   });
 
   // Break caught: a form that loses what was typed to a link, without a word.

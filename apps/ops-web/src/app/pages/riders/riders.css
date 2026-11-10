@@ -27,7 +27,7 @@
   max-width: none;
 }
 
-/* The way back to the rider, above the heading of the device pages: the same element in every state of the page. */
+/* The way back to the roster, above the heading of the rider's page: the same element in every state of the page. */
 .rider-back {
   margin: 0 0 var(--space-4);
 }

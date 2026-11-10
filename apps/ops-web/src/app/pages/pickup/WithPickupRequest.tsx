@@ -4,7 +4,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
-import { PageHeader } from '../../../components/ui/page-header/PageHeader';
+import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
@@ -31,18 +31,6 @@ export function BackToRequests({ requestId }: { readonly requestId?: string }) {
       >
         Back to pickup requests
       </Link>
-    </p>
-  );
-}
-
-/**
- * The way back to one request, above the heading of a page about it that is not the request's own (the exception): the same element in every state of the page, while the request is
- * read, after a read that failed, beside the form and in place of it (the review of 499399c).
- */
-export function BackToTheRequest({ id }: { readonly id: string }) {
-  return (
-    <p className="pickup-back">
-      <Link to={`/pickup-requests/${id}`}>Back to the request</Link>
     </p>
   );
 }
@@ -113,6 +101,11 @@ function NoAccess({ requestId }: { readonly requestId: string }) {
 export interface RequestHeading {
   readonly title: string;
   readonly description?: string;
+  /**
+   * The pages above, for a task on the request (the exception): the trail the wrapper draws while the request is read and after a failure that the page does not draw itself, as the page's task form
+   * draws it once it is read. Such a page passes `back={null}`: the trail is its way back, and no link beside it says it again.
+   */
+  readonly breadcrumb?: readonly BreadcrumbEntry[];
   /** The title of the document (the tab), without the product's name. */
   readonly documentTitle: string;
 }
@@ -146,7 +139,7 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithPicku
     }
   }
 
-  const { title, description, documentTitle } = heading(query.data?.request);
+  const { title, description, breadcrumb, documentTitle } = heading(query.data?.request);
   // The way back is the same element in every state (loading, loaded, failed), so that a press on it while the request is on its way is not lost to the page replacing it.
   const loaded = ownsHeading && query.status === 'success';
   return (
@@ -154,7 +147,11 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithPicku
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
       {back === undefined ? <BackToRequests requestId={id} /> : back}
       {loaded ? null : (
-        <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+        <PageHeader
+          title={title}
+          {...(description === undefined ? {} : { description })}
+          {...(breadcrumb === undefined ? {} : { breadcrumb })}
+        />
       )}
       {query.status === 'success' ? (
         children(query.data, query)

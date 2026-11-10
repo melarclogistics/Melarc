@@ -34,15 +34,12 @@ import { UUID } from '../staff/WithProfile';
 import { CodeRecovery } from './CodeRecovery';
 import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNoAccess, RiderNotFound, RiderOutsideHubs } from './RiderDetailPage';
-import { deviceSentence, mayBindDevice, RIDER_STATUS_MAP } from './rider-presentation';
+import { deviceSentence, mayBindDevice, RIDER_STATUS_MAP, riderTrail } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
 import './riders.css';
 
 /** The longest the verification note may be: the audit's own bound for a note, which the server checks. */
 const NOTE_LIMIT = 1000;
-
-/** The way up from the page: the roster. The way to the rider is the link above the heading, which every state of the page keeps. */
-const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
 
 /** What the replacement is, in two short sentences under its title: it is done in person, and a code comes of it. */
 const REPLACE_INTRO =
@@ -345,10 +342,11 @@ function Device({
     return query.refetch();
   }
 
+  // The way back is the breadcrumb of the parents (the roster, then the rider), the same in every state of the page; there is no link beside it that says it again.
   const header: PageHeaderProps = {
     title: 'Revoke or replace a device',
     description: `For ${rider.full_name}.`,
-    breadcrumb: WAY_UP,
+    breadcrumb: riderTrail(id, rider.full_name),
   };
   const news =
     notice === undefined ? null : (
@@ -476,15 +474,12 @@ function Reading({ id }: { readonly id: string }) {
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
-      <p className="rider-back">
-        <Link to={`/admin/riders/${id}`}>Back to the rider</Link>
-      </p>
       {query.status === 'success' ? (
         <Device id={id} record={query.data} query={query} />
       ) : (
-        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way up, and says what is happening.
+        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back (the trail), and says what is happening.
         <>
-          <PageHeader title={title} breadcrumb={WAY_UP} />
+          <PageHeader title={title} breadcrumb={riderTrail(id, undefined)} />
           <ReadState<RiderRecord>
             query={query}
             isEmpty={() => false}

@@ -5,6 +5,7 @@ import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
+import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -31,8 +32,17 @@ import {
 } from './rider-presentation';
 import './riders.css';
 
-/** The way up from the rider's header and from its other states: the roster. */
-const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
+/**
+ * The way back from the rider's page, in every state of it (loading, read, not found): the roster, as one link above the heading, which a person who has pressed it while the rider was on its
+ * way does not lose to the page replacing it. A record page has this and no breadcrumb; the tasks on the rider (the device pages) have the breadcrumb of their parents and no such link.
+ */
+function BackToRiders() {
+  return (
+    <p className="rider-back">
+      <Link to="/admin/riders">Back to riders</Link>
+    </p>
+  );
+}
 
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
 function useFocusFallenToHeading(): void {
@@ -48,8 +58,9 @@ export function RiderNotFound() {
   return (
     <>
       <title>Rider not found · Melarc Ops Portal</title>
-      <PageHeader title="Rider not found" breadcrumb={WAY_UP} />
+      <PageHeader title="Rider not found" />
       <p>{copyFor({ operation: 'getRider', code: 'NOT_FOUND' })}</p>
+      <BackToRiders />
     </>
   );
 }
@@ -126,7 +137,6 @@ function Rider({ id, record }: { readonly id: string; readonly record: RiderReco
 
   return (
     <RecordPage
-      breadcrumb={WAY_UP}
       header={{
         code: rider.full_name,
         titleKind: 'name',
@@ -216,12 +226,13 @@ function Reading({ id }: { readonly id: string }) {
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
+      <BackToRiders />
       {query.status === 'success' ? (
         <Rider id={id} record={query.data} />
       ) : (
-        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way up, and says what is happening.
+        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back, and says what is happening.
         <>
-          <PageHeader title="Rider" breadcrumb={WAY_UP} />
+          <PageHeader title="Rider" />
           <ReadState<RiderRecord>
             query={query}
             isEmpty={() => false}

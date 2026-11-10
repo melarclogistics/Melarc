@@ -85,11 +85,12 @@ describe('the vendor account: what it shows', () => {
     expect(header).not.toBeNull();
     expect(within(header as HTMLElement).getByText('Active')).toBeVisible();
     expect(within(header as HTMLElement).getByText('This account can sign in.')).toBeVisible();
-    expect(
-      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
-        name: 'Vendors',
-      }),
-    ).toHaveAttribute('href', '/admin/vendors');
+    // A record page has one way back, a link to the list (Stage 4.5), and no breadcrumb.
+    expect(screen.getByRole('link', { name: 'Back to vendors' })).toHaveAttribute(
+      'href',
+      '/admin/vendors',
+    );
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
   });
 
   it('tells a suspended account as that', async () => {
@@ -200,6 +201,10 @@ describe('the vendor account: what it shows', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Account not found' }),
     ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Back to vendors' })).toHaveAttribute(
+      'href',
+      '/admin/vendors',
+    );
   });
 });
 
@@ -308,11 +313,15 @@ describeInterfaceStates('The vendor account', {
       });
       open(READER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the account…')).toBeInTheDocument();
+      // The way back is there while the account is read, and it is the same link once the page has replaced the loading state: a press on it is not lost to the page replacing it.
+      const back = screen.getByRole('link', { name: 'Back to vendors' });
+      expect(back).toHaveAttribute('href', '/admin/vendors');
       await act(async () => {
         release(json(200, detail(), etag('v1')));
         await gate;
       });
       await screen.findByText('This account can sign in.');
+      expect(screen.getByRole('link', { name: 'Back to vendors' })).toBe(back);
     },
   },
   empty: {

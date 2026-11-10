@@ -179,7 +179,7 @@ async function fillReplacement(
 }
 
 describe('the device page: what it shows', () => {
-  it('names the page, the rider and the device, and links back to the rider', async () => {
+  it('names the page, the rider and the device, and its one way back is the trail of its parents', async () => {
     await open();
 
     expect(
@@ -188,15 +188,14 @@ describe('the device page: what it shows', () => {
     expect(document.title).toBe('Revoke or replace a device · Melarc Ops Portal');
     expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
     expect(screen.getByText('One active device.')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the rider' })).toHaveAttribute(
+    // The roster, then the rider by name (Stage 4.5): a task has the breadcrumb of its parents and no link of its own beside it that says the same.
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Riders' })).toHaveAttribute('href', '/admin/riders');
+    expect(trail.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
-    expect(
-      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
-        name: 'Riders',
-      }),
-    ).toHaveAttribute('href', '/admin/riders');
+    expect(screen.queryByRole('link', { name: 'Back to the rider' })).toBeNull();
     // The two acts are two sections of the form, each under a heading of its own.
     expect(
       screen.getByRole('heading', { level: 2, name: 'Report a lost or stolen device' }),
@@ -1110,6 +1109,12 @@ describeInterfaceStates('The device page', {
       });
       await open(REVOKER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the rider…')).toBeInTheDocument();
+      // The way back is there while the rider is read: its entry in the trail has no name to say yet, and goes to the rider all the same.
+      expect(
+        within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+          name: 'The rider',
+        }),
+      ).toHaveAttribute('href', `/admin/riders/${RIDER_ID}`);
       await act(async () => {
         release(json(200, riderDetailFixture(), etag('v1')));
         await gate;

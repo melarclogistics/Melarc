@@ -52,11 +52,14 @@ import {
   serviceDateText,
   weekdayOf,
 } from './pickup-presentation';
+import { QUEUE_PERMISSION } from './WithPickupRequest';
 import { cannotText } from '../../../platform/problem/capability-words';
 import './pickup-pages.css';
 
 const OPERATION = 'createPickupRequest';
 const VENDOR_READ = 'vendor.read';
+/** The queue above the page, for a session that holds the queue's key (`QUEUE_PERMISSION`): one that does not has no link to a page that would refuse it. */
+const BOOKING_TRAIL = [{ label: 'Pickup requests', to: '/pickup-requests' }] as const;
 const LOCATIONS_READ = 'vendor.pickup_location.manage';
 /** The longest search the server accepts (`listVendorAccounts`, `q`). */
 const SEARCH_LIMIT = 128;
@@ -828,6 +831,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
         title: 'Book a pickup',
         description:
           'Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked.',
+        // The way back is the breadcrumb of the parents, and nothing beside it says it again.
+        ...(me?.holds(QUEUE_PERMISSION) === true ? { breadcrumb: BOOKING_TRAIL } : {}),
       }}
       formRef={form}
       busy={command.phase === 'sending'}
@@ -1303,6 +1308,7 @@ function Booked({
  * being filled is the server's answer (`SENDER_SUSPENDED`), told as such.
  */
 export function PickupRequestCreatePage() {
+  const me = useSignedInSession();
   const [booked, setBooked] = useState<PickupRequestView | undefined>(undefined);
   // A new form for each booking: its own state, and its own key.
   const [form, setForm] = useState(0);
@@ -1316,6 +1322,7 @@ export function PickupRequestCreatePage() {
           <PageHeader
             title="Book a pickup"
             description="Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked."
+            {...(me?.holds(QUEUE_PERMISSION) === true ? { breadcrumb: BOOKING_TRAIL } : {})}
           />
           <FormPage>
             <Booked

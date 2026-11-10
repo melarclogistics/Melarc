@@ -309,13 +309,11 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
       >
         {(record) =>
           !isToBeWorked(record.stop) ? (
-            <>
-              <p className="pickup-status">
-                <StatusBadge status={stopStatusOf(record.stop)} map={STOP_STATUS_MAP} />{' '}
-                <span>This stop is not waiting to be worked, so it cannot be skipped.</span>
-              </p>
-              <BackToRun manifestId={manifestId} />
-            </>
+            // The page's header above has the breadcrumb of its parents, which is the way back: no link of its own beside it.
+            <p className="pickup-status">
+              <StatusBadge status={stopStatusOf(record.stop)} map={STOP_STATUS_MAP} />{' '}
+              <span>This stop is not waiting to be worked, so it cannot be skipped.</span>
+            </p>
           ) : (
             <>
               <ReadState<readonly AttributedReason[]>

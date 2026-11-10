@@ -7,6 +7,7 @@ import { Button } from '../../../components/ui/button/Button';
 import { DataTable, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
+import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -37,8 +38,17 @@ import './vendors.css';
 
 type Act = 'reissue' | 'recover';
 
-/** The way up from the account's header and from its other states: the list of accounts. */
-const WAY_UP = [{ label: 'Vendors', to: '/admin/vendors' }] as const;
+/**
+ * The way back from the account's page, in every state of it (loading, read, not found): the list of accounts, as one link above the heading, which a person who has pressed it while the
+ * account was on its way does not lose to the page replacing it. A record page has this and no breadcrumb.
+ */
+function BackToVendors() {
+  return (
+    <p className="vendor-back">
+      <Link to="/admin/vendors">Back to vendors</Link>
+    </p>
+  );
+}
 
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
 function useFocusFallenToHeading(): void {
@@ -54,8 +64,9 @@ function AccountNotFound() {
   return (
     <>
       <title>Account not found · Melarc Ops Portal</title>
-      <PageHeader title="Account not found" breadcrumb={WAY_UP} />
+      <PageHeader title="Account not found" />
       <p>{copyFor({ operation: 'getVendorAccount', code: 'NOT_FOUND' })}</p>
+      <BackToVendors />
     </>
   );
 }
@@ -161,7 +172,6 @@ function Account({
   return (
     <>
       <RecordPage
-        breadcrumb={WAY_UP}
         header={{
           code: account.account_identifier,
           status: <StatusBadge status={account.status} map={VENDOR_STATUS_MAP} />,
@@ -341,12 +351,13 @@ function Reading({ id }: { readonly id: string }) {
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
+      <BackToVendors />
       {query.status === 'success' ? (
         <Account id={id} record={query.data} query={query} />
       ) : (
-        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way up, and says what is happening.
+        // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back, and says what is happening.
         <>
-          <PageHeader title="Vendor account" breadcrumb={WAY_UP} />
+          <PageHeader title="Vendor account" />
           <ReadState<VendorRecord>
             query={query}
             isEmpty={() => false}

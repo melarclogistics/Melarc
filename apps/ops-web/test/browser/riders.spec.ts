@@ -567,7 +567,11 @@ test.describe('the enrolment code in a real browser', () => {
   test('is gone on navigation, and does not return with the back button', async ({ page }) => {
     await showFirstCode(page);
 
-    await page.getByRole('link', { name: 'Back to the rider' }).click();
+    // The way back to the rider is the trail of the page's parents (the roster, then the rider by name).
+    await page
+      .getByRole('navigation', { name: 'Breadcrumb' })
+      .getByRole('link', { name: 'Esi Owusu' })
+      .click();
     await expect(page).toHaveURL(`/admin/riders/${IDS.esi}`);
     expect(await whereIsTheCode(page)).toEqual([]);
     await page.goBack();

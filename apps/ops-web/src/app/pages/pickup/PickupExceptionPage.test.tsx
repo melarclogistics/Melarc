@@ -148,37 +148,62 @@ describe('the exception: asking for it', () => {
 });
 
 describe('the exception: the way back to the request, in every state of the page', () => {
-  const backLink = () => screen.findByRole('link', { name: 'Back to the request' });
+  // The trail of the page's parents is the way back, and the only one (Stage 4.5): its entry for the request names it by its code once it is read, and "The request" until then. No link of its
+  // own sits above the page beside it.
+  const wayBack = async (name: string) =>
+    within(await screen.findByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+      name,
+    });
+  const noOtherWay = () => {
+    expect(screen.queryByRole('link', { name: 'Back to the request' })).toBeNull();
+  };
 
   // Break caught (the review of 499399c): a page with no way back to its request while the request is read, and after a read that failed.
   it('is there while the request is being read', async () => {
     open(() => new Promise<Response>(() => undefined));
 
-    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await wayBack('The request')).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
     expect(
       screen.getByRole('heading', { level: 1, name: 'Request a one-package exception' }),
     ).toBeVisible();
+    noOtherWay();
   });
 
   it('is there after a read that failed', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await wayBack('The request')).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
+    noOtherWay();
   });
 
   it('is there beside the form', async () => {
     open();
 
     expect(await screen.findByRole('button', { name: 'Request the exception' })).toBeVisible();
-    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await wayBack('ACC-PR-7KQ2MZ')).toHaveAttribute(
+      'href',
+      `/pickup-requests/${REQUEST_ID}`,
+    );
+    noOtherWay();
   });
 
   it('is there when the exception cannot be asked for', async () => {
     open(() => json(200, { ...single, state: 'CONFIRMED' }, etag('v1')));
 
     expect(await screen.findByText(/waits for confirmation/)).toBeVisible();
-    expect(await backLink()).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await wayBack('ACC-PR-7KQ2MZ')).toHaveAttribute(
+      'href',
+      `/pickup-requests/${REQUEST_ID}`,
+    );
+    noOtherWay();
+  });
+
+  it('names the queue above the request', async () => {
+    open();
+
+    await screen.findByRole('button', { name: 'Request the exception' });
+    expect(await wayBack('Pickup requests')).toHaveAttribute('href', '/pickup-requests');
   });
 });
 

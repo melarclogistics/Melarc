@@ -1,3 +1,4 @@
+import type { BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import type { StatusMap } from '../../../components/ui/status-badge/StatusBadge';
 import type {
   RiderDeviceStatus,
@@ -5,6 +6,17 @@ import type {
   RiderStatus,
   RiderView,
 } from '../../../platform/rider/rider-shape';
+
+/**
+ * The pages above a task on one rider (the first binding of a device, the revoking or replacing of one): the roster, then the rider, which is the way back to the record and so the only way
+ * back a task form draws. The rider is named once it is read; until then, and where a failure leaves it unread, the entry says "The rider" and goes to the same page.
+ */
+export function riderTrail(id: string, name: string | undefined): readonly BreadcrumbEntry[] {
+  return [
+    { label: 'Riders', to: '/admin/riders' },
+    { label: name ?? 'The rider', to: `/admin/riders/${id}` },
+  ];
+}
 
 /** How the rider screens (S0.60) name what a rider is, in words and never by a code or an id. */
 export const RIDER_STATUS_MAP: StatusMap<RiderStatus> = {

@@ -419,6 +419,13 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
       expect(api.requests.some((request) => request.url.includes('reason-definitions'))).toBe(
         false,
       );
+      // The page's header has the breadcrumb of its parents, which is its one way back (Stage 4.5): no link of its own beside it.
+      const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+      expect(await trail.findByRole('link', { name: 'ACC-MF-Q92422' })).toHaveAttribute(
+        'href',
+        `/manifests/${MANIFEST_ID}`,
+      );
+      expect(screen.queryByRole('link', { name: 'Back to the pickup run' })).toBeNull();
     },
   );
 

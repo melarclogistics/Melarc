@@ -88,11 +88,12 @@ describe('the rider: what it shows', () => {
     expect(factOf('PIN')).toBe('Set');
     expect(factOf('Device')).toBe('One active device');
     expect(factOf('Readiness')).toBe('Ready to sign in.');
-    expect(
-      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
-        name: 'Riders',
-      }),
-    ).toHaveAttribute('href', '/admin/riders');
+    // A record page has one way back, a link to the roster (Stage 4.5), and no breadcrumb: the trail is for the tasks on the rider.
+    expect(screen.getByRole('link', { name: 'Back to riders' })).toHaveAttribute(
+      'href',
+      '/admin/riders',
+    );
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
   });
 
   // Break caught (PRODUCT_DESIGN_DIRECTION section 6.2): the administrative status and the readiness told as one, in one badge. The status is the header's; the PIN, the device and the
@@ -438,11 +439,10 @@ describe('the rider: a record that cannot be shown', () => {
 
     open(READER, { [RECORD]: () => refusal(404, 'NOT_FOUND') });
     expect(await screen.findByRole('heading', { level: 1, name: 'Rider not found' })).toBeVisible();
-    expect(
-      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
-        name: 'Riders',
-      }),
-    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Back to riders' })).toHaveAttribute(
+      'href',
+      '/admin/riders',
+    );
   });
 
   it('is a page of its own for a session whose key is refused by the server', async () => {
@@ -471,11 +471,15 @@ describeInterfaceStates('The rider', {
       });
       open(READER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the rider…')).toBeInTheDocument();
+      // The way back is there while the rider is read, and it is the same link once the page has replaced the loading state: a press on it is not lost to the page replacing it.
+      const back = screen.getByRole('link', { name: 'Back to riders' });
+      expect(back).toHaveAttribute('href', '/admin/riders');
       await act(async () => {
         release(json(200, riderDetailFixture(), etag('v1')));
         await gate;
       });
       await screen.findByText('This rider is active.');
+      expect(screen.getByRole('link', { name: 'Back to riders' })).toBe(back);
     },
   },
   empty: {

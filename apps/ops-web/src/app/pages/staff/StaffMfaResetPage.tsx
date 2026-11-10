@@ -7,7 +7,11 @@ import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { ForbiddenState } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
-import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
+import {
+  PageHeader,
+  type BreadcrumbEntry,
+  type PageHeaderProps,
+} from '../../../components/ui/page-header/PageHeader';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
@@ -22,12 +26,15 @@ import './staff-pages.css';
 const NOT_ELIGIBLE =
   'An authenticator can be reset only for a profile that has one, or whose set-up was started and not finished.';
 
-function BackToProfile({ id }: { readonly id: string }) {
-  return (
-    <p className="staff-back">
-      <Link to={`/admin/staff/${id}`}>Back to profile</Link>
-    </p>
-  );
+/**
+ * The pages above the reset: the staff list, then the person, which is the way back to the profile and so the only way back this page draws. The person is named once the profile is read;
+ * until then the entry says "The profile" and goes to the same page.
+ */
+function wayUp(id: string, name: string | undefined): readonly BreadcrumbEntry[] {
+  return [
+    { label: 'Staff', to: '/admin/staff' },
+    { label: name ?? 'The profile', to: `/admin/staff/${id}` },
+  ];
 }
 
 function sessionsText(count: number): string {
@@ -105,10 +112,7 @@ function Reset({
   const header: Header = {
     title: 'Reset authenticator',
     description: name,
-    breadcrumb: [
-      { label: 'Staff', to: '/admin/staff' },
-      { label: name, to: `/admin/staff/${identity.id}` },
-    ],
+    breadcrumb: wayUp(identity.id, name),
   };
 
   if (outcome !== undefined) {
@@ -224,10 +228,11 @@ export function StaffMfaResetPage() {
       heading={(identity) => ({
         title: 'Reset authenticator',
         documentTitle: 'Reset authenticator',
+        breadcrumb: wayUp(id, identity?.full_name),
         ...(identity === undefined ? {} : { description: identity.full_name }),
       })}
-      // Once it is done the page has its own way back, beside the news.
-      back={outcome === undefined ? <BackToProfile id={id} /> : null}
+      // The breadcrumb of the page's parents is its way back, in every state; there is no link of its own above it. Once the reset is done the news has its own button to the profile.
+      back={null}
     >
       {(record, query) => (
         <Reset record={record} query={query} outcome={outcome} onDone={setOutcome} />

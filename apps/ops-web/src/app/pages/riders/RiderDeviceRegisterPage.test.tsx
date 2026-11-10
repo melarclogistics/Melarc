@@ -193,18 +193,43 @@ describe('the first binding: before a code is asked for', () => {
     expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
     expect(screen.getByText(/Do this in person, with the rider and the handset/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Show the QR code' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the rider' })).toHaveAttribute(
+    // The way back is the trail of the page's parents: the roster, then the rider by name (Stage 4.5). No link of its own beside it says the same.
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Riders' })).toHaveAttribute('href', '/admin/riders');
+    expect(trail.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
-    expect(
-      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
-        name: 'Riders',
-      }),
-    ).toHaveAttribute('href', '/admin/riders');
+    expect(screen.queryByRole('link', { name: 'Back to the rider' })).toBeNull();
     // No picture on the page: the QR code is the only one it ever draws. (The page, not the document: the sidebar around it draws the logo.)
     expect(within(screen.getByRole('main')).queryByRole('img')).toBeNull();
     expect(posts()).toHaveLength(0);
+  });
+
+  // Break caught (Stage 4.5): a way back that waits for the rider to be read. The page does not wait for the rider, so its trail says "The rider" until it is read, and goes to it all the same.
+  it('has its way back before the rider is read, and names the rider once it has been', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REGISTERER, { [RECORD]: () => gate });
+    const trail = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+
+    expect(await screen.findByRole('button', { name: 'Show the QR code' })).toBeVisible();
+    expect(trail().getByRole('link', { name: 'The rider' })).toHaveAttribute(
+      'href',
+      `/admin/riders/${RIDER_ID}`,
+    );
+    await act(async () => {
+      release(json(200, riderDetailFixture(unboundRider(), []), etag('v1')));
+      await gate;
+    });
+
+    expect(await trail().findByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+      'href',
+      `/admin/riders/${RIDER_ID}`,
+    );
+    expect(trail().queryByRole('link', { name: 'The rider' })).toBeNull();
   });
 
   // Break caught (the PO's decision of 9 November 2026): paragraphs and lists of rules above the content. A task form keeps at most two short sentences under its title.
@@ -979,7 +1004,11 @@ describe('the first binding: a new code asked for while a code is on the screen'
       await waitFor(() => {
         expect(posts()).toHaveLength(2);
       });
-      const back = screen.getByRole('link', { name: 'Back to the rider' });
+      // A link elsewhere on the page that the officer has moved to: the trail's link to the rider.
+      const back = within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole(
+        'link',
+        { name: 'Kwame Mensah' },
+      );
       act(() => {
         back.focus();
       });

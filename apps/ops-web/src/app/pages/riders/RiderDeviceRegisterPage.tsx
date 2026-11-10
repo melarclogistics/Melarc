@@ -17,16 +17,13 @@ import { UUID } from '../staff/WithProfile';
 import { CodeRecovery } from './CodeRecovery';
 import { EnrolmentCode, LapsedCode, WithdrawnCode } from './EnrolmentCode';
 import { RiderNotFound } from './RiderDetailPage';
-import { mayBindDevice } from './rider-presentation';
+import { mayBindDevice, riderTrail } from './rider-presentation';
 import { useEnrolmentCode } from './use-enrolment-code';
 import './riders.css';
 
 /** The registration asks for nothing of the person: the rider is in the address, and the key is the command's. */
 type Nothing = Readonly<Record<string, never>>;
 const NOTHING: Nothing = {};
-
-/** The way up from the page: the roster. The way to the rider is the link above the heading, which every state of the page keeps. */
-const WAY_UP = [{ label: 'Riders', to: '/admin/riders' }] as const;
 
 /** What the task is, in two short sentences under its title: it is done in person, and the officer never sees what the handset makes. */
 const INTRO =
@@ -80,15 +77,11 @@ function Registering({ id }: { readonly id: string }) {
     void command.submit(NOTHING);
   }
 
-  const back = (
-    <p className="rider-back">
-      <Link to={`/admin/riders/${id}`}>Back to the rider</Link>
-    </p>
-  );
+  // The way back is the breadcrumb of the parents (the roster, then the rider), the same in every state of the page; there is no link beside it that says it again.
   const header = {
     title: 'Register a first device',
     ...(name === undefined ? {} : { description: `For ${name}.` }),
-    breadcrumb: WAY_UP,
+    breadcrumb: riderTrail(id, name),
   };
 
   // What is under the heading: the code (while it is held), the screen of a code that has lapsed, or the form that asks for one.
@@ -101,7 +94,6 @@ function Registering({ id }: { readonly id: string }) {
     return (
       <>
         <title>Register a first device · Melarc Ops Portal</title>
-        {back}
         <PageHeader {...header} />
         <FormPage>
           <Alert variant="danger">
@@ -123,7 +115,6 @@ function Registering({ id }: { readonly id: string }) {
     return (
       <>
         <title>Register a first device · Melarc Ops Portal</title>
-        {back}
         <PageHeader {...header} />
         <FormPage>
           <Alert variant="danger">
@@ -137,7 +128,6 @@ function Registering({ id }: { readonly id: string }) {
   return (
     <>
       <title>Register a first device · Melarc Ops Portal</title>
-      {back}
       <TaskForm
         header={header}
         busy={command.phase === 'sending'}

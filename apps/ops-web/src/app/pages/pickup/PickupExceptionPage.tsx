@@ -9,7 +9,11 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
-import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
+import {
+  PageHeader,
+  type BreadcrumbEntry,
+  type PageHeaderProps,
+} from '../../../components/ui/page-header/PageHeader';
 import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
@@ -27,7 +31,7 @@ import {
   packagesText,
   PICKUP_STATE_MAP,
 } from './pickup-presentation';
-import { BackToTheRequest, useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
+import { useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
 import './pickup-pages.css';
 
 const OPERATION = 'requestOnePackageException';
@@ -121,8 +125,19 @@ function Requested({ id }: { readonly id: string }) {
   );
 }
 
-/** The page's header: what the form is and for which request, with the way up (the task form draws it; every other state of the page draws it itself). */
+/** The page's header: what the form is and for which request, with the way back (the task form draws it; every other state of the page draws it itself). */
 type Header = Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
+
+/**
+ * The pages above the exception: the queue, then the request, which is the way back to the request and so the only way back this page draws. The request is named by its code once it is read; until
+ * then the entry says "The request" and goes to the same page.
+ */
+function wayUp(id: string, code: string | undefined): readonly BreadcrumbEntry[] {
+  return [
+    { label: 'Pickup requests', to: '/pickup-requests' },
+    { label: code ?? 'The request', to: `/pickup-requests/${id}` },
+  ];
+}
 
 function ExceptionForm({
   header,
@@ -371,10 +386,7 @@ function Exception({
   const header: Header = {
     title: 'Request a one-package exception',
     description: `For ${request.code}.`,
-    breadcrumb: [
-      { label: 'Pickup requests', to: '/pickup-requests' },
-      { label: request.code, to: `/pickup-requests/${request.id}` },
-    ],
+    breadcrumb: wayUp(request.id, request.code),
   };
   if (requested) {
     return (
@@ -417,12 +429,13 @@ export function PickupExceptionPage() {
   return (
     <WithPickupRequest
       id={id}
-      // The way back to the request is the same element in every state of the page (the review of 499399c), above the heading, and the breadcrumb of the page's own heading is the way up.
+      // The breadcrumb of the page's parents is its way back, the same in every state of the page (the review of 499399c); there is no link of its own above it.
       ownsHeading
-      back={<BackToTheRequest id={id} />}
+      back={null}
       heading={(request) => ({
         title: 'Request a one-package exception',
         ...(request === undefined ? {} : { description: `For ${request.code}.` }),
+        breadcrumb: wayUp(id, request?.code),
         documentTitle: 'Request a one-package exception',
       })}
     >

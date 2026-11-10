@@ -88,17 +88,20 @@ async function reset(view: ReturnType<typeof open>) {
 }
 
 describe('the reset of an authenticator: what it shows', () => {
-  it('names the page and the person, and links back to the profile', async () => {
+  it('names the page and the person, and its one way back to the profile is the trail of its parents', async () => {
     open();
 
     expect(await heading('Reset authenticator')).toBeVisible();
     // The person is the description of the heading (the breadcrumb names them too, as a link).
     expect(await screen.findByText('Kofi Boateng', { selector: 'p' })).toBeVisible();
     expect(document.title).toBe('Reset authenticator · Melarc Ops Portal');
-    expect(screen.getByRole('link', { name: 'Back to profile' })).toHaveAttribute(
-      'href',
-      `/admin/staff/${STAFF_ID}`,
-    );
+    // The trail is the way back (Stage 4.5): a task has the breadcrumb of its parents and no link of its own beside it that says the same.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Kofi Boateng',
+      }),
+    ).toHaveAttribute('href', `/admin/staff/${STAFF_ID}`);
+    expect(screen.queryByRole('link', { name: 'Back to profile' })).toBeNull();
   });
 
   it('names the way up, the staff list and the profile, once the profile is read', async () => {
@@ -507,6 +510,14 @@ describeInterfaceStates('The reset of an authenticator', {
       expect(await heading('Reset authenticator')).toBeVisible();
       expect(await screen.findByText('Loading the profile…')).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Reset authenticator' })).toBeNull();
+      // The way back is there while the profile is read: the trail names the person "The profile" until it is, and goes to the same page; no link of its own beside it.
+      const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+      expect(trail.getByRole('link', { name: 'Staff' })).toHaveAttribute('href', '/admin/staff');
+      expect(trail.getByRole('link', { name: 'The profile' })).toHaveAttribute(
+        'href',
+        `/admin/staff/${STAFF_ID}`,
+      );
+      expect(screen.queryByRole('link', { name: 'Back to profile' })).toBeNull();
     },
   },
   empty: {

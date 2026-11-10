@@ -4,7 +4,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
-import { PageHeader } from '../../../components/ui/page-header/PageHeader';
+import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
@@ -65,6 +65,11 @@ function NoAccess() {
 export interface ProfileHeading {
   readonly title: string;
   readonly description?: string;
+  /**
+   * The pages above, for a task on the profile (the reset of an authenticator): the trail the wrapper draws while the profile is read and after a failure that the page does not draw itself, as the
+   * page's task form draws it once it is read. Such a page passes `back={null}`: the trail is its way back, and no link beside it says it again.
+   */
+  readonly breadcrumb?: readonly BreadcrumbEntry[];
   /** The title of the document (the tab), without the product's name. */
   readonly documentTitle: string;
 }
@@ -99,14 +104,18 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithProfi
     }
   }
 
-  const { title, description, documentTitle } = heading(query.data?.identity);
+  const { title, description, breadcrumb, documentTitle } = heading(query.data?.identity);
   const loaded = ownsHeading && query.status === 'success';
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
       {back === undefined ? <BackToStaff /> : back}
       {loaded ? null : (
-        <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+        <PageHeader
+          title={title}
+          {...(description === undefined ? {} : { description })}
+          {...(breadcrumb === undefined ? {} : { breadcrumb })}
+        />
       )}
       {query.status === 'success' ? (
         children(query.data, query)

@@ -2,6 +2,11 @@
  * The vendor screens (S0.52b; redesign step R7b). Layout only: every colour, size and space comes from tokens.css. The components do the rest.
  */
 
+/* The way back to the list of accounts, above the heading of the account's page: the same element in every state of the page. */
+.vendor-back {
+  margin: 0 0 var(--space-4);
+}
+
 /* The search, in the popover of the filter row: the field and the button that sends it, one under the other. */
 .vendor-search {
   display: grid;
