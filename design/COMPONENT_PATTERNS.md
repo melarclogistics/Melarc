@@ -1186,7 +1186,7 @@ there is none teaches people to ignore it.
 
 ## 21. Toast
 
-> **Status:** IMPLEMENTING (redesign step R5, first half, 6 November 2026; the component is described in §37, *the kit as built*; its two actions and the one toaster of the signed-in frame are the follow-up of 7 November 2026, afternoon; ACTIVE when a screen uses it and the Product Owner accepts it)  
+> **Status:** ACTIVE (10 November 2026; built in redesign step R5, first half, 6 November 2026; the component is described in §37, *the kit as built*; its two actions and the one toaster of the signed-in frame are the follow-up of 7 November 2026, afternoon; the task form draws it)  
 > **Code:** `apps/ops-web/src/components/ui/toast/`
 
 The Product Owner decided one workflow on 5 November 2026: the success of a task lands as a toast ([PRODUCT_DESIGN_DIRECTION §6.3](PRODUCT_DESIGN_DIRECTION.md#63-task-form)). **A toast that carries an action does not time out** (approved the same day, so that a person has the time to use the action, WCAG 2.2.1): it stays until the action is taken or it is dismissed. The three things this section had to establish before the toast was built are settled by the component:
@@ -1808,7 +1808,7 @@ Before accepting the initial UI-foundation implementation:
 
 ### The planned kit
 
-**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. **Each pattern has one status (§2), and it is the one its row gives:** redesign step R4 built the five of the shell (AppShell v2, CommandPalette, NewMenu, AccountMenu and HubSwitcher) and task C1 built CountBadge, and those six are **IMPLEMENTING**; redesign step R5 (first half, 6 November 2026) built Tabs with counts (`ViewTabs`), FilterBar, DataTable, SidePanel (with its sheet), RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, and the PageHeader of the redesign (which this table does not list), and those are **IMPLEMENTING** too (built, no screen uses them yet, not yet accepted); and the second half of step R5 (7 November 2026) built Tooltip and Popover, EmptyState v2, Skeleton v2 with LoadingRow, StatusBadge v2, CountBadge's variants and Avatar, which are **IMPLEMENTING** as well (built, in the showcase, accepted by nobody yet); and step R6 (8 November 2026) built the four page templates (*the four page templates*, below), **IMPLEMENTING** too, so **no row of this table is PROPOSED and none is ACTIVE**. The register of §40 holds the same statuses. All are composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
+**Product Owner, 5 November 2026.** The Ops Portal redesign needs the components below. **Each pattern has one status (§2), and it is the one its row gives:** redesign step R4 built the five of the shell (AppShell v2, CommandPalette, NewMenu, AccountMenu and HubSwitcher) and task C1 built CountBadge, and those six are **IMPLEMENTING** (the shell's acceptance is the Product Owner's); redesign step R5 (first half, 6 November 2026) built Tabs with counts (`ViewTabs`), FilterBar, DataTable, SidePanel (with its sheet), RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, and the PageHeader of the redesign (which this table does not list), the second half of step R5 (7 November 2026) built Tooltip and Popover, EmptyState v2, Skeleton v2 with LoadingRow, StatusBadge v2, CountBadge's variants and Avatar; and step R6 (8 November 2026) built the four page templates (*the four page templates*, below). **On 10 November 2026 (run 5) the kit of R5 and the templates of R6 became ACTIVE,** as the Product Owner's brief of that run directed once the security review of the credential screens left no High or Medium finding open: every one of them that a screen draws, directly or through a template, is ACTIVE (twenty-two screens draw the templates, and the templates draw ViewTabs, FilterBar, SidePanel, DataTable, RecordHeader and the rest). **Three are still IMPLEMENTING, because no screen draws them: StatTile, Avatar and Tooltip** (§2: ACTIVE once a screen uses it and the Product Owner has accepted it). With the six of R4 and C1 they are the rows of this table that are not ACTIVE, and none is PROPOSED. The register of §40 holds the same statuses. All are composed in `components/ui` from the shadcn/ui primitives that step R3 installed ([DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)), each to §3 and to [DESIGN_SYSTEM §28](DESIGN_SYSTEM.md#28-component-implementation-rules). A component becomes IMPLEMENTING with its first code, and ACTIVE once a screen uses it and the Product Owner has accepted it. The list is [DESIGN_SYSTEM §27](DESIGN_SYSTEM.md#27-initial-implementation-scope)'s.
 
 | Pattern | What it is for |
 |---|---|
@@ -1826,19 +1826,19 @@ Before accepting the initial UI-foundation implementation:
 | DescriptionList | the facts of a record, grouped and labeled |
 | Panel and Card | the surfaces of the record template |
 | Toast | success after a task, with "Open" and "Do another" |
-| Tooltip, Popover | the name of an icon, and the longer explanation behind an info control. **Built in the second half of redesign step R5** and **IMPLEMENTING** (§2): `Tooltip` and `Popover` in `components/ui`, over the `tooltip` and `popover` primitives, with Melarc's defaults (300ms, 8px, the floating shadow); as built below |
+| Tooltip, Popover | the name of an icon, and the longer explanation behind an info control. **Built in the second half of redesign step R5**; `Popover` is **ACTIVE** (the filter bar draws it) and `Tooltip` **IMPLEMENTING** (§2: no screen draws it): `Tooltip` and `Popover` in `components/ui`, over the `tooltip` and `popover` primitives, with Melarc's defaults (300ms, 8px, the floating shadow); as built below |
 | Dialog wrappers | the modal dialog and the question before a hard-to-undo act, so that a page never touches a primitive. **They are the `Dialog` and `AlertDialog` of §20**, ACTIVE; no second modal was built, which the Product Owner accepted on 7 November 2026 (afternoon) provided they carry the Melarc defaults: the motion was added then, and the defaults are listed below |
-| StatusBadge v2 | the status of a record: five pairs, a dot, plain words, and one table of every state. **Built in the second half of redesign step R5** and **IMPLEMENTING** (§2): `components/ui/status-badge/` and `app/status/status-table.ts`; as built below |
-| Avatar | a person's tile: the initials, or a picture once it has loaded. **Built in the second half of redesign step R5** and **IMPLEMENTING** (§2): `components/ui/avatar/` |
+| StatusBadge v2 | the status of a record: five pairs, a dot, plain words, and one table of every state. **Built in the second half of redesign step R5** and **ACTIVE** (§2): `components/ui/status-badge/` and `app/status/status-table.ts`; as built below |
+| Avatar | a person's tile: the initials, or a picture once it has loaded. **Built in the second half of redesign step R5** and **IMPLEMENTING** (§2; no screen draws it): `components/ui/avatar/` |
 | StatTile | a figure the server states |
 | CountBadge | a count in a menu or a tab, **built early, by task C1** (5 November 2026), because the queue summary is the first count the server states: `components/ui/count-badge/`, from the Badge primitive and the tokens, drawn beside the sidebar's entries (redesign step R4). It is **IMPLEMENTING** (§2). It draws a whole number it is given, never capped (a capped figure hides the size of a queue), with the words of what it counts for a screen reader, a count of `0` that was read quietly, and **nothing at all for a count that was not given**: a count that is loading, missing or failed is never drawn as `0` (§24, §25). On the sidebar it takes the shell's own tokens, white on the pressed ground, on the filled current entry a pill of white at 18% (at 22% the white text on the crimson measures 4.32:1, below the 4.5:1 of the specification), and, on the rail, under the icon inside its entry (12px, not scaled). **The second half of redesign step R5 (7 November 2026) added its variants** `subtle` (the default), `strong` (Ink) and `on-crimson`; as built below |
-| EmptyState v2, Skeleton v2 | the empty and loading treatments, redrawn: a deliberate replacement of §16 and §17, which stay ACTIVE until their screens migrate (§2). **Built in the second half of redesign step R5** and **IMPLEMENTING**: `EmptyStateV2`, and `SkeletonBar`, `SkeletonCard` and `LoadingRow` (the DataTable draws `LoadingRow` for its loading rows); as built below |
+| EmptyState v2, Skeleton v2 | the empty and loading treatments, redrawn: a deliberate replacement of §16 and §17, which stay ACTIVE until their screens migrate (§2). **Built in the second half of redesign step R5** and **ACTIVE**: `EmptyStateV2`, and `SkeletonBar`, `SkeletonCard` and `LoadingRow` (the DataTable draws `LoadingRow` for its loading rows); as built below |
 
 A count or a figure on these components is the server's: the component draws what it is given and works nothing out (§24, §25).
 
 ### The kit as built (redesign step R5, first half, 6 November 2026)
 
-The first half of step R5 built the components below, in `components/ui`, each composed from the shadcn/ui primitives of step R3 and from nothing else (a page imports the component; the primitive and the libraries under it stay behind their door: [DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)). Each is built and is in the lifecycle of §2 as IMPLEMENTING, and ACTIVE once a screen uses it and the Product Owner has accepted it. No screen uses one yet (steps R6 and R7 move the screens). The second half (StatusBadge v2, CountBadge's variants, EmptyState v2, Skeleton v2 and LoadingRow, Avatar, Tooltip and Popover, and the decision on the Dialog wrapper) was built on 7 November 2026 and is described after *Motion*, below.
+The first half of step R5 built the components below, in `components/ui`, each composed from the shadcn/ui primitives of step R3 and from nothing else (a page imports the component; the primitive and the libraries under it stay behind their door: [DESIGN_SYSTEM §29.2](DESIGN_SYSTEM.md#292-the-component-foundation)). Each was built as IMPLEMENTING, and is ACTIVE once a screen uses it and the Product Owner has accepted it (§2). Since run 5 (10 November 2026) every one that a screen draws is ACTIVE, and StatTile, which no screen draws, is IMPLEMENTING (steps R6 and R7 moved the screens). The second half (StatusBadge v2, CountBadge's variants, EmptyState v2, Skeleton v2 and LoadingRow, Avatar, Tooltip and Popover, and the decision on the Dialog wrapper) was built on 7 November 2026 and is described after *Motion*, below.
 
 **Rules every one of them keeps** (and its tests say so): it draws from the tokens alone; it covers the interface states that apply to it (§33.1); it is fully operable from the keyboard and shows the global focus ring; it passes axe (WCAG 2.2 A and AA) in both themes, in jsdom where that is meaningful and in Chromium on every showcase page; it moves only on the motion tokens, and not at all under `prefers-reduced-motion: reduce`; it **draws what it is given and works nothing out** (a count, a total, a state, a time: §24, §25), so a figure that was not given is not drawn, and a missing figure is never `0`; it takes **slots, not other kit components** (`ReactNode` for a status badge or a menu), so that the second half changes the callers and not the kit; and it is in the showcase (§27) with real Melarc words, every variant and every state, the sample data labelled "Sample". Words of the components are plain and short; none names a permission key or a role.
 
@@ -1848,7 +1848,7 @@ The first half of step R5 built the components below, in `components/ui`, each c
 
 #### PageHeader (the kit's)
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/page-header/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/page-header/`
 
 The header of a page of the redesign: the title (the page's one level-one heading, through the existing `PageHeading`, which takes focus after a navigation), how many there are where the server stated a count, how fresh the results are and the way to refresh them, the pages above, and the page's actions. The initial PageHeader of §11 (`src/components/PageHeader.tsx`) is retired (run 5, Stage 4): every page and the showcases take this one.
 
@@ -1859,7 +1859,7 @@ The header of a page of the redesign: the title (the page's one level-one headin
 
 #### ViewTabs
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/view-tabs/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/view-tabs/`
 
 The views of one queue as tabs with counts ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)): the Tabs primitive (Radix UI), with the current view's count as an Ink pill and a 2px underline that grows in over `motion.normal` (a transition of the stylesheet on the token, so it is instant under reduced motion).
 
@@ -1871,7 +1871,7 @@ The views of one queue as tabs with counts ([PRODUCT_DESIGN_DIRECTION §6.1](PRO
 
 #### FilterBar
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/filter-bar/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/filter-bar/`
 
 What a queue is filtered by: each applied choice a chip that can be removed on its own, a dashed "+ Filter" button that opens the page's fields in a popover (the Popover primitive), and the order of the rows told at the end.
 
@@ -1882,7 +1882,7 @@ What a queue is filtered by: each applied choice a chip that can be removed on i
 
 #### DataTable
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/data-table/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/data-table/`
 
 The queue table: TanStack Table's model (columns, row model, selection, manual sorting) over the table primitive ([DESIGN_SYSTEM §23](DESIGN_SYSTEM.md#23-tables-and-dense-operational-data)). It replaced Table and QueueTable (§19, §22f), which run 5 (Stage 4) retired once every list was drawn by it.
 
@@ -1904,7 +1904,7 @@ The queue table: TanStack Table's model (columns, row model, selection, manual s
 
 #### SidePanel
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/side-panel/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/side-panel/`
 
 A record beside its list ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECTION.md#61-queue-workspace)): 360 to 420px wide, 12px corners, the floating shadow (the panel floats), sliding in 18px with a fade over `motion.slow` (Motion; it appears at once under reduced motion). At 768px and below it is a **full-screen sheet** (a modal dialog on the sheet primitive).
 
@@ -1916,7 +1916,7 @@ A record beside its list ([PRODUCT_DESIGN_DIRECTION §6.1](PRODUCT_DESIGN_DIRECT
 
 #### RecordHeader and StageTracker
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/record-header/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/record-header/`
 
 The top of a record ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)): the code in the monospaced face at 26/32 (the page's heading through `PageHeading`, or a level-two heading when it is in a panel: `level`), the status (a slot), one sentence in plain words of where the record stands and what can be done next, the stage tracker, **one primary action in Ink**, other actions and the menu.
 
@@ -1929,7 +1929,7 @@ The top of a record ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.m
 
 #### ActionMenu
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/action-menu/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/action-menu/`
 
 The overflow menu of a record's acts behind a "⋯" button: the Dropdown Menu primitive (Radix UI).
 
@@ -1942,7 +1942,7 @@ The overflow menu of a record's acts behind a "⋯" button: the Dropdown Menu pr
 
 #### DescriptionList
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/description-list/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/description-list/`
 
 The facts of a record, grouped and labelled ([PRODUCT_DESIGN_DIRECTION §6.2](PRODUCT_DESIGN_DIRECTION.md#62-record)): a `<dl>` with a **110px label column**, muted labels, and values that may hold codes (`code: true` sets a text value in `OperationalCode`).
 
@@ -1952,7 +1952,7 @@ The facts of a record, grouped and labelled ([PRODUCT_DESIGN_DIRECTION §6.2](PR
 
 #### Panel and Card
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/panel/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/panel/`
 
 The surfaces of the queue and record templates: the Card primitive on the default surface with the subtle border and **12px corners**, no shadow (it sits on the page); `variant="page"` is the **page card** at 16px.
 
@@ -1963,7 +1963,7 @@ The surfaces of the queue and record templates: the Card primitive on the defaul
 
 #### StatTile
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/stat-tile/`
+> **Status:** IMPLEMENTING (10 November 2026: no screen draws it; the Overview that would is not built) · **Code:** `apps/ops-web/src/components/ui/stat-tile/`
 
 A figure the server states: an 11.5px label in muted capitals (0.06em), a 22px figure in weight 700 and tabular numbers, and a caption.
 
@@ -1973,7 +1973,7 @@ A figure the server states: an 11.5px label in muted capitals (0.06em), a 22px f
 
 #### Toast
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/toast/` · See §21 for the rules it implements.
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/toast/` · See §21 for the rules it implements.
 
 A message at the bottom right on the Sonner primitive: a 22px disc of the tone's status pair with its icon, the message, **up to two actions** (a primary and a secondary one, under the message) and, when it has any, a way to dismiss it.
 
@@ -1985,7 +1985,7 @@ A message at the bottom right on the Sonner primitive: a 22px disc of the tone's
 
 #### Motion
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/motion/` · [DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/motion/` · [DESIGN_SYSTEM §24a](DESIGN_SYSTEM.md#24a-interaction-primitives)
 
 The animation library (`motion`, an exact pin, its licences shipped) behind one door, `components/ui/motion/motion.ts`: only the components of `components/ui` import it, a page never does. A component never writes a duration or an easing: `useMotion()` reads them from the motion tokens of `tokens.css` (120, 200, 280 and 900ms, the enter and exit easings) and gives every transition as instant when the person asked the system for less motion (the same preference that sets the tokens to zero for the stylesheet).
 
@@ -1995,11 +1995,11 @@ The animation library (`motion`, an exact pin, its licences shipped) behind one 
 
 ### The kit as built, second half (redesign step R5, 7 November 2026)
 
-The second half of step R5 built the components below to the rules of the first half (above), in `components/ui`. Each is **IMPLEMENTING** (§2): built, in the showcase (`/__showcase/kit/badges`, `states` and `overlays`) with every variant and state in both themes, proven in jsdom and in a browser; **none is ACTIVE**, and the Product Owner has not accepted them. Two of them changed a component in place, and say so: StatusBadge now draws v2 wherever it was drawn, and the DataTable now draws `LoadingRow`. The other pages are unchanged: `EmptyState` (§16) and `Skeleton` (§17) stay ACTIVE and are what the pages draw until their screens migrate (§2), and no page was moved.
+The second half of step R5 built the components below to the rules of the first half (above), in `components/ui`. Each was built **IMPLEMENTING** (§2), in the showcase (`/__showcase/kit/badges`, `states` and `overlays`) with every variant and state in both themes, proven in jsdom and in a browser. **Since run 5 (10 November 2026) each that a screen draws is ACTIVE** (StatusBadge v2, EmptyState v2, Skeleton v2 with LoadingRow and Popover); **Avatar and Tooltip stay IMPLEMENTING** because no screen draws them, and CountBadge's variants are accepted with the shell (the CountBadge row). Two of them changed a component in place, and say so: StatusBadge now draws v2 wherever it was drawn, and the DataTable now draws `LoadingRow`. The other pages are unchanged: `EmptyState` (§16) and `Skeleton` (§17) stay ACTIVE and are what the pages draw until their screens migrate (§2), and no page was moved then (the screens moved in steps R6 and R7).
 
 #### StatusBadge v2
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/status-badge/` and `apps/ops-web/src/app/status/status-table.ts`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/status-badge/` and `apps/ops-web/src/app/status/status-table.ts`
 
 The status of a record in words (§18 is the pattern; this is its look and its table). **Five pairs**, the R2 status pairs of [DESIGN_SYSTEM §4.4](DESIGN_SYSTEM.md#44-status-tokens), a foreground, a soft background and a border each: `waiting` (what is held for someone or something: the tokens' *warning* pair), `success`, `info`, `neutral` and `danger`. **A 6px dot** in the foreground colour, hidden from assistive technology, stands before the words: the words carry the meaning, and the colour and the dot support them.
 
@@ -2077,7 +2077,7 @@ The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two dif
 
 #### EmptyState v2
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/empty-state/EmptyStateV2.tsx`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/empty-state/EmptyStateV2.tsx`
 
 The empty state redrawn (§16 is the pattern): a **10px square of the brand crimson** (decoration), a title, **one line** and an optional action, on the page with no frame. Three variants, because conflating them sends Ops hunting for a bug: `empty` (nothing yet), `filtered-empty` (something exists and the filters hide all of it: the type **requires** the action that takes the filter off) and `all-clear` (a queue worked to nothing, which is the goal: its title is in the success colour).
 
@@ -2087,13 +2087,13 @@ The empty state redrawn (§16 is the pattern): a **10px square of the brand crim
 
 #### Skeleton v2 and LoadingRow
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/skeleton/` (`SkeletonBar.tsx`, `SkeletonCard.tsx`, `LoadingRow.tsx`)
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/skeleton/` (`SkeletonBar.tsx`, `SkeletonCard.tsx`, `LoadingRow.tsx`)
 
 Placeholders in the shape of what is on its way, so that nothing jumps when it arrives. `SkeletonBar` (`width?`, `height?`) is the part; `SkeletonCard` (`lines`, a whole number from 1 to 8, three by default; `header`, a title bar by default) has the radius, border and padding of a Panel; `LoadingRow` (`columns`, `index?`) is a row of a table with a bar in each cell, in widths that run 60, 80, 45, 70 and 55 per cent from a different start in each row, so that a block of them is not a barcode. **The DataTable draws `LoadingRow` for its loading rows**: its own bars and stylesheet were removed, so the table and the placeholder cannot differ. The bars are in `border.default` (the colour seen on a card in both themes; `surface.selected` is not), pulse only where motion is welcome and keep a border under forced colours. They are decoration, hidden from assistive technology; the words that say the page is loading are the loading indicator's (§10), as §17 says.
 
 #### Avatar
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/avatar/`
+> **Status:** IMPLEMENTING (10 November 2026: no screen draws it) · **Code:** `apps/ops-web/src/components/ui/avatar/`
 
 A person's tile from the avatar primitive: the radius of the controls (`radius.md`, as the sidebar's entries and the mark have it: a tile and not a circle) at 24, 32 or 40px (`size`: `sm`, `md`, `lg`). **The fallback, which is the usual case, is the initials in `text.secondary` on `surface.selected`** (6.38:1 in the light theme; the muted text is 4.22:1 there and does not read): the first letter of the first and of the last word of the name, and the account icon when the name has no letter. A picture (`src`) is drawn once it has loaded; until then, and if it never loads, the initials stand. A picture is never required and never the only thing.
 
@@ -2102,7 +2102,7 @@ A person's tile from the avatar primitive: the radius of the controls (`radius.m
 
 #### Tooltip
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/tooltip/`
+> **Status:** IMPLEMENTING (10 November 2026: no screen draws it) · **Code:** `apps/ops-web/src/components/ui/tooltip/`
 
 A hint on something that can be pointed at or focused, with **Melarc's defaults**, so that a screen never touches the primitive: it appears **300ms** after the pointer arrives and **at once** on keyboard focus, stands **8px** from what it names, floats on the one **floating shadow**, and describes what it is on to assistive technology by its words. It goes with Escape and stays while the pointer is on it (WCAG 1.4.13). Opened from inside a modal dialog it is drawn into the dialog, which it reads for itself (task R5.2, M8): a page never passes a container. It has no arrow: a shadow does not follow an arrow, and the arrow's own height would be added to the offset.
 
@@ -2111,7 +2111,7 @@ A hint on something that can be pointed at or focused, with **Melarc's defaults*
 
 #### Popover
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/popover/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/popover/`
 
 A small panel that opens under what opened it, with Melarc's defaults: **8px** away, on the **floating shadow**, a dialog **named by `label`**, Escape to close it and focus returned to what opened it. Props: `trigger` (one element; it is not wrapped), `label`, `children`, `open?` and `onOpenChange?` (controlled use), `align?`, `side?`, `container?` (the element it is drawn into: inside a modal dialog it is drawn into the dialog, or it would open under it, as the date field's calendar does), `onOpenAutoFocus?`, `contentRef?` (a reference to the panel's own element, for a caller that has to tell a blur inside from a blur outside) and `className?`. These are the props that the date field and the filter bar use from the primitive today, so that they can move onto this component without changing; **the filter bar now uses this component** (task R5.2, M8, M12) and the date field still uses the primitive. The container is read from the dialog the popover is in (`DialogContainer`), so no page passes one, and the popover keeps 8px from the edges of the window. Both stand 4px from what opens them today, so moving them onto this component makes it the 8px default (a visible change of 4px, which the move should own).
 
@@ -2119,9 +2119,9 @@ A small panel that opens under what opened it, with Melarc's defaults: **8px** a
 
 #### The four page templates
 
-> **Status:** IMPLEMENTING · **Code:** `apps/ops-web/src/components/ui/templates/`
+> **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/templates/`
 
-**Redesign step R6, 8 November 2026** ([PRODUCT_DESIGN_DIRECTION §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-templates)): `QueueWorkspace`, `RecordPage`, `TaskForm` and `Builder`, each in the showcase (`/__showcase/kit/example-queue`, `example-record`, `example-form`, `example-builder`) and proven in jsdom and in a browser (WCAG 2.2 in both themes, 320px, 200% text, forced colours). **A template is layout, states and behaviour composed from the kit, and never data or a business rule:** a page passes in what a row is, what a view counts, which acts the session can take and the words of a refusal, and the server decides everything. **A count, a total or an estimate on a template is the server's**, and a figure that was not given is not drawn (never as 0). No screen uses a template until Stage 6 of the run that built them moves four real screens (the pickup queue, a pickup request, booking a pickup and building a manifest); until the Product Owner has accepted them none is ACTIVE.
+**Redesign step R6, 8 November 2026** ([PRODUCT_DESIGN_DIRECTION §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-templates)): `QueueWorkspace`, `RecordPage`, `TaskForm` and `Builder`, each in the showcase (`/__showcase/kit/example-queue`, `example-record`, `example-form`, `example-builder`) and proven in jsdom and in a browser (WCAG 2.2 in both themes, 320px, 200% text, forced colours). **A template is layout, states and behaviour composed from the kit, and never data or a business rule:** a page passes in what a row is, what a view counts, which acts the session can take and the words of a refusal, and the server decides everything. **A count, a total or an estimate on a template is the server's**, and a figure that was not given is not drawn (never as 0). The four proof screens (the pickup queue, a pickup request, booking a pickup and building a manifest) moved onto them first, in the run that built them, and the other screens followed in steps R7a and R7b: twenty-two screens draw a template ([PRODUCT_DESIGN_DIRECTION §6](PRODUCT_DESIGN_DIRECTION.md#6-the-four-page-templates) lists them). **ACTIVE since 10 November 2026 (run 5),** as the Product Owner's brief of that run directed once the security review of the credential screens left no High or Medium finding open.
 
 ##### QueueWorkspace
 
@@ -2302,9 +2302,11 @@ Do not use this file to override a product contract.
 | FormPage, the five pre-sign-in screens | ACTIVE | Identity implementation (S0.43) |
 | ButtonLink, ConfirmationDialog, the six signed-in identity screens | ACTIVE | Identity implementation (S0.44) |
 | The shadcn/ui primitives of `components/primitives` (24, DESIGN_SYSTEM §29.2) | IMPLEMENTING | Redesign step R3 (5 November 2026): installed and restyled, drawn in the showcase and driven from the keyboard in a browser. Seven are composed by components of redesign step R4 (`badge`, `button`, `command`, `dialog`, `dropdown-menu`, `sheet` and `tooltip`, in `components/ui/app-shell/` and `components/ui/count-badge/`), so every signed-in screen draws them; no screen imports one directly, and the Product Owner has not yet accepted them |
-| PageHeader (the redesign's), ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile, Toast (§37, *the kit as built*), and Motion | IMPLEMENTING | Redesign step R5, first half (6 November 2026): in `components/ui`, in the showcase (`/__showcase/kit`) with every variant and state in both themes, proven in jsdom and in a browser (WCAG 2.2 in both themes, the keyboard, reduced motion, the strict policy). No screen uses one yet and the Product Owner has not yet accepted them, so none is ACTIVE |
-| The rest of the planned kit of §37: StatusBadge v2 (five pairs, the dot and the one table of statuses), CountBadge's variants, EmptyState v2, Skeleton v2 with LoadingRow, Avatar, Tooltip and Popover (§37, *the kit as built, second half*) | IMPLEMENTING | Redesign step R5, second half (7 November 2026): in `components/ui`, in the showcase (`/__showcase/kit/badges`, `states` and `overlays`) with every variant and state in both themes, proven in jsdom and in a browser (WCAG 2.2 in both themes, the keyboard, reduced motion, the strict policy). StatusBadge's look is drawn wherever the badge was, and the DataTable draws `LoadingRow`; no page was otherwise moved, and `EmptyState` (§16) and `Skeleton` (§17) stay ACTIVE until their screens migrate. The Product Owner has not yet accepted them, so none is ACTIVE |
-| The four page templates: QueueWorkspace, RecordPage, TaskForm, Builder (§37, *the four page templates*) | IMPLEMENTING | Redesign step R6 (8 November 2026): in `components/ui/templates`, in the showcase (`/__showcase/kit/example-queue`, `example-record`, `example-form` and `example-builder`), proven in jsdom and in a browser (WCAG 2.2 in both themes, 320px, 200% text, forced colours). No screen uses one until the proof screens of the same run move onto them, and the Product Owner has not accepted them, so none is ACTIVE |
+| PageHeader (the redesign's), ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, Toast (§37, *the kit as built*), and Motion | ACTIVE | Redesign step R5, first half (6 November 2026): in `components/ui`, in the showcase (`/__showcase/kit`) with every variant and state in both themes, proven in jsdom and in a browser (WCAG 2.2 in both themes, the keyboard, reduced motion, the strict policy). ACTIVE since 10 November 2026 (run 5), as the Product Owner's brief of that run directed once the security review of the credential screens left no High or Medium finding open: the screens draw them, directly and through the templates |
+| StatTile (§37, *the kit as built*) | IMPLEMENTING | Redesign step R5, first half (6 November 2026): built and in the showcase. No screen draws it (the Overview that would is not built), so it is not ACTIVE (§2) |
+| StatusBadge v2 (five pairs, the dot and the one table of statuses), EmptyState v2, Skeleton v2 with LoadingRow and Popover (§37, *the kit as built, second half*) | ACTIVE | Redesign step R5, second half (7 November 2026): in `components/ui`, in the showcase (`/__showcase/kit/badges`, `states` and `overlays`) with every variant and state in both themes, proven in jsdom and in a browser (WCAG 2.2 in both themes, the keyboard, reduced motion, the strict policy). StatusBadge's look is drawn wherever the badge was, and the DataTable draws `LoadingRow`; no page was otherwise moved, and `EmptyState` (§16) and `Skeleton` (§17) stay ACTIVE until their screens migrate. ACTIVE since 10 November 2026 (run 5), as the Product Owner's brief of that run directed once the security review of the credential screens left no High or Medium finding open |
+| Avatar and Tooltip (§37, *the kit as built, second half*) | IMPLEMENTING | Redesign step R5, second half (7 November 2026): built and in the showcase. No screen draws either, so neither is ACTIVE (§2); CountBadge's variants are the CountBadge row's |
+| The four page templates: QueueWorkspace, RecordPage, TaskForm, Builder (§37, *the four page templates*) | ACTIVE | Redesign step R6 (8 November 2026): in `components/ui/templates`, in the showcase (`/__showcase/kit/example-queue`, `example-record`, `example-form` and `example-builder`), proven in jsdom and in a browser (WCAG 2.2 in both themes, 320px, 200% text, forced colours). The proof screens of the same run moved onto them first, and twenty-two screens draw them now (steps R7a and R7b). ACTIVE since 10 November 2026 (run 5), as the Product Owner's brief of that run directed once the security review of the credential screens left no High or Medium finding open |
 | The Dialog wrapper | ACTIVE | It is the `Dialog` and `AlertDialog` of §20 (Identity implementation, S0.41); their motion (in, and nothing under reduced motion) was added on 7 November 2026, afternoon, and the defaults they carry are listed in §37 |
 
 ---
