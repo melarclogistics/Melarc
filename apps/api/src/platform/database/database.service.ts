@@ -400,10 +400,19 @@ export class DatabaseService {
       // Work that finished after the budget ran out is never committed. Its lateness is logged: the caller was told it failed.
       const late = budget.expiredWith;
       if (late !== undefined) {
-        this.logger.warn(
-          { label: late.label },
-          'database work finished after its budget ran out; nothing it did was committed',
-        );
+        if (late instanceof BudgetCancelledError) {
+          // A budget that its owner cancelled (the client left just as the last statement completed) did not run out: the abandon path says so, below warn and with its reason
+          // (above), and so does its lateness (run 6, Stage 1.7).
+          this.logger.info(
+            { label: late.label, reason: late.reason },
+            `database work finished after its budget was cancelled (${late.reason}); nothing it did was committed`,
+          );
+        } else {
+          this.logger.warn(
+            { label: late.label },
+            'database work finished after its budget ran out; nothing it did was committed',
+          );
+        }
         throw late;
       }
       // A request that is over (answered, or the client left) has nobody waiting for what this did: it is rolled back, not committed.
