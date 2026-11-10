@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { useQueuePaging } from './use-queue-paging';
 
 /**
- * The paging of a queue that pages by token: the tokens of the pages visited, for the filter that produced them. The tests of the pages that
- * move through it are in QueueTable.test.tsx; these are the two things a screen that brings a person back to a queue needs of it: to start
- * where the person was, and to send them to the first page on purpose.
+ * The paging of a queue that pages by token: the tokens of the pages visited, for the filter that produced them. What the pages that move through it show and offer is held beside the
+ * pager (`templates/QueuePager.test.tsx`: the count of a page, "more follow", no total, no pages for a queue of one, the buttons) and in each list's own test (the server's token, back to the
+ * first page); the focus on the results of the page moved to is `pickup.spec.ts` ("pages with the server’s tokens and puts focus on the results") and `manifests.spec.ts`; the order of the
+ * keyboard through the filters, the rows and the pager is `templates/QueueWorkspace.claims.test.tsx`. (The older queue table that held them was retired in 41e204d.) These tests are the two
+ * things a screen that brings a person back to a queue needs of the paging: to start where the person was, and to send them to the first page on purpose.
  */
 describe('useQueuePaging: the tokens of the pages visited', () => {
   it('starts at the first page with no token, and counts the pages the person moves through', () => {
