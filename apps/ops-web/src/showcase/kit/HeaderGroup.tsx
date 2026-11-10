@@ -172,18 +172,31 @@ function Bar({
   initial,
   sortLabel,
   many = false,
+  searching = false,
 }: {
   initial: readonly FilterChip[];
   sortLabel?: string;
   many?: boolean;
+  searching?: boolean;
 }) {
   const [chips, setChips] = useState(initial);
+  const [searched, setSearched] = useState('');
   const [date, setDate] = useState<string | null>(null);
   const [state, setState] = useState('');
   return (
     <FilterBar
       label="Filters"
       chips={chips}
+      {...(searching
+        ? {
+            search: {
+              label: 'Search by name or email',
+              value: searched,
+              onSearch: setSearched,
+              maxLength: 80,
+            },
+          }
+        : {})}
       onRemove={(id) => {
         setChips((current) => current.filter((chip) => chip.id !== id));
       }}
@@ -219,7 +232,7 @@ function FilterBarSpecimens() {
   return (
     <KitSection
       title="FilterBar"
-      note="What is applied is a chip that can be removed on its own; the dashed Filter button opens the page's fields in a popover; the order of the rows is told at the end. Remove a chip with the keyboard and focus stays where it should."
+      note="What is applied is a chip that can be removed on its own; the dashed Filter button opens the page's fields in a popover; the order of the rows is told at the end; a queue that is searched has its search field in the bar. Remove a chip with the keyboard and focus stays where it should."
     >
       <Specimen label="Nothing applied">
         <Bar initial={[]} sortLabel="Sorted by oldest first" />
@@ -229,6 +242,9 @@ function FilterBarSpecimens() {
       </Specimen>
       <Specimen label="Three filters, with Clear all">
         <Bar initial={[SERVICE_DATE, STATE, HUB]} sortLabel="Sorted by oldest first" />
+      </Specimen>
+      <Specimen label="A search field, always in the bar (nothing is opened to find it)">
+        <Bar initial={[SERVICE_DATE]} sortLabel="Sorted by oldest first" searching />
       </Specimen>
       <Specimen label="Many filters wrap, and nothing is cut off" width="30rem">
         <Bar

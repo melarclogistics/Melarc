@@ -1,6 +1,7 @@
-import { useRef, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 
 import { Button } from '../../primitives/button';
+import { Input } from '../../primitives/input';
 import { Icon } from '../icon/Icon';
 import { IconButton } from '../icon-button/IconButton';
 import { Popover } from '../popover/Popover';
@@ -13,9 +14,26 @@ export interface FilterChip {
   readonly label: string;
 }
 
+/**
+ * The search of a queue: a field that is **always in the bar**, not behind the Filter button (the Product Owner, 10 November 2026), with the search that is applied now. The page holds the
+ * search (usually in the address); the field only says what was typed.
+ */
+export interface FilterSearch {
+  /** What the field searches, which is also its name: "Search by name or email". */
+  readonly label: string;
+  /** The search that is applied now. The field shows it, and shows what is typed over it until the address says another search (Back, a link). */
+  readonly value: string;
+  /** Applies what was typed (Enter, or the Search button): the text without the spaces at its ends. Empty takes the search off. */
+  readonly onSearch: (text: string) => void;
+  /** The longest text the server accepts. */
+  readonly maxLength?: number;
+}
+
 export interface FilterBarProps {
   /** Names the group of filters: "Filters". */
   readonly label: string;
+  /** The queue's search field, drawn first in the bar and always visible. Without it the queue has no search. */
+  readonly search?: FilterSearch;
   /** The filters that are applied now, one chip each. The page holds them (usually in the address): the bar only asks for one to be removed. */
   readonly chips: readonly FilterChip[];
   readonly onRemove: (id: string) => void;
@@ -38,6 +56,42 @@ export interface FilterBarProps {
   readonly sortLabel?: string;
 }
 
+/** The search field of the bar: what is typed is kept with the search it was typed over, and is the applied search again as soon as that is not the one in the address. */
+function SearchField({ search }: { readonly search: FilterSearch }) {
+  const [typing, setTyping] = useState({ over: search.value, text: search.value });
+  const draft = typing.over === search.value ? typing.text : search.value;
+  function submit(event: SubmitEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    search.onSearch(draft.trim());
+  }
+  return (
+    <form
+      role="search"
+      aria-label={search.label}
+      noValidate
+      className="ui-filter-bar__search"
+      onSubmit={submit}
+    >
+      <Input
+        type="search"
+        name="q"
+        className="ui-filter-bar__search-field"
+        aria-label={search.label}
+        placeholder={search.label}
+        value={draft}
+        {...(search.maxLength === undefined ? {} : { maxLength: search.maxLength })}
+        autoComplete="off"
+        onChange={(event) => {
+          setTyping({ over: search.value, text: event.target.value });
+        }}
+      />
+      <Button type="submit" variant="secondary" size="sm">
+        Search
+      </Button>
+    </form>
+  );
+}
+
 /**
  * The filters of a queue (PRODUCT_DESIGN_DIRECTION section 6.1; COMPONENT_PATTERNS, *FilterBar*): what is applied is visible as a chip that can be removed
  * on its own, a dashed "+ Filter" button opens a popover with the page's fields, and the order the rows are in is told at the end. It filters nothing
@@ -46,6 +100,7 @@ export interface FilterBarProps {
  */
 export function FilterBar({
   label,
+  search,
   chips,
   onRemove,
   onClearAll,
@@ -81,6 +136,7 @@ export function FilterBar({
 
   return (
     <div ref={root} role="group" aria-label={label} tabIndex={-1} className="ui-filter-bar">
+      {search === undefined ? null : <SearchField search={search} />}
       {chips.length === 0 ? null : (
         // `role="list"` outright: Safari drops the list from one whose markers a style removes.
         <ul className="ui-filter-bar__chips" role="list" aria-label="Applied filters">

@@ -400,6 +400,30 @@ test.describe('PageHeader, ViewTabs and FilterBar in a browser', () => {
     });
   }
 
+  // Break caught (the Product Owner, 10 November 2026): a search that is only behind the Filter button, so that a person has to open something to find a name; or a field that is cut off, or
+  // makes the page scroll sideways, on a phone.
+  for (const width of [1280, 390, 320]) {
+    test(`draws the search field in the bar, in view with nothing opened, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await openKit(page, 'header', { width, height: 900 });
+      const bar = specimen(page, 'A search field, always in the bar');
+      const field = bar.getByRole('searchbox', { name: 'Search by name or email' });
+      await field.scrollIntoViewIfNeeded();
+      await expect(field).toBeVisible();
+      await expect(bar.getByRole('button', { name: 'Search', exact: true })).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+
+      const barBox = await box(bar.getByRole('group', { name: 'Filters' }));
+      const fieldBox = await box(field);
+      expect(fieldBox.x).toBeGreaterThanOrEqual(barBox.x - 0.5);
+      expect(fieldBox.x + fieldBox.width).toBeLessThanOrEqual(barBox.x + barBox.width + 0.5);
+      // The field has room to be typed in (a phone's row of its own is the whole bar's width less the button).
+      expect(fieldBox.width).toBeGreaterThanOrEqual(width <= 390 ? 150 : 250);
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
   // Break caught: a chip that cannot be removed with the keyboard, or one that loses the person's place.
   test('removes a chip from the keyboard and focus stays in the bar; the popover opens, takes focus and gives it back', async ({
     page,

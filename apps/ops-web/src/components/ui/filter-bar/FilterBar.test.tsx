@@ -180,6 +180,74 @@ describe('FilterBar', () => {
   });
 });
 
+describe('FilterBar: the search field', () => {
+  const SEARCH_LABEL = 'Search by name or email';
+
+  // Break caught (the Product Owner, 10 November 2026): a search that is only in the Filter button's popover, so that the person has to open something to find a name; or one with no name, or after
+  // the chips, or one that does not show the search that is applied.
+  it('draws the search field first in the bar, named for what it searches, with the applied search in it, with nothing opened', () => {
+    render(<Host search={{ label: SEARCH_LABEL, value: 'ama', onSearch: vi.fn() }} />);
+
+    const group = screen.getByRole('group', { name: 'Filters' });
+    const form = within(group).getByRole('search', { name: SEARCH_LABEL });
+    expect(within(form).getByRole('searchbox', { name: SEARCH_LABEL })).toHaveValue('ama');
+    expect(within(form).getByRole('button', { name: 'Search' })).toBeVisible();
+    // The popover is shut and the field is in the page, before the chips.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const order = form.compareDocumentPosition(
+      within(group).getByRole('list', { name: 'Applied filters' }),
+    );
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('has no search field when the page gives none', () => {
+    render(<Host />);
+
+    expect(screen.queryByRole('search')).toBeNull();
+  });
+
+  // Break caught: a search that is sent untrimmed (a name with a space at its end finds nobody), that cannot be sent from the keyboard (Enter) or from the button, or one that cannot be taken off.
+  it('applies what is typed, without the spaces at its ends, on Enter and on the button, and an empty field takes the search off', async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<Host search={{ label: SEARCH_LABEL, value: '', onSearch, maxLength: 80 }} />);
+
+    const field = screen.getByRole('searchbox', { name: SEARCH_LABEL });
+    expect(field).toHaveAttribute('maxlength', '80');
+    await user.type(field, '  kofi mensah  {Enter}');
+    expect(onSearch).toHaveBeenLastCalledWith('kofi mensah');
+
+    await user.clear(field);
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    expect(onSearch).toHaveBeenLastCalledWith('');
+    expect(onSearch).toHaveBeenCalledTimes(2);
+  });
+
+  // Break caught: what the person typed lost whenever the page draws again (the field resets under their hands), or a field that keeps its draft when the address says another search (Back).
+  it('keeps what is typed over the applied search, and shows the applied search again when the address says another', async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    const { rerender } = render(<Host search={{ label: SEARCH_LABEL, value: 'ama', onSearch }} />);
+    const field = screen.getByRole('searchbox', { name: SEARCH_LABEL });
+
+    await user.clear(field);
+    await user.type(field, 'kof');
+    rerender(<Host search={{ label: SEARCH_LABEL, value: 'ama', onSearch }} />);
+    expect(screen.getByRole('searchbox', { name: SEARCH_LABEL })).toHaveValue('kof');
+
+    rerender(<Host search={{ label: SEARCH_LABEL, value: 'yaw', onSearch }} />);
+    expect(screen.getByRole('searchbox', { name: SEARCH_LABEL })).toHaveValue('yaw');
+  });
+
+  it('has no WCAG violations that can be checked without a layout engine', async () => {
+    const { container } = render(
+      <Host search={{ label: SEARCH_LABEL, value: 'ama', onSearch: vi.fn() }} />,
+    );
+
+    expect(await wcagViolations(container)).toEqual([]);
+  });
+});
+
 describe('FilterBar: the popover of the page’s fields (task R5.2, M8 and M12)', () => {
   const FILTER = () => screen.getByRole('button', { name: 'Filter' });
 

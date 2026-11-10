@@ -15,6 +15,25 @@
   outline-offset: var(--focus-offset-width);
 }
 
+/*
+ * The search field is always in the bar (the Product Owner, 10 November 2026), before the chips: it takes what the row has, not more than 28rem, and a row of its own where the bar cannot share
+ * one (a phone), so that nothing is cut off at 320px or at enlarged text.
+ */
+.ui-filter-bar__search {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 28rem;
+  min-width: 0;
+}
+
+/* The button goes under the field where the two do not share the row (a phone at 320px), so that the field is never narrower than it can be typed in. */
+.ui-filter-bar__search .ui-filter-bar__search-field {
+  flex: 1 1 12rem;
+}
+
 .ui-filter-bar__chips {
   display: flex;
   flex-wrap: wrap;
