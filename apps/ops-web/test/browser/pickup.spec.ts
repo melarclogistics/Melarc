@@ -507,26 +507,6 @@ function overflowingInQueue(page: Page): Promise<string[]> {
   );
 }
 
-/**
- * What in the queue's rows is wider than its own cell or card, cut off where its words should wrap: the cells and the cards, and not the box of the rows, which may scroll sideways
- * while the table keeps every column in a room narrower than the columns need (a box of 41rem at 768px).
- */
-function clippedCellsInQueue(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    [
-      ...document.querySelectorAll<HTMLElement>(
-        '.ui-data-table__scroller th, .ui-data-table__scroller td, .ui-data-table__card',
-      ),
-    ]
-      .filter((element) => element.getClientRects().length > 0)
-      .filter((element) => element.scrollWidth > element.clientWidth + 1)
-      .map(
-        (element) =>
-          `${element.tagName.toLowerCase()} ${element.textContent.trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
-      ),
-  );
-}
-
 /** What in the queue is cut off with an ellipsis: nothing that is a name, an address or a note may be. */
 function ellipsisedInQueue(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -583,20 +563,22 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       await page.setViewportSize(size);
       await open(page, '/pickup-requests', longWorld());
 
+      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026), so at 768px it is in the
+      // cards and not in the table; where it is drawn it wraps whole.
+      const drawsAddress = size.width > 768;
       const address = page.getByText(LONG_ADDRESS).locator('visible=true');
-      await expect(address).toHaveCount(2);
+      await expect(address).toHaveCount(drawsAddress ? 2 : 0);
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
-      // A table in a box as wide as its columns needs scrolls nowhere. At 768px the box is 41rem and the table keeps every column (the review of 499399c: cards only under 40rem), which
-      // needs more: its box scrolls sideways, and what must hold is that no cell cuts its words off and that the page itself never scrolls.
-      expect(
-        size.width > 768 ? await overflowingInQueue(page) : await clippedCellsInQueue(page),
-      ).toEqual([]);
+      // No table scrolls sideways, at 768px either (restored: the narrowed check of 7aa6135 let the box scroll there and held only that no cell cut its words off), and the page never does.
+      expect(await overflowingInQueue(page)).toEqual([]);
       expect(await ellipsisedInQueue(page)).toEqual([]);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
       // Wrapped, not truncated: the address takes more than one line and the box holds it.
-      const box = await address.first().boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThan(30);
-      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
+      if (drawsAddress) {
+        const box = await address.first().boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThan(30);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
+      }
     });
   }
 
@@ -632,10 +614,10 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     expect(hidden.every((height) => height <= 1)).toBe(true);
   });
 
-  // Break caught (the review of 5edada2, M6, and the Product Owner's decision of 9 November 2026 that replaced its answer): a queue with nothing beside it that drops the columns it marked
-  // lesser, so that at 768px it showed less than the cards it replaced. It does not: it keeps the table and every column from 40rem up (a box of 41rem at 768px, scrolling inside itself),
-  // so every fact of a request is in its row; and it is cards under 40rem, with every fact (640px, a box of 38rem).
-  test('keeps the table, with every column and every fact of a request, at 768px with no request open', async ({
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways; the review of f6cf02b: the queue at 768px kept every column in a box of 41rem, which scrolled sideways with the
+  // act and what a request needs out of view): a queue that keeps a column it has no room for. At 768px (a box of 41rem) the table takes its lesser columns away, the packages and then the
+  // address, and keeps the request with its sender, the state, the service date, what it needs and the act, all in view; every fact of a request is in a card under 40rem.
+  test('keeps the table at 768px with no request open without its lesser columns, and never scrolls it sideways', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
@@ -643,19 +625,22 @@ test.describe('the queue: the parts that stay in view, long text and the room it
 
     await expect(queueTable(page)).toBeVisible();
     await expect(queueCards(page)).toHaveCount(0);
-    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText([
+      'Request / sender',
+      'State',
+      'Service date',
+      'Needs',
+      'Actions',
+    ]);
     const row = queueTable(page).getByRole('row').filter({ hasText: CODE });
-    for (const fact of [
-      CODE,
-      'Demo Fabrics Ltd',
-      'Tue 3 Nov 2026',
-      '14 Demo Lane, Osu',
-      'Accra Central',
-      '3 packages',
-      'A vendor’s own packages',
-    ]) {
+    for (const fact of [CODE, 'Demo Fabrics Ltd', 'Tue 3 Nov 2026']) {
       await expect(row).toContainText(fact);
     }
+    // The act at the end of the row is in view: nothing is scrolled out of reach.
+    await expect(row.getByRole('button', { name: `Confirm ${CODE}` })).toBeInViewport({
+      ratio: 1,
+    });
+    expect(await overflowingInQueue(page)).toEqual([]);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 
@@ -699,12 +684,19 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     await opener(page, CODE).click();
     await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
 
-    // What the columns of lesser weight hold is in the panel, so the table gives them up and does not scroll sideways.
+    // What the columns of lesser weight hold is in the panel, so the table gives them up and does not scroll sideways. The service date is not lesser (the Product Owner, 10 November 2026):
+    // it stays with the state.
     await expect(queueTable(page)).toBeVisible();
     await expect(queueTable(page).getByRole('columnheader', { name: 'State' })).toBeVisible();
-    await expect(queueTable(page).getByRole('columnheader', { name: 'Service date' })).toHaveCount(
-      0,
-    );
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Service date' }),
+    ).toBeVisible();
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Pickup address / hub' }),
+    ).toHaveCount(0);
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Packages / booking type' }),
+    ).toHaveCount(0);
     expect(await overflowingInQueue(page)).toEqual([]);
   });
 });

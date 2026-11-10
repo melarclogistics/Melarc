@@ -1,6 +1,10 @@
-import type { ReactNode } from 'react';
-
-import { NoWrap, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import {
+  CellLines,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { PickupRequestView, PickupState } from '../../../platform/pickup/pickup-shape';
 import { hubNameOf } from '../staff/staff-presentation';
@@ -96,27 +100,6 @@ function Dash({ means }: { readonly means: string }) {
   );
 }
 
-/**
- * Two facts that belong together, the first as it is and the second quieter beneath it. Both wrap at their words, a long address and a long booking type alike; `oneLine` keeps the first
- * to a line (a count is never broken in the middle).
- */
-function Pair({
-  first,
-  second,
-  oneLine = false,
-}: {
-  readonly first: string;
-  readonly second: string;
-  readonly oneLine?: boolean;
-}) {
-  return (
-    <span className="pickup-lines">
-      <span>{oneLine ? <NoWrap>{first}</NoWrap> : first}</span>
-      <span className="pickup-support">{second}</span>
-    </span>
-  );
-}
-
 /** The state as a badge, on one line: the column takes its width. */
 function State({ state }: { readonly state: PickupState }) {
   return <StatusBadge status={state} map={PICKUP_STATE_MAP} />;
@@ -128,8 +111,9 @@ const Needs = ({ text }: { readonly text: string }) =>
 /**
  * The nine facts of the queue in six columns, grouped by what they mean: who and which request, where it stands, when, where and for which hub, what is being
  * collected and as what, and what it needs. The code over the sender is the row's header, and **the button that opens the request in the panel beside the queue**
- * (the table draws it, stretched over the row); the row is no link. When the table's own room narrows (a panel beside it) the columns of lesser weight go, the packages first (under 64rem of the table's own room),
- * then the date and the address (under 48rem), and the state and what a request needs stay.
+ * (the table draws it, stretched over the row); the row is no link. **The columns that go when the table's own box is narrow are the screen's choice, and the table takes them away only
+ * as far as it takes for the box not to scroll sideways** (the Product Owner, 10 November 2026): the packages with the booking type first (weight 3), then the pickup address with the hub
+ * (weight 2). The request with its sender, the state, the service date and what a request needs stay; a card, under 40rem, shows every fact.
  */
 export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
   {
@@ -139,23 +123,18 @@ export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
     cell: (row) => <RowTitle code={row.code} name={row.sender} />,
   },
   { id: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
-  {
-    id: 'date',
-    header: 'Service date',
-    priority: 2,
-    cell: (row) => <NoWrap>{row.date}</NoWrap>,
-  },
+  { id: 'date', header: 'Service date', cell: (row) => <NoWrap>{row.date}</NoWrap> },
   {
     id: 'where',
     header: 'Pickup address / hub',
     priority: 2,
-    cell: (row) => <Pair first={row.address} second={row.hub} />,
+    cell: (row) => <CellLines first={row.address} second={row.hub} />,
   },
   {
     id: 'packages',
     header: 'Packages / booking type',
     priority: 3,
-    cell: (row) => <Pair first={row.packages} second={row.bookedAs} oneLine />,
+    cell: (row) => <CellLines first={row.packages} second={row.bookedAs} oneLine />,
   },
   { id: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
 ];
@@ -163,38 +142,27 @@ export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
 /** What opens a request, for the pointer and for assistive technology: its code and its sender. */
 export const openLabelOf = (row: QueueFacts): string => `Open ${row.code}, ${row.sender}`;
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
 /**
- * A request as a card, for a room too narrow for the columns: the code with the state, the sender, and then the facts in the order a person reads them, each under the name of
- * its column. It holds **no control**: the table draws the card's one hit target (the button that opens the request, stretched over the card).
+ * A request as a card, for a room too narrow for the columns: the state, the sender, and then the facts in the order a person reads them, each a label and its value (`CardFacts`). It holds
+ * **no control**: the table draws the card's one hit target (the button that opens the request, stretched over the card) and its heading, the code.
  */
 export function QueueCard({ facts }: { readonly facts: QueueFacts }) {
   return (
-    <>
-      <div className="pickup-card__head">
-        <State state={facts.state} />
-      </div>
-      <p className="pickup-card__sender pickup-support">{facts.sender}</p>
-      <dl className="pickup-card__facts">
-        <Fact label="Service date">{facts.date}</Fact>
-        <Fact label="Pickup address / hub">
-          <Pair first={facts.address} second={facts.hub} />
-        </Fact>
-        <Fact label="Packages / booking type">
-          <Pair first={facts.packages} second={facts.bookedAs} />
-        </Fact>
-        <Fact label="Needs">
-          <Needs text={facts.needs} />
-        </Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<State state={facts.state} />}
+      lead={facts.sender}
+      facts={[
+        { label: 'Service date', value: facts.date },
+        {
+          label: 'Pickup address / hub',
+          value: <CellLines first={facts.address} second={facts.hub} />,
+        },
+        {
+          label: 'Packages / booking type',
+          value: <CellLines first={facts.packages} second={facts.bookedAs} />,
+        },
+        { label: 'Needs', value: <Needs text={facts.needs} /> },
+      ]}
+    />
   );
 }
