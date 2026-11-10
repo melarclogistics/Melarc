@@ -25,6 +25,9 @@ const SCREEN_CODE = [
   // The vendor screens (S0.52b): they re-issue a setup link and start a recovery, and show a vendor's secret and browsers as facts only.
   'app/pages/vendors',
   'platform/vendor',
+  // The trusted browsers (S0.45, redesign R7b): the staff profile draws a colleague's browsers through the row-and-card factory of the person's own page, which is in this folder, so
+  // a "copy" control or a credential field added there would reach the profile (the security review of run 5, Stage 5.1).
+  'app/pages/account',
 ];
 
 /** The modules that draw, hold or read a credential: nothing of the identity screens imports one. */
@@ -88,6 +91,14 @@ const files = SCREEN_CODE.flatMap(sourceFiles).map((path) => ({
   text: readFileSync(path, 'utf8'),
 }));
 
+/**
+ * A text field, and a field that is a password, as the code's tokens spell them. The tokens are joined with a space (`< Input type = "password"`), so each pattern allows the
+ * space: a pattern written without it (`<Input`, `type="password"`) could never match and the checks below could never fail (found by the security review of run 5, Stage 5.1,
+ * when the field of a mutation was not seen; the checks had read `<Input\b` and `type=["']password["']` since they were written).
+ */
+const TEXT_FIELD = /<\s*Input\b/;
+const PASSWORD_FIELD = /type\s*=\s*["']password["']|name\s*=\s*["']password["']/;
+
 /** The code of a file without its comments: a sentence that says "no token is shown" is not a token being shown. */
 function codeTokens(text: string, fileName: string): string[] {
   const scanner = ts.createScanner(
@@ -116,6 +127,9 @@ describe('what is scanned', () => {
         'app/pages/my-work/MyWorkPage.tsx',
         'platform/staff/staff-shape.ts',
         'platform/staff/staff-commands.ts',
+        // The row-and-card factory of the trusted browsers, which the staff profile draws as well as the person's own page.
+        'app/pages/account/TrustedBrowserTable.tsx',
+        'app/pages/account/TrustedBrowsersPage.tsx',
       ]),
     );
     expect(files.length).toBeGreaterThanOrEqual(11);
@@ -125,6 +139,25 @@ describe('what is scanned', () => {
     const tokens = codeTokens('// setup_token\nconst a = 1; /* otpauth_uri */', 'x.ts');
 
     expect(tokens.join(' ')).not.toMatch(/setup_token|otpauth_uri/);
+  });
+
+  // Break caught: a check for a field that cannot see one, because its pattern is spelled differently from the code it reads.
+  it('sees a text field and a password field in code, and not in a comment or a string of words', () => {
+    const field = codeTokens(
+      'const a = <Input type="password" name="secret" aria-label="x" readOnly />;',
+      'x.tsx',
+    ).join(' ');
+    const named = codeTokens("const a = <input name='password' />;", 'x.tsx').join(' ');
+    const words = codeTokens(
+      '// <Input type="password" />\nconst a = "no type=password here";',
+      'x.tsx',
+    ).join(' ');
+
+    expect(field).toMatch(TEXT_FIELD);
+    expect(field).toMatch(PASSWORD_FIELD);
+    expect(named).toMatch(PASSWORD_FIELD);
+    expect(words).not.toMatch(TEXT_FIELD);
+    expect(words).not.toMatch(PASSWORD_FIELD);
   });
 });
 
@@ -159,7 +192,7 @@ describe('the identity screens and a credential', () => {
       .filter((file) => file.path.endsWith('.tsx'))
       .flatMap((file) => {
         const tokens = codeTokens(file.text, file.path).join(' ');
-        return /type=["']password["']|<Input\b/.test(tokens) ? [file.path] : [];
+        return TEXT_FIELD.test(tokens) || PASSWORD_FIELD.test(tokens) ? [file.path] : [];
       });
 
     // The reset, the profile, the sessions and the landing have no field at all: the reason dialog's note is the only text the person writes.
@@ -170,9 +203,7 @@ describe('the identity screens and a credential', () => {
     for (const file of files.filter((candidate) =>
       /StaffCreatePage|StaffListPage|VendorListPage/.test(candidate.path),
     )) {
-      expect(codeTokens(file.text, file.path).join(' '), file.path).not.toMatch(
-        /type=["']password["']|name=["']password["']/,
-      );
+      expect(codeTokens(file.text, file.path).join(' '), file.path).not.toMatch(PASSWORD_FIELD);
     }
   });
 });
