@@ -138,12 +138,7 @@ describe('the chain applied from a database at 0073', () => {
         `select format('alter table %s disable trigger %I', t.tgrelid::regclass, t.tgname) from pg_trigger t where not t.tgisinternal order by t.tgrelid::regclass::text, t.tgname limit 1`,
       );
       for (const [section, statement] of [
-        ['views', 'create view public.zz_planted_view as select 1 as one'],
         ['schemas', 'grant usage on schema drizzle to public'],
-        [
-          'defaultPrivileges',
-          'alter default privileges in schema public grant select on tables to public',
-        ],
         ['triggers', triggerOff],
       ] as const) {
         await built.admin.query(statement);
@@ -152,6 +147,37 @@ describe('the chain applied from a database at 0073', () => {
           `the ${section} section sees a difference planted in it`,
         ).not.toEqual(then[section]);
       }
+      // A row that only one database has is seen by any column of its section, so the views and the default privileges are shown to see a difference **inside** a row that both
+      // databases have: the same view with another definition, the same default privilege with another privilege.
+      const bothHave = async (statement: string): Promise<void> => {
+        await built.admin.query(statement);
+        await withClient(fromNothing.urlFor('postgres'), (client) => client.query(statement));
+      };
+      await bothHave('create view public.zz_planted_view as select 1 as one');
+      await bothHave('alter default privileges in schema public grant select on tables to public');
+      const equalNow = await schemaOf(built.admin);
+      const equalThen = await withClient(fromNothing.urlFor('postgres'), (client) =>
+        schemaOf(client),
+      );
+      for (const section of ['views', 'defaultPrivileges'] as const) {
+        expect(equalNow[section], `the ${section} of the two databases, with the same row`).toEqual(
+          equalThen[section],
+        );
+        expect(equalNow[section]?.length).toBeGreaterThan(0);
+      }
+      await built.admin.query('create or replace view public.zz_planted_view as select 2 as one');
+      await built.admin.query(
+        'alter default privileges in schema public grant insert on tables to public',
+      );
+      const changed = await schemaOf(built.admin);
+      expect(
+        changed.views,
+        'the views section sees another definition of the same view',
+      ).not.toEqual(equalThen.views);
+      expect(
+        changed.defaultPrivileges,
+        'the default privileges section sees another privilege in the same row',
+      ).not.toEqual(equalThen.defaultPrivileges);
     } finally {
       await fromNothing.drop();
     }
