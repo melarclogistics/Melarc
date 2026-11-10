@@ -93,9 +93,9 @@ function Pair({ first, second }: { readonly first: string; readonly second: stri
   );
 }
 
-/** The state as a badge that wraps at its words in a narrow column, instead of making the column as wide as the longest state. */
+/** The state as a badge, on one line: the column takes its width. */
 function State({ state }: { readonly state: RunFacts['state'] }) {
-  return <StatusBadge status={state} map={MANIFEST_STATE_MAP} wraps />;
+  return <StatusBadge status={state} map={MANIFEST_STATE_MAP} />;
 }
 
 /**

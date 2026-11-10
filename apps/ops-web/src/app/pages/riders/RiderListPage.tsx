@@ -76,9 +76,9 @@ function factsOf(
   };
 }
 
-/** The status as a badge that wraps at its words in a narrow column ("Temporarily unavailable"), instead of making the column as wide as the longest status. */
+/** The status as a badge, on one line ("Temporarily unavailable"): the column takes its width. */
 function State({ status }: { readonly status: RiderStatus }) {
-  return <StatusBadge status={status} map={RIDER_STATUS_MAP} wraps />;
+  return <StatusBadge status={status} map={RIDER_STATUS_MAP} />;
 }
 
 /**

@@ -117,9 +117,9 @@ function Pair({
   );
 }
 
-/** The state as a badge that wraps at its words in a narrow column, instead of making the column as wide as the longest state. */
+/** The state as a badge, on one line: the column takes its width. */
 function State({ state }: { readonly state: PickupState }) {
-  return <StatusBadge status={state} map={PICKUP_STATE_MAP} wraps />;
+  return <StatusBadge status={state} map={PICKUP_STATE_MAP} />;
 }
 
 const Needs = ({ text }: { readonly text: string }) =>

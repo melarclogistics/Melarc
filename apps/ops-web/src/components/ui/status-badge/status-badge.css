@@ -14,20 +14,20 @@
   line-height: var(--text-label-sm-line-height);
   /*
    * The badge is never wider than the room it is given (task R5.2, M9: a long status at 200% text on a 320px screen was 339px wide in a 126px box, which scrolled the page
-   * sideways): its words wrap when they must. In a table the row is one line and the box scrolls, so a badge there stays on one line (below).
+   * sideways): its words wrap where the room itself is smaller than one line of them, and nowhere else (below).
    */
   max-width: 100%;
   overflow-wrap: anywhere;
 }
 
+/*
+ * A status never wraps its words in a table cell (the Product Owner, 10 November 2026): the column takes the badge's width, and the table, which measures its own box, takes its lesser columns
+ * away to make the room (DataTable), where it used to let the badge break at its words ("Waiting for / confirmation") to keep a column narrow. In a card the badge keeps its width and takes
+ * a line of its own where the code leaves it no room (card-facts.css).
+ */
 table .ui-status-badge {
   white-space: nowrap;
   overflow-wrap: normal;
-}
-
-/* A badge that says it may wrap (`wraps`) does so in a table cell, at its words, in a narrow column ("Waiting for / confirmation"). */
-table .ui-status-badge--wraps {
-  white-space: normal;
 }
 
 .ui-status-badge--success {

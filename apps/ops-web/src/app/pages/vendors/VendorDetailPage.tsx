@@ -81,7 +81,7 @@ function BrowserCard({
   return (
     <>
       <div className="vendor-card__head">
-        <StatusBadge status={device.status} map={DEVICE_STATUS_MAP} wraps />
+        <StatusBadge status={device.status} map={DEVICE_STATUS_MAP} />
       </div>
       <dl className="vendor-card__facts">
         <div className="vendor-card__fact">
@@ -145,7 +145,7 @@ function Account({
     {
       id: 'status',
       header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} map={DEVICE_STATUS_MAP} wraps />,
+      cell: (row) => <StatusBadge status={row.status} map={DEVICE_STATUS_MAP} />,
     },
     {
       id: 'registered',

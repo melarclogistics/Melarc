@@ -66,9 +66,9 @@ function Pair({ first, second }: { readonly first: ReactNode; readonly second: s
   );
 }
 
-/** The status as a badge that wraps at its words in a narrow column. */
+/** The status as a badge, on one line: the column takes its width. */
 function Status({ status }: { readonly status: StaffStatus }) {
-  return <StatusBadge status={status} map={STAFF_STATUS_MAP} wraps />;
+  return <StatusBadge status={status} map={STAFF_STATUS_MAP} />;
 }
 
 function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {

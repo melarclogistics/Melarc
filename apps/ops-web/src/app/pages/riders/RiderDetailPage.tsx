@@ -69,7 +69,7 @@ function DeviceCard({ device }: { readonly device: RiderDeviceView }) {
   return (
     <>
       <div className="rider-card__head">
-        <StatusBadge status={device.status} map={RIDER_DEVICE_STATUS_MAP} wraps />
+        <StatusBadge status={device.status} map={RIDER_DEVICE_STATUS_MAP} />
       </div>
       <dl className="rider-card__facts">
         <div className="rider-card__fact">
@@ -95,7 +95,7 @@ const DEVICE_COLUMNS: readonly DataColumn<RiderDeviceView>[] = [
     id: 'status',
     header: 'Status',
     rowHeader: true,
-    cell: (row) => <StatusBadge status={row.status} map={RIDER_DEVICE_STATUS_MAP} wraps />,
+    cell: (row) => <StatusBadge status={row.status} map={RIDER_DEVICE_STATUS_MAP} />,
   },
   { id: 'registered', header: 'Registered', cell: (row) => registeredAt(row) },
   { id: 'by', header: 'Registered by', cell: (row) => registeredBySentence(row) },

@@ -2215,6 +2215,40 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     expect(await sideways(narrow)).toBeLessThanOrEqual(0);
   });
 
+  // Break caught (the Product Owner, 10 November 2026): a status that breaks at its words ("Waiting for / confirmation") in a table cell or in a card, which makes the row taller and the badge harder
+  // to read at a glance. In a table the column takes the badge's width (the table drops its lesser columns to make the room); in a card the badge keeps its width and takes a line of its own.
+  test('never wraps a status in a table cell or in a card', async ({ page }) => {
+    const linesOf = (badges: Locator) =>
+      badges.evaluateAll((all) =>
+        all.map((badge) => {
+          const style = getComputedStyle(badge);
+          const chrome =
+            parseFloat(style.paddingTop) +
+            parseFloat(style.paddingBottom) +
+            parseFloat(style.borderTopWidth) +
+            parseFloat(style.borderBottomWidth);
+          return Math.round(
+            (badge.getBoundingClientRect().height - chrome) / parseFloat(style.lineHeight),
+          );
+        }),
+      );
+
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const table = await linesOf(
+      specimen(page, 'Column fit at 41rem').locator('tbody .ui-status-badge'),
+    );
+    expect(table.length).toBeGreaterThan(0);
+    expect(table.every((lines) => lines === 1)).toBe(true);
+
+    const cards = await linesOf(
+      specimen(page, 'Cards, where the box is narrow').locator(
+        '.ui-data-table__card .ui-status-badge',
+      ),
+    );
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((lines) => lines === 1)).toBe(true);
+  });
+
   // Break caught: the filter popover opened on a phone with no margin from the edge of the screen, its text against the glass (M12).
   test('keeps the filter popover clear of the edges of a 390px screen', async ({ page }) => {
     await openKit(page, 'header', { width: 390, height: 800, reducedMotion: true });

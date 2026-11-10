@@ -133,20 +133,6 @@ describe('StatusBadge', () => {
   });
 
   // Break caught: an unknown value drawn with a dot in a colour that means something, or with no dot at all while the others have one.
-  // Break caught (the review of 499399c): a page that reaches into the badge's markup to let it wrap at its words in a narrow column ("Waiting for / confirmation"), because the badge
-  // has no way to say so. The badge keeps to a line unless it is told it may wrap, and the kit's stylesheet does the rest.
-  it('keeps to a line unless it is told it may wrap at its words', () => {
-    const { rerender } = render(<StatusBadge status="HELD" map={DEMO_MAP} />);
-    expect(screen.getByText('Held').closest('.ui-status-badge')).not.toHaveClass(
-      'ui-status-badge--wraps',
-    );
-
-    rerender(<StatusBadge status="HELD" map={DEMO_MAP} wraps />);
-    expect(screen.getByText('Held').closest('.ui-status-badge')).toHaveClass(
-      'ui-status-badge--wraps',
-    );
-  });
-
   it('draws the dot on an unknown value too, in the neutral pair', () => {
     const { container } = render(<StatusBadge status="NEW_IN_A_NEWER_SERVER" map={DEMO_MAP} />);
 

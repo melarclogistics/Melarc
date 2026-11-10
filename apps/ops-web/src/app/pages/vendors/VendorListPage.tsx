@@ -61,9 +61,9 @@ function factsOf(
   };
 }
 
-/** The status as a badge that wraps at its words in a narrow column, instead of making the column as wide as the longest status. */
+/** The status as a badge, on one line: the column takes its width. */
 function State({ status }: { readonly status: AccountFacts['status'] }) {
-  return <StatusBadge status={status} map={VENDOR_STATUS_MAP} wraps />;
+  return <StatusBadge status={status} map={VENDOR_STATUS_MAP} />;
 }
 
 /**
