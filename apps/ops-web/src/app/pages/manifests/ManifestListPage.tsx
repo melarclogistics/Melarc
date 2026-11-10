@@ -41,7 +41,6 @@ import { serviceDateText } from '../pickup/pickup-presentation';
 import { requestOfClick, restoreQueuePlace } from '../pickup/queue-return';
 import { filtersOf, searchOf, stateOfText } from './manifest-list-filters';
 import { MANIFEST_STATE_MAP } from './manifest-presentation';
-import '../pickup/pickup-pages.css';
 
 /**
  * What the list tells of a pickup run, made once from the record so that the row and the card cannot tell different things. A list of manifests
