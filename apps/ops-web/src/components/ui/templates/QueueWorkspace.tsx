@@ -139,6 +139,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
         {empty.clearLabel}
       </Button>
     ) : undefined;
+  // The words name the buttons beside them: the way back to every hub and, when the page's own filters are set as well, the way to take the others off.
   if (hub !== undefined) {
     return (
       <EmptyStateV2
@@ -157,7 +158,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
       >
         {clear === undefined
           ? `No ${noun} at ${hub.name}. Show all hubs to see those of every hub your session reaches.`
-          : `No ${noun} at ${hub.name} fit these filters.`}
+          : `No ${noun} at ${hub.name} fit these filters. Show all hubs, or take the other filters off.`}
       </EmptyStateV2>
     );
   }
