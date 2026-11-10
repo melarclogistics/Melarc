@@ -277,6 +277,9 @@ test.describe('the queue, drawn for the room it has', () => {
       const { watch } = await open(page, '/pickup-requests');
       const row = page.locator('.ui-view-tabs__scroll');
       await expect(row).toHaveAttribute('data-fade', 'end');
+      // The first page has loaded its fonts before the second is asked for: a font still on its way when the page is left is a request that WebKit reports as cancelled ("Load request cancelled"),
+      // which the page watcher counts as a failure of the page and is the test's own navigation (the engines run of 10 November 2026).
+      await page.evaluate(() => document.fonts.ready);
 
       await page.goto('/pickup-requests?state=CANCELLED');
       const current = page.getByRole('tab', { name: /^Cancelled/ });

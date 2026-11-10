@@ -357,7 +357,7 @@ test.describe('the vendor screens', () => {
     // The field stays where it is, with what was typed, and has focus still.
     await expect(field).toHaveValue('synthetic');
     await expect(field).toBeFocused();
-    expect(queries.at(-1)).toBe('?q=synthetic');
+    await expect.poll(() => queries.at(-1)).toBe('?q=synthetic');
 
     await page.getByRole('button', { name: 'Remove filter: Search: synthetic' }).click();
     await expect(page).toHaveURL('/admin/vendors');
