@@ -891,7 +891,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
   to none, and uses the neutral frame, because that page cannot know whether a session exists.
 - A generic restyle does not wrap every route in the Ink shell.
 - The authenticated shell should feel spacious and stable; the neutral frame is quiet, with no Ink navigation.
-- **Approved direction (Product Owner, 5 November 2026), built in step R4 (7 November 2026; awaiting the Product Owner's acceptance):** the signed-in shell gains a top bar over the main content (the hub switcher, a global search, the theme control, a New menu and the account menu; on a narrow screen the theme is chosen in the account menu instead), the sidebar shows seven groups, and the account menu says who is signed in and where they act, beside the sidebar's foot, which still names the person. The structure is [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); the table above is the shell as built.
+- **Approved direction (Product Owner, 5 November 2026), built in step R4 (7 November 2026; accepted by the Product Owner on 10 November 2026):** the signed-in shell gains a top bar over the main content (the hub switcher, a global search, the theme control, a New menu and the account menu; on a narrow screen the theme is chosen in the account menu instead), the sidebar shows seven groups, and the account menu says who is signed in and where they act, beside the sidebar's foot, which still names the person. The structure is [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); the table above is the shell as built.
 
 **Decided (Product Owner, 6 October 2026): the setup layout is the neutral frame.** The Ops spec says the setup routes
 render "no application shell" and must not render "the authenticated shell". The neutral frame is not the authenticated
@@ -1419,7 +1419,7 @@ The first Melarc UI-foundation implementation should remain small, and each item
 
 ### The component foundation (Product Owner, 5 November 2026; redesign step R3)
 
-Step R3 built what the kit below is composed from. It adds no Melarc component and moves no screen:
+Step R3 (accepted by the Product Owner on 10 November 2026) built what the kit below is composed from. It adds no Melarc component and moves no screen:
 
 - Tailwind CSS v4 on the tokens, with no preflight (§29.3);
 - the 24 shadcn/ui primitives of `apps/ops-web/src/components/primitives/` (§29.2): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toast), table, tabs, textarea and tooltip;
@@ -1822,7 +1822,7 @@ Each pattern should eventually document:
 | Theme choice (§31) | **DECIDED** 5 November 2026 (Product Owner): follows the operating system by default; a person may override it; the choice is kept in the browser's local storage as a non-sensitive preference ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)); the toggle was built in step R4 (7 November 2026, §31) |
 | Visual direction (§4.7) | **APPROVED** 5 November 2026: Ink carries the work and crimson carries the brand; the palette, the radii (8, 12 and 16px), the heights (36, 44 and 56px), the motion and the one shadow are the values in force since step R2; the values R2 derived (§4.3), the 44px controls, the 36px rows and the single floating shadow were approved as built on 5 November 2026, in the task of step R3 |
 | Devices (§12) | **DECIDED** 5 November 2026: hub-floor tasks are tablet-first at 768px; the record panel is a full-screen sheet and the sidebar collapses to icons at that width |
-| Planned component kit (§27; COMPONENT_PATTERNS §37) | **APPROVED** 5 November 2026 and **PROPOSED** as patterns, except the six built (the shell's five in step R4, 7 November 2026, and CountBadge in task C1: **IMPLEMENTING**, awaiting the Product Owner's acceptance); the rest is built in step R5 and **ACTIVE** since 10 November 2026 (run 5), except StatTile, Avatar and Tooltip, which no screen draws and stay IMPLEMENTING |
+| Planned component kit (§27; COMPONENT_PATTERNS §37) | **APPROVED** 5 November 2026 and **PROPOSED** as patterns, except the six built (the shell's five in step R4, 7 November 2026, and CountBadge in task C1: **ACTIVE**, accepted by the Product Owner on 10 November 2026); the rest is built in step R5 and **ACTIVE** since 10 November 2026 (run 6, at its green final commit), except StatTile, Avatar and Tooltip, which no screen draws and stay IMPLEMENTING until one does |
 | Tailwind (§29.2, §29.3) | **DECIDED** 5 November 2026 (Product Owner): Tailwind CSS v4 on the semantic tokens, preflight not imported; built in step R3 |
 | Radix, shadcn/ui (§29.2) | **DECIDED** 5 November 2026 (Product Owner): shadcn/ui over Radix UI is the component foundation of new components, from the official registry only, through `components/primitives` and one door; built in step R3, which awaits the Product Owner's acceptance |
 | Content-security policy (§29.4) | **DECIDED** 5 November 2026 (Product Owner): `style-src 'self' 'unsafe-inline'`, and no other directive relaxed; `script-src` is never relaxed |
