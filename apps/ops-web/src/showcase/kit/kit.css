@@ -218,24 +218,6 @@
   text-align: end;
 }
 
-/* A request as a card of the narrow table: the code, the sender, and the facts under them. */
-.showcase-kit-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.showcase-kit-card__facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
-}
-
 /* The submit bar of the toast specimen: it sticks to the bottom of the window, as a task form's does. */
 .showcase-kit-sticky-bar {
   position: fixed;

@@ -1,15 +1,18 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef, useState, type ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { restoreTableRoom, tableRoom } from '../../../test-support/table-room';
 import { wcagViolations } from '../../../test-support/wcag';
 import { OperationalCode } from '../code/OperationalCode';
 import { Link } from '../link/Link';
 import {
+  CellLines,
   DataTable,
   drawsCards,
+  dropOrderOf,
   RowTitle,
   type DataColumn,
   type DataTableHandle,
@@ -1162,44 +1165,154 @@ describe('DataTable: cards where the table is narrow (task R5.2, M12)', () => {
   });
 });
 
-describe('DataTable: the room a table has (the review of 5edada2, M6)', () => {
-  // Break caught: a queue with nothing beside it that drops the columns it marked lesser, so that at 768px it shows less than the cards it replaced did; and the other way, a queue with
-  // a panel open beside it that turns to cards at once, which hides the table the panel was opened beside.
-  it('is cards at the width where a lesser column would go, when nothing beside it shows what the column holds', () => {
-    expect(drawsCards(45, 'cards', true)).toBe(true);
-    expect(drawsCards(64, 'cards', true)).toBe(true);
-    expect(drawsCards(64.5, 'cards', true)).toBe(false);
-    expect(drawsCards(45, 'drop', true)).toBe(false);
-    expect(drawsCards(44, 'drop', true)).toBe(false);
+describe('DataTable: the room a table has (the Product Owner, 10 November 2026: no table scrolls sideways)', () => {
+  // Break caught: a table that turns to cards where a lesser column would go (it showed less than the table it replaced), or that stays a table down to a phone: a table is a table from 40rem of
+  // its own box up and cards under it.
+  it('is cards under 40rem of its own box and a table from there up', () => {
+    expect(drawsCards(39.9)).toBe(true);
+    expect(drawsCards(40)).toBe(false);
+    expect(drawsCards(45)).toBe(false);
+    expect(drawsCards(64.5)).toBe(false);
+    expect(drawsCards(16)).toBe(true);
   });
 
-  it('keeps the old width for the cards when there is no lesser column to drop, and when the columns may drop', () => {
-    expect(drawsCards(45, 'cards', false)).toBe(false);
-    expect(drawsCards(39.9, 'cards', false)).toBe(true);
-    expect(drawsCards(39.9, 'drop', true)).toBe(true);
-    expect(drawsCards(40, 'drop', true)).toBe(false);
+  // Break caught: the lesser columns taken away in an order the screen did not mean: the most lesser first, the later of two equals before the earlier, and never the row header or a column the screen did not mark.
+  it('says which lesser columns go, the most lesser first and the later of two equals before the earlier', () => {
+    const column = (
+      id: string,
+      priority?: 1 | 2 | 3,
+      rowHeader?: boolean,
+    ): DataColumn<Request> => ({
+      id,
+      header: id,
+      cell: () => id,
+      ...(priority === undefined ? {} : { priority }),
+      ...(rowHeader === true ? { rowHeader } : {}),
+    });
+
+    expect(
+      dropOrderOf([
+        column('request', 3, true),
+        column('state'),
+        column('date', 2),
+        column('where', 2),
+        column('packages', 3),
+        column('needs', 1),
+      ]),
+    ).toEqual(['packages', 'where', 'date']);
+    expect(dropOrderOf([column('request', undefined, true), column('state')])).toEqual([]);
   });
 
-  // Break caught (the review of 499399c): a queue with nothing open beside it drawn as cards at 1280px with the menu open, a box of about 61rem, where the table has room for every column.
-  // `keep` is the table with every column, and only a box under 40rem is cards.
-  it('keeps the table, with every column, from 40rem up when it is told to keep its columns', () => {
-    expect(drawsCards(61.5, 'keep', true)).toBe(false);
-    expect(drawsCards(64, 'keep', true)).toBe(false);
-    expect(drawsCards(40.5, 'keep', true)).toBe(false);
-    expect(drawsCards(40, 'keep', true)).toBe(false);
-    expect(drawsCards(39.9, 'keep', true)).toBe(true);
-  });
+  describe('the lesser columns go as far as it takes for the box not to scroll sideways', () => {
+    const LESSER: readonly DataColumn<Request>[] = [
+      REQUEST_COLUMN,
+      STATE_COLUMN,
+      { id: 'date', header: 'Service date', priority: 2, cell: (item) => item.date },
+      { id: 'where', header: 'Pickup address', priority: 2, cell: (item) => item.code },
+      { id: 'packages', header: 'Packages', priority: 3, cell: (item) => item.sender },
+    ];
+    const headers = () => screen.getAllByRole('columnheader').map((cell) => cell.textContent);
 
-  // Break caught: a stylesheet that drops a lesser column at 64rem whatever the page said, which a table told to keep its columns must not suffer; the attribute is what the stylesheet reads.
-  it('says on its box how it is crowded, `drop` unless it is told otherwise', () => {
-    const { container, rerender } = render(<Table />);
-    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'drop');
+    afterEach(() => {
+      restoreTableRoom();
+    });
 
-    rerender(<Table crowded="keep" />);
-    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'keep');
+    // Break caught: a table that drops its lesser columns at a width of its own (64rem, 48rem) whatever the room needs, so that it shows less than it could, or keeps them and scrolls.
+    it('draws every column while the box has room for them', () => {
+      tableRoom(1200);
+      render(<Table columns={LESSER} />);
 
-    rerender(<Table crowded="cards" />);
-    expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-crowded', 'cards');
+      expect(headers()).toEqual([
+        'Request / sender',
+        'State',
+        'Service date',
+        'Pickup address',
+        'Packages',
+      ]);
+    });
+
+    // Break caught (the review of f6cf02b: the pickup queue at 768px kept every column in a box of 41rem, which scrolled sideways, the act and Needs out of view): the lesser columns go one
+    // at a time, the most lesser first, until the box does not scroll, and no more than that.
+    it('takes them away one at a time, the most lesser first, and no more than the room needs', () => {
+      tableRoom(900);
+      render(<Table columns={LESSER} />);
+      // Five columns need 1000px of the 900: the packages go, and four need 800.
+      expect(headers()).toEqual(['Request / sender', 'State', 'Service date', 'Pickup address']);
+      cleanup();
+
+      tableRoom(700);
+      render(<Table columns={LESSER} />);
+      // Four need 800 of the 700: the later of the two columns of equal weight goes next, and three need 600.
+      expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+    });
+
+    // Break caught: a row header, a column that is not lesser, the box or the act taken away to make room: what a row is, and what is done to it, stays.
+    it('keeps the row header and every column that is not lesser, though the box still scrolls', () => {
+      tableRoom(300);
+      render(
+        <Table
+          columns={LESSER}
+          layout="table"
+          selection={{
+            selectedIds: [],
+            onChange: vi.fn(),
+            selectLabel: (item) => `Select ${item.code}`,
+          }}
+          rowAction={{ label: 'Confirm', onRun: vi.fn() }}
+        />,
+      );
+
+      expect(headers()).toEqual(['Select', 'Request / sender', 'State', 'Actions']);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(REQUESTS.length);
+      expect(screen.getAllByRole('button', { name: 'Confirm' })).toHaveLength(REQUESTS.length);
+    });
+
+    // Break caught: columns that stay away when the room comes back (a panel closed, a window widened), so that the table shows less than it can for the rest of the visit.
+    it('brings the columns back when the box widens, and takes them away again when it narrows', async () => {
+      const room = tableRoom(700);
+      render(<Table columns={LESSER} />);
+      expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+
+      act(() => {
+        room.resize(1200);
+      });
+      await waitFor(() => {
+        expect(headers()).toHaveLength(5);
+      });
+
+      act(() => {
+        room.resize(900);
+      });
+      await waitFor(() => {
+        expect(headers()).toEqual(['Request / sender', 'State', 'Service date', 'Pickup address']);
+      });
+    });
+
+    // Break caught: the fit measured once, when the table was first drawn, so that rows that arrive later (a page, a refresh) or a column that changes are never fitted.
+    it('measures again when its rows change', () => {
+      tableRoom(900);
+      const view = render(<Table columns={LESSER} rows={[FIRST]} />);
+      expect(headers()).toHaveLength(4);
+
+      view.rerender(<Table columns={LESSER.slice(0, 3)} rows={[FIRST, SECOND]} />);
+
+      // Three columns need 600 of the 900: they all fit.
+      expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+    });
+
+    // Break caught: a table that measures what is not there, so that a skeleton or an empty state loses columns the rows will need.
+    it('does not measure while it has no rows to measure', () => {
+      tableRoom(300);
+      render(<Table columns={LESSER} rows={[]} emptyState={<p>No requests.</p>} />);
+
+      expect(headers()).toHaveLength(5);
+    });
+
+    it('draws every column where nothing can be measured', () => {
+      render(<Table columns={LESSER} />);
+
+      expect(headers()).toHaveLength(5);
+    });
   });
 });
 
@@ -1341,5 +1454,69 @@ describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4
     expect(screen.getAllByRole('row')).toHaveLength(4);
     expect(screen.getByRole('button', { name: `Open ${FIRST.code}` })).toBeVisible();
     expect(screen.queryByText('Loading')).toBeNull();
+  });
+});
+
+describe('RowTitle and CellLines', () => {
+  // Break caught (the review of f6cf02b: a title that is not a code was built three times, by the staff, rider and vendor lists): a person is named by a name, in the face of the text, and a code in
+  // the monospaced face; either may be the link to the record's own page, over one quiet line.
+  it('names a record by a code in the monospaced face, or by a name in the face of the text, over one quiet line', () => {
+    render(
+      <MemoryRouter>
+        <RowTitle code="ACC-PR-7KQ2MZ" name="Demo Fabrics Ltd" />
+        <RowTitle title="Kofi Boateng" name="kofi.boateng@example.test" />
+      </MemoryRouter>,
+    );
+
+    const code = screen.getByText('ACC-PR-7KQ2MZ');
+    expect(code).toHaveClass('ui-code');
+    expect(screen.getByText('Demo Fabrics Ltd')).toHaveClass('ui-data-table__name');
+    const person = screen.getByText('Kofi Boateng');
+    expect(person).toHaveClass('ui-data-table__heading');
+    expect(person).not.toHaveClass('ui-code');
+    expect(screen.getByText('kofi.boateng@example.test')).toHaveClass('ui-data-table__name');
+  });
+
+  it('makes the first line the link to the record when it has a page of its own, whichever it is', () => {
+    render(
+      <MemoryRouter>
+        <RowTitle code="ACC-PR-7KQ2MZ" to="/pickup-requests/1" />
+        <RowTitle title="Kofi Boateng" to="/admin/staff/2" />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toHaveAttribute(
+      'href',
+      '/pickup-requests/1',
+    );
+    expect(screen.getByRole('link', { name: 'Kofi Boateng' })).toHaveAttribute(
+      'href',
+      '/admin/staff/2',
+    );
+  });
+
+  it('is a single line when it has no second', () => {
+    const { container } = render(<RowTitle title="Kofi Boateng" />);
+
+    expect(container.querySelector('.ui-data-table__name')).toBeNull();
+  });
+
+  // Break caught: two facts of a cell run into one line, or the count of the first broken in the middle.
+  it('puts two facts in one cell on a line each, the second quieter, and keeps the first to a line when told', () => {
+    const { container } = render(
+      <>
+        <CellLines first="14 Demo Lane, Osu" second="Accra Central" />
+        <CellLines first="3 packages" second="Booked by a vendor" oneLine />
+      </>,
+    );
+
+    const lines = [...container.querySelectorAll('.ui-data-table__lines')];
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.children).toHaveLength(2);
+    expect(within(lines[0] as HTMLElement).getByText('Accra Central')).toHaveClass(
+      'ui-data-table__support',
+    );
+    expect(lines[0]?.querySelector('.ui-data-table__nowrap')).toBeNull();
+    expect(lines[1]?.querySelector('.ui-data-table__nowrap')?.textContent).toBe('3 packages');
   });
 });

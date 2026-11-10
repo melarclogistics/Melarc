@@ -107,20 +107,17 @@
 }
 
 /*
- * A column that matters less goes when the table's own box is narrow, the lesser first (`priority` of the column): at 1440px with a side panel open the table needs no sideways scroll.
- * A table that is told to keep its columns (`crowded: 'keep'`, the queue with nothing open beside it) loses none: its cells wrap to the room they have, down to the width where it is
- * cards (the review of 499399c: a queue at 1280px with the menu open is a table of every column).
+ * A column that matters less goes when the table's own box cannot hold every column (`priority` of the column, `useColumnFit`): the table measures its box and takes the lesser columns away
+ * as far as it takes for the box not to scroll sideways, so there is no width at which it does (the Product Owner, 10 November 2026). The probe is what it watches: it is as wide as the box
+ * and as high as nothing, so that the rows growing or shrinking as columns go is no change of what is watched.
  */
-@container ui-data-table (max-width: 64rem) {
-  .ui-data-table:not([data-crowded='keep']) .ui-data-table__table [data-priority='3'] {
-    display: none;
-  }
-}
-
-@container ui-data-table (max-width: 48rem) {
-  .ui-data-table:not([data-crowded='keep']) .ui-data-table__table [data-priority='2'] {
-    display: none;
-  }
+.ui-data-table__probe {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 /* ---- The row ---- */
@@ -252,6 +249,23 @@
 .ui-data-table__title .ui-code {
   font-size: var(--text-body-sm-size);
   line-height: var(--text-caption-line-height);
+}
+
+/* A record named by a person's name (`RowTitle title`): whole, in the face of the text, wrapping at its words. */
+.ui-data-table__heading {
+  overflow-wrap: anywhere;
+}
+
+/* Two facts in one cell (`CellLines`), the second quieter under the first. */
+.ui-data-table__lines {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ui-data-table__support {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
 }
 
 /* The name is whole: it wraps under the code and is never cut off with an ellipsis (a name is how an officer tells two requests apart). */

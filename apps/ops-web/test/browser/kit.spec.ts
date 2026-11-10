@@ -2180,22 +2180,32 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     await expect(wide.locator('.ui-data-table__cards')).toHaveCount(0);
   });
 
-  // Break caught: the lesser columns kept at a width that has no room for them, so that a side panel opened beside the table makes it scroll sideways (M12): the columns go
-  // by priority, the row's name and its box always staying.
-  test('lets the lesser columns go as the box narrows, and the others stay', async ({ page }) => {
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the lesser columns kept at a width that has no room for them, so that a side panel opened beside the table
+  // makes it scroll sideways (M12), or taken away at a width that holds them (the old thresholds of 64rem and 48rem, which a table of narrow columns did not need). The columns go as far as it
+  // takes, the most lesser first, the row's name and its state always staying.
+  test('lets the lesser columns go as far as it takes for the box not to scroll, and the others stay', async ({
+    page,
+  }) => {
     await openKit(page, 'data', { width: 1440, height: 900 });
-    const sixty = specimen(page, 'Column priority at 60rem');
-    await expect(sixty.getByRole('columnheader', { name: 'Service date' })).toBeVisible();
-    await expect(sixty.getByRole('columnheader', { name: 'Packages' })).toHaveCount(0);
-
-    const forty = specimen(page, 'Column priority at 40rem');
-    await expect(forty.getByRole('columnheader', { name: 'State' })).toBeVisible();
-    await expect(forty.getByRole('columnheader', { name: 'Service date' })).toHaveCount(0);
-    expect(
-      await forty
+    const sideways = (box: Locator) =>
+      box
         .locator('.ui-data-table__scroller')
-        .evaluate((element) => element.scrollWidth - element.clientWidth),
-    ).toBeLessThanOrEqual(0);
+        .evaluate((element) => element.scrollWidth - element.clientWidth);
+
+    const wide = specimen(page, 'Column fit at 70rem');
+    await expect(wide.getByRole('columnheader')).toHaveCount(6);
+    expect(await sideways(wide)).toBeLessThanOrEqual(0);
+
+    const narrow = specimen(page, 'Column fit at 41rem');
+    await expect(narrow.getByRole('columnheader', { name: 'Request' })).toBeVisible();
+    await expect(narrow.getByRole('columnheader', { name: 'State' })).toBeVisible();
+    // The most lesser went first: the two columns of weight 3 are gone before any of weight 2.
+    await expect(narrow.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    await expect(narrow.getByRole('columnheader', { name: 'Packages' })).toHaveCount(0);
+    expect(await narrow.getByRole('columnheader').count()).toBeLessThan(6);
+    // And no more than it took: the least lesser column stays while the box still holds it (they go one at a time, not all at once).
+    await expect(narrow.getByRole('columnheader', { name: 'Service date' })).toBeVisible();
+    expect(await sideways(narrow)).toBeLessThanOrEqual(0);
   });
 
   // Break caught: the filter popover opened on a phone with no margin from the edge of the screen, its text against the glass (M12).

@@ -10,6 +10,7 @@ import {
   type DataSort,
   type DataTableProps,
 } from '../../components/ui/data-table/DataTable';
+import { CardFacts } from '../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../components/ui/code/OperationalCode';
 import { EmptyState } from '../../components/ui/empty-state/EmptyState';
 import { Input } from '../../components/ui/input/Input';
@@ -54,18 +55,25 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
   ];
 }
 
-/** A sample request as a card, for a table that is narrow: its facts as words, with no control in it (the table draws the card's one button, its box and its act). */
+/**
+ * A sample request as a card, for a table that is narrow: the code with the state, the sender, and the facts, each a label and its value (`CardFacts`: side by side where the card has the room), with no
+ * control in it (the table draws the card's one button, its box and its act).
+ */
 export function requestCard(request: SampleRequest): ReactNode {
   return (
-    <span className="showcase-kit-card">
-      <OperationalCode>{request.code}</OperationalCode>
-      <span>{request.sender_name ?? 'Not recorded'}</span>
-      <span className="showcase-kit-card__facts">
-        <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
-        <span>{serviceDateText(request.scheduled_service_date)}</span>
-        <span>{`${String(request.declared_package_count)} packages`}</span>
-      </span>
-    </span>
+    <CardFacts
+      head={
+        <>
+          <OperationalCode>{request.code}</OperationalCode>
+          <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
+        </>
+      }
+      lead={request.sender_name ?? 'Not recorded'}
+      facts={[
+        { label: 'Service date', value: serviceDateText(request.scheduled_service_date) },
+        { label: 'Packages', value: String(request.declared_package_count) },
+      ]}
+    />
   );
 }
 
@@ -235,7 +243,10 @@ function LoadingThenReady() {
   );
 }
 
-/** The lesser columns go as the table's own box narrows, the date and the state staying. */
+/**
+ * The lesser columns go as far as it takes for the table's box not to scroll sideways (`priority`: the most lesser first), the request and its state staying. Four of the six are wide on purpose
+ * (a line of text that does not wrap), so that a box of 41rem cannot hold them and a box of 70rem can.
+ */
 function Prioritised({ label }: { readonly label: string }) {
   return (
     <Plain
@@ -247,9 +258,28 @@ function Prioritised({ label }: { readonly label: string }) {
           id: 'date',
           header: 'Service date',
           priority: 2,
-          cell: (request) => serviceDateText(request.scheduled_service_date),
+          cell: (request) => <NoWrap>{serviceDateText(request.scheduled_service_date)}</NoWrap>,
         },
-        ...requestColumns(false).slice(3),
+        {
+          id: 'booked',
+          header: 'Booked as',
+          priority: 2,
+          cell: () => <NoWrap>Booked by a vendor from the shop</NoWrap>,
+        },
+        {
+          id: 'packages',
+          header: 'Packages',
+          priority: 3,
+          cell: (request) => (
+            <NoWrap>{`${String(request.declared_package_count)} packages`}</NoWrap>
+          ),
+        },
+        {
+          id: 'hub',
+          header: 'Hub',
+          priority: 3,
+          cell: () => <NoWrap>Accra Central depot</NoWrap>,
+        },
       ]}
     />
   );
@@ -357,16 +387,16 @@ export function DataGroup() {
           <LoadingThenReady />
         </Specimen>
         <Specimen
-          label="Column priority at 60rem: the packages go, the date and the state stay (sample data)"
-          width="60rem"
+          label="Column fit at 70rem: the box holds every column, and every column is drawn (sample data)"
+          width="70rem"
         >
-          <Prioritised label="Pickup requests, in 60rem" />
+          <Prioritised label="Pickup requests, in 70rem" />
         </Specimen>
         <Specimen
-          label="Column priority at 40rem: the service date goes too, the state stays (sample data)"
-          width="40rem"
+          label="Column fit at 41rem: the lesser columns go, the most lesser first, as far as it takes for the box not to scroll sideways (sample data)"
+          width="41rem"
         >
-          <Prioritised label="Pickup requests, in 40rem" />
+          <Prioritised label="Pickup requests, in 41rem" />
         </Specimen>
         <Specimen
           label="Cards, where the box is narrow (22rem): one button for each, its box and its act (sample data)"

@@ -223,7 +223,7 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
       </ButtonLink>
     ) : null;
 
-  // Every column stays (`crowded: keep`): what the officer reads of a stop is its place and its state, and none of them is lesser. Under 40rem of the table's own box each stop is a card.
+  // Every column stays (none is marked lesser): what the officer reads of a stop is its place and its state, and none of them is lesser. Under 40rem of the table's own box each stop is a card.
   const columns: readonly DataColumn<StopFacts>[] = [
     {
       id: 'stop',
@@ -364,7 +364,6 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
             rows={facts}
             rowId={(row) => row.stop.id}
             density="two-line"
-            crowded="keep"
             cardHeadingLevel={3}
             cardTitle={(row) => `Stop ${String(row.stop.sequence)}`}
             card={(row) => (

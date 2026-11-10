@@ -19,6 +19,7 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
+import { flushSync } from 'react-dom';
 
 import { Button } from '../../primitives/button';
 import { Checkbox } from '../../primitives/checkbox';
@@ -55,9 +56,10 @@ export interface DataColumn<Item> {
   /** The page can order the rows by this column: its heading is a button that asks for it. The table sorts nothing. */
   readonly sortable?: boolean;
   /**
-   * How much the column matters when the table is narrow (task R5.2, M12): `1` is always drawn (the default), `2` goes first when the table's own box is under 48rem, and
-   * `3` goes before that, under 64rem, so that a table with a side panel open beside it never needs a sideways scroll at 1440px. A hidden column leaves the page and the
-   * accessibility tree (`display: none`), and the screen chooses which columns may go: the table cannot know. The row-header column and the box are always drawn.
+   * How much the column matters when the table's box cannot hold every column (the Product Owner, 10 November 2026: **no table scrolls sideways**): `1` is always drawn (the default), and `2` and `3`
+   * are the columns the screen marks **lesser**. The table measures its box and takes lesser columns away, `3` before `2` and the later column before the earlier among equals, **only as many
+   * as it takes for the box not to scroll sideways**, and brings them back when the box widens; a column that goes leaves the page and the accessibility tree, and its facts are in the panel
+   * and the record (a card, under 40rem, shows them all). The screen chooses which columns may go: the table cannot know. The row-header column and the box are always drawn.
    */
   readonly priority?: 1 | 2 | 3;
 }
@@ -160,16 +162,11 @@ export interface DataTableProps<Item> {
   readonly cardTitle?: (item: Item) => ReactNode;
   /** The level of a card's heading, so that the page's outline stays in order: 2 (the default) where the cards are under the page's title, 3 under a panel's heading. */
   readonly cardHeadingLevel?: 2 | 3 | 4;
-  /** `auto` (the default) draws cards when the table's own box is under 40rem (see `crowded`); `table` and `cards` fix it, for a screen that knows better and for a test. */
-  readonly layout?: 'auto' | 'table' | 'cards';
   /**
-   * What an `auto` table does when its box is too narrow for every column, which is under 64rem for one that has columns the screen marked lesser (`priority`): `drop` (the default) keeps the
-   * table and takes those columns away, which is right where what they hold is at hand beside the table (a panel that shows the record is open); `cards` draws the cards instead, which
-   * show every fact, which is right where nothing else does (the review of 5edada2, M6: no fact the old cards showed is lost); `keep` keeps the table **and every column** until the box is under
-   * 40rem, the cells wrapping to the room they have, which is right where nothing is beside the table and the room is a laptop's (the review of 499399c: a queue at 1280px with the menu open, a box of
-   * about 61rem, is a table). Without `card` there are no cards and the columns drop (`keep` keeps them).
+   * `auto` (the default): **a table from 40rem of its own box up, cards under it** (a 390px phone), and in a table the lesser columns (`priority`) go as far as it takes for it not to scroll sideways.
+   * `table` and `cards` fix it, for a screen that knows better and for a test. Without `card` there are no cards: the table stays a table at every width, and takes its lesser columns away.
    */
-  readonly crowded?: 'drop' | 'cards' | 'keep';
+  readonly layout?: 'auto' | 'table' | 'cards';
 
   /** Rows that changed since the last read: each is highlighted and the highlight fades over `motion.highlight`. A cue for the eye only: say it in words where it matters. */
   readonly changedIds?: readonly string[];
@@ -215,30 +212,63 @@ export interface DataTableProps<Item> {
   readonly focusRowId?: string | null;
 }
 
-interface RowTitleProps {
-  /** The record's code, whole. */
-  readonly code: string;
-  /** Under the code, one quiet line: a name. Without it the row is a single line. */
+type RowTitleProps = (
+  | {
+      /** The record's code, whole, in the monospaced face. */
+      readonly code: string;
+      readonly title?: never;
+    }
+  | {
+      /** A record that is named by a person's name and not by a code (a staff profile, a rider, a vendor's account): its name, in the face of the text, whole. */
+      readonly title: string;
+      readonly code?: never;
+    }
+) & {
+  /** Under the first line, one quiet line: the name of a code's record, or the work email or the phone of a person. Without it the row is a single line. */
   readonly name?: string;
   /**
-   * The record's own page: the code is then a link to it. For a table whose rows open a page of their own and not a panel, and so have no button that opens them (the approver's queue):
-   * the link is a real one, which a keyboard, a middle click and a new tab all use.
+   * The record's own page: the first line is then a link to it. For a table whose rows open a page of their own and not a panel, and so have no button that opens them (the approver's queue,
+   * the staff list): the link is a real one, which a keyboard, a middle click and a new tab all use.
    */
   readonly to?: string;
-}
+};
 
-/** The row-header cell of a queue: the code in the monospaced face over a name in the quiet text. Two lines are a `two-line` density. */
-export function RowTitle({ code, name, to }: RowTitleProps) {
+/**
+ * The row-header cell of a queue: the record's code in the monospaced face, or its name (`title`) in the face of the text, over one quiet line (`name`). Two lines are a `two-line` density. A
+ * person is named by a name and a code by its code, so no page builds a title of its own (three did, the review of f6cf02b).
+ */
+export function RowTitle({ code, title, name, to }: RowTitleProps) {
+  const first =
+    code === undefined ? (
+      <span className="ui-data-table__heading">{title}</span>
+    ) : (
+      <OperationalCode>{code}</OperationalCode>
+    );
   return (
     <span className="ui-data-table__title">
-      {to === undefined ? (
-        <OperationalCode>{code}</OperationalCode>
-      ) : (
-        <Link to={to}>
-          <OperationalCode>{code}</OperationalCode>
-        </Link>
-      )}
+      {to === undefined ? first : <Link to={to}>{first}</Link>}
       {name === undefined ? null : <span className="ui-data-table__name">{name}</span>}
+    </span>
+  );
+}
+
+/**
+ * Two facts that belong together in one cell, each on its own line: the first as it is, the second quieter beneath it (an address over its hub, a person over a time). Both wrap at their words;
+ * `oneLine` keeps the first to a line, as a count must be (see `NoWrap`).
+ */
+export function CellLines({
+  first,
+  second,
+  oneLine = false,
+}: {
+  readonly first: ReactNode;
+  readonly second: ReactNode;
+  readonly oneLine?: boolean;
+}) {
+  return (
+    <span className="ui-data-table__lines">
+      <span>{oneLine ? <NoWrap>{first}</NoWrap> : first}</span>
+      <span className="ui-data-table__support">{second}</span>
     </span>
   );
 }
@@ -251,33 +281,16 @@ export function NoWrap({ children }: { readonly children: ReactNode }) {
   return <span className="ui-data-table__nowrap">{children}</span>;
 }
 
-/** Under this width of the table's own box, in rem (so that enlarged text turns the table into cards sooner), the rows are drawn as cards. */
+/** Under this width of the table's own box, in rem (so that enlarged text turns the table into cards sooner), the rows are drawn as cards: a table is a table from 40rem up. */
 export const CARDS_BELOW_REM = 40;
 
-/** At this width of the table's own box and under, in rem, the first of the columns the screen marked lesser goes (the stylesheet's first container query). */
-export const COLUMNS_GO_AT_REM = 64;
-
-/**
- * Whether a table whose box is `widthRem` wide is drawn as cards. By default that is under `CARDS_BELOW_REM`, and so it is for `crowded: 'keep'`, which also keeps every column down to there.
- * A table that has lesser columns and is `crowded: 'cards'` takes the cards as soon as its first lesser column would go, so that a fact is never dropped where nothing else shows it.
- */
-export function drawsCards(
-  widthRem: number,
-  crowded: 'drop' | 'cards' | 'keep',
-  hasLesserColumns: boolean,
-): boolean {
-  return crowded === 'cards' && hasLesserColumns
-    ? widthRem <= COLUMNS_GO_AT_REM
-    : widthRem < CARDS_BELOW_REM;
+/** Whether a table whose box is `widthRem` wide is drawn as cards: under `CARDS_BELOW_REM`, and at every width above it a table, whose lesser columns go before it would scroll sideways. */
+export function drawsCards(widthRem: number): boolean {
+  return widthRem < CARDS_BELOW_REM;
 }
 
 /** Whether the table's box is narrow enough for cards: measured as the box changes, and left as it was where nothing can be measured (no layout, a hidden box). */
-function useNarrow(
-  root: RefObject<HTMLDivElement | null>,
-  layout: 'auto' | 'table' | 'cards',
-  crowded: 'drop' | 'cards' | 'keep',
-  hasLesserColumns: boolean,
-) {
+function useNarrow(root: RefObject<HTMLDivElement | null>, layout: 'auto' | 'table' | 'cards') {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const element = root.current;
@@ -286,7 +299,7 @@ function useNarrow(
       const width = element.clientWidth;
       if (width === 0) return;
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      setNarrow(drawsCards(width / rem, crowded, hasLesserColumns));
+      setNarrow(drawsCards(width / rem));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -294,8 +307,73 @@ function useNarrow(
     return () => {
       observer.disconnect();
     };
-  }, [root, layout, crowded, hasLesserColumns]);
+  }, [root, layout]);
   return layout === 'cards' ? true : layout === 'table' ? false : narrow;
+}
+
+/**
+ * The columns the screen marked lesser, in the order they go: the most lesser first (`3` before `2`), the later column before the earlier among equals. The row-header column is never one of them.
+ */
+export function dropOrderOf<Item>(columns: readonly DataColumn<Item>[]): readonly string[] {
+  return columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => (column.priority ?? 1) > 1 && column.rowHeader !== true)
+    .sort(
+      (first, second) =>
+        (second.column.priority ?? 1) - (first.column.priority ?? 1) || second.index - first.index,
+    )
+    .map(({ column }) => column.id);
+}
+
+/**
+ * **No table scrolls sideways** (the Product Owner, 10 November 2026): the lesser columns that go, as the table's box is measured. A table drawn as a table whose box scrolls sideways takes the next of
+ * its lesser columns away (`dropOrderOf`) and measures again, until it does not or none is left; it begins again from every column whenever the width of its box changes (a column that now fits comes
+ * back) or what is in it does (`contentKey`: its rows and its columns), so that the lesser columns are never fewer than the room needs. The measure is a layout effect, so what is drawn first is
+ * what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is read from a probe of no height, so that the columns going,
+ * which shortens the rows, is not a change of what is observed.
+ */
+function useColumnFit(
+  scroller: RefObject<HTMLDivElement | null>,
+  probe: RefObject<HTMLDivElement | null>,
+  measuring: boolean,
+  order: readonly string[],
+  contentKey: string,
+): ReadonlySet<string> {
+  const [dropped, setDropped] = useState(0);
+  /** Counts the times the width of the box changed: the measure begins again each time, even when every column was drawn already and nothing else changes. */
+  const [epoch, setEpoch] = useState(0);
+  const [seenKey, setSeenKey] = useState(contentKey);
+  if (seenKey !== contentKey) {
+    setSeenKey(contentKey);
+    setDropped(0);
+  }
+  const count = Math.min(dropped, order.length);
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const box = scroller.current;
+      if (!measuring || box === null || box.clientWidth === 0) return;
+      if (box.scrollWidth > box.clientWidth + 1 && count < order.length) setDropped(count + 1);
+    };
+    measure();
+  }, [scroller, measuring, count, order.length, contentKey, epoch]);
+  useLayoutEffect(() => {
+    const element = probe.current;
+    if (element === null || typeof ResizeObserver === 'undefined') return;
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      flushSync(() => {
+        setDropped(0);
+        setEpoch((value) => value + 1);
+      });
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [probe]);
+  return useMemo(() => new Set(order.slice(0, count)), [order, count]);
 }
 
 /** A control that can take focus now: not a disabled button, not one marked unavailable. */
@@ -331,7 +409,6 @@ export function DataTable<Item>({
   cardTitle,
   cardHeadingLevel = 2,
   layout = 'auto',
-  crowded = 'drop',
   changedIds,
   sort,
   onSortChange,
@@ -353,9 +430,22 @@ export function DataTable<Item>({
   const root = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
-  const hasLesserColumns = columns.some((column) => (column.priority ?? 1) > 1);
-  const narrow = useNarrow(root, layout, crowded, hasLesserColumns);
+  const probe = useRef<HTMLDivElement>(null);
+  const narrow = useNarrow(root, layout);
   const cards = card !== undefined && narrow;
+  const order = dropOrderOf(columns);
+  const columnsKey = columns
+    .map((column) => `${column.id}:${String(column.priority ?? 1)}`)
+    .join(',');
+  const dropped = useColumnFit(
+    scroller,
+    probe,
+    !cards && status === 'ready' && rows.length > 0,
+    order,
+    `${columnsKey}#${rows.map(rowId).join('|')}`,
+  );
+  /** The columns drawn: every one but the lesser columns that the room has taken away. */
+  const shown = columns.filter((column) => !dropped.has(column.id));
   /** The controls of each row, found again when focus is to be put on one: the arrows land on its button that opens it, else its checkbox, else its action. */
   const controls = useRef(
     new Map<string, Partial<Record<'open' | 'box' | 'action', HTMLElement>>>(),
@@ -599,7 +689,7 @@ export function DataTable<Item>({
     .join(' ');
 
   const columnCount =
-    columns.length + (selection === undefined ? 0 : 1) + (rowAction === undefined ? 0 : 1);
+    shown.length + (selection === undefined ? 0 : 1) + (rowAction === undefined ? 0 : 1);
 
   /** The box of a row: a label as big as its cell, so that a press beside the box chooses the row and never opens it. It has no words: the box is named by its own label. */
   const box = (row: Row<Item>, tab: number): ReactNode =>
@@ -706,8 +796,9 @@ export function DataTable<Item>({
       className="ui-data-table"
       data-density={density}
       data-layout={cards ? 'cards' : 'table'}
-      data-crowded={crowded}
     >
+      {/* Of no height and the width of the box: what the table watches to start again from every column when its room changes (`useColumnFit`). */}
+      <div ref={probe} className="ui-data-table__probe" aria-hidden="true" />
       {/* The regions that speak are in the page before they have anything to say (a region that arrives with its words is not announced by most screen readers): one for the
           state of the rows (stale, loading) and one for a failure; the words come into them, and the visible ones draw beside. */}
       <div role="status" className="ui-data-table__live">
@@ -851,7 +942,7 @@ export function DataTable<Item>({
                     <VisuallyHidden>Select</VisuallyHidden>
                   </TableHead>
                 )}
-                {columns.map((column) => {
+                {shown.map((column) => {
                   const sorted = sort?.columnId === column.id ? sort.direction : undefined;
                   return (
                     <TableHead
@@ -943,36 +1034,44 @@ export function DataTable<Item>({
                       {selection === undefined ? null : (
                         <TableCell className="ui-data-table__select">{box(row, tab)}</TableCell>
                       )}
-                      {row.getVisibleCells().map((cell) => {
-                        const column = columns.find((candidate) => candidate.id === cell.column.id);
-                        const content = flexRender(cell.column.columnDef.cell, cell.getContext());
-                        if (column?.rowHeader === true) {
-                          return (
-                            <TableHead
-                              key={cell.id}
-                              scope="row"
-                              className="ui-data-table__code"
-                              data-align={column.align === 'end' ? 'end' : undefined}
-                            >
-                              {opener(row, tab, content)}
-                              {isChanged ? (
-                                <span id={`${hintId}-${id}-changed`} className="ui-visually-hidden">
-                                  Updated
-                                </span>
-                              ) : null}
-                            </TableHead>
+                      {row
+                        .getVisibleCells()
+                        .filter((cell) => !dropped.has(cell.column.id))
+                        .map((cell) => {
+                          const column = columns.find(
+                            (candidate) => candidate.id === cell.column.id,
                           );
-                        }
-                        return (
-                          <TableCell
-                            key={cell.id}
-                            data-align={column?.align === 'end' ? 'end' : undefined}
-                            data-priority={column === undefined ? undefined : priorityOf(column)}
-                          >
-                            {content}
-                          </TableCell>
-                        );
-                      })}
+                          const content = flexRender(cell.column.columnDef.cell, cell.getContext());
+                          if (column?.rowHeader === true) {
+                            return (
+                              <TableHead
+                                key={cell.id}
+                                scope="row"
+                                className="ui-data-table__code"
+                                data-align={column.align === 'end' ? 'end' : undefined}
+                              >
+                                {opener(row, tab, content)}
+                                {isChanged ? (
+                                  <span
+                                    id={`${hintId}-${id}-changed`}
+                                    className="ui-visually-hidden"
+                                  >
+                                    Updated
+                                  </span>
+                                ) : null}
+                              </TableHead>
+                            );
+                          }
+                          return (
+                            <TableCell
+                              key={cell.id}
+                              data-align={column?.align === 'end' ? 'end' : undefined}
+                              data-priority={column === undefined ? undefined : priorityOf(column)}
+                            >
+                              {content}
+                            </TableCell>
+                          );
+                        })}
                       {rowAction === undefined ? null : (
                         <TableCell className="ui-data-table__actions">{action(row, tab)}</TableCell>
                       )}

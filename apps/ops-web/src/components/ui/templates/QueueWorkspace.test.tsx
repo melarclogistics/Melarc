@@ -283,12 +283,9 @@ describe('QueueWorkspace', () => {
     );
   });
 
-  // Break caught (the review of 499399c): a queue with nothing open beside it told to take cards where a lesser column would go, so that at 1280px with the menu open (a box of
-  // about 61rem) it drew cards though its table had room for every column. With no panel the table keeps every column from 40rem up; a panel docked beside it lets the lesser
-  // columns go (the record shows what they held); a panel that is a sheet covers the table, and the table under it is cards.
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a template that chooses the table's crowding itself (keep, drop, cards by whether a panel is open), which is a
+  // second place that decides what the room holds. The table measures its own box (DataTable.test.tsx), whatever is beside it: with nothing open, with a panel docked and with a sheet.
   describe('the room the table is given', () => {
-    const crowded = (container: HTMLElement) =>
-      container.querySelector('.ui-data-table')?.getAttribute('data-crowded');
     const panel = {
       open: true,
       onClose: () => undefined,
@@ -300,15 +297,14 @@ describe('QueueWorkspace', () => {
       vi.unstubAllGlobals();
     });
 
-    it('keeps the table and every column while nothing is open beside it', () => {
-      expect(crowded(renderQueue().container)).toBe('keep');
+    it('asks nothing of the table about its crowding, with nothing open beside it and with a panel docked', () => {
+      for (const container of [renderQueue().container, renderQueue({ panel }).container]) {
+        expect(container.querySelector('.ui-data-table')).not.toHaveAttribute('data-crowded');
+        expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-layout', 'table');
+      }
     });
 
-    it('lets the lesser columns go while a record is docked beside the table', () => {
-      expect(crowded(renderQueue({ panel }).container)).toBe('drop');
-    });
-
-    it('draws cards under a panel that is a sheet over the table', () => {
+    it('asks nothing of it under a panel that is a sheet over the table either', () => {
       vi.stubGlobal('matchMedia', (query: string) => ({
         matches: query === SHEET_QUERY,
         media: query,
@@ -316,12 +312,9 @@ describe('QueueWorkspace', () => {
         removeEventListener: () => undefined,
       }));
 
-      expect(crowded(renderQueue({ panel }).container)).toBe('cards');
-    });
+      const { container } = renderQueue({ panel });
 
-    it('keeps the table of a page that asks for its own crowding', () => {
-      const { container } = renderQueue({ table: { ...props().table, crowded: 'drop' } });
-      expect(crowded(container)).toBe('drop');
+      expect(container.querySelector('.ui-data-table')).not.toHaveAttribute('data-crowded');
     });
   });
 

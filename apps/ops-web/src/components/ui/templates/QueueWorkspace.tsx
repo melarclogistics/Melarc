@@ -14,7 +14,6 @@ import { FilterBar, type FilterBarProps } from '../filter-bar/FilterBar';
 import { PageHeader, type PageHeaderProps } from '../page-header/PageHeader';
 import { Panel } from '../panel/Panel';
 import { SidePanel, type SidePanelProps } from '../side-panel/SidePanel';
-import { SHEET_QUERY, useMediaQuery } from '../side-panel/use-media-query';
 import { ViewTabs, type ViewTabsProps } from '../view-tabs/ViewTabs';
 import './queue-workspace.css';
 
@@ -213,12 +212,8 @@ export function QueueWorkspace<Item>({
   // and, once the layout has settled, focus that the swap dropped is put back (never focus the person has moved to a control of their own).
   const open = panel?.open === true;
   const wasOpen = useRef(false);
-  // A panel that is docked beside the table shows what the columns the page marked lesser would hold, so the table may drop them. With nothing open the table keeps every column down to
-  // 40rem, its cells wrapping, and is cards only under that (the review of 499399c: at 1280px with the menu open, a box of about 61rem, the queue is a table). The panel that is the
-  // full-screen sheet of a tablet covers the table, and the table under it is cards.
-  const sheet = useMediaQuery(SHEET_QUERY);
-  const docked = open && !sheet;
-  const crowded = docked ? 'drop' : open ? 'cards' : 'keep';
+  // The table decides what its room holds (`DataTable`: a table from 40rem up whose lesser columns go as far as it takes for it not to scroll sideways, and cards under 40rem): a panel docked
+  // beside it narrows its box and the columns go by themselves; the page and this template ask nothing of it.
   useEffect(() => {
     if (open) {
       wasOpen.current = true;
@@ -248,7 +243,6 @@ export function QueueWorkspace<Item>({
       {...table}
       ref={tableHandle}
       busy={result.status === 'ready' && result.refreshing === true}
-      crowded={table.crowded ?? crowded}
       {...(onOpen === undefined
         ? {}
         : {
