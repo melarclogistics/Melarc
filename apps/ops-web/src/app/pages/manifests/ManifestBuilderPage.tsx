@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import { AlertDialog } from '../../../components/ui/dialog/AlertDialog';
 import {
+  CellLines,
   DataTable,
   NoWrap,
   RowTitle,
@@ -82,6 +84,8 @@ interface RunHub {
 const NO_HUBS: readonly { readonly id: string; readonly display_name: string }[] = [];
 
 const NOT_RECORDED = 'Not recorded';
+/** What the pool says under the day of a request that was promised for an earlier day than the run's. */
+const CARRIED_OVER = 'Carried over: promised for an earlier day';
 /**
  * A session that lists no hub has nothing to choose and nothing to build a run from (task R5.2, M15b: it was told "Choose the hub first" with nothing to choose). The
  * words name no role and no permission, as the portal's refusals do; they are provisional copy for the Product Owner to approve.
@@ -118,8 +122,9 @@ const isFinishedDate = (date: string | null): date is string =>
   date !== null && calendarDateOf(date) !== undefined && Number(date.slice(0, 4)) >= 1000;
 
 /**
- * The pool's columns: **none is marked lesser** (the review of 5edada2, M6). Nothing stands beside the pool that shows what a request holds (the run lists only what was chosen), so the
- * pool keeps the address and the count where the room is the pool's beside the run at 1440px, and wraps what is long; it is the cards, with every fact, where it is too narrow for the columns.
+ * The pool's columns: **none is marked lesser** (nothing stands beside the pool that shows what a request holds, since the run lists only what was chosen, so the pool is where an officer reads the
+ * promised day, the address and the count to choose by; this list marks nothing, and its table has nothing to take away). The columns wrap what is long; where the pool's own box is under 40rem
+ * it is the cards, with every fact.
  */
 const POOL_COLUMNS = (
   isCarriedOver: (promised: string) => boolean,
@@ -134,23 +139,23 @@ const POOL_COLUMNS = (
   {
     id: 'promised',
     header: 'Promised for',
-    cell: (row) => (
-      <span className="manifest-lines">
-        <NoWrap>{serviceDateText(row.scheduled_service_date)}</NoWrap>
-        {isCarriedOver(row.scheduled_service_date) ? (
-          <span className="manifest-support">Carried over: promised for an earlier day</span>
-        ) : null}
-      </span>
-    ),
+    cell: (row) => {
+      const promised = <NoWrap>{serviceDateText(row.scheduled_service_date)}</NoWrap>;
+      return isCarriedOver(row.scheduled_service_date) ? (
+        <CellLines first={promised} second={CARRIED_OVER} />
+      ) : (
+        promised
+      );
+    },
   },
   {
     id: 'where',
     header: 'Pickup address / hub',
     cell: (row) => (
-      <span className="manifest-lines">
-        <span>{row.resolved_pickup_location?.address ?? NOT_RECORDED}</span>
-        <span className="manifest-support">{hubNameOf(row.responsible_hub_id, hubs)}</span>
-      </span>
+      <CellLines
+        first={row.resolved_pickup_location?.address ?? NOT_RECORDED}
+        second={hubNameOf(row.responsible_hub_id, hubs)}
+      />
     ),
   },
   {
@@ -160,35 +165,40 @@ const POOL_COLUMNS = (
   },
 ];
 
-/** A request of the pool as a card, for a pool too narrow for the columns: the table draws the card's one control (the box that chooses it), so the card holds none. */
+/**
+ * A request of the pool as a card, for a pool too narrow for the columns: the sender, and every fact of the row, each a label and its value (`CardFacts`). The table draws the card's one control
+ * (the box that chooses it), so the card holds none.
+ */
 function PoolCard({
   request,
   carriedOver,
+  hubs,
 }: {
   readonly request: PickupRequestView;
   readonly carriedOver: boolean;
+  readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
 }) {
+  const promised = serviceDateText(request.scheduled_service_date);
   return (
-    <>
-      <p className="manifest-support">{request.sender_name ?? NOT_RECORDED}</p>
-      <dl className="manifest-card__facts">
-        <div className="manifest-card__fact">
-          <dt>Promised for</dt>
-          <dd>
-            {serviceDateText(request.scheduled_service_date)}
-            {carriedOver ? ' · Carried over: promised for an earlier day' : ''}
-          </dd>
-        </div>
-        <div className="manifest-card__fact">
-          <dt>Pickup address</dt>
-          <dd>{request.resolved_pickup_location?.address ?? NOT_RECORDED}</dd>
-        </div>
-        <div className="manifest-card__fact">
-          <dt>Packages</dt>
-          <dd>{packagesText(request)}</dd>
-        </div>
-      </dl>
-    </>
+    <CardFacts
+      lead={request.sender_name ?? NOT_RECORDED}
+      facts={[
+        {
+          label: 'Promised for',
+          value: carriedOver ? <CellLines first={promised} second={CARRIED_OVER} /> : promised,
+        },
+        {
+          label: 'Pickup address / hub',
+          value: (
+            <CellLines
+              first={request.resolved_pickup_location?.address ?? NOT_RECORDED}
+              second={hubNameOf(request.responsible_hub_id, hubs)}
+            />
+          ),
+        },
+        { label: 'Packages', value: packagesText(request) },
+      ]}
+    />
   );
 }
 
@@ -700,6 +710,7 @@ export function ManifestBuilderPage() {
                         <PoolCard
                           request={row}
                           carriedOver={isCarriedOver(row.scheduled_service_date)}
+                          hubs={hubs}
                         />
                       )}
                       selection={{

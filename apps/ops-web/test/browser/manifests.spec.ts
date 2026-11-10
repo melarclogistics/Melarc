@@ -1375,6 +1375,27 @@ test.describe('the pickup runs, drawn for the room they have (the Product Owner,
   });
 });
 
+test.describe('the builder’s pool, drawn for the room it has (the Product Owner, 10 November 2026)', () => {
+  // Break caught: a card that tells less than the row it replaces (the hub under the address, the count of packages, or the day left out where the table has no room for its columns).
+  test('draws a card for each request of the pool at 390px with every fact, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/manifests/new');
+
+    const cards = page
+      .getByRole('list', { name: 'Confirmed pickups waiting for a pickup run' })
+      .getByRole('listitem');
+    await expect(cards.first()).toBeVisible();
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Promised for',
+      'Pickup address / hub',
+      'Packages',
+    ]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+});
+
 test.describe('every screen, at the verified widths', () => {
   for (const { width, height } of VIEWPORTS) {
     for (const screen of SCREENS) {
