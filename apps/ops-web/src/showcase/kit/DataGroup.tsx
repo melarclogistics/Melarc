@@ -558,6 +558,15 @@ export function DataGroup() {
         >
           <ProseColumns label="Pickup requests, prose, in 44rem" />
         </Specimen>
+        {['38rem', '41rem', '47rem'].map((width) => (
+          <Specimen
+            key={width}
+            label={`Prose columns at ${width}, for the faces' test: the same table in a box a little narrower or wider (sample data)`}
+            width={width}
+          >
+            <ProseColumns label={`Pickup requests, prose, in ${width}`} />
+          </Specimen>
+        ))}
         <Specimen label="A list near the height of the window: the fit does not follow the page's scrollbar (sample data)">
           <NearTheWindow label="Pickup requests, tall rows" />
         </Specimen>

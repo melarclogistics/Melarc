@@ -8,7 +8,7 @@ import { vi } from 'vitest';
  * - `resize` changes the width and tells every observer of the box, as a browser does;
  * - `setNeed` changes what a column needs (a face that loaded, a cell that grew), and tells nobody;
  * - `growTable` tells the observers of the table element itself (it grew wider than its box), which is how a browser says that what is in it grew;
- * - `fontsLoaded` tells the page's `document.fonts` that the faces finished loading, as a browser does;
+ * - `fontsLoaded` tells the page's `document.fonts` that the faces finished loading, as a browser does, and `fontsReadyWithoutEvent` does it as WebKit does for some faces, with `ready` and no event;
  *
  * and `restoreTableRoom` puts the measuring back to nothing, after each test.
  */
@@ -32,7 +32,12 @@ export function tableRoom(initialWidth: number, initialNeed = 200) {
     }
   }
   vi.stubGlobal('ResizeObserver', Observer);
-  const fonts = new EventTarget();
+  const fonts = Object.assign(new EventTarget(), { status: 'loading' });
+  let settleReady: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => {
+    settleReady = resolve;
+  });
+  Object.defineProperty(fonts, 'ready', { value: ready });
   Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
@@ -68,7 +73,14 @@ export function tableRoom(initialWidth: number, initialNeed = 200) {
       tell((target) => target.matches('table'));
     },
     fontsLoaded(): void {
+      fonts.status = 'loaded';
       fonts.dispatchEvent(new Event('loadingdone'));
+    },
+    /** The faces are in and the engine sent no `loadingdone`: only `document.fonts.ready` says so (WebKit, for a face its layout asked for). */
+    fontsReadyWithoutEvent(): Promise<void> {
+      fonts.status = 'loaded';
+      settleReady();
+      return ready;
     },
   };
 }

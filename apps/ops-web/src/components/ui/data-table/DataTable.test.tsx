@@ -1534,6 +1534,21 @@ describe('DataTable: words wrap at their words, and a column keeps its room (run
     expect(headers()).toHaveLength(5);
   });
 
+  // Break caught (the targeted run of 11 November 2026): WebKit finishes loading a face its layout asked for and sends no `loadingdone`, so a fit that listens for the event alone never measures again
+  // there. `document.fonts.ready` is told in every engine, and the table that finds the faces still loading when it is drawn waits for it too.
+  it('measures again from every column when only `ready` says the faces are in', async () => {
+    const room = tableRoom(900);
+    render(<Table columns={LESSER} />);
+    expect(headers()).toHaveLength(4);
+
+    room.setNeed(150);
+    await act(async () => {
+      await room.fontsReadyWithoutEvent();
+    });
+
+    expect(headers()).toHaveLength(5);
+  });
+
   // Break caught: a table that watches its box and not itself, so that what is in it growing wider (a face wider than the first, a cell that gets its words later) is never seen: the box scrolls
   // sideways until the person resizes the window. On that signal columns are only added to what has gone, never given back.
   it('takes another lesser column away when the table grows wider than its box, and gives none back on that signal', () => {

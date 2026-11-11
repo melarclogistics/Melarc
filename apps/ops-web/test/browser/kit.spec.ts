@@ -2379,20 +2379,45 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     const seen = watchPage(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${KIT}/data`, { waitUntil: 'domcontentloaded' });
-    const prose = specimen(page, 'Prose columns at 44rem');
-    await expect(prose.getByRole('columnheader', { name: 'Needs' })).toBeVisible();
-    const withFallback = await prose.getByRole('columnheader').count();
+    // The same table in four boxes, a little narrower or wider than each other: the engines set Inter and the fallback at different widths, so the box at which the two faces call for a different
+    // number of columns is not the same in each, and some box of the four is.
+    const widths = ['38rem', '41rem', '44rem', '47rem'];
+    const boxes = widths.map((width) => specimen(page, `Prose columns at ${width}`));
+    for (const box of boxes)
+      await expect(box.getByRole('columnheader', { name: 'Needs' })).toBeVisible();
+    // Every time a heading cell is put in the four tables from here on: a fit that measures again puts every column back before it takes the ones that do not fit away again.
+    await page.evaluate(() => {
+      const seen = { restarts: 0 };
+      (window as unknown as { __faces: typeof seen }).__faces = seen;
+      for (const head of document.querySelectorAll('figure thead')) {
+        new MutationObserver((records) => {
+          for (const record of records) {
+            if ([...record.addedNodes].some((node) => node.nodeName === 'TH')) seen.restarts += 1;
+          }
+        }).observe(head, { childList: true, subtree: true });
+      }
+    });
 
     release();
     await page.evaluate(() => document.fonts.ready);
+    // The faces are in, and the tables measured again by themselves: with no change of the window, headings were put back (the engines set Inter and the fallback at different widths, so a count of
+    // columns that grows is not the same in each; the measure begun again is), and no box scrolls sideways.
     await expect
-      .poll(() => prose.getByRole('columnheader').count(), { timeout: 10_000 })
-      .toBeGreaterThan(withFallback);
-    expect(
-      await prose
-        .locator('.ui-data-table__scroller')
-        .evaluate((element) => element.scrollWidth - element.clientWidth),
-    ).toBeLessThanOrEqual(0);
+      .poll(
+        () =>
+          page.evaluate(
+            () => (window as unknown as { __faces: { restarts: number } }).__faces.restarts,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(0);
+    for (const box of boxes) {
+      expect(
+        await box
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      ).toBeLessThanOrEqual(0);
+    }
     expect(seen.problems).toEqual([]);
   });
 

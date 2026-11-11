@@ -434,6 +434,14 @@ function useColumnFit(
     const page: { readonly fonts?: FontFaceSet } = document;
     const fonts = page.fonts;
     fonts?.addEventListener('loadingdone', restart);
+    // The faces that are still on their way when the table is drawn: `ready` is told when they are in, which WebKit does for a face its layout asked for where it sends no `loadingdone` (found by the
+    // targeted run of 11 November 2026). The two are the same moment in an engine that sends both, and the second restart is a measure that changes nothing.
+    let gone = false;
+    if (fonts?.status === 'loading') {
+      void fonts.ready.then(() => {
+        if (!gone) restart();
+      });
+    }
     let observer: ResizeObserver | undefined;
     if (element !== null && typeof ResizeObserver !== 'undefined') {
       let width = element.clientWidth;
@@ -445,6 +453,7 @@ function useColumnFit(
       observer.observe(element);
     }
     return () => {
+      gone = true;
       fonts?.removeEventListener('loadingdone', restart);
       observer?.disconnect();
     };
