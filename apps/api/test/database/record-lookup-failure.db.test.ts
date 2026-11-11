@@ -58,6 +58,13 @@ vi.mock('../../src/platform/queue-summary/statement-limit.js', async (importOrig
 /** The bound the scenarios give the server instead of three seconds: a minute, far beyond any of them. */
 const CEILING_MS = 60_000;
 
+/** The statement that sets the bound (`limitStatements`), as the trace shows it: values taken out, in lower case. */
+const isTheBound = (statement: string): boolean =>
+  statement.includes('set_config( ?, least(') && statement.includes('from pg_settings');
+
+/** A search of a lookup, as the trace shows it: every search is a name matched with `ilike` (the requests, the vendors, the riders, the staff). */
+const isASearch = (statement: string): boolean => statement.includes(' ilike ');
+
 let routes: VendorRoutes;
 
 beforeAll(async () => {
@@ -318,10 +325,12 @@ describe('every statement of a lookup has the bound of three seconds on the serv
     const admin = await routes.platformAdmin();
     bound.ceiling = undefined;
     bound.asked.length = 0;
+    let statements: readonly string[] = [];
     try {
-      const answer = await ask(admin, 'zuko');
+      const traced = await routes.kit.trace(() => ask(admin, 'zuko'));
 
-      expect(answer.status).toBe(200);
+      expect(traced.result.status).toBe(200);
+      statements = traced.statements;
     } finally {
       bound.ceiling = CEILING_MS;
     }
@@ -330,5 +339,26 @@ describe('every statement of a lookup has the bound of three seconds on the serv
     // the acceptance criterion's, written here as the number it names and not as the constant the application reads.
     expect(bound.asked.length).toBeGreaterThanOrEqual(3);
     for (const each of bound.asked) expect(each).toEqual({ milliseconds: 3000, effective: '3s' });
+
+    // The order (run 7, Stage 3.6): the test is named for it and used to check none. The statements the application's login sent are cut into the transactions they ran in, and in each
+    // one that searched, the bound was set before the first search of its key: a bound set after the search, or after the first of several, would have the first statement run unbounded.
+    const transactions: string[][] = [];
+    for (const statement of statements) {
+      if (statement.startsWith('begin')) transactions.push([]);
+      transactions.at(-1)?.push(statement);
+    }
+    const searching = transactions.filter((transaction) => transaction.some(isASearch));
+    expect(searching.length, 'one transaction for each key searched').toBeGreaterThanOrEqual(3);
+    for (const transaction of searching) {
+      const boundAt = transaction.findIndex(isTheBound);
+      const searchAt = transaction.findIndex(isASearch);
+      expect(
+        boundAt,
+        `the bound is set in the transaction that searches: ${transaction.join(' | ')}`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(boundAt, `before its first search: ${transaction.join(' | ')}`).toBeLessThan(searchAt);
+    }
+    // One setting of the bound for each transaction that searched, and the application's mock saw each of them.
+    expect(bound.asked).toHaveLength(searching.length);
   }, 60_000);
 });
