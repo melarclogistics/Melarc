@@ -358,8 +358,9 @@ test.describe('the authenticator in a browser', () => {
 
     await page.reload();
 
+    // The entry remembers that the code was shown here (not the code): the page says what happened and what to do (run 7, Stage 2.4), and the seed is not on it.
     await expect(
-      page.getByRole('heading', { level: 1, name: 'This link cannot be used' }),
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
     ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
   });
@@ -397,7 +398,7 @@ test.describe('the authenticator in a browser', () => {
     await page.goBack();
 
     await expect(
-      page.getByRole('heading', { level: 1, name: 'This link cannot be used' }),
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
     ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
   });

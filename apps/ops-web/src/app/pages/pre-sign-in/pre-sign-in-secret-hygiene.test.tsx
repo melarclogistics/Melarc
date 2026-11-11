@@ -300,7 +300,10 @@ describe('the seed an authenticator is set up with', () => {
       vi.advanceTimersByTime(MAX_HOLD_MS);
     });
 
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    // The code has gone, and the page says what happened (run 7, Stage 2.4: not that the link cannot be used, which was used) and shows nothing of it.
+    expect(
+      await screen.findByRole('heading', { name: 'Your authenticator is not set up yet' }),
+    ).toBeVisible();
     expect(whereIs(...SEED_FORMS, CONTINUATION)).toEqual([]);
   });
 
@@ -318,7 +321,7 @@ describe('the seed an authenticator is set up with', () => {
     await act(async () => {
       await router.navigate(-1);
     });
-    await screen.findByRole('heading', { name: 'This link cannot be used' });
+    await screen.findByRole('heading', { name: 'Your authenticator is not set up yet' });
     expect(whereIs(...SEED_FORMS, CONTINUATION)).toEqual([]);
   });
 

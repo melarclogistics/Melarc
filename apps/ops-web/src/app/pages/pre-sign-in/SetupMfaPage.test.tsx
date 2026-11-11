@@ -30,6 +30,8 @@ const SEED = 'SENTINELSEED234567ABCDEFGH';
 const URI = `otpauth://totp/Melarc:synthetic.officer?secret=${SEED}&issuer=Melarc&period=30`;
 const CONTINUATION = 'synthetic-continuation-grant';
 const SETUP = 'POST /auth/staff/setup/credential';
+/** The heading of a person who comes back after the code has gone (run 7, Stage 2.4). */
+const NOT_SET_UP = 'Your authenticator is not set up yet';
 const BEGIN = 'POST /auth/staff/setup/mfa/begin';
 const ENROL = 'POST /auth/staff/setup/mfa';
 const PRIVILEGED = {
@@ -612,7 +614,9 @@ describe('the seed is transient (OB-23)', () => {
       await view.router.navigate(-1);
     });
 
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    // Back at the page the person was on: the code is gone, and the page says what happened and what to do, and not that the link cannot be used (the password is set, the link was used).
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'This link cannot be used' })).toBeNull();
     expect(whereIsTheSeed()).toEqual([]);
   });
 
@@ -645,8 +649,8 @@ describe('the seed is transient (OB-23)', () => {
     await act(async () => {
       await view.router.navigate(-1);
     });
-    // Back at the page, which has nothing to set up: the link's one error, and no picture.
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    // Back at the page, which has nothing left to show: what happened, and no picture.
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
     expect(whereIsTheSeed()).toEqual([]);
 
     await act(async () => {
@@ -677,8 +681,38 @@ describe('the seed is transient (OB-23)', () => {
       vi.advanceTimersByTime(15 * 60 * 1000);
     });
 
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
     expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): a person who comes back to /setup/mfa after the code has gone was told "This link cannot be used", though the link was
+  // used and the password is set, and sent to sign in, which asks for the set-up link they were sent. The page says what happened and what to do next, from re-enrolment as well.
+  it('tells a person who comes back after a re-enrolment what happened, and to ask for a reset', async () => {
+    const view = viaLink({ [BEGIN]: () => json(200, BEGUN) });
+    await view.user.click(await screen.findByRole('button', { name: 'Begin set-up' }));
+    await screen.findByRole('region', { name: 'Authenticator set-up' });
+
+    await act(async () => {
+      await view.router.navigate('/sign-in');
+    });
+    await screen.findByRole('heading', { name: 'Sign in' });
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
+    expect(screen.getByText(/ask an administrator to reset your authenticator/i)).toBeVisible();
+    expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught: the new words shown to everyone who has no material, which would tell a stranger something about an account that the link's one error never does: only a tab that was
+  // taken through the flow (the history entry says so, and says nothing of anybody) is told.
+  it('says it only to a tab that was taken through the set-up, and the link’s one error to anyone else', async () => {
+    api = installFakeApi();
+    renderApp('/setup/mfa');
+
+    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: NOT_SET_UP })).toBeNull();
   });
 
   // Break caught: the seed, the code or the grant written to the console by a diagnostic.
