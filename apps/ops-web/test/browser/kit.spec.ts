@@ -1,6 +1,7 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, type Locator, type Page } from '@playwright/test';
 
 import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
+import { wordsOf } from './support/words';
 
 /**
  * The Melarc component kit in the development-only showcase (`/__showcase/kit/<group>`; redesign step R5; COMPONENT_PATTERNS section 37), in a real browser: the
@@ -2277,6 +2278,289 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     // And no more than it took: the least lesser column stays while the box still holds it (they go one at a time, not all at once).
     await expect(narrow.getByRole('columnheader', { name: 'Service date' })).toBeVisible();
     expect(await sideways(narrow)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (the Product Owner, 11 November 2026): text cells that shrink to a letter ("One-packag / e / excepti / on"): `overflow-wrap: anywhere` on the page lowers every cell's least width to one
+  // character, so the fit never dropped a lesser column for text. A prose column keeps 8rem and its words break at their spaces only; the lesser columns go first, and the rows are no taller than that.
+  test('keeps the words of a prose column whole, and takes the lesser columns away to make their room', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const prose = specimen(page, 'Prose columns at 44rem');
+    await prose.scrollIntoViewIfNeeded();
+    await expect(prose.getByRole('columnheader', { name: 'Needs' })).toBeVisible();
+
+    // The lesser columns went (the packages first), and what is drawn is not crushed: no word is broken inside and no row is taller than its prose needs at 8rem.
+    await expect(prose.getByRole('columnheader', { name: 'Packages' })).toHaveCount(0);
+    const words = await wordsOf(prose.getByRole('table'));
+    expect(words.broken).toEqual([]);
+    expect(words.tall).toEqual([]);
+    expect(
+      await prose
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    // The least room of a prose cell is its block, 8rem wide at the least.
+    const widths = await prose
+      .locator('tbody .ui-data-table__cell')
+      .evaluateAll((blocks) => blocks.map((block) => block.getBoundingClientRect().width));
+    expect(widths.length).toBeGreaterThan(0);
+    expect(Math.min(...widths)).toBeGreaterThanOrEqual(127);
+  });
+
+  // Break caught (the Product Owner, 11 November 2026): the page's `overflow-wrap: anywhere` left on the table, which lowers a plain column's least width to a letter, so that the fit sees room that is
+  // not there and keeps the lesser column while the words are crushed. The longest word of a column holds the column: the lesser column goes, and no word is broken.
+  test('lets the longest word of a plain column hold its column, and takes the lesser column away', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const plain = specimen(page, 'Plain words at 30rem');
+    await plain.scrollIntoViewIfNeeded();
+    await expect(plain.getByRole('columnheader', { name: 'Sender' })).toBeVisible();
+    await expect(plain.getByRole('columnheader', { name: 'Packages' })).toHaveCount(0);
+    expect((await wordsOf(plain.getByRole('table'))).broken).toEqual([]);
+    expect(
+      await plain
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (run 7, Stage 1.2): a list whose rows open nothing that takes a column away, so that a fact is on no screen. Where its columns cannot fit it is cards, with every fact; where they
+  // fit it is the table, with every column.
+  test('draws a list that opens nothing as cards where its columns cannot fit, and as a table where they can', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const tight = specimen(page, 'A list that opens nothing at 45rem');
+    await tight.scrollIntoViewIfNeeded();
+    await expect(tight.getByRole('list')).toBeVisible();
+    await expect(tight.getByRole('table')).toHaveCount(0);
+    const first = tight.getByRole('listitem').first();
+    for (const fact of ['When', 'Sender', 'To', 'Number', 'Booked by a vendor from the shop']) {
+      await expect(first).toContainText(fact);
+    }
+    expect(
+      await tight
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+
+    const roomy = specimen(page, 'A list that opens nothing at 75rem');
+    await roomy.scrollIntoViewIfNeeded();
+    await expect(roomy.getByRole('table')).toBeVisible();
+    await expect(roomy.getByRole('columnheader')).toHaveCount(5);
+    await expect(roomy.getByRole('list')).toHaveCount(0);
+  });
+
+  // Break caught (run 7, Stage 1.3): the fit measured once, in the face the browser shows first (`font-display: swap`), so that when Inter arrives the columns chosen for the fallback face are the
+  // wrong ones. The fallback here is wider than Inter (a monospace face) and the face is held back: the table draws fewer columns than Inter needs room for, and when the faces finish loading it
+  // measures again and brings the columns back, with no change of the window.
+  test('measures the fit again when the faces finish loading', async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\.woff2(\?.*)?$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        // The property of the root's own style, set through the CSS object model: a <style> element would be refused by the strict policy of a production build.
+        document.documentElement.style.setProperty(
+          '--font-family-sans',
+          'Inter, "Courier New", monospace',
+        );
+      });
+    });
+    const seen = watchPage(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${KIT}/data`, { waitUntil: 'domcontentloaded' });
+    const prose = specimen(page, 'Prose columns at 44rem');
+    await expect(prose.getByRole('columnheader', { name: 'Needs' })).toBeVisible();
+    const withFallback = await prose.getByRole('columnheader').count();
+
+    release();
+    await page.evaluate(() => document.fonts.ready);
+    await expect
+      .poll(() => prose.getByRole('columnheader').count(), { timeout: 10_000 })
+      .toBeGreaterThan(withFallback);
+    expect(
+      await prose
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 1.3): a table that watches its box and not itself, so that what is in it growing wider (a cell that gets its words later, a face wider than the first) is never seen: the
+  // box scrolls sideways until the window is resized. No resize is made here: a cell grows by itself and the table takes the lesser column away.
+  test('takes a lesser column away when what is in the table grows, with no change of the window', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const wide = specimen(page, 'Column fit at 70rem');
+    await wide.scrollIntoViewIfNeeded();
+    await expect(wide.getByRole('columnheader')).toHaveCount(6);
+    const sideways = () =>
+      wide
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth);
+    expect(await sideways()).toBeLessThanOrEqual(0);
+
+    // The cell of the last column, which is the most lesser, gets a long unbroken line of its own.
+    await wide
+      .locator('tbody tr')
+      .first()
+      .locator('td')
+      .last()
+      .evaluate((cell) => {
+        const grown = document.createElement('div');
+        grown.style.width = '60rem';
+        grown.style.height = '1px';
+        cell.append(grown);
+      });
+
+    await expect.poll(sideways).toBeLessThanOrEqual(0);
+    await expect(wide.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    await expect(wide.getByRole('columnheader', { name: 'Request' })).toBeVisible();
+  });
+
+  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing): the table's change to cards left to when React next renders, so that the frame in which the window became
+  // narrow still draws the table. A second observer of the same box, made later than the table's, is told in the same frame after it: by then the cards are drawn and no table is.
+  test('draws the cards in the frame in which the box became narrow, and never the table for a frame', async ({
+    page,
+  }) => {
+    await openKit(page, 'example-queue', { width: 1280, height: 900 });
+    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
+    await page.evaluate(() => {
+      const root = document.querySelector('.ui-data-table');
+      const probe = root?.querySelector('.ui-data-table__probe');
+      if (root === null || root === undefined || probe === null || probe === undefined) {
+        throw new Error('no table in the page');
+      }
+      const seen: { width: number; table: boolean }[] = [];
+      (window as unknown as { __frames: typeof seen }).__frames = seen;
+      // The probe is what the table watches, and this observer was made after the table's own: it is told in the same frame, after them.
+      new ResizeObserver(() => {
+        seen.push({
+          width: root.clientWidth,
+          table: root.querySelector('.ui-data-table__table') !== null,
+        });
+      }).observe(probe);
+    });
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(page.locator('.ui-data-table__cards').first()).toBeVisible();
+    await expect(page.locator('.ui-data-table__table')).toHaveCount(0);
+
+    const frames = await page.evaluate(
+      () => (window as unknown as { __frames: { width: number; table: boolean }[] }).__frames,
+    );
+    const narrow = frames.filter((frame) => frame.width > 0 && frame.width < 640);
+    expect(narrow.length).toBeGreaterThan(0);
+    expect(narrow.filter((frame) => frame.table)).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 1.4; the Product Owner suspected that the fit oscillates with the page's scrollbar on his Windows, whose scrollbars take room: a column dropped shortens the rows, the page
+  // no longer needs its scrollbar, the box widens by its width, every column comes back, the page grows past the window again, and so on). Not reproduced: the fit restarts and measures in one
+  // synchronous flush (a layout effect inside `flushSync`), and the layout it reads already has the scrollbar the restarted rows bring, so it drops the column again before anything is drawn and the
+  // widening it settles on starts nothing. The page here is about as tall as the window with the lesser column and shorter without it, and the box holds the table with the scrollbar away and not with
+  // it: the header is changed in the first moments (two restarts, each in one flush) and then not at all, in the next second and a half. A fit that restarted outside that flush (an update left to the next render) is the break this holds.
+  test('settles when the page is about as tall as the window, and then leaves its columns alone', async ({
+    page: provided,
+    baseURL,
+    browserName,
+  }) => {
+    // Playwright hides the scrollbars of a headless Chromium (`--hide-scrollbars`); the Product Owner's Windows draws them and gives them room, so Chromium is started here as that machine runs it. The
+    // other engines are run as they are, and the test is skipped where their scrollbar takes no room.
+    const own =
+      browserName === 'chromium'
+        ? await chromium.launch({ channel: 'chromium', ignoreDefaultArgs: ['--hide-scrollbars'] })
+        : undefined;
+    try {
+      const page =
+        own === undefined ? provided : await (await own.newContext({ baseURL })).newPage();
+      const url = (ballast: number) => `${KIT}/data?ballast=${String(ballast)}`;
+      const list = () => specimen(page, 'A list near the height of the window');
+      // The page is taller than the window to begin with, so it has its scrollbar: its width, the box's room beside it, what the table needs and the height of the page (the ballast changes none of them).
+      await page.setViewportSize({ width: 1100, height: 1200 });
+      await page.goto(url(0));
+      await expect(list().getByRole('columnheader', { name: 'Notes' })).toBeVisible();
+      const measured = await list()
+        .locator('.ui-data-table__scroller')
+        .evaluate((box) => {
+          const table = box.querySelector('table');
+          if (table === null) throw new Error('no table');
+          // The table's own least width (36rem) is taken away while it is measured: what is measured is what its columns need.
+          table.style.width = 'min-content';
+          table.style.minWidth = '0';
+          const needs = table.getBoundingClientRect().width;
+          table.style.width = '';
+          table.style.minWidth = '';
+          return {
+            room: box.clientWidth,
+            needs,
+            scrollbar: window.innerWidth - document.documentElement.clientWidth,
+            height: document.documentElement.scrollHeight,
+          };
+        });
+      test.skip(
+        measured.scrollbar === 0,
+        'this browser draws its scrollbar over the page, and takes no room for it',
+      );
+      // A table that fits the room by six pixels with no scrollbar, and cannot with one (fifteen pixels or more); 128 is the least room of the column, which the ballast replaces.
+      const ballast = Math.floor(measured.room + measured.scrollbar - 6 - measured.needs + 128);
+      expect(ballast).toBeGreaterThan(128);
+
+      // A window taller than the page: no scrollbar, and the table fits.
+      await page.setViewportSize({ width: 1100, height: measured.height + 400 });
+      await page.goto(url(ballast));
+      await expect(list().getByRole('columnheader', { name: 'Notes' })).toBeVisible();
+      expect(
+        await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth),
+      ).toBe(0);
+      const fits = await list()
+        .locator('.ui-data-table__scroller')
+        .evaluate((box) => box.scrollWidth <= box.clientWidth + 1);
+      expect(fits).toBe(true);
+      await list()
+        .locator('thead')
+        .evaluate((head) => {
+          const seen: number[] = [];
+          (window as unknown as { __fit: number[] }).__fit = seen;
+          const start = performance.now();
+          // Every time a heading cell is put in or taken out, and when (a column that went and came back in one flush is still seen).
+          new MutationObserver((records) => {
+            for (const record of records) {
+              const cells = [...record.addedNodes, ...record.removedNodes];
+              if (cells.some((node) => node.nodeName === 'TH')) {
+                seen.push(Math.round(performance.now() - start));
+              }
+            }
+          }).observe(head, { childList: true, subtree: true });
+        });
+
+      // The window becomes a little shorter than the page: the page needs its scrollbar, and the box is narrower by its width.
+      await page.setViewportSize({ width: 1100, height: measured.height - 80 });
+      await page.waitForTimeout(3000);
+
+      const times = await page.evaluate(() => (window as unknown as { __fit: number[] }).__fit);
+      // The fit was started by the window: it changed the header (at least the column that went) ...
+      expect(times.length).toBeGreaterThan(0);
+      // ... and, after the first moments (the restart the window starts and the one the widening starts after it, on a loaded machine a second at the most), did not touch it again.
+      expect(times.filter((time) => time > 1500)).toEqual([]);
+      // It settled with the column away and the box not scrolling sideways.
+      await expect(list().getByRole('columnheader', { name: 'Notes' })).toHaveCount(0);
+      expect(
+        await list()
+          .locator('.ui-data-table__scroller')
+          .evaluate((box) => box.scrollWidth - box.clientWidth),
+      ).toBeLessThanOrEqual(0);
+    } finally {
+      await own?.close();
+    }
   });
 
   // Break caught (the Product Owner, 10 November 2026): a status that breaks at its words ("Waiting for / confirmation") in a table cell or in a card, which makes the row taller and the badge harder

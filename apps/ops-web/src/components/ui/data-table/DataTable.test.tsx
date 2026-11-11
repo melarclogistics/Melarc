@@ -1079,7 +1079,7 @@ describe('DataTable: columns of lesser priority, and numbers (task R5.2, M12)', 
 });
 
 describe('DataTable: cards where the table is narrow (task R5.2, M12)', () => {
-  const cards = { card: cardOf, layout: 'cards' } as const;
+  const cards = { card: cardOf, cardTitle: (item: Request) => item.code, layout: 'cards' } as const;
 
   // Break caught: the card layout a second copy of the rows beside the table (two controls for every row, read twice): one drawing at a time.
   it('draws a card for each row in place of the table, with no table beside them', () => {
@@ -1092,16 +1092,43 @@ describe('DataTable: cards where the table is narrow (task R5.2, M12)', () => {
     expect(document.querySelector('.ui-data-table')).toHaveAttribute('data-layout', 'cards');
   });
 
+  // Replaces "…the button that opens it, named for the record" (run 7, Stage 1.5): the button no longer holds the card's facts (a button's content is presentational, so they were never read);
+  // it is the card's title, the code, named as before, and a press on it opens the record.
   it('has one hit target for a card: the button that opens it, named for the record', async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
     render(<Table {...cards} onOpen={onOpen} />);
 
     const button = screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' });
-    expect(button).toHaveTextContent('Demo Fabrics Ltd');
+    expect(button).toHaveTextContent(/^ACC-PR-7KQ2MZ$/);
     await user.click(button);
 
     expect(onOpen).toHaveBeenCalledWith(FIRST);
+    expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(REQUESTS.length);
+  });
+
+  // Break caught (run 7, Stage 1.5): the card's facts put back inside the one button, as the cards of run 6 had them: a button's children are presentational, so a screen reader heard the
+  // label and never the state, the date or the address, and a button may hold phrasing content only. The facts are read in order after the title, outside any button.
+  it('keeps the facts of a card outside the button, read in order after its title', () => {
+    render(<Table {...cards} />);
+
+    const card = screen.getByRole('button', { name: /^Open ACC-PR-7KQ2MZ/ }).closest('li');
+    expect(card).not.toBeNull();
+    if (card === null) return;
+    const heading = within(card).getByRole('heading', { level: 2 });
+    expect(within(heading).getByRole('button')).toHaveTextContent('ACC-PR-7KQ2MZ');
+    for (const fact of ['Demo Fabrics Ltd', 'Confirmed']) {
+      const node = within(card).getByText(fact);
+      expect(node.closest('button')).toBeNull();
+      expect(heading.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  // Break caught: a table that opens its cards with nothing to be the button (no title), which would put the facts back into it.
+  it('needs a title for the card of a table that opens rows', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(() => render(<Table card={cardOf} layout="cards" />)).toThrow(/needs a cardTitle/);
+    quiet.mockRestore();
   });
 
   it('has a box and the row’s act in each card, and chooses with the box', async () => {
@@ -1159,7 +1186,7 @@ describe('DataTable: cards where the table is narrow (task R5.2, M12)', () => {
     const view = render(<Table layout="cards" />);
     expect(screen.getByRole('table')).toBeInTheDocument();
 
-    view.rerender(<Table card={cardOf} layout="table" />);
+    view.rerender(<Table card={cardOf} cardTitle={(item) => item.code} layout="table" />);
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
   });
@@ -1174,6 +1201,25 @@ describe('DataTable: the room a table has (the Product Owner, 10 November 2026: 
     expect(drawsCards(45)).toBe(false);
     expect(drawsCards(64.5)).toBe(false);
     expect(drawsCards(16)).toBe(true);
+  });
+
+  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing): the change to cards left to when React next renders, so that the frame in which the box became narrow still
+  // draws the table. The observer's callback flushes it: the cards are in the page when the callback returns. (`kit.spec.ts` measures the same in a browser frame.)
+  it('draws the cards inside the observer’s callback, and not a render later', () => {
+    const room = tableRoom(1200);
+    render(<Table card={cardOf} cardTitle={(item) => item.code} />);
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      room.resize(400);
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(screen.getByRole('list', { name: 'Pickup requests' })).toBeInTheDocument();
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+      restoreTableRoom();
+    }
   });
 
   // Break caught: the lesser columns taken away in an order the screen did not mean: the most lesser first, the later of two equals before the earlier, and never the row header or a column the screen did not mark.
@@ -1313,6 +1359,200 @@ describe('DataTable: the room a table has (the Product Owner, 10 November 2026: 
 
       expect(headers()).toHaveLength(5);
     });
+  });
+});
+
+describe('DataTable: words wrap at their words, and a column keeps its room (run 7, Stage 1.1 to 1.3)', () => {
+  const column = (id: string, extra: Partial<DataColumn<Request>> = {}): DataColumn<Request> => ({
+    id,
+    header: id,
+    cell: (item) => item.sender,
+    ...extra,
+  });
+  const LESSER: readonly DataColumn<Request>[] = [
+    REQUEST_COLUMN,
+    column('State', { kind: 'badge' }),
+    column('Service date', { kind: 'date', priority: 2 }),
+    column('Pickup address', { kind: 'prose', priority: 2 }),
+    column('Packages', { kind: 'count', priority: 3 }),
+  ];
+  const headers = () => screen.getAllByRole('columnheader').map((cell) => cell.textContent);
+  const blocks = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('.ui-data-table__cell')).map(
+      (block) => block.style.minInlineSize,
+    );
+
+  afterEach(() => {
+    restoreTableRoom();
+  });
+
+  // Break caught: every cell given a minimum (a badge, a date and a count then take 8rem each, and the table drops columns it could keep), or a prose column given none (its words then shrink to a
+  // letter, and the fit never drops a lesser column for text).
+  it('holds a prose column to 8rem and any column to the width it names, in a block inside its cells, and no other kind to anything', () => {
+    render(
+      <Table
+        columns={[
+          REQUEST_COLUMN,
+          column('State', { kind: 'badge' }),
+          column('Needs', { kind: 'prose' }),
+          column('Why', { kind: 'prose', minWidth: '11rem' }),
+          column('Plain'),
+        ]}
+        rows={[FIRST, SECOND]}
+      />,
+    );
+
+    expect(blocks()).toEqual(['8rem', '11rem', '8rem', '11rem']);
+    const badge = document.querySelector('tbody td[data-kind="badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.querySelector('.ui-data-table__cell')).toBeNull();
+  });
+
+  // Break caught: a table that is marked before its lesser columns are gone, or one that keeps its minimum widths when nothing else can give: it must still never scroll sideways.
+  it('marks itself, and lets words break anywhere, only when every lesser column is gone and the box still scrolls', () => {
+    tableRoom(900);
+    const view = render(<Table columns={LESSER} />);
+    // Five columns need 1000 of the 900: the count goes, and four need 800. A lesser column went, the box holds the rest: not marked, and the minimum widths stay.
+    expect(headers()).toHaveLength(4);
+    expect(document.querySelector('.ui-data-table__table')).not.toHaveAttribute('data-fit');
+    expect(blocks()).toEqual(['8rem', '8rem', '8rem']);
+    view.unmount();
+
+    tableRoom(300);
+    render(<Table columns={LESSER} />);
+    // Every lesser column is gone and three columns of 200 still need 600 of the 300: marked, and the room each prose cell kept is given up.
+    expect(headers()).toEqual(['Request / sender', 'State']);
+    expect(document.querySelector('.ui-data-table__table')).toHaveAttribute(
+      'data-fit',
+      'exhausted',
+    );
+    expect(blocks()).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 1.2): a list whose rows open nothing that takes a column away, so that a fact (a number, a time) is not on the screen at all.
+  describe('a list whose rows open nothing', () => {
+    const FACTS: readonly DataColumn<Request>[] = [
+      REQUEST_COLUMN,
+      column('State'),
+      column('Service date'),
+      column('Pickup address'),
+      column('Packages'),
+    ];
+    const noOpen = (extra: Partial<DataTableProps<Request>> = {}) => (
+      <DataTable<Request>
+        label="Pickup requests"
+        columns={FACTS}
+        rows={REQUESTS}
+        rowId={(item) => item.id}
+        card={cardOf}
+        {...extra}
+      />
+    );
+
+    it('is cards, with every fact, where its columns cannot fit, and never a table with a column missing', () => {
+      tableRoom(1200);
+      const view = render(noOpen());
+      expect(headers()).toHaveLength(5);
+      view.unmount();
+
+      tableRoom(900);
+      render(noOpen());
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(
+        within(screen.getByRole('list', { name: 'Pickup requests' })).getAllByRole('listitem'),
+      ).toHaveLength(3);
+      expect(document.querySelector('.ui-data-table')).toHaveAttribute('data-layout', 'cards');
+    });
+
+    it('comes back as a table when its box widens', async () => {
+      const room = tableRoom(900);
+      render(noOpen());
+      expect(screen.queryByRole('table')).toBeNull();
+
+      act(() => {
+        room.resize(1200);
+      });
+
+      await waitFor(() => {
+        expect(headers()).toHaveLength(5);
+      });
+    });
+
+    it('is a table with every column, marked, when it has no card to be', () => {
+      tableRoom(300);
+      render(noOpen({ card: undefined }));
+
+      expect(headers()).toHaveLength(5);
+      expect(document.querySelector('.ui-data-table__table')).toHaveAttribute(
+        'data-fit',
+        'exhausted',
+      );
+    });
+
+    it('refuses a column marked lesser, for none of its columns may go', () => {
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      expect(() =>
+        render(noOpen({ columns: [REQUEST_COLUMN, column('Hub', { priority: 3 })] })),
+      ).toThrow(/rows open nothing/);
+      quiet.mockRestore();
+    });
+  });
+
+  // Break caught: a list whose rows open a record by a link (the approver's queue, the staff list) treated as one that opens nothing, so that it is cards where it could have dropped a column
+  // that the record shows.
+  it('drops lesser columns when its rows open a record of their own, though no button opens them', () => {
+    tableRoom(900);
+    render(
+      <DataTable<Request>
+        label="Pickup requests"
+        columns={LESSER}
+        rows={REQUESTS}
+        rowId={(item) => item.id}
+        opens="record"
+        card={cardOf}
+      />,
+    );
+
+    expect(headers()).toHaveLength(4);
+    expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+  });
+
+  // Break caught (run 7, Stage 1.3): the fit measured once in the face the browser showed first (`font-display: swap`), so that at 768px the columns chosen for the fallback face are the wrong ones
+  // when Inter arrives: too many when it is wider, too few when it is narrower. The measure begins again from every column when the faces finish loading.
+  it('measures again from every column when the faces finish loading', () => {
+    const room = tableRoom(900);
+    render(<Table columns={LESSER} />);
+    expect(headers()).toHaveLength(4);
+
+    // The fallback face was the wider one: with the face that arrived, five columns need 750 of the 900.
+    room.setNeed(150);
+    act(() => {
+      room.fontsLoaded();
+    });
+
+    expect(headers()).toHaveLength(5);
+  });
+
+  // Break caught: a table that watches its box and not itself, so that what is in it growing wider (a face wider than the first, a cell that gets its words later) is never seen: the box scrolls
+  // sideways until the person resizes the window. On that signal columns are only added to what has gone, never given back.
+  it('takes another lesser column away when the table grows wider than its box, and gives none back on that signal', () => {
+    const room = tableRoom(900);
+    render(<Table columns={LESSER} />);
+    expect(headers()).toHaveLength(4);
+
+    room.setNeed(300);
+    act(() => {
+      room.growTable();
+    });
+    // Four columns need 1200 of the 900: the next lesser column goes, and three need 900.
+    expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+
+    room.setNeed(100);
+    act(() => {
+      room.growTable();
+    });
+    expect(headers()).toHaveLength(3);
   });
 });
 

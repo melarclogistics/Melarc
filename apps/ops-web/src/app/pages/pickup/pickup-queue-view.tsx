@@ -122,21 +122,28 @@ export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
     rowHeader: true,
     cell: (row) => <RowTitle code={row.code} name={row.sender} />,
   },
-  { id: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
-  { id: 'date', header: 'Service date', cell: (row) => <NoWrap>{row.date}</NoWrap> },
+  { id: 'state', header: 'State', kind: 'badge', cell: (row) => <State state={row.state} /> },
+  {
+    id: 'date',
+    header: 'Service date',
+    kind: 'date',
+    cell: (row) => <NoWrap>{row.date}</NoWrap>,
+  },
   {
     id: 'where',
     header: 'Pickup address / hub',
+    kind: 'prose',
     priority: 2,
     cell: (row) => <CellLines first={row.address} second={row.hub} />,
   },
   {
     id: 'packages',
     header: 'Packages / booking type',
+    kind: 'count',
     priority: 3,
     cell: (row) => <CellLines first={row.packages} second={row.bookedAs} oneLine />,
   },
-  { id: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
+  { id: 'needs', header: 'Needs', kind: 'prose', cell: (row) => <Needs text={row.needs} /> },
 ];
 
 /** What opens a request, for the pointer and for assistive technology: its code and its sender. */

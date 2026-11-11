@@ -6,12 +6,12 @@ import { vi } from 'vitest';
  */
 export function narrowRoom(): void {
   class Observer {
-    constructor(private readonly callback: ResizeObserverCallback) {}
     observe(): void {
-      this.callback([], this);
+      // Nothing is told: the table measures its box itself when it is first drawn (a layout effect), which is what this room answers. A browser tells an observer at the next frame, never inside the
+      // call, and an update flushed inside a lifecycle is refused by React.
     }
     unobserve(): void {
-      // Nothing is watched: the room was told, once, when the table began to observe.
+      // Nothing is watched: the room is answered by the first measure.
     }
     disconnect(): void {
       // As above.

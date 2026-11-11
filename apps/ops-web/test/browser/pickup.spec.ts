@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type Route } from '@playwright/t
 
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
+import { wordsOf } from './support/words';
 import {
   IDS,
   PLANTED_PRICE_TEXT,
@@ -213,16 +214,19 @@ test.describe('the queue, drawn for the room it has', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  // Break caught (the review of 499399c): the queue drawn as cards at 1280 px with the menu open, a box of about 61rem, though its table has room for every column: a table that
-  // keeps every column from 40rem up, its cells wrapping, and is cards only under that.
-  test('keeps the table, with every column, at 1280 px with the menu open, and no cards', async ({
+  // Break caught (the review of 499399c): the queue drawn as cards at 1280 px with the menu open, a box of about 61rem, though its table has room for most of its columns: a table that
+  // keeps its columns from 40rem up and is cards only under that. Replaces "keeps the table, with every column" (run 7, Stage 1.1): the prose columns now keep 8rem each (the words stay whole),
+  // so the box of 61rem takes the packages, the most lesser column, away to make that room, and keeps every other column.
+  test('keeps the table, without its packages, at 1280 px with the menu open, and no cards', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const { watch } = await open(page, '/pickup-requests');
 
     await expect(queueTable(page)).toBeVisible();
-    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(
+      QUEUE_COLUMNS.filter((name) => name !== 'Packages / booking type'),
+    );
     await expect(queueCards(page)).toHaveCount(0);
     await expect(opener(page, CODE)).toHaveCount(1);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
@@ -716,6 +720,101 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       queueTable(page).getByRole('columnheader', { name: 'Packages / booking type' }),
     ).toHaveCount(0);
     expect(await overflowingInQueue(page)).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 1.6; replaces two unit tests that read an attribute no component draws any more and a layout jsdom cannot measure, so that they could not fail): the crowding of the queue
+  // decided by whether a panel is open (a template that keeps the columns the panel has no room for, or one that drops them with nothing open), when it is the table's own box that decides. Opening
+  // the panel narrows the box and the lesser columns go; closing it widens the box and they come back; the table never scrolls sideways in either.
+  test('drops the lesser columns when a request is opened beside the queue at 1440px, and brings them back when it is closed', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    const header = (name: string) => queueTable(page).getByRole('columnheader', { name });
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+
+    await opener(page, CODE).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel).toBeVisible();
+    await expect(header('Pickup address / hub')).toHaveCount(0);
+    await expect(header('Packages / booking type')).toHaveCount(0);
+    await expect(header('Needs')).toBeVisible();
+    expect(await overflowingInQueue(page)).toEqual([]);
+
+    await panel.getByRole('button', { name: 'Close the panel' }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    expect(await overflowingInQueue(page)).toEqual([]);
+  });
+
+  // Break caught (the Product Owner, 11 November 2026): text cells that shrink to a letter ("One-packag / e / excepti / on", a row eight lines tall), because `overflow-wrap: anywhere` lowers every
+  // cell's least width to one character, so that the fit never dropped a lesser column for text. The words keep their room (8rem for prose) and break at their spaces only; the lesser columns go
+  // first; and no row is taller than its longest prose cell needs at 8rem.
+  for (const [size, world] of [
+    [{ width: 1280, height: 800 }, 'the queue as it is'],
+    [{ width: 1280, height: 800 }, 'long words'],
+    [{ width: 768, height: 1024 }, 'the queue as it is'],
+    [{ width: 768, height: 1024 }, 'long words'],
+  ] as const) {
+    test(`breaks no word inside and has no row taller than its prose needs at ${String(size.width)} px, with ${world}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests', world === 'long words' ? longWorld() : {});
+      await expect(queueTable(page)).toBeVisible();
+
+      const words = await wordsOf(queueTable(page));
+      expect(words.broken).toEqual([]);
+      expect(words.tall).toEqual([]);
+      expect(await overflowingInQueue(page)).toEqual([]);
+    });
+  }
+
+  // Break caught (run 7, Stage 1.5): the card's facts inside its one button, where a button's content is presentational (a screen reader hears the label and never the state, the date, the address or
+  // what the request needs) and may be phrasing content only. The button is the card's title; the facts follow it in the tree, outside it, in the order a person reads them; and a press on the facts
+  // still opens the request, by the button's reach stretched over the card.
+  test('reads the facts of a card outside its button, and opens the request from a press on them, at 390px', async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW);
+    const { watch } = await open(page, '/pickup-requests');
+    const first = queueCards(page).getByRole('listitem').first();
+    await expect(first).toBeVisible();
+
+    const lines = (await first.ariaSnapshot()).split('\n');
+    const at = lines.findIndex((line) => line.includes(`button "Open ${CODE}, `));
+    expect(at).toBeGreaterThanOrEqual(0);
+    const indent = (line: string) => line.length - line.trimStart().length;
+    // The button is a leaf: whatever follows it is not inside it.
+    expect(lines[at]?.trimEnd().endsWith(':')).toBe(false);
+    const after = lines.slice(at + 1).join('\n');
+    for (const fact of [
+      'Waiting for confirmation',
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+    ]) {
+      expect(after).toContain(fact);
+    }
+    expect(
+      Math.min(
+        ...lines
+          .slice(at + 1)
+          .filter((line) => line.trim() !== '')
+          .map(indent),
+      ),
+    ).toBeLessThanOrEqual(indent(lines[at] ?? ''));
+
+    // A press on the sender, which is a fact outside the button, lands on the button's reach and opens the request.
+    const sender = first.getByText('Demo Fabrics Ltd').first();
+    const where = await sender.boundingBox();
+    expect(where).not.toBeNull();
+    await page.mouse.click(
+      (where?.x ?? 0) + (where?.width ?? 0) / 2,
+      (where?.y ?? 0) + (where?.height ?? 0) / 2,
+    );
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+    expect(watch.problems).toEqual([]);
   });
 });
 
@@ -1842,8 +1941,9 @@ test.describe('the approver’s queue', () => {
     ).toBeVisible();
   });
 
-  // Break caught (the review of 499399c): the approver's queue drawn as cards at 1280 px with the menu open, though its table has room for every column.
-  test('keeps the table, with every column, at 1280 px with the menu open, and no cards', async ({
+  // Break caught (the review of 499399c): the approver's queue drawn as cards at 1280 px with the menu open, though its table has room for most of its columns. Replaces "keeps the table, with every
+  // column" (run 7, Stage 1.1): the prose columns now keep 8rem each (their words stay whole), so the box of 61rem takes the hub, the most lesser column, away to make that room.
+  test('keeps the table, without its hub, at 1280 px with the menu open, and no cards', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -1857,7 +1957,6 @@ test.describe('the approver’s queue', () => {
       'Recipient',
       'Why',
       'Asked',
-      'Hub',
       'Request state',
       'Actions',
     ]);
@@ -1890,7 +1989,8 @@ test.describe('the approver’s queue', () => {
   });
 
   // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the approver's table keeping a column it has no room for, so that its box scrolls and the act is out of view.
-  // At 768px (a box of 41rem) the table takes its lesser columns away, the packages and the hub, and keeps the request with its sender, the recipient, why, who asked, the state and the act, in view.
+  // At 768px (a box of 41rem) the table takes its lesser columns away, the hub and the packages and then the recipient (the marks of the Product Owner, 11 November 2026), and keeps the request with its
+  // sender, why, who asked, the state and the act, in view, with no word broken inside.
   test('keeps the table at 768px without its lesser columns, and never scrolls it sideways', async ({
     page,
   }) => {
@@ -1900,7 +2000,6 @@ test.describe('the approver’s queue', () => {
     const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
     await expect(table.getByRole('columnheader')).toHaveText([
       'Request / sender',
-      'Recipient',
       'Why',
       'Asked',
       'Request state',
@@ -1909,6 +2008,9 @@ test.describe('the approver’s queue', () => {
     await expect(
       table.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
     ).toBeInViewport({ ratio: 1 });
+    const words = await wordsOf(table);
+    expect(words.broken).toEqual([]);
+    expect(words.tall).toEqual([]);
     expect(await overflowingInQueue(page)).toEqual([]);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });

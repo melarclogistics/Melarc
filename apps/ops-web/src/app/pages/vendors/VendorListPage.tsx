@@ -263,6 +263,8 @@ export function VendorListPage() {
           rowId: (row) => row.id,
           density: 'two-line',
           card: (row) => <AccountCard facts={row} />,
+          // The rows open a page of their own (the link of the first line), so the lesser columns may go: their facts are in the record.
+          opens: 'record',
           // The identifier is the heading of each card, for heading navigation, and the link to the account.
           cardTitle: (row) => (
             <Link to={row.href}>

@@ -19,6 +19,13 @@ import { StatusBadge } from '../../components/ui/status-badge/StatusBadge';
 import { KitSection, Specimen } from './Section';
 import { sampleRequests, type SampleRequest } from './sample-data';
 
+/** The same columns with none marked lesser, for a table whose rows open nothing (it never takes a column away: `DataTable`, *Lists that open nothing*). */
+export function alwaysDrawn<Item>(
+  columns: readonly DataColumn<Item>[],
+): readonly DataColumn<Item>[] {
+  return columns.map((column) => ({ ...column, priority: 1 }));
+}
+
 /** The columns of a pickup queue, in the Melarc words: the request over its sender, its state, the service date and the packages. */
 export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequest>[] {
   return [
@@ -36,11 +43,13 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
     {
       id: 'state',
       header: 'State',
+      kind: 'badge',
       cell: (request) => <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />,
     },
     {
       id: 'date',
       header: 'Service date',
+      kind: 'date',
       sortable: true,
       cell: (request) => <NoWrap>{serviceDateText(request.scheduled_service_date)}</NoWrap>,
     },
@@ -56,18 +65,13 @@ export function requestColumns(twoLine: boolean): readonly DataColumn<SampleRequ
 }
 
 /**
- * A sample request as a card, for a table that is narrow: the code with the state, the sender, and the facts, each a label and its value (`CardFacts`: side by side where the card has the room), with no
- * control in it (the table draws the card's one button, its box and its act).
+ * A sample request as a card, for a table that is narrow: the state, the sender, and the facts, each a label and its value (`CardFacts`: side by side where the card has the room), with no control in it
+ * (the table draws the card's title, the code, which is its one button, and its box and its act: `requestCardTitle`).
  */
 export function requestCard(request: SampleRequest): ReactNode {
   return (
     <CardFacts
-      head={
-        <>
-          <OperationalCode>{request.code}</OperationalCode>
-          <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />
-        </>
-      }
+      head={<StatusBadge status={request.state} map={PICKUP_STATE_MAP} />}
       lead={request.sender_name ?? 'Not recorded'}
       facts={[
         { label: 'Service date', value: serviceDateText(request.scheduled_service_date) },
@@ -76,6 +80,11 @@ export function requestCard(request: SampleRequest): ReactNode {
     />
   );
 }
+
+/** The title of a sample request's card: its code, which is the card's one button where the cards open the record. */
+export const requestCardTitle = (request: SampleRequest): ReactNode => (
+  <OperationalCode>{request.code}</OperationalCode>
+);
 
 const openLabel = (request: SampleRequest): string =>
   `Open ${request.code}${request.sender_name === undefined ? '' : `, ${request.sender_name}`}`;
@@ -285,6 +294,150 @@ function Prioritised({ label }: { readonly label: string }) {
   );
 }
 
+const SAMPLE_ADDRESS = 'Plot 14, Independence Avenue, near the old Ridge roundabout, Accra';
+const SAMPLE_NEEDS = 'One-package exception approval';
+
+/**
+ * Prose columns (an address, what a request needs) in a box that cannot hold them all: they keep `PROSE_MIN_WIDTH` of their own, so no word falls to a letter a line, and the lesser columns go to make
+ * the room (run 7, Stage 1). The rows open a panel, so a column may go.
+ */
+function ProseColumns({ label }: { readonly label: string }) {
+  return (
+    <Plain
+      label={label}
+      rows={sampleRequests(3)}
+      density="two-line"
+      columns={[
+        ...requestColumns(true).slice(0, 2),
+        {
+          id: 'where',
+          header: 'Pickup address',
+          kind: 'prose',
+          priority: 2,
+          cell: () => SAMPLE_ADDRESS,
+        },
+        { id: 'needs', header: 'Needs', kind: 'prose', cell: () => SAMPLE_NEEDS },
+        {
+          id: 'packages',
+          header: 'Packages',
+          kind: 'count',
+          priority: 3,
+          cell: (request) => (
+            <NoWrap>{`${String(request.declared_package_count)} packages`}</NoWrap>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+const SAMPLE_SENDER = 'Internationalrepresentativeoffice Ltd';
+
+/**
+ * A column of plain text with long words and no kind (run 7, Stage 1.1): its longest word holds its column, so a box that cannot hold the word and the other columns takes the lesser column away
+ * and does not squeeze the words to a letter a line.
+ */
+function PlainWords({ label }: { readonly label: string }) {
+  return (
+    <Plain
+      label={label}
+      rows={sampleRequests(3)}
+      columns={[
+        requestColumns(false)[0] as DataColumn<SampleRequest>,
+        { id: 'sender', header: 'Sender', cell: () => SAMPLE_SENDER },
+        {
+          id: 'packages',
+          header: 'Packages',
+          kind: 'count',
+          priority: 3,
+          cell: (request) => (
+            <NoWrap>{`${String(request.declared_package_count)} packages`}</NoWrap>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+/**
+ * A list whose rows open nothing (a message log, a list of sessions): it never takes a column away, for the fact would be on no screen. Where its columns cannot fit it is cards, with every fact.
+ */
+function OpensNothing({ label }: { readonly label: string }) {
+  return (
+    <DataTable<SampleRequest>
+      label={label}
+      columns={[
+        {
+          id: 'when',
+          header: 'When',
+          rowHeader: true,
+          cell: (request) => <NoWrap>{serviceDateText(request.scheduled_service_date)}</NoWrap>,
+        },
+        {
+          id: 'state',
+          header: 'State',
+          kind: 'badge',
+          cell: (request) => <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />,
+        },
+        {
+          id: 'sender',
+          header: 'Sender',
+          cell: (request) => <NoWrap>{request.sender_name ?? 'Not recorded'}</NoWrap>,
+        },
+        { id: 'to', header: 'To', cell: () => <NoWrap>Booked by a vendor from the shop</NoWrap> },
+        { id: 'number', header: 'Number', cell: () => <NoWrap>+233 ** *** 1234, masked</NoWrap> },
+      ]}
+      rows={sampleRequests(3)}
+      rowId={(request) => request.id}
+      card={(request) => (
+        <CardFacts
+          head={<StatusBadge status={request.state} map={PICKUP_STATE_MAP} />}
+          facts={[
+            { label: 'When', value: serviceDateText(request.scheduled_service_date) },
+            { label: 'Sender', value: request.sender_name ?? 'Not recorded' },
+            { label: 'To', value: 'Booked by a vendor from the shop' },
+            { label: 'Number', value: '+233 ** *** 1234, masked' },
+          ]}
+        />
+      )}
+      cardTitle={(request) => request.sender_name ?? 'Not recorded'}
+    />
+  );
+}
+
+const SAMPLE_NOTE =
+  'Ring the bell twice at the side gate, ask for the night porter, and have the packages weighed on the scale by the door before they are handed over to the rider, who will sign for them.';
+
+/**
+ * A list whose rows are tall because of a lesser column, in a box as wide as the page (run 7, Stage 1.4): the page grows past the window with the column and not without it, so the page's
+ * scrollbar comes and goes as the fit drops and restores the column. `?ballast=N` gives the column's cells N pixels of least width, so that a test can make the box hold the table with the
+ * scrollbar away and not with it.
+ */
+function NearTheWindow({ label }: { readonly label: string }) {
+  const ballast = Number(new URLSearchParams(window.location.search).get('ballast') ?? '0');
+  return (
+    <Plain
+      label={label}
+      rows={sampleRequests(6)}
+      density="two-line"
+      columns={[
+        ...requestColumns(true).slice(0, 2),
+        {
+          id: 'notes',
+          header: 'Notes',
+          kind: 'prose',
+          priority: 2,
+          cell: () => (
+            <div style={ballast > 0 ? { minWidth: `${String(ballast)}px` } : undefined}>
+              <p style={{ width: '8rem', margin: 0 }}>{SAMPLE_NOTE}</p>
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
 /** A table narrow enough to be cards: one button for a card, its box and its act. */
 function AsCards() {
   const chosen = useChosen();
@@ -293,6 +446,7 @@ function AsCards() {
       label="Pickup requests, as cards"
       rows={sampleRequests(5)}
       card={requestCard}
+      cardTitle={requestCardTitle}
       selection={{
         selectedIds: chosen.ids,
         onChange: chosen.set,
@@ -397,6 +551,33 @@ export function DataGroup() {
           width="41rem"
         >
           <Prioritised label="Pickup requests, in 41rem" />
+        </Specimen>
+        <Specimen
+          label="Prose columns at 44rem: the words keep 8rem and stay whole, and the lesser columns go to make the room (sample data)"
+          width="44rem"
+        >
+          <ProseColumns label="Pickup requests, prose, in 44rem" />
+        </Specimen>
+        <Specimen label="A list near the height of the window: the fit does not follow the page's scrollbar (sample data)">
+          <NearTheWindow label="Pickup requests, tall rows" />
+        </Specimen>
+        <Specimen
+          label="Plain words at 30rem: the longest word holds its column, so the lesser column goes and no word is broken (sample data)"
+          width="30rem"
+        >
+          <PlainWords label="Pickup requests, plain words, in 30rem" />
+        </Specimen>
+        <Specimen
+          label="A list that opens nothing at 45rem: its columns cannot fit, so it is cards with every fact, and no column is lost (sample data)"
+          width="45rem"
+        >
+          <OpensNothing label="Messages, in 45rem" />
+        </Specimen>
+        <Specimen
+          label="A list that opens nothing at 75rem: the box holds every column, so it is a table (sample data)"
+          width="75rem"
+        >
+          <OpensNothing label="Messages, in 75rem" />
         </Specimen>
         <Specimen
           label="Cards, where the box is narrow (22rem): one button for each, its box and its act (sample data)"

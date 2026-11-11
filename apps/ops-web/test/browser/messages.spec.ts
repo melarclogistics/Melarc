@@ -673,19 +673,25 @@ test.describe('the log in six columns, and cards under 40rem (owner item a, 9 No
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the six columns need 74px more than a box of 41rem (768px) has, so the box scrolled sideways with the record out of
-  // view. Each list marks its own lesser columns: the number (the masked hint, weight 3) is what goes first, and the audience with the channel (2) after it, only as far as it takes.
-  test('keeps the table at 768px without its number, and never scrolls it sideways', async ({
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways; and 11 November 2026: a dropped fact must be somewhere): the six columns need 74px more than a box of 41rem (768px)
+  // has. A message opens nothing, so a column the table took away (the number first, then who it is for) would leave a fact on no screen, as the log of run 6 did at this width. Replaces "keeps the
+  // table at 768px without its number": the log is cards where its columns cannot fit, with every fact (the eight terms of its card), and its box never scrolls sideways.
+  test('draws cards with every fact at 768px, where the six columns cannot fit, and never a table with a column missing', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await open(page, LOG);
 
-    await expect(table(page).getByRole('columnheader')).toHaveText([
+    await expect(table(page)).toHaveCount(0);
+    const first = page.getByRole('list', { name: 'Messages' }).getByRole('listitem').first();
+    await expect(first.getByRole('term')).toHaveText([
       'When',
       'Message',
-      'To',
-      'Status',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
       'Record',
     ]);
     expect(
@@ -694,7 +700,6 @@ test.describe('the log in six columns, and cards under 40rem (owner item a, 9 No
         return box === null ? Number.NaN : box.scrollWidth - box.clientWidth;
       }),
     ).toBeLessThanOrEqual(0);
-    await expectWholeInTheWindow(page, table(page).getByRole('columnheader', { name: 'Record' }));
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
 });

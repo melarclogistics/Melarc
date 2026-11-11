@@ -39,6 +39,16 @@ import { LoadingRow } from '../skeleton/LoadingRow';
 import { VisuallyHidden } from '../visually-hidden/VisuallyHidden';
 import './data-table.css';
 
+/**
+ * What a column holds, for the room it needs (the Product Owner, 11 November 2026: a table's text cells shrank to a letter, so the fit never dropped a lesser column for text). `prose` is words that
+ * wrap at their spaces (an address, what a request needs, why, who asked) and keeps `PROSE_MIN_WIDTH` of its own; the others are one line whose own width is the room they need: a `badge` (a state),
+ * a `code`, a `date` and a `count`, which the screen keeps to a line (a badge does; `NoWrap` is the mark for a code, a date and a count). A column of no kind takes what its content needs.
+ */
+export type DataColumnKind = 'prose' | 'badge' | 'code' | 'date' | 'count';
+
+/** The room a prose column keeps, so that its words wrap at their spaces and never fall to a letter a line. */
+export const PROSE_MIN_WIDTH = '8rem';
+
 /** One column of the table. */
 export interface DataColumn<Item> {
   /** Tells the column from the others. Unique in a table. */
@@ -53,13 +63,21 @@ export interface DataColumn<Item> {
   readonly align?: 'start' | 'end';
   /** The column's width as a CSS length or percentage. Without one it takes what its content needs. */
   readonly width?: string;
+  /** What the column holds: its default room (see `DataColumnKind`). Without one the column takes what its content needs. */
+  readonly kind?: DataColumnKind;
+  /**
+   * The least room the column keeps, as a CSS length, drawn as `min-inline-size` on a block inside each cell (so a table whose columns cannot all have their room overflows, and the fit takes the lesser
+   * columns away). The default is `PROSE_MIN_WIDTH` for a `prose` column and none for any other kind. It is given up only when every lesser column is gone and the box still scrolls.
+   */
+  readonly minWidth?: string;
   /** The page can order the rows by this column: its heading is a button that asks for it. The table sorts nothing. */
   readonly sortable?: boolean;
   /**
    * How much the column matters when the table's box cannot hold every column (the Product Owner, 10 November 2026: **no table scrolls sideways**): `1` is always drawn (the default), and `2` and `3`
    * are the columns the screen marks **lesser**. The table measures its box and takes lesser columns away, `3` before `2` and the later column before the earlier among equals, **only as many
    * as it takes for the box not to scroll sideways**, and brings them back when the box widens; a column that goes leaves the page and the accessibility tree, and its facts are in the panel
-   * and the record (a card, under 40rem, shows them all). The screen chooses which columns may go: the table cannot know. The row-header column and the box are always drawn.
+   * and the record (a card, under 40rem, shows them all). The screen chooses which columns may go: the table cannot know. The row-header column and the box are always drawn. **Only a table whose rows
+   * open something has lesser columns** (`onOpen` or `opens`): a column it took away would leave a fact nowhere, so a list whose rows open nothing marks none, and is cards where its columns cannot fit.
    */
   readonly priority?: 1 | 2 | 3;
 }
@@ -119,8 +137,13 @@ export interface DataTableProps<Item> {
    */
   readonly density?: 'single' | 'two-line' | 'touch';
 
-  /** Opens the record: the button of the row-header cell, which is stretched over the whole row, and Enter on it. */
+  /** Opens the record: the button of the row-header cell, which is stretched over the whole row, and Enter on it. It makes the rows a list that opens a panel, whose lesser columns may go. */
   readonly onOpen?: (item: Item) => void;
+  /**
+   * What a row opens, for a table whose rows open something with no button of the table's (`onOpen` implies `panel`): `record` is a page of its own, whose link is the first line of the row header
+   * (`RowTitle to`). A table that opens neither has rows that open nothing; it never takes a column away (its facts would be on no screen) and is drawn as cards where its columns cannot fit.
+   */
+  readonly opens?: 'panel' | 'record';
   /** Names that button for assistive technology and for the pointer: "Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd". It contains the visible words. */
   readonly openLabel?: (item: Item) => string;
 
@@ -137,7 +160,7 @@ export interface DataTableProps<Item> {
     readonly bulkActions?: readonly BulkAction[];
   };
 
-  /** The usual next act of a row, shown on hover, on focus and when the row is chosen (always on a touch screen). */
+  /** The usual next act of a row, drawn at rest on every row that has one and on every device (the Product Owner, 10 November 2026). */
   readonly rowAction?: {
     /** What the button says ("Confirm"). */
     readonly label: string;
@@ -150,21 +173,23 @@ export interface DataTableProps<Item> {
 
   /**
    * What a row is as a card, for a table that is narrow (task R5.2, M12): the facts of the row as one block of text, badges and codes, **with no control in it**, for the
-   * table draws the card's one hit target (the button that opens, stretched over the card), its box and its act. Under 40rem of the table's own width the rows are drawn
-   * as these cards in place of the table (a 390px phone), and the keys, the box, the open button and the row act work as they do in the table. Without it the table stays a
-   * table at every width and scrolls sideways.
+   * table draws the card's one hit target (the button that opens, which is its title, stretched over the card), its box and its act. Under 40rem of the table's own width the rows are drawn
+   * as these cards in place of the table (a 390px phone), and the keys, the box, the open button and the row act work as they do in the table. So are the rows of a list that opens nothing wherever
+   * its columns cannot fit. Without it the table stays a table at every width, and when nothing more can go its words break anywhere before it scrolls sideways.
    */
   readonly card?: (item: Item) => ReactNode;
   /**
-   * The heading of a card: the record's code, for **heading navigation** (a person who moves between headings reaches each card). It is drawn above the card's button and **outside** it,
-   * for a button's content is presentational to assistive technology and holds no heading; the button's reach is stretched over the heading as over the rest of the card.
+   * The heading of a card: the record's code, for **heading navigation** (a person who moves between headings reaches each card). For a table that opens its rows it is also the one button of the
+   * card, named for the record (`openLabel`) and stretched over the whole card by a pseudo-element, so that the press target is the card; **the facts are outside the button, read in order after
+   * it** (a button's content is presentational to assistive technology, so the facts inside it were never read, and a button may hold phrasing content only). A table that opens its rows needs it.
    */
   readonly cardTitle?: (item: Item) => ReactNode;
   /** The level of a card's heading, so that the page's outline stays in order: 2 (the default) where the cards are under the page's title, 3 under a panel's heading. */
   readonly cardHeadingLevel?: 2 | 3 | 4;
   /**
-   * `auto` (the default): **a table from 40rem of its own box up, cards under it** (a 390px phone), and in a table the lesser columns (`priority`) go as far as it takes for it not to scroll sideways.
-   * `table` and `cards` fix it, for a screen that knows better and for a test. Without `card` there are no cards: the table stays a table at every width, and takes its lesser columns away.
+   * `auto` (the default): **a table from 40rem of its own box up, cards under it** (a 390px phone), and in a table the lesser columns (`priority`) go as far as it takes for it not to scroll sideways;
+   * a list whose rows open nothing is cards instead of losing a column. `table` and `cards` fix it, for a screen that knows better and for a test. Without `card` there are no cards: the table stays
+   * a table at every width, and takes its lesser columns away.
    */
   readonly layout?: 'auto' | 'table' | 'cards';
 
@@ -289,25 +314,51 @@ export function drawsCards(widthRem: number): boolean {
   return widthRem < CARDS_BELOW_REM;
 }
 
-/** Whether the table's box is narrow enough for cards: measured as the box changes, and left as it was where nothing can be measured (no layout, a hidden box). */
-function useNarrow(root: RefObject<HTMLDivElement | null>, layout: 'auto' | 'table' | 'cards') {
+/**
+ * Whether the table's box is narrow enough for cards: measured as the box changes, and left as it was where nothing can be measured (no layout, a hidden box). The first measure is a layout
+ * effect, which React finishes before the first paint; **a change the observer reports is flushed in the callback** (`flushSync`, as the fit's is), so that the frame in which the box became
+ * narrow draws the cards and never the table for a frame: a test measures it (`kit.spec.ts`), and it does not lean on when React decides to render.
+ */
+function useNarrow(
+  root: RefObject<HTMLDivElement | null>,
+  probe: RefObject<HTMLDivElement | null>,
+  layout: 'auto' | 'table' | 'cards',
+) {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const element = root.current;
-    if (layout !== 'auto' || element === null || typeof ResizeObserver === 'undefined') return;
-    const measure = (): void => {
+    const watched = probe.current;
+    if (
+      layout !== 'auto' ||
+      element === null ||
+      watched === null ||
+      typeof ResizeObserver === 'undefined'
+    )
+      return;
+    const measure = (flush: boolean): void => {
       const width = element.clientWidth;
       if (width === 0) return;
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      setNarrow(drawsCards(width / rem));
+      const next = drawsCards(width / rem);
+      if (flush) {
+        flushSync(() => {
+          setNarrow(next);
+        });
+      } else {
+        setNarrow(next);
+      }
     };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
+    measure(false);
+    // The probe is watched and not the box: it has the width of the box and no height, so the rows becoming cards, which changes the height of the box, is no change of what is watched (an observer
+    // told of a change its own callback made reports "ResizeObserver loop completed with undelivered notifications").
+    const observer = new ResizeObserver(() => {
+      measure(true);
+    });
+    observer.observe(watched);
     return () => {
       observer.disconnect();
     };
-  }, [root, layout]);
+  }, [root, probe, layout]);
   return layout === 'cards' ? true : layout === 'table' ? false : narrow;
 }
 
@@ -325,12 +376,21 @@ export function dropOrderOf<Item>(columns: readonly DataColumn<Item>[]): readonl
     .map(({ column }) => column.id);
 }
 
+/** What the fit decided: the lesser columns that went, and whether nothing more could go while the box still scrolled sideways. */
+interface ColumnFit {
+  readonly dropped: ReadonlySet<string>;
+  /** Every lesser column is gone (there may have been none) and the box still scrolls sideways. */
+  readonly full: boolean;
+}
+
 /**
  * **No table scrolls sideways** (the Product Owner, 10 November 2026): the lesser columns that go, as the table's box is measured. A table drawn as a table whose box scrolls sideways takes the next of
- * its lesser columns away (`dropOrderOf`) and measures again, until it does not or none is left; it begins again from every column whenever the width of its box changes (a column that now fits comes
- * back) or what is in it does (`contentKey`: its rows and its columns), so that the lesser columns are never fewer than the room needs. The measure is a layout effect, so what is drawn first is
- * what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is read from a probe of no height, so that the columns going,
- * which shortens the rows, is not a change of what is observed.
+ * its lesser columns away (`dropOrderOf`) and measures again, until it does not or none is left (then it is `full`: the table gives up the room its prose columns keep and lets words break anywhere, or,
+ * for a list that opens nothing, is cards). It begins again from every column whenever the width of its box changes (a column that now fits comes back), the faces finish loading (the first measure
+ * is made in the fallback face, `font-display: swap`) or what is in it does (`contentKey`: its rows and its columns), so that the lesser columns are never fewer than the room needs; and it measures
+ * again, **adding drops and never giving one back**, whenever the table element itself changes its width (what is in it grew: a cell that got its words, a face that was wider than the first). The
+ * measure is a layout effect, so what is drawn first is what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is read from a
+ * probe of no height, so that the columns going, which shortens the rows, is not a change of what is observed.
  */
 function useColumnFit(
   scroller: RefObject<HTMLDivElement | null>,
@@ -338,42 +398,79 @@ function useColumnFit(
   measuring: boolean,
   order: readonly string[],
   contentKey: string,
-): ReadonlySet<string> {
+): ColumnFit {
   const [dropped, setDropped] = useState(0);
-  /** Counts the times the width of the box changed: the measure begins again each time, even when every column was drawn already and nothing else changes. */
+  const [full, setFull] = useState(false);
+  /** Counts the times the measure is to be made again: when the width of the box changed (even when every column was drawn already and nothing else changes), the faces loaded or the table grew. */
   const [epoch, setEpoch] = useState(0);
   const [seenKey, setSeenKey] = useState(contentKey);
   if (seenKey !== contentKey) {
     setSeenKey(contentKey);
     setDropped(0);
+    setFull(false);
   }
   const count = Math.min(dropped, order.length);
   useLayoutEffect(() => {
     const measure = (): void => {
       const box = scroller.current;
       if (!measuring || box === null || box.clientWidth === 0) return;
-      if (box.scrollWidth > box.clientWidth + 1 && count < order.length) setDropped(count + 1);
+      if (box.scrollWidth <= box.clientWidth + 1) return;
+      if (count < order.length) setDropped(count + 1);
+      else if (!full) setFull(true);
     };
     measure();
-  }, [scroller, measuring, count, order.length, contentKey, epoch]);
+  }, [scroller, measuring, count, order.length, full, contentKey, epoch]);
   useLayoutEffect(() => {
     const element = probe.current;
-    if (element === null || typeof ResizeObserver === 'undefined') return;
-    let width = element.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (element.clientWidth === width) return;
-      width = element.clientWidth;
+    // The start again from every column: the box changed its width, or the faces finished loading.
+    const restart = (): void => {
       flushSync(() => {
         setDropped(0);
+        setFull(false);
         setEpoch((value) => value + 1);
       });
+    };
+    // A page environment without layout (a test's) has no set of faces to watch.
+    const page: { readonly fonts?: FontFaceSet } = document;
+    const fonts = page.fonts;
+    fonts?.addEventListener('loadingdone', restart);
+    let observer: ResizeObserver | undefined;
+    if (element !== null && typeof ResizeObserver !== 'undefined') {
+      let width = element.clientWidth;
+      observer = new ResizeObserver(() => {
+        if (element.clientWidth === width) return;
+        width = element.clientWidth;
+        restart();
+      });
+      observer.observe(element);
+    }
+    return () => {
+      fonts?.removeEventListener('loadingdone', restart);
+      observer?.disconnect();
+    };
+  }, [probe]);
+  // The table element itself, watched while it is drawn: it grows wider than its box when what is in it grows, and then only drops are added.
+  useLayoutEffect(() => {
+    const table = scroller.current?.querySelector('table');
+    if (
+      !measuring ||
+      table === null ||
+      table === undefined ||
+      typeof ResizeObserver === 'undefined'
+    )
+      return;
+    // Not flushed in the callback: the table is the element watched, and a drop that shrinks it inside its own callback is a change the observer would be told of at once. The measure is made when
+    // React next renders, a frame later, which is for what is in the table having grown and not for the window changing.
+    const observer = new ResizeObserver(() => {
+      setEpoch((value) => value + 1);
     });
-    observer.observe(element);
+    observer.observe(table);
     return () => {
       observer.disconnect();
     };
-  }, [probe]);
-  return useMemo(() => new Set(order.slice(0, count)), [order, count]);
+  }, [scroller, measuring, full]);
+  const set = useMemo(() => new Set(order.slice(0, count)), [order, count]);
+  return { dropped: set, full };
 }
 
 /** A control that can take focus now: not a disabled button, not one marked unavailable. */
@@ -384,8 +481,8 @@ const isEnabled = (node: HTMLElement): boolean =>
 /**
  * The queue's table (PRODUCT_DESIGN_DIRECTION section 6.1; COMPONENT_PATTERNS, *DataTable*): TanStack Table's model (columns, row model, selection) over the
  * table primitive. Rows are 36px, 52px with a code over a name, or 56px on a tablet. The whole row opens its record through a real button in the code cell,
- * stretched over the row; rows can be chosen, a bar above the rows (which stays in view as they scroll) holds the acts on them, and the usual next act of a row shows on
- * hover, focus and selection. It draws what it is given, in the order it is given, and **never a total it was not given**; it sorts, filters and pages nothing, and
+ * stretched over the row; rows can be chosen, a bar above the rows (which stays in view as they scroll) holds the acts on them, and the usual next act of a row is drawn
+ * at rest. It draws what it is given, in the order it is given, and **never a total it was not given**; it sorts, filters and pages nothing, and
  * decides nothing about what may be chosen or done.
  *
  * The keys: Tab enters the table at one row and leaves it in a few stops (only the current row's controls are in the order), the up and down arrows, Home and End
@@ -402,6 +499,7 @@ export function DataTable<Item>({
   rowId,
   density = 'single',
   onOpen,
+  opens,
   openLabel,
   selection,
   rowAction,
@@ -431,21 +529,27 @@ export function DataTable<Item>({
   const scroller = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const probe = useRef<HTMLDivElement>(null);
-  const narrow = useNarrow(root, layout);
-  const cards = card !== undefined && narrow;
-  const order = dropOrderOf(columns);
+  const narrow = useNarrow(root, probe, layout);
+  const narrowCards = card !== undefined && narrow;
+  /** Only a table whose rows open something may take a column away: its facts are in the panel or the record. A list that opens nothing keeps every column, or is cards. */
+  const canDrop = onOpen !== undefined || opens !== undefined;
+  const order = canDrop ? dropOrderOf(columns) : [];
   const columnsKey = columns
     .map((column) => `${column.id}:${String(column.priority ?? 1)}`)
     .join(',');
-  const dropped = useColumnFit(
+  const fit = useColumnFit(
     scroller,
     probe,
-    !cards && status === 'ready' && rows.length > 0,
+    !narrowCards && status === 'ready' && rows.length > 0,
     order,
     `${columnsKey}#${rows.map(rowId).join('|')}`,
   );
+  /** A list that opens nothing, whose columns cannot fit with every fact in them, is drawn as cards (every fact), never as a table with a fact missing. */
+  const cards = narrowCards || (fit.full && !canDrop && card !== undefined && layout === 'auto');
+  /** Nothing more can go and the box still scrolls: the table gives up the room its prose columns keep and lets words break anywhere, so that even a string with no break never scrolls the box. */
+  const exhausted = fit.full && !cards;
   /** The columns drawn: every one but the lesser columns that the room has taken away. */
-  const shown = columns.filter((column) => !dropped.has(column.id));
+  const shown = columns.filter((column) => !fit.dropped.has(column.id));
   /** The controls of each row, found again when focus is to be put on one: the arrows land on its button that opens it, else its checkbox, else its action. */
   const controls = useRef(
     new Map<string, Partial<Record<'open' | 'box' | 'action', HTMLElement>>>(),
@@ -517,6 +621,16 @@ export function DataTable<Item>({
   if (onOpen !== undefined && (openLabel === undefined || rowHeaderColumns.length === 0)) {
     throw new Error(
       `The table "${label}" opens rows, so it needs a row-header column and a label for its button.`,
+    );
+  }
+  if (card !== undefined && onOpen !== undefined && cardTitle === undefined) {
+    throw new Error(
+      `The table "${label}" opens rows as cards, so it needs a cardTitle: the card's title is its button that opens the record.`,
+    );
+  }
+  if (!canDrop && columns.some((column) => (column.priority ?? 1) > 1)) {
+    throw new Error(
+      `The table "${label}" marks lesser columns but its rows open nothing, so no column may go: a fact it took away would be on no screen. Remove the priorities (it is cards where its columns cannot fit).`,
     );
   }
   const duplicateColumn = columns.find(
@@ -914,9 +1028,11 @@ export function DataTable<Item>({
                   {box(row, tab)}
                   <div className="ui-data-table__card-body">
                     {cardTitle === undefined ? null : (
-                      <CardHeading level={cardHeadingLevel}>{cardTitle(row.original)}</CardHeading>
+                      <CardHeading level={cardHeadingLevel}>
+                        {opener(row, tab, cardTitle(row.original))}
+                      </CardHeading>
                     )}
-                    {opener(row, tab, card(row.original))}
+                    {card(row.original)}
                     {isChanged ? (
                       <span id={`${hintId}-${row.id}-changed`} className="ui-visually-hidden">
                         Updated
@@ -931,6 +1047,7 @@ export function DataTable<Item>({
         ) : (
           <Table
             className="ui-data-table__table"
+            data-fit={exhausted ? 'exhausted' : undefined}
             aria-describedby={hintId}
             aria-busy={status === 'loading' ? true : undefined}
           >
@@ -951,6 +1068,7 @@ export function DataTable<Item>({
                       style={column.width === undefined ? undefined : { width: column.width }}
                       data-align={column.align === 'end' ? 'end' : undefined}
                       data-priority={priorityOf(column)}
+                      data-kind={column.kind}
                       aria-sort={sorted}
                     >
                       {column.sortable === true && onSortChange !== undefined ? (
@@ -1036,12 +1154,23 @@ export function DataTable<Item>({
                       )}
                       {row
                         .getVisibleCells()
-                        .filter((cell) => !dropped.has(cell.column.id))
+                        .filter((cell) => !fit.dropped.has(cell.column.id))
                         .map((cell) => {
                           const column = columns.find(
                             (candidate) => candidate.id === cell.column.id,
                           );
-                          const content = flexRender(cell.column.columnDef.cell, cell.getContext());
+                          const room =
+                            exhausted || column === undefined ? undefined : minWidthOf(column);
+                          const drawn = flexRender(cell.column.columnDef.cell, cell.getContext());
+                          // The room the column keeps is a block inside the cell, so that the cell's least width is a width and not one letter.
+                          const content =
+                            room === undefined ? (
+                              drawn
+                            ) : (
+                              <div className="ui-data-table__cell" style={{ minInlineSize: room }}>
+                                {drawn}
+                              </div>
+                            );
                           if (column?.rowHeader === true) {
                             return (
                               <TableHead
@@ -1049,6 +1178,7 @@ export function DataTable<Item>({
                                 scope="row"
                                 className="ui-data-table__code"
                                 data-align={column.align === 'end' ? 'end' : undefined}
+                                data-kind={column.kind}
                               >
                                 {opener(row, tab, content)}
                                 {isChanged ? (
@@ -1067,6 +1197,7 @@ export function DataTable<Item>({
                               key={cell.id}
                               data-align={column?.align === 'end' ? 'end' : undefined}
                               data-priority={column === undefined ? undefined : priorityOf(column)}
+                              data-kind={column?.kind}
                             >
                               {content}
                             </TableCell>
@@ -1107,6 +1238,11 @@ function CardHeading({
 }) {
   const Heading = `h${String(level)}` as 'h2' | 'h3' | 'h4';
   return <Heading className="ui-data-table__card-title">{children}</Heading>;
+}
+
+/** The room a column keeps: the width it names, else `PROSE_MIN_WIDTH` for prose, else none (its content's own one line is its room). */
+export function minWidthOf<Item>(column: DataColumn<Item>): string | undefined {
+  return column.minWidth ?? (column.kind === 'prose' ? PROSE_MIN_WIDTH : undefined);
 }
 
 /** What a column says of its priority for the stylesheet: nothing for the one that is always drawn. */

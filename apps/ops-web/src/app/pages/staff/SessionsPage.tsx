@@ -128,13 +128,13 @@ function Sessions({
     {
       id: 'active',
       header: 'Last active',
-      priority: 2,
+      kind: 'date',
       cell: (row) => <Time instant={row.last_activity_at} />,
     },
     {
       id: 'expires',
       header: 'Expires',
-      priority: 3,
+      kind: 'date',
       cell: (row) => <Time instant={row.expires_at} />,
     },
     ...(canRevoke

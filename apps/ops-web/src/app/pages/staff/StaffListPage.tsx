@@ -346,6 +346,8 @@ export function StaffListPage() {
           rowId: (row) => row.id,
           density: 'two-line',
           card: (row) => <ProfileCard facts={row} />,
+          // The rows open a page of their own (the link of the first line), so the lesser columns may go: their facts are in the record.
+          opens: 'record',
           // The name is the heading of each card, for heading navigation, and the link to the profile.
           cardTitle: (row) => <Link to={row.href}>{row.name}</Link>,
           // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).

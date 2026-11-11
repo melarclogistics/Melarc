@@ -188,9 +188,9 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
  * chips, the table, and the record that is open in a panel beside it. **It owns the structure, the states and the behaviour of the shape, and never the data**: what a row is,
  * what a view counts, which acts are offered and what the server refused are the page's and the server's, and a figure that was not given is not drawn (never as 0).
  *
- * What it carries from the kit, so that a page does not wire it again: column priority (the table's own box narrows when the panel opens, so a column the page marked lesser
- * goes and the table never scrolls sideways at 1440px; with no panel beside it the table keeps every column down to 40rem, its cells wrapping, so no fact is dropped where nothing
- * else shows it, and the rows are cards only under that or under a panel that is a sheet), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
+ * What it carries from the kit, so that a page does not wire it again: the fit of the columns (the table measures its own box, which narrows when the panel opens, and takes a column
+ * the page marked lesser away only as far as it takes for the box not to scroll sideways, whatever is beside it, so the table never scrolls sideways at 1440px; its prose columns keep
+ * their room and its words break at their spaces; the rows are cards under 40rem of the box, and where a list that opens nothing cannot fit its columns), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
  * came from (`table.initialScroll`, `table.onScrollChange`, `table.focusRowId`), and the panel becoming a full-screen sheet at 768px and below. **Every state is told:** loading
  * (rows of the table's own shape), nothing yet, nothing that fits the filters, nothing at the chosen hub (with *Show all hubs*), a failure with a way to try again, and stale rows with
  * a way to read again.

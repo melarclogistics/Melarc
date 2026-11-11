@@ -44,14 +44,19 @@ export function trustedBrowserRows(
       ),
     },
     // What a browser is called and when it was last used say which it is; when it was added and when it ends go first where the box is short, the later of the two before the earlier.
-    { id: 'added', header: 'Added', priority: 3, cell: (row) => <Time instant={row.created_at} /> },
+    {
+      id: 'added',
+      header: 'Added',
+      kind: 'date',
+      cell: (row) => <Time instant={row.created_at} />,
+    },
     {
       id: 'used',
       header: 'Last used',
-      priority: 2,
+      kind: 'date',
       cell: (row) => <LastUsed instant={row.last_used_at} />,
     },
-    { id: 'ends', header: 'Ends', priority: 3, cell: (row) => <Time instant={row.expires_at} /> },
+    { id: 'ends', header: 'Ends', kind: 'date', cell: (row) => <Time instant={row.expires_at} /> },
     ...(action === undefined
       ? []
       : [{ id: 'action', header: 'Action', cell: (row: TrustedBrowserView) => action(row) }]),

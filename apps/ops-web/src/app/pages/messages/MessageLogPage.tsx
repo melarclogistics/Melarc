@@ -117,11 +117,11 @@ function NumberHint({ entry }: { readonly entry: NotificationEntryView }) {
 /** The page of the record a message is about, by the kind of record it is; an identifier is an address and never text. */
 function RecordLink({ entry }: { readonly entry: NotificationEntryView }) {
   return (
-    <span className="messages-words">
+    <NoWrap>
       <Link to={SUBJECT_PATHS[entry.subject.type](entry.subject.id)}>
         {SUBJECT_LABELS[entry.subject.type]}
       </Link>
-    </span>
+    </NoWrap>
   );
 }
 
@@ -209,11 +209,11 @@ const COLUMNS: readonly DataColumn<NotificationEntryView>[] = [
     rowHeader: true,
     cell: (row) => <NoWrap>{formatInstant(row.created_at)}</NoWrap>,
   },
-  { id: 'message', header: 'Message', cell: (row) => <WhichMessage entry={row} /> },
-  { id: 'to', header: 'To', priority: 2, cell: (row) => <ToAndChannel entry={row} /> },
+  { id: 'message', header: 'Message', kind: 'prose', cell: (row) => <WhichMessage entry={row} /> },
+  { id: 'to', header: 'To', cell: (row) => <ToAndChannel entry={row} /> },
   { id: 'status', header: 'Status', cell: (row) => <StatusAndOutcome entry={row} /> },
-  { id: 'number', header: 'Number', priority: 3, cell: (row) => <NumberHint entry={row} /> },
-  { id: 'record', header: 'Record', cell: (row) => <RecordLink entry={row} /> },
+  { id: 'number', header: 'Number', cell: (row) => <NumberHint entry={row} /> },
+  { id: 'record', header: 'Record', kind: 'code', cell: (row) => <RecordLink entry={row} /> },
 ];
 
 /**

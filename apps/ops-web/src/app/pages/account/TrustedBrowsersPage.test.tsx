@@ -159,24 +159,21 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
     ).toEqual(['Added', 'Last used', 'Ends']);
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold its columns scrolls sideways where the end and the
-  // day it was added could have gone. What a browser is called and when it was last used say which it is; the act is never lesser.
-  it('marks when it was added and when it ends as the lesser columns, the later of the two the first to go', async () => {
+  // Break caught (run 7, Stage 1.2; replaces "marks when it was added and when it ends as the lesser columns", which the Product Owner reversed on 11 November 2026): a browser's row opens
+  // nothing, so a column the table took away would leave a day on no screen. No column is lesser; the three times are of the date kind (one line each), and where the box cannot hold them the
+  // list is cards, with every fact.
+  it('marks no column lesser, for a list whose rows open nothing never loses a time', async () => {
     open();
 
     const found = await table();
-    const priorities = Object.fromEntries(
-      within(found)
-        .getAllByRole('columnheader')
-        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    const headers = within(found).getAllByRole('columnheader');
+    expect(headers.map((cell) => cell.getAttribute('data-priority'))).toEqual(
+      headers.map(() => null),
     );
-    // A column that is not lesser carries no mark: it is always drawn.
-    expect(priorities).toMatchObject({
-      Browser: null,
-      Added: '3',
-      'Last used': '2',
-      Ends: '3',
-    });
+    const kinds = Object.fromEntries(
+      headers.map((cell) => [cell.textContent, cell.getAttribute('data-kind')]),
+    );
+    expect(kinds).toMatchObject({ Added: 'date', 'Last used': 'date', Ends: 'date' });
   });
 
   it('says plainly that the password is still asked, and shows nothing that could sign anyone in', async () => {

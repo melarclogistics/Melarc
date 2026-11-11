@@ -247,20 +247,24 @@ export function ApprovalsPage() {
     {
       id: 'packages',
       header: 'Packages',
+      kind: 'count',
       priority: 3,
       cell: ({ request }) => <NoWrap>{packagesText(request)}</NoWrap>,
     },
     {
       id: 'recipient',
       header: 'Recipient',
+      kind: 'prose',
+      priority: 2,
       cell: ({ exception }) => (
         <CellLines first={exception.recipient.name} second={exception.recipient.location.address} />
       ),
     },
-    { id: 'why', header: 'Why', cell: ({ exception }) => exception.note },
+    { id: 'why', header: 'Why', kind: 'prose', cell: ({ exception }) => exception.note },
     {
       id: 'asked',
       header: 'Asked',
+      kind: 'prose',
       cell: ({ exception }) => (
         <CellLines
           first={actorText(exception.requested_by, principalId)}
@@ -277,6 +281,7 @@ export function ApprovalsPage() {
     {
       id: 'state',
       header: 'Request state',
+      kind: 'badge',
       cell: ({ request }) => {
         const note = stateNoteOf(request);
         const badge = <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />;
@@ -405,6 +410,8 @@ export function ApprovalsPage() {
                 stateNote={stateNoteOf(row.request)}
               />
             ),
+            // The rows open the request's own page (the link of the first line), so the lesser columns may go: their facts are in the record.
+            opens: 'record',
             // The code is the heading of each card and the link to the request's own page.
             cardTitle: ({ request }) => (
               <Link to={`/pickup-requests/${request.id}`}>

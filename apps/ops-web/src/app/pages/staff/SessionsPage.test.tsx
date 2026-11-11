@@ -218,19 +218,21 @@ describe('the sessions: what it shows', () => {
     ).toEqual(['Last active', 'Expires']);
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that a box that cannot hold its columns scrolls sideways where the time it
-  // expires and then the time it was last active could have gone. The time it started, which names the session, and the act are never lesser.
-  it('marks when it was last active and when it expires as the lesser columns, the expiry the most lesser', async () => {
+  // Break caught (run 7, Stage 1.2; replaces "marks when it was last active and when it expires as the lesser columns", which the Product Owner reversed on 11 November 2026): a session's row
+  // opens nothing, so a column the table took away would leave a time on no screen. No column is lesser; the three times are of the date kind (one line each), and where the box cannot hold them the
+  // list is cards, with every fact (the kit's rule and its tests are in DataTable.test.tsx).
+  it('marks no column lesser, for a list whose rows open nothing never loses a time', async () => {
     open();
 
     const found = await table();
-    const priorities = Object.fromEntries(
-      within(found)
-        .getAllByRole('columnheader')
-        .map((cell) => [cell.textContent, cell.getAttribute('data-priority')]),
+    const headers = within(found).getAllByRole('columnheader');
+    expect(headers.map((cell) => cell.getAttribute('data-priority'))).toEqual(
+      headers.map(() => null),
     );
-    // A column that is not lesser carries no mark: it is always drawn.
-    expect(priorities).toMatchObject({ Started: null, 'Last active': '2', Expires: '3' });
+    const kinds = Object.fromEntries(
+      headers.map((cell) => [cell.textContent, cell.getAttribute('data-kind')]),
+    );
+    expect(kinds).toMatchObject({ 'Last active': 'date', Expires: 'date' });
   });
 
   // Break caught: a credential, a token hash or a bundle on a session row.

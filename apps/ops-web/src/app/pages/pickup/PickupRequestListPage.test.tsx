@@ -357,7 +357,13 @@ describe('the queue: six columns, and the same facts as cards', () => {
 
       expect(within(place).queryAllByRole('link')).toHaveLength(0);
       expect(within(place).getAllByRole('button')).toHaveLength(1);
-      await user.click(within(place).getByText('Demo Fabrics Ltd'));
+      // The row's words are inside its button; a card's are outside it (its facts are read, which a button's content is not), so a press on them reaches the button by the reach the button is
+      // stretched to, which jsdom does not draw (`pickup.spec.ts` presses them in a real browser).
+      await user.click(
+        layout === 'card'
+          ? within(place).getByRole('button')
+          : within(place).getByText('Demo Fabrics Ltd'),
+      );
 
       // The press opened the request in the panel beside the queue, and the page stayed where it was.
       expect(router.state.location.pathname).toBe('/pickup-requests');

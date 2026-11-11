@@ -447,6 +447,8 @@ export function ManifestListPage() {
             rowId: (row) => row.id,
             density: 'two-line',
             card: (row) => <RunCard facts={row} />,
+            // The rows open the run's own page (the link of the first line), so the lesser columns may go: their facts are in the record.
+            opens: 'record',
             // The code is the heading of each card, for heading navigation, and the link to the run.
             cardTitle: (row) => (
               <Link to={row.href}>

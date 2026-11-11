@@ -25,7 +25,7 @@ import {
   TaskFormSection,
   TaskFormWide,
 } from '../../components/ui/templates/TaskForm';
-import { requestCard, requestColumns } from './DataGroup';
+import { alwaysDrawn, requestCard, requestCardTitle, requestColumns } from './DataGroup';
 import { REQUEST_STAGES, requestMenuItems, RequestFacts } from './PanelsGroup';
 import { SAMPLE_SENDER_PHONE, sampleRequests, type SampleRequest } from './sample-data';
 
@@ -192,6 +192,7 @@ export function QueueWorkspaceExample() {
           openLabel: (request) =>
             `Open ${request.code}${request.sender_name === undefined ? '' : `, ${request.sender_name}`}`,
           card: requestCard,
+          cardTitle: requestCardTitle,
           selection: {
             selectedIds: chosen,
             onChange: setChosen,
@@ -595,7 +596,7 @@ export function BuilderExample() {
   const [refused, setRefused] = useState(false);
   const columns = useMemo<readonly DataColumn<PoolRow>[]>(
     () =>
-      requestColumns(true).map((column): DataColumn<PoolRow> => ({
+      alwaysDrawn(requestColumns(true)).map((column): DataColumn<PoolRow> => ({
         ...column,
         cell: (row) => column.cell(row.request),
       })),
@@ -663,6 +664,7 @@ export function BuilderExample() {
                 selectLabel: (row) => `Choose ${row.request.code}`,
               }}
               card={(row) => requestCard(row.request)}
+              cardTitle={(row) => requestCardTitle(row.request)}
               maxHeight="26rem"
             />
           ),

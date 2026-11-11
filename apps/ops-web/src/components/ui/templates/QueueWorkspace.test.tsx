@@ -2,11 +2,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef, useState } from 'react';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
 import type { DataColumn } from '../data-table/DataTable';
-import { SHEET_QUERY } from '../side-panel/use-media-query';
 import {
   QueueWorkspace,
   type QueueWorkspaceHandle,
@@ -328,41 +327,6 @@ describe('QueueWorkspace', () => {
     );
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a template that chooses the table's crowding itself (keep, drop, cards by whether a panel is open), which is a
-  // second place that decides what the room holds. The table measures its own box (DataTable.test.tsx), whatever is beside it: with nothing open, with a panel docked and with a sheet.
-  describe('the room the table is given', () => {
-    const panel = {
-      open: true,
-      onClose: () => undefined,
-      code: 'ACC-PR-7KQ2MZ',
-      children: <p>The record.</p>,
-    } as const;
-
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    it('asks nothing of the table about its crowding, with nothing open beside it and with a panel docked', () => {
-      for (const container of [renderQueue().container, renderQueue({ panel }).container]) {
-        expect(container.querySelector('.ui-data-table')).not.toHaveAttribute('data-crowded');
-        expect(container.querySelector('.ui-data-table')).toHaveAttribute('data-layout', 'table');
-      }
-    });
-
-    it('asks nothing of it under a panel that is a sheet over the table either', () => {
-      vi.stubGlobal('matchMedia', (query: string) => ({
-        matches: query === SHEET_QUERY,
-        media: query,
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      }));
-
-      const { container } = renderQueue({ panel });
-
-      expect(container.querySelector('.ui-data-table')).not.toHaveAttribute('data-crowded');
-    });
-  });
-
   // Break caught: a panel that closes and leaves focus on nothing, because the row button it was opened from is not the one that is drawn now (the table and its cards swap when
   // the panel narrows the room): the way back is the row's control as it is, found by the row's id.
   it('gives focus back to the row the panel was opened from when it closes', async () => {
@@ -452,7 +416,14 @@ describe('QueueWorkspace', () => {
     view.rerender(
       <MemoryRouter>
         <QueueWorkspace<Row>
-          {...props({ table: { ...props().table, layout: 'cards', card: (row) => row.code } })}
+          {...props({
+            table: {
+              ...props().table,
+              layout: 'cards',
+              card: (row) => row.code,
+              cardTitle: (row) => row.code,
+            },
+          })}
           ref={handle}
         />
       </MemoryRouter>,

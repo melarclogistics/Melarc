@@ -13,7 +13,7 @@ import { Panel } from '../../components/ui/panel/Panel';
 import { LoadingRow } from '../../components/ui/skeleton/LoadingRow';
 import { SkeletonBar } from '../../components/ui/skeleton/SkeletonBar';
 import { SkeletonCard } from '../../components/ui/skeleton/SkeletonCard';
-import { requestColumns } from './DataGroup';
+import { alwaysDrawn, requestColumns } from './DataGroup';
 import { sampleRequests, type SampleRequest } from './sample-data';
 import { KitSection, ScrollRegion, Specimen } from './Section';
 
@@ -70,7 +70,7 @@ function EmptyStateSpecimens() {
         <div className="showcase-kit-stack">
           <DataTable<SampleRequest>
             label="Pickup requests, all-clear"
-            columns={requestColumns(false)}
+            columns={alwaysDrawn(requestColumns(false))}
             rows={[]}
             rowId={(request) => request.id}
             emptyState={
@@ -81,7 +81,7 @@ function EmptyStateSpecimens() {
           />
           <DataTable<SampleRequest>
             label="Pickup requests, filtered to nothing"
-            columns={requestColumns(false)}
+            columns={alwaysDrawn(requestColumns(false))}
             rows={[]}
             rowId={(request) => request.id}
             emptyState={
@@ -166,7 +166,7 @@ function LoadingRowSpecimens() {
         <div className="showcase-kit-stack">
           <DataTable<SampleRequest>
             label="Pickup requests, loading"
-            columns={requestColumns(false)}
+            columns={alwaysDrawn(requestColumns(false))}
             rows={[]}
             rowId={(request) => request.id}
             status="loading"
@@ -175,7 +175,7 @@ function LoadingRowSpecimens() {
           />
           <DataTable<SampleRequest>
             label="Pickup requests, loaded"
-            columns={requestColumns(false)}
+            columns={alwaysDrawn(requestColumns(false))}
             rows={sampleRequests(3)}
             rowId={(request) => request.id}
           />
