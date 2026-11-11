@@ -128,7 +128,8 @@ const OUTSIDE_HUBS_OF = {
   'vendor accounts': 'These vendor accounts are at a hub your account does not work in.',
   'staff profiles': 'These staff profiles are at a hub your account does not work in.',
   'this person': 'This person is at a hub your account does not work in.',
-  'a linked request': 'It belongs to a hub your account does not work in, or it is no longer there.',
+  'a linked request':
+    'It belongs to a hub your account does not work in, or it is no longer there.',
 } as const;
 
 /** What a page can say it holds when a refusal is for a hub (see {@link refusalText}). */
