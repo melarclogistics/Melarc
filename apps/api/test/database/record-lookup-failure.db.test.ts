@@ -325,7 +325,7 @@ describe('every statement of a lookup has the bound of three seconds on the serv
     const admin = await routes.platformAdmin();
     bound.ceiling = undefined;
     bound.asked.length = 0;
-    let statements: readonly string[] = [];
+    let statements: readonly string[];
     try {
       const traced = await routes.kit.trace(() => ask(admin, 'zuko'));
 
