@@ -119,6 +119,40 @@ describe('PageHeader', () => {
       expect(refresh).toHaveFocus();
     });
 
+    // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): a Refresh that is pressed and ignored while the page cannot be read again (the builder's pool while the pickup run
+    // is made), the person left to wonder why nothing happens. The line says why in words, and the button is disabled, not silent.
+    it('says in words why Refresh cannot be used for now, and disables it', async () => {
+      const user = userEvent.setup();
+      const onRefresh = vi.fn();
+      renderHeader({
+        title: 'Pickup requests',
+        freshness: {
+          updatedAt: '09:42',
+          unavailable: 'Refresh waits until the pickup run is made.',
+          onRefresh,
+        },
+      });
+
+      const refresh = screen.getByRole('button', { name: 'Refresh' });
+      expect(refresh).toBeDisabled();
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Updated 09:42. Refresh waits until the pickup run is made.',
+      );
+      await user.click(refresh);
+      expect(onRefresh).not.toHaveBeenCalled();
+    });
+
+    // Break caught: the disabled state kept after the reason has gone.
+    it('is enabled again once nothing stops it', () => {
+      renderHeader({
+        title: 'Pickup requests',
+        freshness: { updatedAt: '09:42', onRefresh: vi.fn() },
+      });
+
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+      expect(screen.getByRole('status')).toHaveTextContent(/^Updated 09:42$/);
+    });
+
     // Break caught: a failed read told as if the page were current, or its last good time lost, or no way to try again.
     it('says a read failed with the last time it worked, and offers to try again', async () => {
       const user = userEvent.setup();

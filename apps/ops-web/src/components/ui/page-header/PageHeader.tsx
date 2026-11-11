@@ -23,6 +23,11 @@ export interface Freshness {
   readonly state?: FreshnessState;
   /** The moment of the last successful read, already written the way the portal writes a time ("09:42"). Nothing is drawn for a page never read. */
   readonly updatedAt?: string;
+  /**
+   * Why Refresh cannot be used for now, in words ("Refresh waits until the pickup run is made."): the button is disabled and the line says so, so that a press is never ignored in silence.
+   * Leave it out when Refresh can be used.
+   */
+  readonly unavailable?: string;
   readonly onRefresh: () => void;
 }
 
@@ -46,7 +51,7 @@ const NUMBER = new Intl.NumberFormat('en-GB');
  * not a page header but has results of its own to read again (the builder's pool), so that every screen says it the same way and no page writes its own words for it.
  */
 export function FreshnessLine({ freshness }: { readonly freshness: Freshness }) {
-  const { state = 'idle', updatedAt, onRefresh } = freshness;
+  const { state = 'idle', updatedAt, unavailable, onRefresh } = freshness;
   // A page that was never read says nothing, and has nothing to refresh.
   if (state === 'idle' && updatedAt === undefined) return null;
   const words =
@@ -59,13 +64,14 @@ export function FreshnessLine({ freshness }: { readonly freshness: Freshness }) 
         : `Updated ${updatedAt ?? ''}`;
   return (
     <p className="ui-page-head__freshness">
-      <span role="status">{words}</span>
+      <span role="status">{unavailable === undefined ? words : `${words}. ${unavailable}`}</span>
       <span aria-hidden="true">·</span>
       <Button
         type="button"
         variant="link"
         className="ui-page-head__refresh"
         aria-busy={state === 'refreshing' ? true : undefined}
+        disabled={unavailable !== undefined}
         onClick={() => {
           // One read at a time: a press while a read is under way is that read's, and neither cancels it nor starts another.
           if (state !== 'refreshing') onRefresh();

@@ -677,7 +677,10 @@ export function ManifestBuilderPage() {
                       freshness={{
                         state: pool.isFetching ? 'refreshing' : pool.isError ? 'failed' : 'idle',
                         ...(updatedAt === undefined ? {} : { updatedAt }),
-                        // While the pickup run is being made the pool is left as it is: a press is ignored, as one is while a read is under way.
+                        // While the pickup run is being made the pool is left as it is: Refresh is disabled and the line says why.
+                        ...(locked
+                          ? { unavailable: 'Refresh waits until the pickup run is made.' }
+                          : {}),
                         onRefresh: () => {
                           if (!locked) void pool.refetch({ cancelRefetch: false });
                         },

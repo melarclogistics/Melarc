@@ -957,6 +957,36 @@ describe('the pool: when it was read, the way to read it again, and a page that 
     await poolTable();
   });
 
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the pool's Refresh pressed while the pickup run is being made and ignored without a word. It is disabled, and the line
+  // says why in words, until the answer comes.
+  it('disables Refresh and says why while the pickup run is being made', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { user } = open({ [CREATE]: () => gate });
+    await user.click(await box('ACC-PR-7KQ2MZ'));
+    await typeDate(user, '04112026');
+    await user.click(screen.getByRole('button', { name: 'Create the pickup run' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    });
+    expect(screen.getByText(/Refresh waits until the pickup run is made/)).toBeVisible();
+    const before = pools().length;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(pools()).toHaveLength(before);
+
+    await act(async () => {
+      release(refusal(409, 'ALREADY_MANIFESTED'));
+      await gate;
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    });
+    expect(screen.queryByText(/Refresh waits until the pickup run is made/)).toBeNull();
+  });
+
   // Break caught: a page past the end of the pool told as the pool's own nothing ("The pool is empty", as if no pickup were waiting anywhere), or in words that are not the queue template's, or with
   // no way back to the first page.
   it('tells a page after the first that holds nothing as that, and goes back to the first page', async () => {
