@@ -8,13 +8,17 @@
  *
  *   EVENT=push BEFORE=<revision> FORCED=<true|false> GITHUB_ENV=<file> node scripts/ci-migration-base.ts
  *
- *   exit 0   the base was named (written to GITHUB_ENV), or there is nothing to name: the run is not a push, or the push created the branch (the all-zero revision)
- *   exit 1   the push came from a revision this checkout does not have and `git fetch origin <revision>` did not bring it; or BEFORE is empty or is not a revision; or there
- *            is no GITHUB_ENV to write to
+ *   exit 0   the base was named (written to GITHUB_ENV), or there is nothing to name: the run is not a push
+ *   exit 1   the push came from a revision this checkout does not have and `git fetch origin <revision>` did not bring it; or BEFORE is empty, is not a revision, or is all zeros
+ *            (the push created main: see below); or there is no GITHUB_ENV to write to
  *
  * A **force push** replaces the history of main: the commit `before` names is no longer reachable from any branch, and the checkout (the whole history of the new main) does not hold
  * it. The commit may still be on the server, so it is fetched by name; if it is gone, the run fails, in words that name the force push. **It never falls back to `origin/main`**: on
  * a push that is the revision under test, and the comparison would pass whatever was changed. Branch protection should refuse a force push to main in the first place.
+ *
+ * **A push whose previous revision is all zeros created main** (run 7, Stage 3.3): the workflow runs on a push to main only, so main was deleted and created again (or this is
+ * the first push of a repository), and there is no earlier tip to hold the migrations to. That used to be "nothing to name", and the guard then compared the new main with itself and
+ * passed a deleted and recreated main with an edited migration in it. It fails now, in words that name the recreation.
  *
  * It uses only Node's own modules, so that CI can run it before any install.
  */
@@ -64,8 +68,9 @@ export function decideBase(input: BaseInput, repository: Repository): BaseDecisi
   }
   if (ZERO_REVISION.test(before)) {
     return {
-      kind: 'none',
-      why: 'the push created the branch (its previous revision is all zeros), so there is nothing it replaced to hold the migrations to',
+      kind: 'fail',
+      message:
+        'This push created main (its previous revision is all zeros): main was deleted and created again, so there is no earlier tip to hold the migrations to, and a guard with no base compares the revision with itself and passes whatever was changed, an edited migration included. The migration guard does not fall back to origin/main. Restore main to the commit it had and push again; the branch protection of main should refuse deleting it. If this is the very first push of a new repository, there is nothing to hold the migrations to: run this workflow by hand instead.',
     };
   }
   if (!REVISION.test(before)) {

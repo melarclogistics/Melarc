@@ -381,7 +381,9 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    revision and whether the push was forced, and it refuses `MELARC_MIGRATION_BASE` in an `env:` and a step that sets `CI` to anything but `true` or takes it away (`unset CI`,
    `env -u CI`). **After a force push** the revision the push replaced is no longer in the checkout: the step fetches it by name (`git fetch origin <revision>`), and if the
    server no longer has it **the run fails, in words that name the force push**; it never falls back to `origin/main`, which on a push is the revision under test. Refuse a force
-   push to main in the branch protection of the repository.
+   push to main in the branch protection of the repository. **A push to main whose previous revision is all zeros created main** (it was deleted and created again): the step
+   fails, in words that name the recreation (run 7, Stage 3.3), because there is no earlier tip to hold the migrations to and the guard would compare the new main with itself and
+   pass an edited migration; only the guard run by a developer reads the all-zero revision as none named. For the very first push of a new repository, run the workflow by hand.
 3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
    edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
 4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It

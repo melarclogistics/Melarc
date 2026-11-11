@@ -59,15 +59,24 @@ describe('what a push is held to, decided from the event', () => {
     });
   }
 
-  it('names nothing when the push created the branch: its previous revision is all zeros', () => {
-    const { repository: git, fetched } = repository([]);
+  // Break caught (run 7, Stage 3.3): the all-zero previous revision of a push to main read as "nothing to name". It is main created: deleted and created again, with whatever history
+  // the pusher chose, and the guard that was named no base compared that history with itself and passed an edited migration. The push fails, in words that name the recreation.
+  for (const forced of ['false', 'true', undefined]) {
+    it(`fails when a push created main: its previous revision is all zeros (forced: ${String(forced)})`, () => {
+      const { repository: git, fetched } = repository([]);
 
-    assert.equal(
-      decideBase({ event: 'push', before: '0'.repeat(40), forced: 'false' }, git).kind,
-      'none',
-    );
-    assert.deepEqual(fetched, []);
-  });
+      const decision = decideBase({ event: 'push', before: '0'.repeat(40), forced }, git);
+
+      assert.ok(decision.kind === 'fail');
+      assert.match(
+        decision.message,
+        /^This push created main \(its previous revision is all zeros\)/,
+      );
+      assert.match(decision.message, /deleted and created again/);
+      assert.match(decision.message, /does not fall back to origin\/main/);
+      assert.deepEqual(fetched, []);
+    });
+  }
 
   // Break caught: an empty BEFORE on a push read as "none", which is the guard comparing the revision with itself and passing whatever was changed.
   for (const before of [undefined, '', '   ']) {
@@ -296,6 +305,21 @@ describe('the step, run as CI runs it, on real repositories', () => {
       /The migrations were not held to a base: This push was a force push \(github\.event\.forced is true\)/,
     );
     assert.match(ran.stderr, /does not fall back to origin\/main/);
+    assert.equal(ran.environment, '');
+  });
+
+  // Break caught (run 7, Stage 3.3): main deleted and created again, and the push that created it passed with an edited migration: nothing is written, the words name the recreation.
+  it('fails, names the recreation and writes nothing when the push created main', () => {
+    const { checkout } = world();
+
+    const ran = step(checkout, { EVENT: 'push', BEFORE: '0'.repeat(40), FORCED: 'false' });
+
+    assert.equal(ran.status, 1);
+    assert.match(
+      ran.stderr,
+      /The migrations were not held to a base: This push created main \(its previous revision is all zeros\)/,
+    );
+    assert.match(ran.stderr, /deleted and created again/);
     assert.equal(ran.environment, '');
   });
 
