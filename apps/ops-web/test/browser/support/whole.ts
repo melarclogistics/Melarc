@@ -38,9 +38,7 @@ export async function expectWholeInTheWindow(page: Page, control: Locator): Prom
         (style.overflowX !== 'visible' && (rect.left < left - 0.5 || rect.right > right + 0.5)) ||
         (style.overflowY !== 'visible' && (rect.top < top - 0.5 || rect.bottom > bottom + 0.5));
       if (cuts) {
-        found.push(
-          `${ancestor.tagName.toLowerCase()}.${ancestor.className.toString().split(' ')[0] ?? ''}`,
-        );
+        found.push(`${ancestor.tagName.toLowerCase()}.${ancestor.className.split(' ')[0] ?? ''}`);
       }
     }
     return found;
