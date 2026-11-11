@@ -9,6 +9,7 @@ import {
   MigrationKeyWaitError,
   applicationLockTimeoutOf,
   beginAndTakeKeys,
+  describeLockTimeoutUsed,
   describeRun,
   keyWaitFor,
   runMigrations,
@@ -473,6 +474,46 @@ describe('applicationLockTimeoutOf', () => {
   it("reads the application's setting from the environment of the run", () => {
     expect(applicationLockTimeoutOf({ DATABASE_LOCK_TIMEOUT_MS: '1500' })).toBe(1_500);
     expect(applicationLockTimeoutOf({ DATABASE_LOCK_TIMEOUT_MS: '60000' })).toBe(60_000);
+  });
+
+  // Break caught (run 7, Stage 3.2): a release step that lacks the setting falling back to 2000 ms, so that an API set lower than that finds every attempt of the run outlasting
+  // what queues behind it. In a release (the migration URL is given) the setting is required, and the refusal names it and the reason.
+  it.each([
+    ['not set', {}],
+    ['empty', { DATABASE_LOCK_TIMEOUT_MS: '' }],
+  ])(
+    'refuses, in a release, an environment where it is %s, and names the setting',
+    (_label, environment) => {
+      let failure: unknown;
+      try {
+        applicationLockTimeoutOf(environment, { release: true });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(RangeError);
+      expect((failure as Error).message).toContain('DATABASE_LOCK_TIMEOUT_MS');
+      expect((failure as Error).message).toContain('DATABASE_MIGRATION_URL');
+    },
+  );
+
+  it('reads the setting in a release as it does elsewhere, and applies the same rules to it', () => {
+    expect(applicationLockTimeoutOf({ DATABASE_LOCK_TIMEOUT_MS: '1500' }, { release: true })).toBe(
+      1_500,
+    );
+    expect(() =>
+      applicationLockTimeoutOf({ DATABASE_LOCK_TIMEOUT_MS: '99' }, { release: true }),
+    ).toThrow(RangeError);
+  });
+
+  // Break caught: a run that starts without saying which lock timeout it keeps its waits shorter than, so that nobody reading the log of a release can see that the setting reached it.
+  it('says which value it uses, and where it came from', () => {
+    expect(describeLockTimeoutUsed(1_500, true)).toBe(
+      "db:migrate: each wait for the policy keys is kept shorter than the application's lock timeout of 1500 ms (DATABASE_LOCK_TIMEOUT_MS)",
+    );
+    expect(describeLockTimeoutUsed(2_000, false)).toBe(
+      "db:migrate: each wait for the policy keys is kept shorter than the application's lock timeout of 2000 ms (the application's default, because DATABASE_LOCK_TIMEOUT_MS is not set; a release must set it)",
+    );
   });
 
   // Break caught: a value the application would refuse used for the run, so that the attempts are kept shorter than a figure nobody runs with.

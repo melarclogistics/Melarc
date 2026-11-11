@@ -239,8 +239,9 @@ describe('db-migrate', () => {
       const database = await fresh();
       const url = database.urlFor(MIGRATION_ROLE);
 
-      const first = await tool(DB_MIGRATE, [], { DATABASE_MIGRATION_URL: url });
-      const second = await tool(DB_MIGRATE, [], { DATABASE_MIGRATION_URL: url });
+      const release = { DATABASE_MIGRATION_URL: url, DATABASE_LOCK_TIMEOUT_MS: '2000' };
+      const first = await tool(DB_MIGRATE, [], release);
+      const second = await tool(DB_MIGRATE, [], release);
 
       expect(first.code).toBe(0);
       expect(first.stdout).toMatch(/applied \d+ migration/);
@@ -259,6 +260,7 @@ describe('db-migrate', () => {
 
       const result = await tool(DB_MIGRATE, [], {
         DATABASE_MIGRATION_URL: database.urlFor(API_RUNTIME_ROLE),
+        DATABASE_LOCK_TIMEOUT_MS: '2000',
       });
 
       expect(result.code).toBe(1);

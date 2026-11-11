@@ -99,16 +99,27 @@ export function keyWaitFor(applicationLockTimeoutMs: number): Omit<KeyWaitSettin
 export const DEFAULT_KEY_WAIT = keyWaitFor(Number(ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS));
 
 /**
- * The application's lock timeout as the environment of the run gives it (`DATABASE_LOCK_TIMEOUT_MS`, the setting the application reads under the same name and the same rules),
- * or the application's own default when it gives none. The run keeps each attempt's wait shorter than it, so the environment of the release step carries the value the
- * application runs with. A value the application would refuse is refused here, naming the setting and never what it held.
+ * The application's lock timeout as the environment of the run gives it (`DATABASE_LOCK_TIMEOUT_MS`, the setting the application reads under the same name and the same rules).
+ * The run keeps each attempt's wait shorter than it, so the environment of the release step carries the value the application runs with. A value the application would refuse is
+ * refused here, naming the setting and never what it held.
+ *
+ * **In a release** (`release`: the run is aimed at a database by `DATABASE_MIGRATION_URL`, as a deployment aims it) the setting is **required** (run 7, Stage 3.2): a release step
+ * that lacks it would work to the application's default of 2000 ms, and an API set lower than that would find every attempt outlasting what queues behind it. A local run, which
+ * uses the local development database and an application that has its default, may leave it out.
  */
 export function applicationLockTimeoutOf(
   environment: Readonly<Record<string, string | undefined>>,
+  options: { readonly release?: boolean } = {},
 ): number {
   const given = environment.DATABASE_LOCK_TIMEOUT_MS;
-  if (given === undefined || given === '')
+  if (given === undefined || given === '') {
+    if (options.release === true) {
+      throw new RangeError(
+        `DATABASE_LOCK_TIMEOUT_MS is not set. A release (DATABASE_MIGRATION_URL is set) must carry the value the application runs with, a whole number of milliseconds from ${String(APPLICATION_LOCK_TIMEOUT.least)} to ${String(APPLICATION_LOCK_TIMEOUT.most)}: the run keeps each wait for the policy keys shorter than it, and a guess of the default (${ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS} ms) would be wrong for an application set lower. Set it in the environment of the release step to the application's value.`,
+      );
+    }
     return Number(ENGINEERING_DEFAULTS.DATABASE_LOCK_TIMEOUT_MS);
+  }
   const parsed = integerBetween(
     APPLICATION_LOCK_TIMEOUT.least,
     APPLICATION_LOCK_TIMEOUT.most,
@@ -119,6 +130,14 @@ export function applicationLockTimeoutOf(
     );
   }
   return parsed.data;
+}
+
+/** The line `db:migrate` prints when it starts: which lock timeout of the application it keeps every wait for the policy keys shorter than, and where the value came from. */
+export function describeLockTimeoutUsed(applicationLockTimeoutMs: number, given: boolean): string {
+  const where = given
+    ? 'DATABASE_LOCK_TIMEOUT_MS'
+    : "the application's default, because DATABASE_LOCK_TIMEOUT_MS is not set; a release must set it";
+  return `db:migrate: each wait for the policy keys is kept shorter than the application's lock timeout of ${String(applicationLockTimeoutMs)} ms (${where})`;
 }
 
 /** The run could not take the policy keys its files name, in as many attempts as it was allowed. Nothing of it was applied. */
