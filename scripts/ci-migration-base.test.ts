@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { decideBase, type Repository } from './ci-migration-base.ts';
+import {
+  decideBase,
+  fetchCommand,
+  redacted,
+  type FetchResult,
+  type Repository,
+  fetchFailure,
+} from './ci-migration-base.ts';
 import { MIGRATIONS_DIRECTORY } from './migration-immutability.ts';
 
 /**
@@ -30,14 +39,18 @@ describe('what a push is held to, decided from the event', () => {
       fetched,
       repository: {
         has: (revision) => present.has(revision),
-        fetch: (revision) => {
+        fetch: (revision): FetchResult => {
           fetched.push(revision);
-          if (fetchable.includes(revision)) present.add(revision);
+          if (!fetchable.includes(revision)) return { ok: false, error: GIT_SAID };
+          present.add(revision);
+          return { ok: true };
         },
       },
     };
   }
   const BEFORE = 'a'.repeat(40);
+  const GIT_SAID =
+    "fatal: unable to access 'https://github.com/example/repo/': The requested URL returned error: 404";
 
   it('names the revision a push came from when the checkout has it, and fetches nothing', () => {
     const { repository: git, fetched } = repository([BEFORE]);
@@ -136,6 +149,21 @@ describe('what a push is held to, decided from the event', () => {
     assert.deepEqual(fetched, [BEFORE], 'it tried to fetch it, once, before it gave up');
   });
 
+  // Break caught (run 7, Stage 3.4): the failure of the fetch told as a fact about the server ("no longer serves it") when the fetch was anonymous and failed for want of a token, and git's
+  // own error thrown away. A fetch that failed is told as one that could not be fetched, with what git said, so that a private repository's refusal is not read as a commit that is gone.
+  for (const forced of ['true', 'false']) {
+    it(`says the commit could not be fetched, with what git said, and not that the server no longer serves it (forced: ${forced})`, () => {
+      const { repository: git } = repository([]);
+
+      const decision = decideBase({ event: 'push', before: BEFORE, forced }, git);
+
+      assert.ok(decision.kind === 'fail');
+      assert.match(decision.message, /could not be fetched/);
+      assert.ok(decision.message.includes(GIT_SAID), decision.message);
+      assert.doesNotMatch(decision.message, /no longer serves it|did not bring it/);
+    });
+  }
+
   it('fails in its own words when a push that was not forced came from a revision the checkout lacks', () => {
     const { repository: git } = repository([]);
 
@@ -146,6 +174,103 @@ describe('what a push is held to, decided from the event', () => {
     assert.doesNotMatch(message, /force push/);
     assert.match(message, /fetch-depth: 0/);
     assert.match(message, /does not fall back to origin\/main/);
+  });
+});
+
+/** A token as GitHub hands a job one; nothing of it may reach a log, a file or an error. */
+const TOKEN = 'ghs_Z7qXr0kLmN3pVw9Yb2TdE5fHaJ8cU1iO4sG6';
+const HEADER_VALUE = `basic ${Buffer.from(`x-access-token:${TOKEN}`).toString('base64')}`;
+
+describe('the fetch of a replaced commit', () => {
+  // Break caught (run 7, Stage 3.4): an anonymous fetch (the job checks out with persist-credentials: false), which in a private repository always fails. The token goes to this
+  // one fetch as an extra header passed on the command line, scoped to the command: it is not a `git config` and it is not in the URL.
+  it('hands the job token to the one fetch as an http.extraheader passed with -c, and writes it nowhere', () => {
+    const command = fetchCommand('b'.repeat(40), TOKEN);
+
+    assert.deepEqual(command.args, [
+      '-c',
+      `http.extraheader=AUTHORIZATION: ${HEADER_VALUE}`,
+      'fetch',
+      '--no-tags',
+      '--quiet',
+      'origin',
+      '--',
+      'b'.repeat(40),
+    ]);
+    assert.ok(!command.args.includes('config'));
+    assert.ok(!command.args.some((argument) => argument.includes(TOKEN)));
+    assert.deepEqual(
+      [...command.secrets].sort(),
+      [HEADER_VALUE.slice('basic '.length), TOKEN].sort(),
+    );
+  });
+
+  it('fetches anonymously, as before, when the step has no token', () => {
+    for (const token of [undefined, '', '  ']) {
+      const command = fetchCommand('b'.repeat(40), token);
+
+      assert.deepEqual(command.args, [
+        'fetch',
+        '--no-tags',
+        '--quiet',
+        'origin',
+        '--',
+        'b'.repeat(40),
+      ]);
+      assert.deepEqual(command.secrets, []);
+    }
+  });
+
+  // Break caught: git's error printed as it came, with a credential in it (a trace of the requests, a URL with a user in it).
+  it('removes every credential from what git said, whatever form it is in', () => {
+    const base64 = HEADER_VALUE.slice('basic '.length);
+    const said = [
+      `fatal: unable to access 'https://x-access-token:${TOKEN}@github.com/example/repo/': 403`,
+      `=> Send header: Authorization: ${HEADER_VALUE}`,
+      `authorization: Bearer ${TOKEN}`,
+      `the token ${TOKEN} and its base64 ${base64} again ${TOKEN}`,
+      "fatal: unable to access 'https://user:secret@example.com/r.git/': nope",
+    ].join('\n');
+
+    const clean = redacted(said, [TOKEN, base64]);
+
+    assert.ok(!clean.includes(TOKEN), clean);
+    assert.ok(!clean.includes(base64), clean);
+    assert.ok(!clean.includes('secret@'), clean);
+    assert.doesNotMatch(clean, /Authorization: (?:basic|bearer) \S/i);
+    assert.match(clean, /fatal: unable to access/);
+    assert.match(clean, /403/);
+  });
+
+  // Break caught: the failure told with git's output as it came. A fetch that is traced or run verbosely ends with the headers it sent, and the end of its output is what a failure repeats.
+  it('tells a failed fetch from the end of what git printed, with the credentials removed from those lines', () => {
+    const base64 = HEADER_VALUE.slice('basic '.length);
+    const ran = {
+      stdout: '',
+      stderr: [
+        'first line of a long trace',
+        ...Array.from({ length: 6 }, (_, index) => `trace line ${String(index)}`),
+        `=> Send header: Authorization: ${HEADER_VALUE}`,
+        `  -c http.extraheader=AUTHORIZATION: ${HEADER_VALUE}`,
+        `remote: Invalid username or token ${TOKEN}`,
+        'fatal: unable to access the repository: The requested URL returned error: 403',
+      ].join('\n'),
+    };
+
+    const failure = fetchFailure(ran, [TOKEN, base64]);
+
+    assert.equal(failure.ok, false);
+    assert.ok(!failure.error.includes(TOKEN), failure.error);
+    assert.ok(!failure.error.includes(base64), failure.error);
+    assert.match(failure.error, /returned error: 403/);
+    assert.match(failure.error, /Invalid username or token/);
+    assert.ok(!failure.error.includes('first line'), 'only the end of it is repeated');
+  });
+
+  it('leaves a message with no credential in it as it was', () => {
+    const said = "fatal: couldn't find remote ref bbbbbbbb";
+
+    assert.equal(redacted(said, [TOKEN]), said);
   });
 });
 
@@ -291,6 +416,58 @@ describe('the step, run as CI runs it, on real repositories', () => {
     assert.equal(ran.status, 0, ran.stderr);
     assert.equal(ran.environment, `MELARC_MIGRATION_BASE=${replaced}\n`);
     assert.equal(git(checkout, 'cat-file', '-t', replaced), 'commit');
+  });
+
+  // Break caught (run 7, Stage 3.4): the fetch of a replaced commit made without the job's token, or with it written to the checkout's configuration, or printed. Here `origin` is a
+  // server that refuses (403) and records the header it was sent, and git is made to trace every header unredacted (GIT_TRACE_CURL, GIT_TRACE_REDACT=0) so that a step that printed what
+  // git said without removing the credential would show it. The header arrives, the failure is told as a fetch that could not be made, with git's own words, and the token is in no
+  // line of the output and in no file of the checkout.
+  it('fetches with the job token, tells a refusal as "could not be fetched" and leaks the token nowhere', async () => {
+    const { checkout } = world();
+    const seen: (string | undefined)[] = [];
+    const server = createServer((request, response) => {
+      seen.push(request.headers.authorization);
+      response.statusCode = 403;
+      response.end('refused');
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    try {
+      const { port } = server.address() as AddressInfo;
+      git(checkout, 'remote', 'set-url', 'origin', `http://127.0.0.1:${String(port)}/private.git`);
+      const file = join(scratch('melarc-base-env-'), 'github_env');
+      writeFileSync(file, '');
+      const environment: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+      for (const key of ['BEFORE', 'GITHUB_ENV', 'MELARC_MIGRATION_BASE', 'GH_TOKEN']) {
+        Reflect.deleteProperty(environment, key);
+      }
+      Object.assign(environment, {
+        EVENT: 'push',
+        BEFORE: SOMEWHERE_ELSE,
+        FORCED: 'true',
+        GITHUB_ENV: file,
+        GH_TOKEN: TOKEN,
+        GIT_TRACE_CURL: '1',
+        GIT_TRACE_REDACT: '0',
+      });
+      const child = spawn(process.execPath, [SCRIPT], { cwd: checkout, env: environment });
+      let output = '';
+      child.stdout.on('data', (chunk: Buffer) => void (output += chunk.toString()));
+      child.stderr.on('data', (chunk: Buffer) => void (output += chunk.toString()));
+      const status = await new Promise<number | null>((done) => child.on('close', done));
+
+      assert.equal(status, 1, output);
+      assert.ok(seen.length > 0, 'the server was asked');
+      assert.equal(seen[0], HEADER_VALUE, 'the first request carried the job token');
+      assert.match(output, /could not be fetched/);
+      assert.match(output, /403/, "git's own words are there");
+      assert.ok(!output.includes(TOKEN), 'the token is not printed');
+      assert.ok(!output.includes(HEADER_VALUE.slice('basic '.length)), 'its base64 is not printed');
+      assert.equal(readFileSync(file, 'utf8'), '');
+      const configuration = readFileSync(join(checkout, '.git', 'config'), 'utf8');
+      assert.ok(!configuration.includes(TOKEN) && !/extraheader/i.test(configuration));
+    } finally {
+      server.close();
+    }
   });
 
   // Break caught: a force push whose replaced revision is gone, ended with success or with a fall back to origin/main: nothing is written, and the words name the force push.

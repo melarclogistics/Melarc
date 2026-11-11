@@ -1457,17 +1457,21 @@ function checkMigrationBaseIsNotAnEnv(workflow: unknown, jobs: readonly Job[]): 
 export const MIGRATION_BASE_COMMAND = 'node scripts/ci-migration-base.ts';
 /** The guard that holds the migrations to that revision (scripts/migration-immutability.ts), as the whole of its script. */
 export const MIGRATION_GUARD_COMMAND = 'node scripts/migration-immutability.ts';
-/** What the step is handed, as expressions of the run: the event, the revision the push came from and whether the push replaced history. Nothing else gives it these. */
+/**
+ * What the step is handed, as expressions of the run: the event, the revision the push came from, whether the push replaced history, and the job's token for the one fetch of a
+ * replaced commit (the checkout keeps none, and an anonymous fetch always fails in a private repository: run 7, Stage 3.4). Nothing else gives it these.
+ */
 export const MIGRATION_BASE_STEP_ENV: Readonly<Record<string, string>> = {
   EVENT: '${{ github.event_name }}',
   BEFORE: '${{ github.event.before }}',
   FORCED: '${{ github.event.forced }}',
+  GH_TOKEN: '${{ github.token }}',
 };
 
 /**
  * The step that names the revision a push is held to is there, before the guard, and is handed the event (run 6, Stage 1.3). A push tests the commit main is now at, and a guard
  * with no base compares that commit with the merge base of itself and `origin/main`, which is itself: it passes whatever the push changed. So the step is held, as the whole
- * script of a step of the job that runs the guard, **before** it, with `EVENT`, `BEFORE` and `FORCED` handed to it. A step that is deleted, moved after the guard, or handed nothing
+ * script of a step of the job that runs the guard, **before** it, with `EVENT`, `BEFORE`, `FORCED` and `GH_TOKEN` handed to it. A step that is deleted, moved after the guard, or handed nothing
  * leaves a push to main checked against itself and green.
  */
 function checkMigrationBaseStep(jobs: readonly Job[]): WorkflowProblem[] {
