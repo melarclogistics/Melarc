@@ -57,10 +57,11 @@ function screenSources(directory: string): string[] {
   });
 }
 
-const KEY_SHAPE = /(?<![\w.])[a-z]+(?:\.[a-z_]+){1,3}(?![\w])/g;
+/** The shape of a key, in any case (run 7, Stage 2.4): `Pickup.read` is the key to whoever reads it. */
+const KEY_SHAPE = /(?<![\w.])[a-z]+(?:\.[a-z_]+){1,3}(?![\w])/gi;
 
 function keysIn(text: string, keys: ReadonlySet<string>): string[] {
-  return (text.match(KEY_SHAPE) ?? []).filter((candidate) => keys.has(candidate));
+  return (text.match(KEY_SHAPE) ?? []).filter((candidate) => keys.has(candidate.toLowerCase()));
 }
 
 function parse(text: string, fileName: string): ts.SourceFile {
@@ -454,6 +455,9 @@ describe('the source of the portal', () => {
     ).toBe(1);
     expect(wrong('const a = `waits for ${who} with pickup.read to see it`;')).toBe(1);
     expect(wrong('const a = `${who} pickup.read`;')).toBe(1);
+    // Break caught (run 7, Stage 2.4): the scan case-sensitive, so that a key with a capital in a sentence or in an element went through.
+    expect(wrong(`const a = 'needs Pickup.read to see it';`)).toBe(1);
+    expect(wrong(`const a = <p>STAFF.READ</p>;`)).toBe(1);
     expect(wrong(`const a = <p>pickup.read</p>;`)).toBe(1);
     expect(wrong(`const a = <Alert title="pickup.read" />;`)).toBe(1);
     expect(wrong(`console.log('pickup.read');`)).toBe(1);

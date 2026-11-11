@@ -34,5 +34,8 @@ export function keyPatternSource(keys: ReadonlySet<string> = catalogueKeys()): s
   return String.raw`(?<![\w.])(?:${escaped.join('|')})(?![\w])`;
 }
 
-/** The flags of {@link keyPatternSource}. */
-export const KEY_PATTERN_FLAGS = 'g';
+/**
+ * The flags of {@link keyPatternSource}: global, and **case-insensitive** (run 7, Stage 2.4): a key with a capital (`Pickup.read`) is the key to whoever reads it, and went through both guards while the
+ * pattern was case-sensitive.
+ */
+export const KEY_PATTERN_FLAGS = 'gi';

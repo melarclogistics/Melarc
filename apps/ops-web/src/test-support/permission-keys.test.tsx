@@ -39,6 +39,23 @@ describe('the watch for a permission key on the screen', () => {
     ]);
   });
 
+  // Break caught (run 7, Stage 2.4): a pattern that is case-sensitive, so that a key with a capital ("Pickup.read") or in capitals went through both guards while a person reads it as the key.
+  it('finds a key written with capitals', () => {
+    const found = keysDrawnBy(() => {
+      render(
+        <div>
+          <p>Pickup.read</p>
+          <p>STAFF.READ</p>
+          <button type="button" aria-label="Fleet.Custody.Read">
+            Go
+          </button>
+          <p>Pickup.reading and unpickup.read are other words</p>
+        </div>,
+      );
+    });
+    expect(found.sort()).toEqual(['Fleet.Custody.Read', 'Pickup.read', 'STAFF.READ']);
+  });
+
   // Break caught: a watch that looks once at what is drawn and not at what is drawn later (a dialog opened and closed, a message that appears and goes), which is where
   // a key that is put together at run time is likely to be.
   it('finds a key that is drawn only for a moment, and one that a text or an attribute is changed to', async () => {
