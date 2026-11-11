@@ -387,6 +387,39 @@ test.describe('building a pickup run: what the officer reads (run 4, Stage 3.6)'
   });
 });
 
+test.describe('a rider’s name on a run (run 7, Stage 2.4)', () => {
+  // Break caught (the Product Owner's review of 198e5be): a rider's name kept for the session on a key shared by every page, so that a rider renamed since the last visit to a run was named as
+  // before. It is read once while the run is on the screen, and read again on the next visit.
+  test('is read again on the next visit to the run, and once while the run stays', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api } = await open(page, RUN, runWorld());
+    const riderReads = () =>
+      api.calls.filter(
+        (call) => call.method === 'GET' && call.path.endsWith(`/ops/riders/${IDS.riderA}`),
+      ).length;
+    await expect(page.getByText('Kwame Mensah').first()).toBeVisible();
+    expect(riderReads()).toBe(1);
+
+    // The rider is renamed at the server while the officer is on another page, some time before they come back.
+    const rider = api.world.riders.find((candidate) => candidate.id === IDS.riderA);
+    if (rider !== undefined) rider.name = 'Kwame Asante';
+    await page.getByRole('link', { name: 'Back to pickup runs' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Pickup runs' })).toBeVisible();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 200);
+        }),
+    );
+    await page.goBack();
+
+    await expect(page.getByText('Kwame Asante').first()).toBeVisible();
+    expect(riderReads()).toBe(2);
+  });
+});
+
 test.describe('ordering, assigning and dispatching a run', () => {
   // Break caught: a reordering control that works with a pointer alone, or whose focus is lost with every move.
   test('moves a stop by the keyboard alone, keeping focus on it, and saves the whole order', async ({

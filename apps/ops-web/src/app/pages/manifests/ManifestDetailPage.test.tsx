@@ -364,41 +364,6 @@ describe('the manifest: what it shows', () => {
     expect(screen.getByText('Assigned')).toBeVisible();
   });
 
-  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): a rider's name kept for the session (read once, never stale, and not let go of when the page was), so a rider renamed
-  // since the last visit was named as before in the facts and in the question of the dispatch. The name is kept while a page that names the rider is mounted and read again on the next visit.
-  it('reads the rider’s name again on the next visit to the page, and once while it stays', async () => {
-    let name = 'Kwame Mensah';
-    let reads = 0;
-    const { router } = open(
-      () =>
-        answer(
-          manifestFixture({ assigned_rider_id: RIDER_ID, assigned_at: '2026-11-03T08:00:00Z' }),
-        ),
-      ALL,
-      {
-        [`GET /ops/riders/${RIDER_ID}`]: () => {
-          reads += 1;
-          return answer({ rider: riderFixture({ full_name: name }), devices: [] }, 'rd1');
-        },
-      },
-    );
-    await ready();
-    expect(await screen.findByText('Kwame Mensah')).toBeVisible();
-    expect(reads).toBe(1);
-
-    await act(async () => {
-      await router.navigate('/nowhere');
-    });
-    name = 'Kwame Asante';
-    await act(async () => {
-      await router.navigate(PATH);
-    });
-    await ready();
-
-    expect(await screen.findByText('Kwame Asante')).toBeVisible();
-    expect(reads).toBe(2);
-  });
-
   it('names each stop by the pickup behind it, in the order of the run', async () => {
     open();
 
