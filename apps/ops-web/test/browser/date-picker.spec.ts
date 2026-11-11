@@ -190,21 +190,24 @@ test.describe('the date field in a browser: focus and accessibility', () => {
     }
   });
 
-  // Break caught: a contrast, target-size, name or relationship failure that shows only with layout, with the calendar open over the page.
-  test('has no WCAG 2.2 A or AA violation with the calendar closed or open', async ({ page }) => {
+  // Break caught: a contrast, target-size, name or relationship failure that shows only with layout, with the calendar open over the page. One test for each state: two scans of the page in one
+  // test took 26 s on WebKit with 30 allowed (the engines run of 10 November 2026); the time is not raised, the work is divided.
+  test('has no WCAG 2.2 A or AA violation with the calendar closed', async ({ page }) => {
     await openShowcase(page);
     expect(await wcagViolations(page)).toEqual([]);
+  });
 
+  test('has no WCAG 2.2 A or AA violation with the calendar open', async ({ page }) => {
+    await openShowcase(page);
     await calendarButton(page).click();
     await expect(dialog(page)).toBeVisible();
     expect(await wcagViolations(page)).toEqual([]);
   });
 
   // Break caught: the muted text colour on the selected fill (4.32:1 against the 4.5:1 that WCAG 1.4.3 needs for 14px text), which shows
-  // only when an empty field has focus, or on the subtle fill of an empty read-only date. Neither state is on the page until it is made.
-  test('has no WCAG 2.2 A or AA violation with an empty part focused, or in an empty read-only date', async ({
-    page,
-  }) => {
+  // only when an empty field has focus, or on the subtle fill of an empty read-only date. Neither state is on the page until it is made. One test for each state: two scans of the page in one
+  // test took 25 s on WebKit with 30 allowed (the engines run of 10 November 2026); the time is not raised, the work is divided.
+  test('has no WCAG 2.2 A or AA violation with an empty part focused', async ({ page }) => {
     await openShowcase(page);
 
     await part(page, 'day').focus();
@@ -212,6 +215,10 @@ test.describe('the date field in a browser: focus and accessibility', () => {
     await expect(part(page, 'day')).toBeFocused();
     await expect(part(page, 'day')).toHaveValue('');
     expect(await wcagViolations(page)).toEqual([]);
+  });
+
+  test('has no WCAG 2.2 A or AA violation in an empty read-only date', async ({ page }) => {
+    await openShowcase(page);
 
     const readOnly = field(page, 'Demo empty read-only date');
     await expect(readOnly).toHaveValue('');
@@ -631,20 +638,36 @@ test.describe('the date field in a browser: what the one field adds', () => {
   });
 
   // Break caught: a contrast, target-size, name or relationship failure that shows only with layout, in either theme, with the calendar open over the page
-  // and with the words of a mistake showing under the control.
+  // and with the words of a mistake showing under the control. One test for each theme and state: three scans of the page in one test took 32 s on WebKit with 30 allowed (the engines run of
+  // 10 November 2026); the time is not raised, the work is divided.
   for (const scheme of ['light', 'dark'] as const) {
-    test(`has no WCAG 2.2 A or AA violation, in the ${scheme} theme, with the calendar closed, with a mistake shown and with it open`, async ({
+    test(`has no WCAG 2.2 A or AA violation, in the ${scheme} theme, with the calendar closed`, async ({
       page,
     }) => {
       await page.emulateMedia({ colorScheme: scheme });
       await openShowcase(page);
       expect(await wcagViolations(page)).toEqual([]);
+    });
+
+    test(`has no WCAG 2.2 A or AA violation, in the ${scheme} theme, with a mistake shown`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await openShowcase(page);
 
       await field(page).click();
       await page.keyboard.type('10282026');
       await expect(page.getByText('That day is not on the calendar.')).toBeVisible();
       expect(await wcagViolations(page)).toEqual([]);
+    });
 
+    test(`has no WCAG 2.2 A or AA violation, in the ${scheme} theme, with the calendar open`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await openShowcase(page);
+
+      // The calendar opens over an empty field, as it did when the same test had typed a mistake into it and cleared it first.
       await field(page).fill('');
       await calendarButton(page).click();
       await expect(dialog(page)).toBeVisible();

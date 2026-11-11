@@ -215,19 +215,20 @@ test.describe('a modal dialog in a browser', () => {
     expect(border.width).toBeGreaterThanOrEqual(1);
   });
 
-  test('has no WCAG 2.2 A or AA violation with the dialog open, at each verified width', async ({
-    page,
-  }) => {
-    for (const { width, height } of VERIFIED_VIEWPORTS) {
+  // One test for each verified width: three scans of the whole page in one test took 35 s on Firefox with 30 s allowed (run (b) of 10 November 2026), the same as the workflow's scan below, which
+  // Stage 5.4 had split. Each width is a test of its own, and none is near its budget.
+  for (const { width, height } of VERIFIED_VIEWPORTS) {
+    test(`has no WCAG 2.2 A or AA violation with the dialog open, at ${String(width)} px`, async ({
+      page,
+    }) => {
       await page.setViewportSize({ width, height });
       await openShowcase(page);
       await openWithKeyboard(page, 'Open the demo dialog');
       await expect(page.getByRole('dialog', { name: 'Demo dialog' })).toBeVisible();
 
       expect(await wcagViolations(page), `${String(width)} px`).toEqual([]);
-      await page.keyboard.press('Escape');
-    }
-  });
+    });
+  }
 });
 
 test.describe('an alert dialog in a browser', () => {

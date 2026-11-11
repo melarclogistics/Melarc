@@ -407,33 +407,48 @@ test.describe('the queue, drawn for the room it has', () => {
     });
   }
 
-  // Break caught: a queue with a violation that only shows in one of its drawings, or in one state's colours (the four badges are four tones), or with the panel open.
-  test('has no WCAG 2.2 A or AA violation as a table, as cards, or with a request open beside it, with every state in it', async ({
-    page,
-  }) => {
-    const states = [
-      pickup({ id: IDS.pending, code: 'ACC-PR-7KQ2MZ', state: 'PENDING' }),
-      pickup({ id: IDS.confirmed, code: 'ACC-PR-9WXH4T', state: 'CONFIRMED' }),
-      pickup({ id: IDS.booked, code: 'ACC-PR-3TZ8A6', state: 'DECLINED' }),
-      pickup({ id: IDS.single, code: 'ACC-PR-4VA9B7', state: 'CANCELLED' }),
-    ];
+  // Break caught: a queue with a violation that only shows in one of its drawings, or in one state's colours (the four badges are four tones), or with the panel open. One test for each drawing:
+  // four scans of the page in one test took 28 s on WebKit with 30 allowed (the engines run of 10 November 2026); the time is not raised, the work is divided.
+  const everyState = () => [
+    pickup({ id: IDS.pending, code: 'ACC-PR-7KQ2MZ', state: 'PENDING' }),
+    pickup({ id: IDS.confirmed, code: 'ACC-PR-9WXH4T', state: 'CONFIRMED' }),
+    pickup({ id: IDS.booked, code: 'ACC-PR-3TZ8A6', state: 'DECLINED' }),
+    pickup({ id: IDS.single, code: 'ACC-PR-4VA9B7', state: 'CANCELLED' }),
+  ];
+
+  test('has no WCAG 2.2 A or AA violation as a table, with every state in it', async ({ page }) => {
     await page.setViewportSize(WIDE);
-    await open(page, '/pickup-requests', { requests: states });
+    await open(page, '/pickup-requests', { requests: everyState() });
     await expect(queueTable(page)).toBeVisible();
     expect(await wcagViolations(page)).toEqual([]);
+  });
+
+  test('has no WCAG 2.2 A or AA violation with a request open beside the table, with every state in it', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests', { requests: everyState() });
+    await expect(queueTable(page)).toBeVisible();
 
     await opener(page, CODE).click();
     await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
     await expect(page.getByText('It waits for an Ops officer to confirm it.')).toBeVisible();
     expect(await wcagViolations(page), 'with the panel open').toEqual([]);
-    await page.keyboard.press('Escape');
+  });
 
-    for (const size of [NARROW, PHONE]) {
+  for (const size of [NARROW, PHONE]) {
+    test(`has no WCAG 2.2 A or AA violation as cards at ${String(size.width)} px, with every state in it`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(WIDE);
+      await open(page, '/pickup-requests', { requests: everyState() });
+      await expect(queueTable(page)).toBeVisible();
+
       await page.setViewportSize(size);
       await expect(queueCards(page)).toBeVisible();
       expect(await wcagViolations(page), `${String(size.width)} px`).toEqual([]);
-    }
-  });
+    });
+  }
 
   test('with reduced motion nothing in the queue moves, in either drawing', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });

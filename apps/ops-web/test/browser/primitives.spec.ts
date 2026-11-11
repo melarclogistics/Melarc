@@ -83,13 +83,18 @@ const OVERLAYS: readonly Overlay[] = [
 
 test.describe('the primitives in a browser: WCAG 2.2 and both themes', () => {
   // Break caught: a primitive whose colours, sizes or roles fail a rule that contrast figures cannot see, in either theme: a scan that runs on
-  // a page whose theme was never applied, which is why the page's own ground is compared.
-  test('the page has no violation in the light theme and none in the dark theme, set by the system', async ({
+  // a page whose theme was never applied, which is why the page's own ground is compared. One test for each theme: two scans of this page in one test took 28 s on WebKit with 30 allowed
+  // (the engines run of 10 November 2026); the time is not raised, the work is divided.
+  test('the page has no violation in the light theme, set by the system', async ({ page }) => {
+    await openShowcase(page, 'light');
+    expect(await wcagViolations(page)).toEqual([]);
+  });
+
+  test('the page has no violation in the dark theme, set by the system, on a ground that is not the light one', async ({
     page,
   }) => {
     await openShowcase(page, 'light');
     const light = await ground(page);
-    expect(await wcagViolations(page)).toEqual([]);
 
     await page.emulateMedia({ colorScheme: 'dark' });
     await expect.poll(() => ground(page)).not.toBe(light);
