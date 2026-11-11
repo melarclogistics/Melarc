@@ -359,8 +359,10 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the migration files main has, the generated client, formatting, types,
    the build, the contract check and lint), the dependency audit, which asks the package registry and so needs the
    network, and the `guards` lane (the root tests that read only documents, styles and manifests: the design tokens, the lifecycle
-   words of the component patterns, the links between documents, the agent documents and the rest of `ROOT_GUARDS` in
-   `scripts/gate.ts`, which add a few seconds beside the other lanes: the gate's unit stage runs them as every root test), in
+   words of the component patterns, the links between documents, the agent documents, `lint-coverage.test.ts` (is every tracked source file linted by something?) and the rest
+   of `ROOT_GUARDS` in `scripts/gate.ts`, which Node runs side by side and which take **about 8.5 seconds in all**, measured on 11 November 2026 (run 7, Stage 3.6) on the development
+   machine with the heavy lock held, three runs each: the fourteen guards 7.6 to 10.6 seconds (8.0 at the median), `lint-coverage.test.ts` alone 5.0 to 5.4, and the fifteen together
+   8.1 to 8.8 (8.5 at the median), so that it adds about half a second beside the other lanes, which take minutes when their caches are cold: the gate's unit stage runs them as every root test), in
    parallel, with the content cache of the formatter and turbo's
    task cache (which serves lint, one task for each workspace) switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
    a few minutes on cold caches, and exits 0 when no check failed: every check passed, or the one that did not pass cleanly is a

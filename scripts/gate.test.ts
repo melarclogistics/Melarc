@@ -458,7 +458,13 @@ describe('the precheck', () => {
       assert.ok(existsSync(join(root, guard)), `${guard} exists`);
       assert.ok(testRoot.split(/\s+/).includes(guard), `${guard} is run by test:root`);
     }
-    for (const named of ['design-tokens', 'design-lifecycle', 'markdown-links', 'agent-docs']) {
+    for (const named of [
+      'design-tokens',
+      'design-lifecycle',
+      'markdown-links',
+      'agent-docs',
+      'lint-coverage',
+    ]) {
       assert.ok(ROOT_GUARDS.includes(`scripts/${named}.test.ts`), `the lane holds ${named}`);
     }
     assert.equal(ROOT_GUARDS_COMMAND, `node --test ${ROOT_GUARDS.join(' ')}`);

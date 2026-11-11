@@ -134,7 +134,10 @@ const AUDIT = 'pnpm audit --audit-level high';
  * They are the tests that a document, a stylesheet or a manifest breaks (the design tokens, the lifecycle words of the component patterns, the links between documents, the agent
  * documents), which the precheck, running no test, did not see until the final run of a task: run 5 found two of them only there. Each reads files, takes seconds and starts no
  * process but Git's; `gate.test.ts` holds the list to that (every file exists and is run by `test:root`) and to being the lane. A guard that needs a browser, a build, a database, a
- * JDK, a walk of the whole tree or more than a few seconds is not in it; the affected run's root target is what runs those (DEVELOPMENT.md, step 4).
+ * JDK, a walk of the whole tree or more than a few seconds is not in it; the affected run's root target is what runs those (DEVELOPMENT.md, step 4). **One exception, by the
+ * Product Owner (run 7, Stage 3.6): `lint-coverage.test.ts`**, which puts every tracked source file to ESLint's own API (is it linted by anything?) and is the guard that a
+ * new folder of code, a changed ignore or a workspace without a lint script breaks, none of which the precheck saw until the final run of a task. It takes about 5 seconds alone and
+ * adds about half a second to the lane, which Node runs side by side (measured on 11 November 2026: the lane 7.6 to 10.6 seconds, 8.0 at the median; with it 8.1 to 8.8, 8.5 at the median).
  */
 export const ROOT_GUARDS: readonly string[] = [
   'scripts/design-tokens.test.ts',
@@ -151,6 +154,7 @@ export const ROOT_GUARDS: readonly string[] = [
   'scripts/repository-shape.test.ts',
   'scripts/test-inventory.test.ts',
   'scripts/gitignore.test.ts',
+  'scripts/lint-coverage.test.ts',
 ];
 
 /** The command of the lane: Node's own runner over the guards, as `test:root` runs them. */
