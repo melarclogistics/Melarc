@@ -28,9 +28,9 @@
 }
 
 /*
- * The box the rows are in is the container the columns' priorities are read from (`@container`, below): its own width, which a side panel opened beside the table shrinks, and
- * not the window's. Focus that goes to a control is never left under the sticky header (`scroll-padding`), nor under the bar of acts above the rows (`scroll-margin`, which adds the
- * bar's height as the table publishes it): a person tabbing backwards through a long table keeps the control in view (task R5.2, M6).
+ * The box the rows are in is the one the table fits its columns to (`useColumnFit`): its own width, which a side panel opened beside the table shrinks, and not the window's. Focus that
+ * goes to a control is never left under the sticky header (`scroll-padding`), nor under the bar of acts above the rows (`scroll-margin`, which adds the bar's height as the table
+ * publishes it): a person tabbing backwards through a long table keeps the control in view (task R5.2, M6).
  */
 .ui-data-table__scroller {
   container-type: inline-size;
@@ -54,6 +54,12 @@
   min-width: min(36rem, 100%);
   border-collapse: separate;
   border-spacing: 0;
+  /*
+   * Words break at their spaces and nowhere else: `break-word` does not lower a cell's least width, so the longest word of a column holds the column, and a table whose words cannot all have
+   * their room overflows, which is what the fit reads to take a lesser column away. The page's `anywhere` (base.css) would lower every cell to one letter. Only when the fit has nothing more
+   * to take away (`data-fit='exhausted'`, below) may words break anywhere.
+   */
+  overflow-wrap: break-word;
   font-size: var(--text-body-md-size);
   line-height: var(--text-body-md-line-height);
 }
@@ -80,6 +86,22 @@
 /* What the screen marks to keep to one line (`NoWrap`): a code, a date, a count. */
 .ui-data-table__nowrap {
   white-space: nowrap;
+}
+
+/*
+ * The least room of a column (`minWidth`, by default 8rem for prose) is a block inside its cells (its width is set on the block), so that a cell's least width is a width and not one
+ * letter. The cells draw no block once the table is exhausted.
+ */
+.ui-data-table__cell {
+  box-sizing: border-box;
+}
+
+/*
+ * Every lesser column is gone and the box still scrolls sideways (`data-fit='exhausted'`, set by `useColumnFit`): words may break anywhere, so that a string with no break at all (an email of
+ * seventy-eight characters) never makes the box scroll sideways.
+ */
+.ui-data-table__table[data-fit='exhausted'] {
+  overflow-wrap: anywhere;
 }
 
 .ui-data-table__table thead th {
@@ -237,10 +259,7 @@
   line-height: var(--text-caption-line-height);
 }
 
-/* A record named by a person's name (`RowTitle title`): whole, in the face of the text, wrapping at its words. */
-.ui-data-table__heading {
-  overflow-wrap: anywhere;
-}
+/* A record named by a person's name (`RowTitle title`) is whole, in the face of the text, and wraps at its words by the table's own `overflow-wrap`, which it inherits. */
 
 /* Two facts in one cell (`CellLines`), the second quieter under the first. */
 .ui-data-table__lines {
@@ -260,7 +279,6 @@
   font-size: var(--text-caption-size);
   font-weight: var(--text-caption-weight);
   line-height: var(--text-caption-line-height);
-  overflow-wrap: anywhere;
 }
 
 /* The muted text is for the default surface only (DESIGN_SYSTEM section 4.6): on the tint of a chosen row it is 4.2 to 1, under the 4.5 to 1 that text needs, so the name takes the secondary text there (found by the axe scan of the table with rows chosen). */
@@ -448,7 +466,7 @@
   min-width: 0;
 }
 
-/* The card's heading: the record's code, above the button that holds the rest of the card. */
+/* The card's heading: the record's code, which is the one button of a card that opens (its reach is stretched over the card, above) and is followed by the card's facts, outside it. */
 .ui-data-table__card-title {
   margin: 0;
   font-size: var(--text-body-md-size);
@@ -456,14 +474,14 @@
   line-height: var(--text-body-md-line-height);
 }
 
-/* The one button of the card holds its facts; no height of its own is kept beyond them. */
+/* The one button of the card is its title (the code); no height of its own is kept beyond it. Its `::after` is stretched over the card, which is the press target. */
 .ui-data-table__card .ui-data-table__open {
   display: block;
   align-items: flex-start;
   min-height: 0;
   min-width: 0;
   padding: 0;
-  /* A button does not wrap its words by itself (the engine's own style is `pre`): the words of a card are a block of text, and a long sender or address wraps in it. */
+  /* A button does not wrap its words by itself (the engine's own style is `pre`): a long title wraps in it. */
   white-space: normal;
 }
 
