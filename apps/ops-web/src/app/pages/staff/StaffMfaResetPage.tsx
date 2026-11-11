@@ -7,11 +7,7 @@ import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { ForbiddenState } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
-import {
-  PageHeader,
-  type BreadcrumbEntry,
-  type PageHeaderProps,
-} from '../../../components/ui/page-header/PageHeader';
+import type { BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
@@ -20,7 +16,7 @@ import { resetStaffMfa } from '../../../platform/staff/staff-commands';
 import type { MfaResetOutcome, StaffIdentityView } from '../../../platform/staff/staff-shape';
 import type { StaffRecord } from '../../../platform/staff/use-staff-queries';
 import { formatInstant } from '../../../platform/time/format-time';
-import { useFocusFallenToHeading, WithProfile } from './WithProfile';
+import { WithProfile } from './WithProfile';
 import './staff-pages.css';
 
 const NOT_ELIGIBLE =
@@ -84,9 +80,6 @@ function Done({
   );
 }
 
-/** The page's header: what the form is and for whom, with the way up (the task form draws it; every other state of the page draws it itself). */
-type Header = Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
-
 function Reset({
   record,
   query,
@@ -101,32 +94,19 @@ function Reset({
   const client = useApiClient();
   const me = useSignedInSession();
   const [asking, setAsking] = useState(false);
-  // The page draws its own heading once the profile is read (the one the wrapper drew while it loaded is gone): focus is put on it if the old one's has fallen.
-  useFocusFallenToHeading();
+  // The heading is the wrapper's, in every state of the read and of the page: the same element while the profile is read and after (run 7, Stage 4.3).
   const { identity, etag } = record;
   const name = identity.full_name;
 
   if (me === undefined) return null;
   const branch = identity.mfa_reset_state;
   const mine = identity.id.toLowerCase() === me.session.principal_id?.toLowerCase();
-  const header: Header = {
-    title: 'Reset authenticator',
-    description: name,
-    breadcrumb: wayUp(identity.id, name),
-  };
-
   if (outcome !== undefined) {
-    return (
-      <>
-        <PageHeader {...header} />
-        <Done identity={identity} outcome={outcome} />
-      </>
-    );
+    return <Done identity={identity} outcome={outcome} />;
   }
   if (branch === 'NOT_ELIGIBLE') {
     return (
       <>
-        <PageHeader {...header} />
         <ForbiddenState kind="unavailable-here" />
         <p className="staff-action__text">{NOT_ELIGIBLE}</p>
       </>
@@ -134,12 +114,9 @@ function Reset({
   }
   if (mine) {
     return (
-      <>
-        <PageHeader {...header} />
-        <p className="staff-note">
-          You cannot reset your own authenticator. Another Platform Admin has to do it.
-        </p>
-      </>
+      <p className="staff-note">
+        You cannot reset your own authenticator. Another Platform Admin has to do it.
+      </p>
     );
   }
 
@@ -151,7 +128,6 @@ function Reset({
   return (
     <>
       <TaskForm
-        header={header}
         onSubmit={ask}
         // The only thing entered on this page is in the question of the act (its reason and note, in its dialog): while the question is open, leaving asks first.
         dirty={asking}
@@ -226,7 +202,6 @@ export function StaffMfaResetPage() {
   return (
     <WithProfile
       id={id}
-      ownsHeading
       heading={(identity) => ({
         title: 'Reset authenticator',
         documentTitle: 'Reset authenticator',

@@ -63,8 +63,12 @@ export interface TaskFormSummary {
 }
 
 export interface TaskFormProps {
-  /** The page's header: the title, its one-line description and the breadcrumb. The page's actions are the form's, below. */
-  readonly header: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
+  /**
+   * The page's header: the title, its one-line description and the breadcrumb. The page's actions are the form's, below. **Leave it out where the page draws the header itself, above the
+   * form** (a page that reads what its form needs, the rider or the request, draws `PageHeader` once for every state of the read): the heading is then the same element while the page reads
+   * and after, so that the focus the frame put on it is not lost when the form arrives (run 7, Stage 4.3).
+   */
+  readonly header?: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
   /** Banners that belong to the whole form (the outcome of a send that did not answer, a refusal that names no field), above the sections. */
   readonly alerts?: ReactNode;
   /** The sections, in the order the officer thinks of the task: `TaskFormSection`s, and anything between them that the task needs. */
@@ -106,7 +110,7 @@ export function TaskForm({
   const reviewing = review?.active === true;
   return (
     <div className="ui-task-form" data-rail={summary === undefined ? undefined : ''}>
-      <PageHeader {...header} />
+      {header === undefined ? null : <PageHeader {...header} />}
       <div className="ui-task-form__layout">
         <form
           ref={formRef}

@@ -1,12 +1,5 @@
 import type { UseQueryResult } from '@tanstack/react-query';
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type SubmitEvent,
-} from 'react';
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
@@ -14,7 +7,7 @@ import { Button } from '../../../components/ui/button/Button';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Link } from '../../../components/ui/link/Link';
-import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
@@ -44,15 +37,6 @@ const NOTE_LIMIT = 1000;
 /** What the replacement is, in two short sentences under its title: it is done in person, and a code comes of it. */
 const REPLACE_INTRO =
   'Do this in person, once you have verified who the rider is. A code appears for the rider to scan with the new handset.';
-
-/** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */
-function useFocusFallenToHeading(): void {
-  useLayoutEffect(() => {
-    const active = document.activeElement;
-    if (active === null || active === document.body)
-      document.querySelector<HTMLElement>('h1')?.focus();
-  }, []);
-}
 
 interface Replacement {
   readonly reasonCode: string;
@@ -102,14 +86,12 @@ function ReplaceDevice({
   id,
   record,
   query,
-  header,
   alerts,
   revoke,
 }: {
   readonly id: string;
   readonly record: RiderRecord;
   readonly query: UseQueryResult<RiderRecord>;
-  readonly header: PageHeaderProps;
   readonly alerts: ReactNode;
   readonly revoke: ReactNode;
 }) {
@@ -196,7 +178,6 @@ function ReplaceDevice({
 
   return (
     <TaskForm
-      header={header}
       formRef={form}
       busy={command.phase === 'sending'}
       dirty={unsaved}
@@ -334,8 +315,6 @@ function Device({
   useEffect(() => {
     if (notice !== undefined) noticeBox.current?.focus();
   }, [notice]);
-  // The page draws its own heading once the rider is read (the one the wrapper drew while it loaded is gone): focus is put on it, as on a record page.
-  useFocusFallenToHeading();
   if (me === undefined) return null;
   const { rider, devices } = record;
   const holdsReregister = me.holds('staff.device.reregister');
@@ -346,12 +325,6 @@ function Device({
     return query.refetch();
   }
 
-  // The way back is the breadcrumb of the parents (the roster, then the rider), the same in every state of the page; there is no link beside it that says it again.
-  const header: PageHeaderProps = {
-    title: 'Revoke or replace a device',
-    description: `For ${rider.full_name}.`,
-    breadcrumb: riderTrail(id, rider.full_name),
-  };
   const news =
     notice === undefined ? null : (
       <div className="rider-notice" ref={noticeBox} tabIndex={-1}>
@@ -395,17 +368,9 @@ function Device({
   return (
     <>
       {replaces ? (
-        <ReplaceDevice
-          id={id}
-          record={record}
-          query={query}
-          header={header}
-          alerts={news}
-          revoke={revoke}
-        />
+        <ReplaceDevice id={id} record={record} query={query} alerts={news} revoke={revoke} />
       ) : (
         <TaskForm
-          header={header}
           alerts={news}
           actions={null}
           onSubmit={(event: SubmitEvent<HTMLFormElement>) => {
@@ -475,27 +440,34 @@ function Reading({ id }: { readonly id: string }) {
     }
   }
   const title = 'Revoke or replace a device';
+  const name = query.status === 'success' ? query.data.rider.full_name : undefined;
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
+      {/*
+        The page's one heading, drawn once for every state of the read, so that it is the same element while the rider is read and after (the focus the frame put on it is not lost when the form
+        arrives, run 7, Stage 4.3). The way back is the breadcrumb of the parents (the roster, then the rider, who has no name to say until the read answers) and no link beside it says it again.
+      */}
+      <PageHeader
+        title={title}
+        {...(name === undefined ? {} : { description: `For ${name}.` })}
+        breadcrumb={riderTrail(id, name)}
+      />
       {query.status === 'success' ? (
         <Device id={id} record={query.data} query={query} />
       ) : (
         // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back (the trail), and says what is happening.
-        <>
-          <PageHeader title={title} breadcrumb={riderTrail(id, undefined)} />
-          <ReadState<RiderRecord>
-            query={query}
-            isEmpty={() => false}
-            empty={null}
-            loadingLabel="Loading the rider…"
-            skeleton={<Skeleton lines={4} />}
-            permission="dispatch.read"
-            operation="getRider"
-          >
-            {() => null}
-          </ReadState>
-        </>
+        <ReadState<RiderRecord>
+          query={query}
+          isEmpty={() => false}
+          empty={null}
+          loadingLabel="Loading the rider…"
+          skeleton={<Skeleton lines={4} />}
+          permission="dispatch.read"
+          operation="getRider"
+        >
+          {() => null}
+        </ReadState>
       )}
     </>
   );

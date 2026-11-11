@@ -72,7 +72,6 @@ function StopNotFound({ manifestId }: { readonly manifestId: string }) {
 }
 
 function Form({
-  header,
   manifestId,
   record,
   code,
@@ -80,8 +79,6 @@ function Form({
   refetchReasons,
   reloadStop,
 }: {
-  /** The page's header, which the task form draws (every other state of the page draws it itself). */
-  readonly header: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
   readonly manifestId: string;
   readonly record: StopRecord;
   readonly code: string | undefined;
@@ -92,8 +89,6 @@ function Form({
 }) {
   const client = useApiClient();
   const navigate = useNavigate();
-  // The task form draws the page's heading once the stop is read, a new element in place of the one the page had while it was read: focus the frame put on that one is put on this one.
-  useFocusFallenToHeading();
   const stop = record.stop;
   const [values, setValues] = useState<Fields>({ reasonCode: '', note: '' });
   const [invalid, setInvalid] = useState<{ reason?: string; note?: string }>({});
@@ -126,7 +121,6 @@ function Form({
   return (
     <>
       <TaskForm
-        header={header}
         formRef={form}
         onSubmit={review}
         actions={
@@ -286,17 +280,12 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
       { label: run.data?.manifest.code ?? 'The pickup run', to: `/manifests/${manifestId}` },
     ],
   };
-  // The form is shown once the stop is read, waits to be worked and the catalogue has a reason: the task form draws the header then, and every other state (loading, a failure, a stop
-  // that cannot be skipped, no reason configured) draws it here, so that the page has its one heading in each of them.
-  const formShown =
-    stopQuery.isSuccess &&
-    isToBeWorked(stopQuery.data.stop) &&
-    reasons.isSuccess &&
-    reasons.data.length > 0;
   return (
     <>
       <title>Skip a stop · Melarc Ops Portal</title>
-      {formShown ? null : <PageHeader {...header} />}
+      {/* The page's one heading, drawn here for every state (loading, a failure, a stop that cannot be skipped, no reason configured, the form), so that it is the same element while the stop is read
+          and after, and the focus the frame put on it is not lost when the form arrives (run 7, Stage 4.3). */}
+      <PageHeader {...header} />
       <ReadState<StopRecord>
         query={stopQuery}
         isEmpty={() => false}
@@ -334,7 +323,6 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
               >
                 {(list) => (
                   <Form
-                    header={header}
                     manifestId={manifestId}
                     record={record}
                     code={code}

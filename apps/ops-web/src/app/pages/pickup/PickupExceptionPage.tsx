@@ -9,11 +9,7 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
-import {
-  PageHeader,
-  type BreadcrumbEntry,
-  type PageHeaderProps,
-} from '../../../components/ui/page-header/PageHeader';
+import type { BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
@@ -31,7 +27,7 @@ import {
   packagesText,
   PICKUP_STATE_MAP,
 } from './pickup-presentation';
-import { useFocusFallenToHeading, WithPickupRequest } from './WithPickupRequest';
+import { WithPickupRequest } from './WithPickupRequest';
 import './pickup-pages.css';
 
 const OPERATION = 'requestOnePackageException';
@@ -125,9 +121,6 @@ function Requested({ id }: { readonly id: string }) {
   );
 }
 
-/** The page's header: what the form is and for which request, with the way back (the task form draws it; every other state of the page draws it itself). */
-type Header = Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
-
 /**
  * The pages above the exception: the queue, then the request, which is the way back to the request and so the only way back this page draws. The request is named by its code once it is read; until
  * then the entry says "The request" and goes to the same page.
@@ -140,12 +133,10 @@ function wayUp(id: string, code: string | undefined): readonly BreadcrumbEntry[]
 }
 
 function ExceptionForm({
-  header,
   request,
   query,
   onRequested,
 }: {
-  readonly header: Header;
   readonly request: PickupRequestView;
   readonly query: UseQueryResult<PickupRecord>;
   readonly onRequested: () => void;
@@ -214,7 +205,6 @@ function ExceptionForm({
   const locked = command.locked;
   return (
     <TaskForm
-      header={header}
       formRef={form}
       onSubmit={send}
       busy={command.phase === 'sending'}
@@ -381,33 +371,12 @@ function Exception({
 }) {
   const [requested, setRequested] = useState(false);
   const { request } = record;
-  // The page draws its own heading once the request is read (the one the wrapper drew while it loaded is gone): focus is put on it, as on a record page.
-  useFocusFallenToHeading();
-  const header: Header = {
-    title: 'Request a one-package exception',
-    description: `For ${request.code}.`,
-    breadcrumb: wayUp(request.id, request.code),
-  };
-  if (requested) {
-    return (
-      <>
-        <PageHeader {...header} />
-        <Requested id={request.id} />
-      </>
-    );
-  }
+  // The heading is the wrapper's, in every state of the read and of the page: the same element while the request is read and after (run 7, Stage 4.3).
+  if (requested) return <Requested id={request.id} />;
   const reason = notAvailable(request);
-  if (reason !== undefined) {
-    return (
-      <>
-        <PageHeader {...header} />
-        <p className="pickup-act__text">{reason}</p>
-      </>
-    );
-  }
+  if (reason !== undefined) return <p className="pickup-act__text">{reason}</p>;
   return (
     <ExceptionForm
-      header={header}
       request={request}
       query={query}
       onRequested={() => {
@@ -429,8 +398,8 @@ export function PickupExceptionPage() {
   return (
     <WithPickupRequest
       id={id}
-      // The breadcrumb of the page's parents is its way back, the same in every state of the page (the review of 499399c); there is no link of its own above it.
-      ownsHeading
+      // The breadcrumb of the page's parents is its way back, the same in every state of the page (the review of 499399c); there is no link of its own above it. The wrapper draws the heading
+      // for every state, so that it is the same element while the request is read and after (the page does not own it: run 7, Stage 4.3).
       back={null}
       heading={(request) => ({
         title: 'Request a one-package exception',

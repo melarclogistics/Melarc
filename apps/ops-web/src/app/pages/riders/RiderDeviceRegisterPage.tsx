@@ -128,8 +128,9 @@ function Registering({ id }: { readonly id: string }) {
   return (
     <>
       <title>Register a first device · Melarc Ops Portal</title>
+      {/* The heading is outside the form and in the same place as in the two refusals above, so that it is the same element when the read of the rider lands and the page turns into one (run 7, Stage 4.3). */}
+      <PageHeader {...header} />
       <TaskForm
-        header={header}
         busy={command.phase === 'sending'}
         // A code is asked for by the button and by nothing else: no event of the form (an implicit submission, a stray Enter) makes a grant for a rider nobody is with.
         onSubmit={(event: SubmitEvent<HTMLFormElement>) => {

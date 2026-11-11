@@ -21,7 +21,6 @@ import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { createStaffIdentity, type NewStaffProfile } from '../../../platform/staff/staff-commands';
 import type { AssignableBundleView, StaffIdentityView } from '../../../platform/staff/staff-shape';
 import { useAssignableBundles } from '../../../platform/staff/use-staff-queries';
-import { useFocusFallenToHeading } from './WithProfile';
 import './staff-pages.css';
 
 const OPERATION = 'createStaffIdentity';
@@ -87,15 +86,13 @@ function refusedFields(problem: Problem | undefined): FieldErrors {
   return found;
 }
 
-/** The page's header: what the form is, with the way up to the staff list for a session that can read it (the task form draws it; every other state of the page draws it itself). */
+/** The page's header: what the form is, with the way up to the staff list for a session that can read it (the page draws it once, for every state of it). */
 type Header = Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'>;
 
 function CreateForm({
-  header,
   bundles,
   onCreated,
 }: {
-  readonly header: Header;
   readonly bundles: readonly AssignableBundleView[];
   readonly onCreated: (identity: StaffIdentityView) => void;
 }) {
@@ -103,8 +100,6 @@ function CreateForm({
   const me = useSignedInSession();
   const hubs = me?.session.authorized_hubs ?? [];
   const activeHub = useActiveHub();
-  // The page that waited for the roles drew a heading of its own; this one replaces it, and focus is put on the new one if the old one's has fallen.
-  useFocusFallenToHeading();
   const [values, setValues] = useState<Values>({
     fullName: '',
     email: '',
@@ -180,7 +175,6 @@ function CreateForm({
 
   return (
     <TaskForm
-      header={header}
       formRef={form}
       onSubmit={send}
       busy={command.phase === 'sending'}
@@ -408,53 +402,42 @@ export function StaffCreatePage() {
     ...(me.holds('staff.read') ? { breadcrumb: [{ label: 'Staff', to: '/admin/staff' }] } : {}),
   };
 
-  if (created !== undefined) {
-    return (
-      <>
-        <title>Add a staff profile · Melarc Ops Portal</title>
-        <PageHeader {...header} />
-        <Created
-          identity={created}
-          onAnother={() => {
-            setCreated(undefined);
-          }}
-        />
-      </>
+  // The page's one heading is drawn once for every state (the roles being read, the form, the profile created), so that it is the same element while the roles are read and after: the focus the
+  // frame put on it is not lost when the form arrives (run 7, Stage 4.3).
+  const body =
+    created !== undefined ? (
+      <Created
+        identity={created}
+        onAnother={() => {
+          setCreated(undefined);
+        }}
+      />
+    ) : canReadRoles && bundles.status === 'success' && bundles.data.length > 0 ? (
+      <CreateForm bundles={bundles.data} onCreated={setCreated} />
+    ) : canReadRoles ? (
+      <ReadState<AssignableBundleView[]>
+        query={bundles}
+        isEmpty={(data) => data.length === 0}
+        empty={
+          <EmptyState kind="none" heading="There are no roles to choose from">
+            A profile needs a role, and none can be chosen right now. Ask an administrator.
+          </EmptyState>
+        }
+        loadingLabel="Loading the roles…"
+        permission={BUNDLE_READ}
+        operation="listAssignableStaffRoleBundles"
+      >
+        {() => null}
+      </ReadState>
+    ) : (
+      <ForbiddenState kind="permission-missing" permission={BUNDLE_READ} />
     );
-  }
-
-  // The form is drawn once the roles are in, and it draws the heading itself; until then, and when they cannot be had, the heading stands with the reason.
-  if (canReadRoles && bundles.status === 'success' && bundles.data.length > 0) {
-    return (
-      <>
-        <title>Add a staff profile · Melarc Ops Portal</title>
-        <CreateForm header={header} bundles={bundles.data} onCreated={setCreated} />
-      </>
-    );
-  }
 
   return (
     <>
       <title>Add a staff profile · Melarc Ops Portal</title>
       <PageHeader {...header} />
-      {canReadRoles ? (
-        <ReadState<AssignableBundleView[]>
-          query={bundles}
-          isEmpty={(data) => data.length === 0}
-          empty={
-            <EmptyState kind="none" heading="There are no roles to choose from">
-              A profile needs a role, and none can be chosen right now. Ask an administrator.
-            </EmptyState>
-          }
-          loadingLabel="Loading the roles…"
-          permission={BUNDLE_READ}
-          operation="listAssignableStaffRoleBundles"
-        >
-          {() => null}
-        </ReadState>
-      ) : (
-        <ForbiddenState kind="permission-missing" permission={BUNDLE_READ} />
-      )}
+      {body}
     </>
   );
 }
