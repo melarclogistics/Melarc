@@ -5,7 +5,7 @@ import { expect, type Page } from '@playwright/test';
 import { arrange } from '../database.ts';
 import { readMessages, readTexts } from '../messages.ts';
 import { signInAs } from './actions.ts';
-import { expectHeading, fromPage } from './pages.ts';
+import { clearBrowser, expectHeading, fromPage } from './pages.ts';
 import { readEnrolmentCode, RiderHandset } from './rider-handset.ts';
 import type { JourneyContext } from './staff-journeys.ts';
 import { worldOf, type RiderState } from './world.ts';
@@ -338,11 +338,13 @@ async function walk({ page, context, stack }: JourneyContext): Promise<void> {
   expect([closed.state, closed.assigned_rider_id]).toEqual(['COMPLETED', two.id]);
   expect(closed.completed_at).not.toBeNull();
 
-  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider, in the officer's own session: the journey is one session again. It had been given a session of its
-  // own for this half when the officer's one session reached the limit of 120 requests a minute at the speed of a machine, which the pages' reads after each act (the run, its handover, the
-  // counts of the menu) made likely; the pages keep those reads in their own query cache now (RUN 6, Stage 1.6: an act writes the answer it was given). Measured on the real stack, the whole
-  // journey made 107 requests of the officer's session in 40 seconds (24 reads of the menu's counts, 20 of the run, 11 of a rider, 9 of a handover, 8 of the session), thirteen under the limit: a
-  // page that reads more again is refused here (429), and the count of requests by operation is where to look.
+  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider, in a session of its own (run 7, Stage 3.5: the second session is back). A session's requests are
+  // limited to 120 a minute: a person never comes near it, but this journey goes at the speed of a machine and the pages read the run and the counts again after each act. In one session the whole
+  // journey made 107 requests in 40 seconds (24 reads of the menu's counts, 20 of the run, 11 of a rider, 9 of a handover, 8 of the session), thirteen under the limit, and CI runs it under
+  // HTTPS in three engines on every push to main, where one engine's extra read or one retried 503 would have turned main red for a reason that is the journey's. Two sessions halve the
+  // count of each, and the harness now counts every session's requests by operation and fails a journey that passes 100 in a minute (`request-count.ts`).
+  await clearBrowser(context);
+  await signInAs(page, ama);
   const second = await build(page, [codeOf(2), codeOf(3)], day);
   await assignAndDispatch(page, one.name);
   await startRun(one, tokenOne, second.id);

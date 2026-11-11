@@ -53,6 +53,7 @@ import {
   vendorRecovery,
 } from './recovery-journeys.ts';
 import { manifestsAndCustody } from './manifest-journeys.ts';
+import { countingRequests } from './request-count.ts';
 import { riderHandsets, vendorBrowsersAndSessions } from './rider-journeys.ts';
 import { introduce, worldOf } from './world.ts';
 
@@ -893,7 +894,7 @@ async function rememberThisBrowser({ page, context, stack }: JourneyContext): Pr
   await clearBrowser(context);
 }
 
-export const STAFF_JOURNEYS: readonly Journey[] = [
+const JOURNEYS: readonly Journey[] = [
   {
     title:
       'row 4 and 5: the first bootstrap administrator sets a password and an authenticator from the secret in their bundle, and has no session before the code is proven',
@@ -970,3 +971,8 @@ export const STAFF_JOURNEYS: readonly Journey[] = [
     run: manifestsAndCustody,
   },
 ];
+
+/** The journeys, each counted (see `countingRequests`): what both specs register, so that the plain HTTP run and the HTTPS runs hold the same limit. */
+export const STAFF_JOURNEYS: readonly Journey[] = JOURNEYS.map((journey) =>
+  countingRequests(journey),
+);
