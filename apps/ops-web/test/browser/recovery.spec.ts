@@ -368,6 +368,47 @@ test.describe('the vendor screens', () => {
     expect(seen.unexpected).toEqual([]);
   });
 
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the search field of the bar kept at 12rem when it shares a row with its button at 390px, so that its placeholder, which is
+  // its name ("Search by organisation or account"), was cut off ("Search by organisation or accc"). The field is never narrower than its placeholder: the button goes under it where the two cannot
+  // share the row, as the bar's rule says.
+  for (const width of [390, 320]) {
+    test(`shows the whole of the search field's placeholder at ${String(width)}px, the button under it where they cannot share the row`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        'GET /api/v1/ops/vendors': (route) =>
+          route.fulfill({ status: 200, json: { items: [ACCOUNT_BODY], next_page_token: null } }),
+      });
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto('/admin/vendors');
+      const field = page.getByRole('searchbox', { name: 'Search by organisation or account' });
+      await expect(field).toBeVisible();
+
+      const measured = await field.evaluate((input: HTMLInputElement) => {
+        const style = getComputedStyle(input);
+        const context = document.createElement('canvas').getContext('2d');
+        if (context === null) throw new Error('no canvas');
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        return {
+          text: context.measureText(input.placeholder).width,
+          room: input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        };
+      });
+      expect(measured.text).toBeGreaterThan(0);
+      expect(measured.text).toBeLessThanOrEqual(measured.room);
+      // The button is under the field when they cannot share the row, and the page does not scroll sideways.
+      const button = page.getByRole('button', { name: 'Search', exact: true });
+      const [fieldBox, buttonBox] = [await field.boundingBox(), await button.boundingBox()];
+      expect(fieldBox).not.toBeNull();
+      expect(buttonBox).not.toBeNull();
+      if (fieldBox !== null && buttonBox !== null) {
+        expect(buttonBox.y).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
+
   // The account is drawn by the record template: its identifier is the heading, its status and one sentence sit beside it, its facts are under their names, and its browsers are a table
   // where the table's own box has room (40rem) and cards under that, never both. Nothing of a credential reaches the page, and it never scrolls sideways.
   for (const [shown, size] of [

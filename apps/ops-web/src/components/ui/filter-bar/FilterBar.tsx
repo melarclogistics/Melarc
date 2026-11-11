@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type SubmitEvent } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode, type SubmitEvent } from 'react';
 
 import { Button } from '../../primitives/button';
 import { Input } from '../../primitives/input';
@@ -70,6 +70,7 @@ function SearchField({ search }: { readonly search: FilterSearch }) {
       aria-label={search.label}
       noValidate
       className="ui-filter-bar__search"
+      style={{ '--ui-filter-search-chars': search.label.length } as CSSProperties}
       onSubmit={submit}
     >
       <Input

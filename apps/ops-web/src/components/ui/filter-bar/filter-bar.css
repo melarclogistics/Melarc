@@ -20,6 +20,8 @@
  * one (a phone), so that nothing is cut off at 320px or at enlarged text.
  */
 .ui-filter-bar__search {
+  /* How many characters the field's placeholder (its name) has: the component sets it, and the field is never narrower than they take (below). */
+  --ui-filter-search-chars: 0;
   display: flex;
   flex: 1 1 16rem;
   flex-wrap: wrap;
@@ -29,9 +31,12 @@
   min-width: 0;
 }
 
-/* The button goes under the field where the two do not share the row (a phone at 320px), so that the field is never narrower than it can be typed in. */
+/*
+ * The button goes under the field where the two do not share the row (a phone), so that the field is never narrower than it can be typed in **and than its placeholder, which is its name, can be
+ * read** (run 7, Stage 2.4: "Search by organisation or account" was cut off at 390px beside its button). The basis is the characters of the name, in the field's own face, and the field's padding.
+ */
 .ui-filter-bar__search .ui-filter-bar__search-field {
-  flex: 1 1 12rem;
+  flex: 1 1 max(12rem, calc(var(--ui-filter-search-chars) * 1ch + 2.5rem));
 }
 
 .ui-filter-bar__chips {
