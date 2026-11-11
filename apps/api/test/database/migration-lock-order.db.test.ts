@@ -519,6 +519,66 @@ describe('a run whose files take a key it was not told of', () => {
     120_000,
   );
 
+  // Break caught (run 7, Stage 3.6): a file that changes bundles by a variable (0043 and 0057 loop over every row of the bundle table) judged against today's list of the seed, so
+  // that a bundle the seed does not know makes both refused on every fresh database, or taken in the middle of the run. The runner takes the key of every bundle the table holds
+  // before its first statement: here two bundles the seed has never heard of, one of them held by a transaction of the application, and the run waits for it in the call that
+  // takes the keys first and not inside the file, and goes through once it is let go.
+  it('takes the key of every bundle there is before its first statement when a file changes bundles by a variable', async () => {
+    const UNKNOWN = [
+      '5eed0001-0000-4000-8000-000000000007',
+      '5eed0001-0000-4000-8000-000000000008',
+    ];
+    for (const [index, id] of UNKNOWN.entries()) {
+      await built.admin.query(
+        "insert into role_bundle (id, name, audience, privileged) values ($1, $2, 'STAFF', false)",
+        [id, `Unknown bundle ${String(index)}`],
+      );
+    }
+    withNewMigration(
+      `CREATE TABLE public.a_new_table (id integer);--> statement-breakpoint\nDO $new$ DECLARE b record; BEGIN PERFORM pg_catalog.set_config('melarc.principal_type', 'SYSTEM', true); PERFORM pg_catalog.set_config('melarc.task_capability', 'policy_change', true); FOR b IN SELECT id FROM public.role_bundle ORDER BY id LOOP PERFORM melarc.change_role_bundle(b.id, NULL, NULL, 'release-test#variable'); END LOOP; END $new$;`,
+    );
+    const application: pg.Client = clientFor(built.target.urlFor('postgres'));
+    await application.connect();
+    let run: ReturnType<typeof runMigrations> | undefined;
+    try {
+      await application.query('begin');
+      await application.query(
+        `select pg_advisory_xact_lock_shared(${String(AUTH_POLICY_BUNDLE)}, ${String(bundleLockKey(UNKNOWN[1] ?? ''))})`,
+      );
+
+      run = runMigrations({ url: built.target.urlFor(MIGRATION_ROLE), folder });
+      run.catch(() => undefined);
+      await until(
+        async () =>
+          await scalar<boolean>(
+            built.admin,
+            `select exists (
+               select 1 from pg_locks l join pg_stat_activity a on a.pid = l.pid
+                where a.datname = current_database() and a.application_name = 'melarc-migrate'
+                  and l.locktype = 'advisory' and not l.granted)`,
+          ),
+        'the run to wait for the key of the bundle the application holds',
+      );
+      // It waits in the call that takes the keys first. Inside the file the statement in progress would be the file's own.
+      expect(
+        await scalar<string>(
+          built.admin,
+          `select query from pg_stat_activity where datname = current_database() and application_name = 'melarc-migrate'`,
+        ),
+      ).toMatch(/^select melarc\.lock_policy_keys/);
+
+      await application.query('commit');
+      const result = await run;
+      expect(result.applied).toBe(1);
+      expect(result.keyAttempts).toBe(1);
+      expect(await tableExists()).toBe(true);
+    } finally {
+      await application.query('rollback').catch(() => undefined);
+      await application.end();
+      await run?.catch(() => undefined);
+    }
+  }, 120_000);
+
   // Break caught: a key taken in a way the reader cannot see (the function's name built at run time, so that the text never says it), so that the run's first statements
   // did not take it. The run notices after the file that it took a key it had not taken first, and takes everything back. (This used to be written with a quoted schema;
   // the reader refuses that form up front now, and the check after the file is what remains for the forms nothing can read.)

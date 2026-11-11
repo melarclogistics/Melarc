@@ -21,14 +21,20 @@
  * string, a comment or a dollar quote that is never closed. A change of a bundle or of a fixed policy (`change_role_bundle`, `change_fixed_policy`) in a file that
  * has not named, by literal, a key of that kind to take first is refused as well, because the primitive would take its own key in the middle of the run. **Run 6, Stage 1.7**
  * closed four more: a change whose key is a variable (a constant that the statement declares with a literal, as 0075 and 0077 do, is read as that literal; any other variable
- * takes the key of whatever it holds, which the text does not say, and is accepted only when the file names every bundle of the seed, or both fixed policies, as 0043 and 0057 do
- * for their loop over the bundle table: a bundle that another key of the file names is not necessarily the one a variable holds); a routine defined in the file, other than the five themselves, whose body names
+ * takes the key of whatever it holds, which the text does not say; **run 7, Stage 3.6**: the file was accepted only when it named every bundle of the seed, which judged the frozen
+ * 0043 and 0057 (loops over every row of the bundle table) against today's list, so that a seventh seeded bundle would have had both refused on every fresh database. A change by a
+ * variable now makes the **run** take the key of every bundle there is at run time (`everyBundle`; `run-migrations.ts` reads them from the table before its first statement), whatever the
+ * file names; a variable fixed policy is still accepted only when the file names both, there being no table to read them from); a routine defined in the file, other than the five themselves, whose body names
  * one of the five (a wrapper makes its call when it is called, which the files do not show); a name in a string that a function other than `EXECUTE` runs as SQL
  * (`query_to_xml`, `ts_stat`, `dblink_exec` and their kin); and a Unicode-escaped identifier (`U&"..."`), whose characters the text does not say. The runner also checks,
  * after each file, that the file took no key the run had not taken first.
+ *
+ * **What it does not read, accepted as documented by the Product Owner (run 7, Stage 3.6).** A string with backslash escapes (`E'\x6d...'`) that spells a name, a name put together
+ * at run time (`'melarc.lock_policy_' || suffix`), a wrapper function defined in an **earlier** migration (a wrapper defined in the file itself is refused above), and a direct advisory
+ * lock of a policy key are not seen in the text, and are not refused up front. A miss does not pass, though: the check after each file asks which policy keys the session holds, and a
+ * file that took a key the run had not taken first takes the **whole run back** (`MigrationLockOrderError`), with nothing applied. The file is then written to name its keys by
+ * literal at its start (MIGRATION_AND_SEEDING.md, "What the reader of the files does not see").
  */
-
-import { BUNDLE_IDS } from '../seed/bundles.js';
 
 export type FixedPolicyType = 'RIDER' | 'VENDOR';
 
@@ -37,6 +43,11 @@ export interface PolicyKeys {
   readonly bundleIds: readonly string[];
   /** The fixed permission policies, each once, in the order they are first named. */
   readonly fixedTypes: readonly FixedPolicyType[];
+  /**
+   * A change of a bundle by a variable (a loop over the bundle table, as 0043 and 0057 write): the key it takes is the key of whatever bundle the variable holds, which the text
+   * does not say. The run takes the keys of **every bundle there is at run time**, besides the ones named. Present only when it is so.
+   */
+  readonly everyBundle?: true;
 }
 
 export interface PolicyKeyScan extends PolicyKeys {
@@ -421,10 +432,9 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
   const bundleIds: string[] = [];
   const fixedTypes: FixedPolicyType[] = [];
   const unresolved: string[] = [];
-  let changesABundle: string | undefined;
   let changesAFixedPolicy: string | undefined;
-  /** The first change of a bundle, and of a fixed policy, whose key is a variable (not a literal, nor a constant declared with one): judged at the end of the file. */
-  let variableBundleChange: string | undefined;
+  /** A change of a bundle, and the first change of a fixed policy, whose key is a variable (not a literal, nor a constant declared with one): judged at the end of the file. */
+  let variableBundleChange = false;
   let variableFixedChange: string | undefined;
 
   const addBundle = (id: string): void => {
@@ -507,7 +517,6 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
           if (item !== undefined && FIXED_TYPES.includes(item)) addFixed(item);
           else unresolved.push(describe(name, args));
         } else if (name === 'change_role_bundle') {
-          changesABundle ??= describe(name, args);
           // The key the primitive takes is the bundle it is given: a literal, or a constant the statement declares with one (0075 and 0077 write `platform_admin constant uuid := '...'`).
           // A variable that is not a constant, a field, a query: the runner cannot say which bundle it is, and a bundle that another key of the file names is not that one (run 6, Stage 1.7).
           const first = firstArgument(args).trim();
@@ -515,7 +524,7 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
             literal(first) ??
             (IDENTIFIER_WORD.test(first) ? constantValue(text, first) : undefined);
           if (item !== undefined && UUID.test(item)) addBundle(item);
-          else variableBundleChange ??= describe(name, args);
+          else variableBundleChange = true;
         } else {
           changesAFixedPolicy ??= describe(name, args);
           const first = firstArgument(args).trim();
@@ -570,18 +579,10 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
   }
 
   // A change whose key is a variable (a loop over the bundle table, as 0043 and 0057 write) takes the key of whatever bundle or fixed policy the variable holds, which the text
-  // does not say: it is read as safe only when the file has named every one there is (the six bundles of the seed, both fixed policies), so that whatever it holds was taken first.
-  // Any other variable is the case that was accepted when the file had named some other key (run 6, Stage 1.7).
+  // does not say. For a bundle the run takes the key of every bundle there is at run time (run 7, Stage 3.6: `everyBundle`); there is no table to read the fixed policies from, so a
+  // variable fixed policy is read as safe only when the file has named both, so that whatever it holds was taken first. Any other variable is the case that was accepted when the
+  // file had named some other key (run 6, Stage 1.7).
   let refusedAChange = false;
-  if (variableBundleChange !== undefined) {
-    const missing = Object.values(BUNDLE_IDS).filter((id) => !bundleIds.includes(id));
-    if (missing.length > 0) {
-      refusedAChange = true;
-      unresolved.push(
-        `${variableBundleChange}: the bundle is a variable, and the file does not name every bundle of the seed by literal (${String(missing.length)} of ${String(Object.keys(BUNDLE_IDS).length)} are missing), so the runner cannot say that the keys it takes first are all the keys the variable can hold`,
-      );
-    }
-  }
   if (variableFixedChange !== undefined) {
     const missing = FIXED_TYPES.filter((type) => !fixedTypes.includes(type as FixedPolicyType));
     if (missing.length > 0) {
@@ -591,29 +592,32 @@ export function scanPolicyKeys(statements: readonly string[]): PolicyKeyScan {
       );
     }
   }
-  // The primitive takes its own key, in the middle of the run, unless the file named one of that kind to be taken first.
-  if (!refusedAChange && changesABundle !== undefined && bundleIds.length === 0) {
-    unresolved.push(
-      `${changesABundle}: no bundle is named by literal in a lock_policy_keys call of the file`,
-    );
-  }
+  // The primitive takes its own key, in the middle of the run, unless the file named one of that kind to be taken first. (A change of a bundle needs no such check since run 7,
+  // Stage 3.6: its bundle is a literal, which is taken first, or a variable, and then the run takes every bundle there is.)
   if (!refusedAChange && changesAFixedPolicy !== undefined && fixedTypes.length === 0) {
     unresolved.push(
       `${changesAFixedPolicy}: no fixed policy is named by literal in a lock_policy_keys call of the file`,
     );
   }
-  return { bundleIds, fixedTypes, unresolved };
+  return {
+    bundleIds,
+    fixedTypes,
+    unresolved,
+    ...(variableBundleChange ? { everyBundle: true as const } : {}),
+  };
 }
 
 /** The keys of a run: those of its files together, each once. */
 export function policyKeysOfRun(scans: readonly PolicyKeys[]): PolicyKeys {
   const bundleIds: string[] = [];
   const fixedTypes: FixedPolicyType[] = [];
+  let everyBundle = false;
   for (const scan of scans) {
     for (const id of scan.bundleIds) if (!bundleIds.includes(id)) bundleIds.push(id);
     for (const type of scan.fixedTypes) if (!fixedTypes.includes(type)) fixedTypes.push(type);
+    if (scan.everyBundle === true) everyBundle = true;
   }
-  return { bundleIds, fixedTypes };
+  return { bundleIds, fixedTypes, ...(everyBundle ? { everyBundle: true as const } : {}) };
 }
 
 /**

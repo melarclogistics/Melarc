@@ -299,6 +299,26 @@ async function hasPolicyKeyPrimitive(client: pg.Client): Promise<boolean> {
   return rows[0]?.present === true;
 }
 
+/**
+ * Every bundle the table holds, as lower-case identifiers: what a change of a bundle by a variable (a loop over the bundle table, as 0043 and 0057 write) can take the key of
+ * (run 7, Stage 3.6). The table is read as the policy-change capability reads it, which is how the files themselves read it and the only way row-level security lets the
+ * migration identity see it, in a transaction of its own that ends before the run's begins.
+ */
+async function bundleIdsPresent(client: pg.Client): Promise<string[]> {
+  await client.query('begin');
+  try {
+    await client.query(
+      "select set_config('melarc.principal_type', 'SYSTEM', true), set_config('melarc.task_capability', 'policy_change', true)",
+    );
+    const { rows } = await client.query<{ id: string }>(
+      'select id::text as id from public.role_bundle order by id',
+    );
+    return rows.map((row) => row.id.toLowerCase());
+  } finally {
+    await client.query('rollback').catch(() => undefined);
+  }
+}
+
 /** The policy keys this connection holds now, as `class:key` (the two-number form of an advisory lock; the migrator's own session lock has the other form). */
 async function policyKeysHeld(client: pg.Client): Promise<Set<string>> {
   const { rows } = await client.query<{ held: string }>(
@@ -441,12 +461,20 @@ async function applyPending(
     sql: migration.sql,
   }));
   // Fails closed: a mention of a policy key that the runner cannot place refuses the run, naming the file, before anything is applied.
-  const keys = policyKeysOfFiles(files);
+  const fromFiles = policyKeysOfFiles(files);
 
   // The first statements of the run: every key its files name, in the canonical order, before any file runs; bounded, and tried again a few times (`beginAndTakeKeys`). They
   // are held until the commit, and that is how long the application's sign-ins and mutations wait (`keysHeldMs`). A database below 0017 has no primitive and no session that
   // could wait: the run has no key to take first.
   const guarded = await hasPolicyKeyPrimitive(client);
+  // A file that changes a bundle by a variable takes the key of whichever bundle the variable holds: the run takes the key of every bundle there is, besides the ones the files name.
+  const keys: PolicyKeys =
+    guarded && fromFiles.everyBundle === true
+      ? {
+          bundleIds: [...new Set([...fromFiles.bundleIds, ...(await bundleIdsPresent(client))])],
+          fixedTypes: fromFiles.fixedTypes,
+        }
+      : fromFiles;
   const { attempts, takenAt, waitedMs } = await beginAndTakeKeys(
     client,
     guarded ? keys : { bundleIds: [], fixedTypes: [] },

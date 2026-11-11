@@ -109,13 +109,9 @@ describe('what a migration names (scanPolicyKeys)', () => {
 
   // Break caught: a change of a bundle or of a fixed policy that is not preceded by a lock the runner can read: the primitive takes its own key, which is the lock
   // taken in the middle of the run.
-  it('says so when a file changes a bundle, or a fixed policy, and names no key of that kind', () => {
-    const bundle = scanPolicyKeys([
-      `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
-    ]);
-    expect(bundle.unresolved).toHaveLength(1);
-    expect(bundle.unresolved[0]).toContain('change_role_bundle');
-
+  // (Run 7, Stage 3.6: the bundle half of this test is gone, its claim replaced: a change of a bundle by a variable is no longer refused for naming no bundle, the run takes the
+  // key of every bundle there is: the tests below that read it as `everyBundle`. A change by a literal names its bundle.)
+  it('says so when a file changes a fixed policy and names no key of that kind', () => {
     const fixed = scanPolicyKeys([
       locks([BUNDLE_1]),
       `DO $x$ BEGIN PERFORM melarc.change_fixed_policy(audience, false, 'release#b'); END $x$;`,
@@ -138,16 +134,67 @@ describe('what a migration names (scanPolicyKeys)', () => {
     expect(found.fixedTypes).toEqual(['VENDOR']);
   });
 
-  // The form of 0043 and 0057: a loop over the bundle table gives the change the key of whatever bundle the loop holds. It is accepted because the file names every bundle of the
-  // seed and both fixed policies first, so that whatever the variable holds was taken first; with one of them missing it is refused (the forms of the next describe).
-  it('accepts a change whose key is a variable when the file names every bundle of the seed and both fixed policies', () => {
+  // The form of 0043 and 0057: a loop over the bundle table gives the change the key of whatever bundle the loop holds. Run 7, Stage 3.6: it was accepted because the file named
+  // the six bundles of the seed, which judged two frozen files against today's list (a seventh seeded bundle would have had both refused on every fresh database). The file
+  // cannot say which bundles the loop will hold, the table can: the scan says the run is to take the key of **every bundle there is at run time** (`everyBundle`), whatever the file
+  // names, and the runner reads them (`migration-lock-order.db.test.ts`). With both fixed policies it is still the file that must name them.
+  it.each([
+    ['no bundle', []],
+    ['one bundle', [BUNDLE_1]],
+    ['every bundle of the seed', Object.values(BUNDLE_IDS)],
+  ])(
+    'has the run take the key of every bundle there is for a change whose key is a variable, when the file names %s',
+    (_which, named) => {
+      const found = scanPolicyKeys([
+        locks(named, ['VENDOR', 'RIDER']),
+        `DO $x$ DECLARE s record; BEGIN FOR s IN SELECT b.id, b.audience FROM public.role_bundle AS b LOOP PERFORM melarc.change_role_bundle(s.id, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy(s.audience, false, 'release#b'); END LOOP; END $x$;`,
+      ]);
+
+      expect(found.unresolved).toEqual([]);
+      expect(found.everyBundle).toBe(true);
+      expect(found.bundleIds).toEqual(named);
+    },
+  );
+
+  // Break caught: the run asked to take every bundle for a change that names its bundle (a literal, or a constant declared with one), which would stall the application for the
+  // keys of bundles the file never touches.
+  it('does not have the run take every bundle for a change whose key is a literal or a constant', () => {
     const found = scanPolicyKeys([
-      locks(Object.values(BUNDLE_IDS), ['VENDOR', 'RIDER']),
-      `DO $x$ DECLARE s record; BEGIN FOR s IN SELECT b.id, b.audience FROM public.role_bundle AS b LOOP PERFORM melarc.change_role_bundle(s.id, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_fixed_policy(s.audience, false, 'release#b'); END LOOP; END $x$;`,
+      locks([BUNDLE_1]),
+      `DO $x$ DECLARE b constant uuid := '${BUNDLE_1}'; BEGIN PERFORM melarc.change_role_bundle(b, NULL, '[]'::jsonb, 'release#a'); PERFORM melarc.change_role_bundle('${BUNDLE_1}', NULL, '[]'::jsonb, 'release#b'); END $x$;`,
     ]);
 
     expect(found.unresolved).toEqual([]);
-    expect(found.bundleIds).toEqual(Object.values(BUNDLE_IDS));
+    expect(found).not.toHaveProperty('everyBundle');
+  });
+
+  // The two forms the refusals of run 6 held (a variable for the bundle of a change, though the file has named a bundle; a variable that is given a literal but is not a constant) are
+  // not refused any more: the keys of every bundle there is are taken first, which is what the refusal was for. Both are read as a change by a variable.
+  it.each([
+    [
+      'a variable for the bundle of a change, though the file has named a bundle',
+      [
+        locks([BUNDLE_1]),
+        `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+      ],
+    ],
+    [
+      'a variable that is given a literal but is not a constant',
+      [
+        `DO $x$ DECLARE b uuid := '${BUNDLE_1}'; BEGIN PERFORM melarc.change_role_bundle(b, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+      ],
+    ],
+    [
+      'a change that no lock names, by a variable',
+      [
+        `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+      ],
+    ],
+  ])('reads %s as a change by a variable: every bundle there is is taken first', (_which, sql) => {
+    const found = scanPolicyKeys(sql);
+
+    expect(found.unresolved).toEqual([]);
+    expect(found.everyBundle).toBe(true);
   });
 
   // The form of 0075 and 0077: the bundle is a constant that the statement declares with a literal, and the change is given the constant. It is read as that literal, and
@@ -199,6 +246,12 @@ describe('the real migrations', () => {
       expect(byNumber(number).bundleIds, `migration ${String(number)}`).toEqual(six);
     }
     expect(byNumber(43).fixedTypes.toSorted()).toEqual(['RIDER', 'VENDOR']);
+    // Both loop over every row of the bundle table (run 7, Stage 3.6): the run takes the key of every bundle there is, and no file is judged against today's list of the seed.
+    expect(byNumber(43).everyBundle, 'migration 43').toBe(true);
+    expect(byNumber(57).everyBundle, 'migration 57').toBe(true);
+    for (const number of [74, 75, 77, 78, 79]) {
+      expect(byNumber(number), `migration ${String(number)}`).not.toHaveProperty('everyBundle');
+    }
     expect(byNumber(79).bundleIds).toEqual([]);
     expect(byNumber(79).fixedTypes.toSorted()).toEqual(['RIDER', 'VENDOR']);
     expect(byNumber(74)).toEqual({ bundleIds: [], fixedTypes: [], unresolved: [] });
@@ -228,6 +281,19 @@ describe('the keys of a run (policyKeysOfRun)', () => {
       bundleIds: [],
       fixedTypes: [],
     });
+  });
+
+  // Break caught (run 7, Stage 3.6): the request for every bundle there is lost on the way from a file to the run, so that the runner takes only what the files name.
+  it('asks for every bundle there is when any file of the run does', () => {
+    const variable = scanPolicyKeys([
+      `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
+    ]);
+
+    expect(policyKeysOfRun([scanPolicyKeys([locks([BUNDLE_1])]), variable]).everyBundle).toBe(true);
+    expect(policyKeysOfRun([variable, scanPolicyKeys(['SELECT 1;'])]).everyBundle).toBe(true);
+    expect(policyKeysOfRun([scanPolicyKeys([locks([BUNDLE_1])])])).not.toHaveProperty(
+      'everyBundle',
+    );
   });
 });
 
@@ -294,27 +360,12 @@ describe('what the runner cannot place refuses the run, with the name of the fil
     ],
     // Run 6, Stage 1.7: four more forms that the reader accepted and resolved wrongly.
     [
-      'a variable for the bundle of a change, though the file has named a bundle',
-      [
-        locks([BUNDLE_1]),
-        `DO $x$ BEGIN PERFORM melarc.change_role_bundle(some_id, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
-      ],
-      /change_role_bundle\(some_id.*the bundle is a variable, and the file does not name every bundle of the seed/,
-    ],
-    [
       'a row field for the fixed policy of a change, though the file has named a fixed policy',
       [
         locks([], ['VENDOR']),
         `DO $x$ BEGIN PERFORM melarc.change_fixed_policy(b.audience, false, 'release#b'); END $x$;`,
       ],
       /change_fixed_policy\(b\.audience.*the fixed policy is a variable, and the file does not name both fixed policies/,
-    ],
-    [
-      'a variable that is given a literal but is not a constant',
-      [
-        `DO $x$ DECLARE b uuid := '${BUNDLE_1}'; BEGIN PERFORM melarc.change_role_bundle(b, NULL, '[]'::jsonb, 'release#a'); END $x$;`,
-      ],
-      /change_role_bundle\(b,.*the bundle is a variable/,
     ],
     [
       'a wrapper function that takes the keys, defined in the file',
