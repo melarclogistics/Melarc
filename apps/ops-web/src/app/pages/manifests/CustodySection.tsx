@@ -16,6 +16,7 @@ import {
 } from '../../../platform/manifest/manifest-commands';
 import type { HandoverView } from '../../../platform/manifest/manifest-shape';
 import { handoverKey, usePendingHandover } from '../../../platform/manifest/use-manifest-queries';
+import { writeAnswer } from '../../../platform/query/write-answer';
 import { useRiderName } from '../../../platform/rider/use-rider-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
@@ -113,7 +114,7 @@ export function CustodySection({ record, onDone, onReload }: CustodySectionProps
     if (pendingNow === undefined) {
       void pending.refetch();
     } else {
-      queryClient.setQueryData<HandoverRecord | null>(handoverKey(manifest.id), pendingNow);
+      void writeAnswer<HandoverRecord | null>(queryClient, handoverKey(manifest.id), pendingNow);
     }
     onDone(text);
   }

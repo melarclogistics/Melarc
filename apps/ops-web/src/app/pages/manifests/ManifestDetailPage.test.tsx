@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -1284,6 +1284,60 @@ describe('the manifest: an act keeps its answer, and the run is not read again',
     expect(await screen.findByText(/The pickup run is cancelled\./)).toBeVisible();
     expect(state.reads).toBe(1);
     expect(screen.getAllByText('Cancelled').length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Break caught (run 7, Stage 2.2; the Product Owner's review of 198e5be): the answer of an act written into the page's read while a read of the same run was already on its way. That read was
+  // sent before the act and is answered after it, with the run as it was, so it put the version before the act back and the next act was refused with 412. Here the read is the one the person asked
+  // for after a conflict, held open across the dispatch that follows it.
+  it('keeps the answer of an act when a read of the run that was already on its way is answered after it', async () => {
+    let reads = 0;
+    let dispatches = 0;
+    let answerTheRead: (response: Response) => void = () => undefined;
+    const { user } = open(
+      () => {
+        reads += 1;
+        return reads === 2
+          ? new Promise<Response>((resolve) => {
+              answerTheRead = resolve;
+            })
+          : answer(assigned, `v${String(reads)}`);
+      },
+      ALL,
+      {
+        [DISPATCH]: () => {
+          dispatches += 1;
+          return dispatches === 1
+            ? refusal(409, 'STATE_CONFLICT')
+            : answer(dispatched, 'v-dispatched');
+        },
+      },
+    );
+    await ready();
+    await user.click(screen.getByRole('button', { name: 'Dispatch the pickup run' }));
+    const question = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await user.click(within(question).getByRole('button', { name: 'Dispatch the pickup run' }));
+    await user.click(
+      await within(question).findByRole('button', {
+        name: /Reload|Look at the pickup run|Read it again/,
+      }),
+    );
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    // The run is read again (held), and the person dispatches it while that read is on its way.
+    await user.click(await screen.findByRole('button', { name: 'Dispatch the pickup run' }));
+    const again = screen.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await user.click(within(again).getByRole('button', { name: 'Dispatch the pickup run' }));
+    expect(await screen.findByText(/The pickup run is dispatched\./)).toBeVisible();
+
+    // The read that was sent before the dispatch is answered now, with the run as it was.
+    await act(async () => {
+      answerTheRead(answer(assigned, 'v2'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getAllByText('Dispatched').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: 'Dispatch the pickup run' })).toBeNull();
   });
 
   // Break caught: the read after a conflict, or an outcome nobody knows, skipped with the rest: that read is the person's, and it stays.

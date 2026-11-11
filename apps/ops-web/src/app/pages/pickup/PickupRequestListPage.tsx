@@ -34,6 +34,7 @@ import {
 import { refusalText } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
+import { writeAnswer } from '../../../platform/query/write-answer';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER, serviceDateText } from './pickup-presentation';
@@ -227,7 +228,7 @@ export function PickupRequestListPage() {
     if (etag === undefined) {
       void queryClient.invalidateQueries({ queryKey: key });
     } else {
-      queryClient.setQueryData<PickupRecord>(key, { request, etag });
+      void writeAnswer<PickupRecord>(queryClient, key, { request, etag });
     }
     setChanged({ visit: visit.id, ids: [request.id] });
     returnTo.current = request.id;

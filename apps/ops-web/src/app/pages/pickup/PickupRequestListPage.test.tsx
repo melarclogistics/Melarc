@@ -1218,6 +1218,62 @@ describe('the queue: the request beside it', () => {
       expect(escalation?.headers.get('If-Match')).not.toBe('"v1"');
     });
 
+    // Break caught (run 7, Stage 2.2; the Product Owner's review of 198e5be): the answer of an act written into the cache while a read of the same request was already on its way. That read
+    // was sent before the act and is answered after it, with the request as it was, so it put the version before the act back, and the next act was refused with 412. Here the read is the
+    // panel's "Reload", held open across the confirmation: when it is answered, the panel still shows what the confirmation said, with the version the confirmation gave.
+    it('keeps the answer of the confirmation when a read of the request that was already on its way is answered after it', async () => {
+      let posts = 0;
+      let reads = 0;
+      let answerTheRead: (response: Response) => void = () => undefined;
+      const view = openConfirmer(
+        () => {
+          posts += 1;
+          return posts === 1
+            ? refusal(412, 'STATE_CONFLICT')
+            : json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer'));
+        },
+        () => {
+          reads += 1;
+          return reads === 2
+            ? new Promise<Response>((resolve) => {
+                answerTheRead = resolve;
+              })
+            : json(200, pending, etag(`v${String(reads)}`));
+        },
+      );
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const first = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(first).getByRole('button', { name: 'Confirm the pickup' }));
+      await within(first).findByRole('alert');
+      await view.user.click(within(first).getByRole('button', { name: 'Cancel' }));
+
+      // The officer reads the request again (the read is held), and confirms it while that read is on its way.
+      await view.user.click(await within(panel).findByRole('button', { name: 'Reload' }));
+      await waitFor(() => {
+        expect(reads).toBe(2);
+      });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const second = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(second).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+      const headerOf = () =>
+        within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }).parentElement;
+      await waitFor(() => {
+        expect(headerOf()).toHaveTextContent('Confirmed');
+      });
+
+      // The read that was sent before the confirmation is answered now, with the request as it was.
+      await act(async () => {
+        answerTheRead(json(200, pending, etag('v2')));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(headerOf()).toHaveTextContent('Confirmed');
+      expect(headerOf()).not.toHaveTextContent('Waiting for confirmation');
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+    });
+
     // Break caught (the review of 499399c): a queue that cannot be read again after a confirmation, drawn as a failure that takes away the rows the officer was working on, or as if nothing were wrong:
     // the rows stay, under a line that says they may be out of date, with the way to read them again.
     it('keeps the rows, with a line that says so, when the queue cannot be read again after a confirmation', async () => {

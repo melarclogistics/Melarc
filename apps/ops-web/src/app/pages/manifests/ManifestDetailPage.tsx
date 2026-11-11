@@ -24,6 +24,7 @@ import {
 } from '../../../platform/manifest/manifest-commands';
 import type { ManifestView } from '../../../platform/manifest/manifest-shape';
 import { manifestKey } from '../../../platform/manifest/use-manifest-queries';
+import { writeAnswer } from '../../../platform/query/write-answer';
 import { useRiderName } from '../../../platform/rider/use-rider-queries';
 import { subjectLogPath } from '../../../platform/notifications/notification-shape';
 import { lackedText } from '../../../platform/problem/capability-words';
@@ -193,7 +194,7 @@ function Manifest({
     if (answer === undefined) {
       void query.refetch();
     } else {
-      queryClient.setQueryData<ManifestRecord>(manifestKey(id), answer);
+      void writeAnswer<ManifestRecord>(queryClient, manifestKey(id), answer);
     }
   }
   function reload(): Promise<unknown> {
