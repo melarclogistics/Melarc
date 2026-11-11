@@ -1,7 +1,13 @@
 import { act, render, screen } from '@testing-library/react';
 import { Suspense } from 'react';
-import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  Outlet,
+  RouterProvider,
+  type RouteObject,
+} from 'react-router';
+import { describe, expect, it, vi } from 'vitest';
 
 import { NeverReady } from '../../test-support/never-ready';
 import { sessionFixture } from '../../test-support/session-fixture';
@@ -55,6 +61,44 @@ function setup(routes: (onReady: (secret: TransientSecret<string>) => void) => R
   };
   return { router, secret };
 }
+
+describe('useTransientSecret: asked to let go when the router moves, with no data router (run 7, Stage 2.4)', () => {
+  function withoutADataRouter(release: boolean): void {
+    const store = new SessionStore();
+    store.signedIn(sessionFixture());
+    render(
+      <SessionProvider store={store}>
+        <MemoryRouter initialEntries={['/a']}>
+          <Holder
+            onReady={() => {
+              // Nothing is done with the secret.
+            }}
+            release={release}
+          />
+        </MemoryRouter>
+      </SessionProvider>,
+    );
+  }
+
+  // Break caught: the request silently ignored where no data router is present (a test, the showcase, a root that was changed), so that a page that asks for the early release has none in
+  // the place where nothing proves it, and a Back could draw the secret again with nothing to say so.
+  it('fails loudly, in development and in tests, instead of doing nothing', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() => {
+        withoutADataRouter(true);
+      }).toThrow(/data router/);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
+  it('is quiet for a screen that did not ask for the early release', () => {
+    withoutADataRouter(false);
+
+    expect(screen.getByText('none: -')).toBeInTheDocument();
+  });
+});
 
 describe('useTransientSecret: a navigation that has begun', () => {
   // Break caught: the secret let go of only once the next page has been drawn, so that it stays on the screen, and comes back with the Back button, for as long as that page is awaited.

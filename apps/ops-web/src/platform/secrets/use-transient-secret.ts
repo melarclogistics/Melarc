@@ -214,7 +214,7 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
   useEffect(() => clear, [scopeKey, clear]);
 
   // For a screen that asked for it (`releaseWhenRouterMoves`): the secret is also let go of when the router's location leaves the scope it was held in, **before** the next page is drawn, so
-  // that the page the person left, while it is still on the screen, holds nothing a Back could show again. Where there is no data router (a test, the showcase) the effect above is all there is.
+  // that the page the person left, while it is still on the screen, holds nothing a Back could show again. Where there is no data router the request is refused in development and in tests (below), and in production, which always has one, the effect above is all there is.
   //
   // **Why the router object and not a public hook** (the review of f6cf02b asked whether one gives the same signal; none does, as of React Router 8.4): `useLocation`, `useNavigation` and
   // the unstable `useRouterState` all read what React has rendered, which is exactly what lags (the router commits its new location, and React draws the page it leads to later, in a
@@ -231,7 +231,17 @@ export function useTransientSecret<T>(options: TransientSecretOptions = {}): Tra
   });
   const releaseWhenRouterMoves = options.releaseWhenRouterMoves === true;
   useEffect(() => {
-    if (dataRouter === undefined || !releaseWhenRouterMoves) return;
+    if (!releaseWhenRouterMoves) return;
+    if (dataRouter === undefined) {
+      // Asked for and not possible: the early release is a promise that a Back cannot draw the secret again, and where no data router is present nothing keeps it. In development and in tests that is
+      // a mistake of the screen or of the place it is drawn in, and it is said (the Product Owner's review of 198e5be); a production build always has the router, and does only what the effect above does.
+      if (!import.meta.env.PROD) {
+        throw new Error(
+          'releaseWhenRouterMoves needs a data router (createBrowserRouter or createMemoryRouter with a RouterProvider); this screen is drawn without one, so nothing would let go of its secret when the router moves.',
+        );
+      }
+      return;
+    }
     const scopeAt = (at: Location): string => scopeOf.current?.(at) ?? at.key;
     let seen = scopeAt(dataRouter.state.location);
     return dataRouter.subscribe((state) => {
