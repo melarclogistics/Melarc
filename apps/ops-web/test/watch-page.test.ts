@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   guardAgainstPermissionKeys,
+  keysDrawn,
   type GuardedContext,
 } from './browser/support/permission-key-guard';
 import { watchPage } from './browser/support/page';
@@ -196,6 +197,18 @@ describe('guardAgainstPermissionKeys: every key drawn on any page of the test, w
     await guard.finish();
 
     expect(evaluated.sort()).toEqual([0, 1, 2]);
+  });
+
+  // Break caught: a key read from the line of the watch wrongly (a place taken for a key), or counted once for each place it was drawn in, so that a test that draws a key on purpose cannot say which.
+  it('says which key each line is about, once each', () => {
+    expect(
+      keysDrawn([
+        `${PERMISSION_KEY_LOG_PREFIX}pickup.read in the text of <p>`,
+        `${PERMISSION_KEY_LOG_PREFIX}staff.read in the aria-label attribute of <button> "staff.read"`,
+        `${PERMISSION_KEY_LOG_PREFIX}pickup.read in the text of <div>`,
+      ]),
+    ).toEqual(['pickup.read', 'staff.read']);
+    expect(keysDrawn([])).toEqual([]);
   });
 
   // Break caught: the text the guard listens for changed in one place and not the other, so that the watch speaks and the guard does not hear.

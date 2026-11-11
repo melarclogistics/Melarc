@@ -31,6 +31,16 @@ export interface GuardedContext {
   readonly pages: () => readonly Pick<Page, 'evaluate'>[];
 }
 
+/** The key each line the watch wrote is about ("A permission key is on the screen: pickup.read in the text of <p>" is "pickup.read"), once each, in order. */
+export function keysDrawn(lines: readonly string[]): string[] {
+  const keys: string[] = [];
+  for (const line of lines) {
+    const key = line.slice(PERMISSION_KEY_LOG_PREFIX.length).split(' in ')[0] ?? '';
+    if (key !== '' && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
 export async function guardAgainstPermissionKeys(
   context: GuardedContext,
 ): Promise<PermissionKeyGuard> {
