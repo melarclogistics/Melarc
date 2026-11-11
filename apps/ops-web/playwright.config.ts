@@ -22,6 +22,14 @@ type Engine = keyof typeof ENGINES;
 const isEngine = (name: string): name is Engine => Object.hasOwn(ENGINES, name);
 
 /**
+ * Where a showcase spec runs. Chromium runs it against the development server, whose unbundled load is what the showcase is built for; **Firefox and WebKit run the same spec against the production showcase build** (`vite build --mode showcase`,
+ * the build the -policy projects already use): the development server serves every module on its own, and under load it starved the specs of those two engines (the engines run of 10 November 2026, finding 17: five-second waits for the
+ * heading of a page that was still loading its modules). Nothing a spec asserts changes with the origin.
+ */
+const showcaseOrigin = (engine: Engine): string =>
+  engine === 'chromium' ? DEV_ORIGIN : SHOWCASE_ORIGIN;
+
+/**
  * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs Chromium on every pull request
  * and all three on a push to main, every night and by hand, each engine in jobs of its own (the supported browsers of
  * surfaces/ops-portal.md section 11, by their engines; DEVELOPMENT.md, "What CI runs when"). Without the variable only Chromium
@@ -69,7 +77,8 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *   shell       the application shell (the frame, the sidebar, the sheet of a narrow screen, sign-out), against the production build served
  *               the way a static host would serve it. It needs no database, and its API is a stand-in that answers who is signed in.
  *   components  the real components in the development-only showcase, which the production build does not contain
- *               (test/build.test.ts proves that), so they run against the Vite development server. The secrets and dialogs specs
+ *               (test/build.test.ts proves that), so they run against the Vite development server on Chromium and, on Firefox and WebKit,
+ *               against the production showcase build (`showcaseOrigin`; the secrets, dialogs, date-picker, primitives and kit specs the same). The secrets and dialogs specs
  *               are the same showcase in files of their own.
  *   date-picker the date field of the showcase (COMPONENT_PATTERNS section 22a): the keyboard, reflow, enlarged text, forced colours and
  *               reduced motion, against the development server; and, in a project of its own, the same showcase built for production and
@@ -129,25 +138,25 @@ export default defineConfig({
     {
       name: `components-${engine}`,
       testMatch: 'components.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The form components, the one-time secret and the QR code of the showcase (S0.39): the same server, their own spec.
       name: `secrets-${engine}`,
       testMatch: 'secrets.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The dialogs and the reason and confirmation workflow of the showcase (S0.41): what only a real browser can show of a modal.
       name: `dialogs-${engine}`,
       testMatch: 'dialogs.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The date field of the showcase (COMPONENT_PATTERNS section 22a): what only a real browser can show of a calendar.
       name: `date-picker-${engine}`,
       testMatch: 'date-picker.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The showcase as a production build under the strict content-security policy: the library's popovers, focus handling and the one style
@@ -161,7 +170,7 @@ export default defineConfig({
       // development server.
       name: `primitives-${engine}`,
       testMatch: 'primitives.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The same page as a production build under the strict content-security policy: Radix UI and Sonner raise no violation in any engine, and the
@@ -327,7 +336,7 @@ export default defineConfig({
       // and what moves under Motion and under reduced motion, against the development server.
       name: `kit-${engine}`,
       testMatch: 'kit.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The same pages built for production under the strict content-security policy: Motion and the libraries raise no violation in any engine.
