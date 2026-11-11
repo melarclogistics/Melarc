@@ -232,12 +232,13 @@ describe('the rider screens and a credential', () => {
     expect(code.attributes.has('QrCode.payload={grant.enrolmentUri}')).toBe(true);
   });
 
-  // Break caught: a text field or a password field on a screen that is not a form for one.
-  it('draw a text field only on the roster search and the verification note, and never a password or a PIN field', () => {
+  // Break caught: a text field or a password field on a screen that is not a form for one. The roster search is a field of the filter bar since Stage 4.7 (the page hands the bar its search: a label,
+  // the text, what to do with it and the length it may have), so no rider screen draws an input of its own; the verification note is the one text area.
+  it('draw no text input of their own (the roster search is the filter bar’s, the note is a text area), and never a password or a PIN field', () => {
     const drawing = (element: string) =>
       files.filter((file) => file.code.elements.has(element)).map((file) => file.path);
 
-    expect(drawing('Input')).toEqual(['app/pages/riders/RiderListPage.tsx']);
+    expect(drawing('Input')).toEqual([]);
     expect(drawing('Textarea')).toEqual(['app/pages/riders/RiderDevicePage.tsx']);
     for (const file of files) {
       for (const element of file.code.elements) {
