@@ -1,4 +1,5 @@
-import { chromium, expect, test, type Locator, type Page } from '@playwright/test';
+import { chromium, type Locator, type Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
 import { wordsOf } from './support/words';

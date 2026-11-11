@@ -21,6 +21,12 @@ export interface PermissionKeyWatchOptions {
   readonly log: boolean;
 }
 
+/**
+ * What the watch writes to the console before each hit (the browser tests' guard listens for it). The function below is sent into the page as source and names nothing outside itself, so the
+ * text is written in it too, and `watch-page.test.ts` holds the two to each other.
+ */
+export const PERMISSION_KEY_LOG_PREFIX = 'A permission key is on the screen: ';
+
 export function watchForPermissionKeys(options: PermissionKeyWatchOptions): PermissionKeyWatch {
   const pattern = new RegExp(options.source, options.flags);
   const hits: string[] = [];

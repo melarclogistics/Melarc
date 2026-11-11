@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { reachableNames, watchPage, wcagViolations } from './support/page';
 import { expectShellAround, openAccountMenu, primaryNav } from './support/shell';

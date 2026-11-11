@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 
-import { expect, test, type Page, type Route } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { SIGNED_IN_SESSION } from './support/api';
 import { HUB_A, HUB_B, menuEntry, topBar } from './support/shell';

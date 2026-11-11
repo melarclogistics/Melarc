@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';

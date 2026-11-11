@@ -1,7 +1,13 @@
-import type { Page } from '@playwright/test';
+import type { ConsoleMessage, Page } from '@playwright/test';
 import { describe, expect, it } from 'vitest';
 
+import {
+  guardAgainstPermissionKeys,
+  type GuardedContext,
+} from './browser/support/permission-key-guard';
 import { watchPage } from './browser/support/page';
+import { KEY_PATTERN_FLAGS, keyPatternSource } from './support/permission-catalogue';
+import { PERMISSION_KEY_LOG_PREFIX, watchForPermissionKeys } from './support/permission-key-watch';
 
 /** The two warnings as Firefox 1543 wrote them to a console that Playwright was reading (logs of the run of 9 November 2026). */
 const BOUNCE_TRACKER =
@@ -116,5 +122,84 @@ describe('watchPage: what Firefox says of its own accord', () => {
     say('log', 'A log line is not a problem.');
 
     expect(seen.problems).toEqual(['console error: Uncaught TypeError: x is undefined ()']);
+  });
+});
+
+/** A browser context that is only what the guard asks of one: a console to be told things in, an init script to be handed, and pages that answer a round trip. */
+function contextOf(pageCount = 1) {
+  type Message = Pick<ConsoleMessage, 'type' | 'text'>;
+  const listeners: ((message: Message) => void)[] = [];
+  const installed: unknown[][] = [];
+  const evaluated: number[] = [];
+  const pages = Array.from({ length: pageCount }, (_unused, index) => ({
+    evaluate: () => {
+      evaluated.push(index);
+      return Promise.resolve(undefined);
+    },
+  }));
+  const context: GuardedContext = {
+    addInitScript: (...args) => {
+      installed.push(args);
+      return Promise.resolve();
+    },
+    on: (_event, listener) => {
+      listeners.push(listener);
+    },
+    pages: () => pages,
+  };
+  const say = (type: ReturnType<ConsoleMessage['type']>, text: string): void => {
+    for (const listener of listeners) listener({ type: () => type, text: () => text });
+  };
+  return { context, say, installed, evaluated };
+}
+
+describe('guardAgainstPermissionKeys: every key drawn on any page of the test, whether or not the test looked (run 7, Stage 2.3)', () => {
+  // Break caught: a guard that listens to nothing, or to the wrong text, so that a key drawn in a refusal test that asserts nothing about it passes.
+  it('gives every key a page wrote to its console as an error, and nothing else', async () => {
+    const { context, say } = contextOf();
+    const guard = await guardAgainstPermissionKeys(context);
+
+    say('error', `${PERMISSION_KEY_LOG_PREFIX}pickup.read in the text of <p>`);
+    say('error', 'Uncaught TypeError: x is undefined');
+    say('warning', `${PERMISSION_KEY_LOG_PREFIX}staff.read in the text of <p>`);
+    say('log', `${PERMISSION_KEY_LOG_PREFIX}staff.read in the text of <p>`);
+
+    expect(await guard.finish()).toEqual([
+      `${PERMISSION_KEY_LOG_PREFIX}pickup.read in the text of <p>`,
+    ]);
+  });
+
+  it('gives nothing for a test whose pages drew no key', async () => {
+    const { context, say } = contextOf();
+    const guard = await guardAgainstPermissionKeys(context);
+
+    say('error', 'Failed to load resource: the server responded with a status of 403');
+
+    expect(await guard.finish()).toEqual([]);
+  });
+
+  // Break caught: a watch put on the page the test opened first and not on the context, so that a second page, a popup or a reload after a navigation is not watched.
+  it('puts the watch on the context, with the catalogue and its logging on, so that every document of every page has it', async () => {
+    const { context, installed } = contextOf();
+    await guardAgainstPermissionKeys(context);
+
+    expect(installed).toEqual([
+      [watchForPermissionKeys, { source: keyPatternSource(), flags: KEY_PATTERN_FLAGS, log: true }],
+    ]);
+  });
+
+  // Break caught: the keys read without asking the pages first, so that one drawn in the last moments of the test is not heard.
+  it('asks every page for a round trip before it answers, so that what they said last is heard', async () => {
+    const { context, evaluated } = contextOf(3);
+    const guard = await guardAgainstPermissionKeys(context);
+
+    await guard.finish();
+
+    expect(evaluated.sort()).toEqual([0, 1, 2]);
+  });
+
+  // Break caught: the text the guard listens for changed in one place and not the other, so that the watch speaks and the guard does not hear.
+  it('listens for the text the watch writes', () => {
+    expect(watchForPermissionKeys.toString()).toContain(PERMISSION_KEY_LOG_PREFIX);
   });
 });

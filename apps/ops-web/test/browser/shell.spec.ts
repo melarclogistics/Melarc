@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { SESSION_PATH, stubApi } from './support/api';
 import {
@@ -1613,5 +1614,46 @@ test.describe('the step that includes links, which the tests that walk links tak
     await page.locator('#heading').focus();
     await stepIncludingLinks(page);
     expect(await active()).toBe('first');
+  });
+});
+
+/**
+ * The guard against a permission key on a screen is on every test of every spec (run 7, Stage 2.3: `support/guarded-test.ts`, an automatic fixture). This test draws a key on a page and
+ * asserts nothing about it, and is marked as one that must fail: Playwright counts the guard's failure at the end of the test as the failure it expects, and a guard that stopped failing it
+ * (taken off the context, or made to fail only for a test that looks) would make this test pass unexpectedly, which Playwright reports as a failure.
+ */
+test.describe('the guard against a permission key on a screen', () => {
+  const SELF_TEST = '/__guard-self-test';
+
+  async function drawKey(page: Page, body: string): Promise<void> {
+    await page.route(`**${SELF_TEST}`, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<!doctype html><title>Guard</title>${body}`,
+      }),
+    );
+    await page.goto(SELF_TEST);
+  }
+
+  test('fails a test that draws a permission key in the text of a page, though it asserts nothing about it', async ({
+    page,
+  }) => {
+    test.fail();
+    await drawKey(page, '<main><p>Your account can’t do this (pickup.read).</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
+  });
+
+  test('fails a test that draws a permission key in an attribute of a page, though it asserts nothing about it', async ({
+    page,
+  }) => {
+    test.fail();
+    await drawKey(page, '<main><p data-reason="staff.read">A refusal.</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
+  });
+
+  // Break caught: a guard that fails every test, which would make the two above pass for the wrong reason.
+  test('lets a test that draws no key through', async ({ page }) => {
+    await drawKey(page, '<main><p>Your account can’t see pickup requests.</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
   });
 });

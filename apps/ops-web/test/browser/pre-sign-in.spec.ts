@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { SIGNED_IN_SESSION } from './support/api';
 import { decodePainted } from './support/painted';
