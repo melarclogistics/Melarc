@@ -206,6 +206,35 @@ describe('the first binding: before a code is asked for', () => {
     expect(posts()).toHaveLength(0);
   });
 
+  // Break caught (run 7, Stage 4.3): the form's own heading, replaced by the page's when the read of the rider lands and says that a first device cannot be registered: the focus the frame put on
+  // the heading is lost. It is the same element in the form and in the refusal.
+  it('keeps one heading element, with its focus, when the read of the rider turns the form into the refusal', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REGISTERER, { [RECORD]: () => gate });
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Register a first device',
+    });
+    await screen.findByRole('button', { name: 'Show the QR code' });
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, riderDetailFixture(), etag('v1')));
+      await gate;
+    });
+    expect(await screen.findByText(/This rider already has a device/)).toBeVisible();
+
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
+  });
+
   // Break caught (Stage 4.5): a way back that waits for the rider to be read. The page does not wait for the rider, so its trail says "The rider" until it is read, and goes to it all the same.
   it('has its way back before the rider is read, and names the rider once it has been', async () => {
     let release: (response: Response) => void = () => undefined;

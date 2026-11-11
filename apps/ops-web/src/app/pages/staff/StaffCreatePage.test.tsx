@@ -133,7 +133,7 @@ describe('the staff creation form: what it asks for', () => {
   });
 
   // Break caught (found in a real browser, kept from the earlier page): the heading replaced when the roles arrive, so that the focus the frame put on it falls to the top
-  // of the document and a screen reader says nothing about the form that has just appeared.
+  // of the document and a screen reader says nothing about the form that has just appeared. Run 7, Stage 4.3: and not replaced at all: it is the same element.
   it('keeps focus on the heading when the roles arrive and the form replaces the page that waited for them', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
@@ -153,7 +153,10 @@ describe('the staff creation form: what it asks for', () => {
     release();
 
     await field(/Full name/);
-    expect(screen.getByRole('heading', { level: 1, name: 'Add a staff profile' })).toHaveFocus();
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Add a staff profile' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
   });
 
   it('marks what is needed as required and what is not as optional by leaving it unmarked', async () => {

@@ -262,6 +262,37 @@ describe('the exception: when it does not apply', () => {
   });
 });
 
+describe('The one-package exception: its heading', () => {
+  // Break caught (run 7, Stage 4.3): a page that owns its heading, so that the wrapper's is replaced by the form's when the request is read: the focus the frame put on it is lost, and what
+  // held the first heading holds a node that is no longer in the document. It is the same element while the request is read and after.
+  it('keeps one heading element, with its focus, while the request is read and after', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    open(() => gate);
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Request a one-package exception',
+    });
+    await screen.findByText('Loading the pickup request…');
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, single, etag('v1')));
+      await gate;
+    });
+    await screen.findByRole('button', { name: 'Request the exception' });
+
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
+  });
+});
+
 describeInterfaceStates('The one-package exception', {
   loading: {
     test: async () => {

@@ -132,7 +132,7 @@ describe('the reset of an authenticator: what it shows', () => {
   });
 
   // Break caught (found in a real browser on the profile page, kept here): the heading replaced when the profile arrives, so that the focus the frame put on it falls to the top
-  // of the document.
+  // of the document. Run 7, Stage 4.3: and not replaced at all: it is the same element, which a heading that took the focus the old one had lost is not.
   it('keeps focus on the heading when the profile arrives and the form replaces the page that waited for it', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
@@ -152,7 +152,10 @@ describe('the reset of an authenticator: what it shows', () => {
     release();
 
     await screen.findByRole('button', { name: 'Reset authenticator' });
-    expect(screen.getByRole('heading', { level: 1, name: 'Reset authenticator' })).toHaveFocus();
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Reset authenticator' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
   });
 
   it('says plainly what a reset does, and that the person sets up the new one themselves', async () => {

@@ -131,7 +131,8 @@ describe('the skip: what the page says and asks', () => {
   });
 
   // Break caught: the heading the page had while the stop was read replaced by the form's own, so that the focus the frame put on it falls to the document and a keyboard user is left
-  // at the top of the page (found by the browser spec of the run's final affected run: it depends on which comes first, the frame's move of focus or the stop's answer).
+  // at the top of the page (found by the browser spec of the run's final affected run: it depends on which comes first, the frame's move of focus or the stop's answer). Run 7, Stage 4.3: and
+  // not replaced at all: it is the same element, which a heading that took the focus the old one had lost is not.
   it('keeps focus on the heading when the form replaces the page that was loading', async () => {
     const held = byHand();
     open({ [STOP]: held.handler });
@@ -142,7 +143,10 @@ describe('the skip: what the page says and asks', () => {
     await held.answer(json(200, waitingStop(), etag('s1')));
     await form();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Skip a stop' })).toHaveFocus();
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Skip a stop' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
   });
 
   // Break caught (the Product Owner, 9 November 2026): a way back that calls every run "The pickup run", so that an officer with two runs open cannot tell which this is.

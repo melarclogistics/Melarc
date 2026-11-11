@@ -203,6 +203,37 @@ describe('the device page: what it shows', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Replace the handset' })).toBeVisible();
   });
 
+  // Break caught (run 7, Stage 4.3): a page that draws its title twice, once while the rider is read and once in the form that comes of the read, so that the heading element is replaced when the read
+  // lands: the focus the frame put on it is lost, and a test that took the heading while it loaded held a node that was no longer in the document (this file failed four times in ten). The heading
+  // is the same element in every state, with the focus it had.
+  it('keeps one heading element, with its focus, while the rider is read and after', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REVOKER, { [RECORD]: () => gate });
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Revoke or replace a device',
+    });
+    await screen.findByText('Loading the rider…');
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, riderDetailFixture(), etag('v1')));
+      await gate;
+    });
+    expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
+
+    // The same node, which is not what `toEqual` of two nodes says (it compares what they look like).
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
+  });
+
   // Break caught (the PO's decision of 9 November 2026): paragraphs of rules above the content. What revoking does is told in the question of its dialog.
   it('has no paragraph that explains the revoke: it is told in the dialog', async () => {
     await open();
