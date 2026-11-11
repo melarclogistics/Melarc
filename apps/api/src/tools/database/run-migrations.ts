@@ -167,15 +167,21 @@ const pauseFor = (milliseconds: number): Promise<void> =>
     setTimeout(resolve, milliseconds);
   });
 
-/** Whether the server ended a wait because `lock_timeout` passed (SQLSTATE 55P03, lock_not_available). */
-const isLockTimeout = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '55P03';
+/**
+ * Whether the server ended an attempt's wait because its time passed: `lock_timeout` (SQLSTATE 55P03, lock_not_available), which is the wait for one lock, or
+ * `statement_timeout` (57014, query_canceled), which is the wait for the whole call. The second is what bounds an attempt (run 7, Stage 3.1).
+ */
+const isWaitTimeout = (error: unknown): boolean => {
+  const code =
+    typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return code === '55P03' || code === '57014';
+};
 
 /**
  * Begins the transaction of the run and takes in it the policy keys its files name, in the canonical order (`melarc.lock_policy_keys`), bounded and tried again as
  * `KeyWaitSettings` says. On success the transaction is **open** and holds the keys until it ends, `takenAt` is the monotonic moment it had them and `waitedMs` how long it
  * waited for them in all (the attempts that timed out and the pauses between them included); on failure nothing is left open. A run with no key to take only begins. A failure
- * that is not a lock timeout is not retried and is the caller's as it came. Every attempt waits for less than the application's own lock timeout, and settings that say
+ * that is not a timeout of the wait (a lock timeout, or the statement timeout that bounds the whole call) is not retried and is the caller's as it came. Every attempt waits for less than the application's own lock timeout, and settings that say
  * otherwise are refused before anything is sent. `pause` is the wait between two attempts and `now` the monotonic clock (the tests give one that does not wait, and one they hold).
  */
 export async function beginAndTakeKeys(
@@ -219,18 +225,22 @@ export async function beginAndTakeKeys(
   for (let attempt = 1; ; attempt += 1) {
     await client.query('begin');
     try {
-      // `SET LOCAL` takes no parameter: the figures are whole numbers checked above, never text from outside.
+      // `SET LOCAL` takes no parameter: the figures are whole numbers checked above, never text from outside. The primitive takes the keys one at a time and holds the ones it
+      // took while it waits for the next, and a `lock_timeout` applies to each lock it waits for: an attempt bounded by it alone could last as long as the wait for each key
+      // held by someone else (run 7, Stage 3.1). The `statement_timeout` bounds the whole call to the wait, and is given back once the call has returned.
       await client.query(`set local lock_timeout = '${String(settings.waitMs)}ms'`);
+      await client.query(`set local statement_timeout = '${String(settings.waitMs)}ms'`);
       await client.query('select melarc.lock_policy_keys($1::uuid[], $2::text[])', [
         keys.bundleIds,
         keys.fixedTypes,
       ]);
+      await client.query('set local statement_timeout = default');
       await client.query(`set local lock_timeout = '${String(settings.runWaitMs)}ms'`);
       const takenAt = now();
       return { attempts: attempt, takenAt, waitedMs: takenAt - startedAt };
     } catch (error) {
       await client.query('rollback').catch(() => undefined);
-      if (!isLockTimeout(error)) throw error;
+      if (!isWaitTimeout(error)) throw error;
       if (attempt >= settings.attempts) {
         throw new MigrationKeyWaitError(
           settings.attempts,

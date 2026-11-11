@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import type pg from 'pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -10,7 +11,10 @@ import {
   bundleLockKey,
   fixedLockKey,
 } from '../../src/platform/database/policy-lock/lock-keys.js';
-import { MigrationLockOrderError } from '../../src/tools/database/policy-keys.js';
+import {
+  MigrationLockOrderError,
+  policyKeysOfFiles,
+} from '../../src/tools/database/policy-keys.js';
 import {
   MIGRATIONS_FOLDER,
   MigrationKeyWaitError,
@@ -284,6 +288,93 @@ describe('the chain applied from a database at 0073', () => {
       await holder.query('rollback').catch(() => undefined);
       await queued.end();
       await holder.end();
+      await run?.catch(() => undefined);
+    }
+  }, 120_000);
+
+  // Break caught (run 7, Stage 3.1): the wait bounded per key and not per attempt. `melarc.lock_policy_keys` takes the keys one at a time and holds the ones it already took, and
+  // a `lock_timeout` applies to each lock it waits for, so an attempt of 1.5 s could last as long as 1.5 s for each key held by someone else (8 keys in this release's run) while a
+  // sign-in queued on the first key waited past the application's own 2 s and was refused. Here the run's second key is held by a transaction that ends after a second and its
+  // third by one that does not end: a request of the application queued on the first key the run takes must be served when the attempt's wait (1.5 s, as a whole) ends, before its
+  // own lock timeout, and the run must have given up within that time. With a bound per key the run takes the second key at one second, waits another 1.5 s for the third, and
+  // the request is refused at two seconds.
+  it('never keeps a request that queued on the first key the run takes waiting for longer than the wait, whatever the keys behind it are held by', async () => {
+    const files = readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER })
+      .slice(FIRST_NEW)
+      .map((migration, index) => ({
+        tag: `file ${String(FIRST_NEW + index)}`,
+        sql: migration.sql,
+      }));
+    const named = policyKeysOfFiles(files);
+    // The order in which `melarc.lock_policy_keys` takes them: the bundles by key, then the fixed policies by key.
+    const order = [
+      ...named.bundleIds
+        .map((id) => ({ klass: AUTH_POLICY_BUNDLE, key: bundleLockKey(id) }))
+        .sort((a, b) => a.key - b.key),
+      ...named.fixedTypes
+        .map((type) => ({ klass: AUTH_POLICY_FIXED, key: fixedLockKey(type) }))
+        .sort((a, b) => a.key - b.key),
+    ];
+    // The run of this release takes several keys (a test of one key would not see a bound per key).
+    expect(order.length).toBeGreaterThanOrEqual(3);
+    const [first, second, third] = order;
+    const shared = (key: { klass: number; key: number } | undefined): string =>
+      `select pg_advisory_xact_lock_shared(${String(key?.klass)}, ${String(key?.key)})`;
+
+    const brief: pg.Client = clientFor(built.target.urlFor('postgres'));
+    const lasting: pg.Client = clientFor(built.target.urlFor('postgres'));
+    const queued: pg.Client = clientFor(built.target.urlFor('postgres'));
+    await brief.connect();
+    await lasting.connect();
+    await queued.connect();
+    const waitingForAKey = (who: string) =>
+      scalar<string>(
+        built.admin,
+        `select count(*) from pg_locks l join pg_stat_activity a on a.pid = l.pid
+          where a.datname = current_database() and l.locktype = 'advisory' and not l.granted and ${who}`,
+      );
+    let run: ReturnType<typeof runMigrations> | undefined;
+    try {
+      await brief.query('begin');
+      await brief.query(shared(second));
+      await lasting.query('begin');
+      await lasting.query(shared(third));
+
+      run = runMigrations({ url: built.target.urlFor(MIGRATION_ROLE), keyWait: { attempts: 1 } });
+      const ended = run.catch((error: unknown) => error);
+      await until(
+        async () => (await waitingForAKey("a.application_name = 'melarc-migrate'")) === '1',
+        'the run to wait for the second key',
+      );
+
+      // The application's own request, under the application's own lock timeout (its default, 2 s), queues on the first key behind the run, which holds it.
+      await queued.query('begin');
+      await queued.query("set local lock_timeout = '2000ms'");
+      const outcome = queued.query(shared(first)).then(
+        () => 'served',
+        (error: unknown) => `refused (${(error as { code?: string }).code ?? 'no code'})`,
+      );
+      await until(
+        async () => (await waitingForAKey("a.application_name <> 'melarc-migrate'")) === '1',
+        'the request of the application to queue behind the run',
+      );
+      // The second key is let go after a second; the third is not let go.
+      setTimeout(() => {
+        void brief.query('rollback');
+      }, 1_000);
+
+      const failure = await ended;
+      expect(failure).toBeInstanceOf(MigrationKeyWaitError);
+      expect(await outcome).toBe('served');
+      // The run gave up after the wait of one attempt (1.5 s), as a whole: not after 1 s for the second key and 1.5 s more for the third.
+      expect((failure as MigrationKeyWaitError).waitedMs).toBeLessThan(2_000);
+    } finally {
+      await queued.query('rollback').catch(() => undefined);
+      await brief.query('rollback').catch(() => undefined);
+      await lasting.query('rollback').catch(() => undefined);
+      await queued.end();
+      await brief.end();
+      await lasting.end();
       await run?.catch(() => undefined);
     }
   }, 120_000);

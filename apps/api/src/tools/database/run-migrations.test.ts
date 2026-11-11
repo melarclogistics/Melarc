@@ -153,7 +153,11 @@ describe('beginAndTakeKeys', () => {
   /** Records what it is sent; the call of the primitive is answered by the next outcome, the rest by an empty result. */
   class RecordingClient {
     readonly sent: { readonly text: string; readonly values: unknown[] | undefined }[] = [];
-    constructor(private readonly outcomes: ('ok' | 'lock timeout' | 'another failure')[]) {}
+    constructor(
+      private readonly outcomes: (
+        'ok' | 'lock timeout' | 'statement timeout' | 'another failure'
+      )[],
+    ) {}
     query(text: string, values?: unknown[]): Promise<unknown> {
       this.sent.push({ text: text.replaceAll(/\s+/g, ' ').trim(), values });
       if (text.includes('melarc.lock_policy_keys')) {
@@ -161,6 +165,13 @@ describe('beginAndTakeKeys', () => {
         if (outcome === 'lock timeout') {
           return Promise.reject(
             Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' }),
+          );
+        }
+        if (outcome === 'statement timeout') {
+          return Promise.reject(
+            Object.assign(new Error('canceling statement due to statement timeout'), {
+              code: '57014',
+            }),
           );
         }
         if (outcome === 'another failure') {
@@ -179,8 +190,9 @@ describe('beginAndTakeKeys', () => {
   }
 
   // Break caught: the keys asked for with no bound of their own (a run that waits for ever behind a transaction that never ends), or a run left under the short bound of the
-  // key wait for the whole of its work.
-  it('begins, bounds the wait for the keys, takes them, and returns the run to its own bound', async () => {
+  // key wait for the whole of its work. Run 7, Stage 3.1: the bound of the whole call is a `statement_timeout` (the primitive takes the keys one at a time, and a `lock_timeout`
+  // applies to each lock it waits for, holding the keys it already took), and it is given back once the call has returned.
+  it('begins, bounds the wait for the keys as a whole, takes them, and returns the run to its own bound', async () => {
     const client = new RecordingClient(['ok']);
 
     const taken = await beginAndTakeKeys(client, KEYS, SETTINGS, () => Promise.resolve());
@@ -188,10 +200,12 @@ describe('beginAndTakeKeys', () => {
     expect(client.texts).toEqual([
       'begin',
       "set local lock_timeout = '1500ms'",
+      "set local statement_timeout = '1500ms'",
       'select melarc.lock_policy_keys($1::uuid[], $2::text[])',
+      'set local statement_timeout = default',
       "set local lock_timeout = '60000ms'",
     ]);
-    expect(client.sent[2]?.values).toEqual([KEYS.bundleIds, KEYS.fixedTypes]);
+    expect(client.sent[3]?.values).toEqual([KEYS.bundleIds, KEYS.fixedTypes]);
     expect(taken.attempts).toBe(1);
     expect(taken.takenAt).toBeTypeOf('number');
   });
@@ -212,6 +226,39 @@ describe('beginAndTakeKeys', () => {
     expect(client.texts.filter((text) => text === 'rollback')).toHaveLength(2);
     // The transaction that holds the keys is the last one begun, and is still open.
     expect(client.texts.at(-1)).toBe("set local lock_timeout = '60000ms'");
+  });
+
+  // Break caught (run 7, Stage 3.1): a cancelled statement (57014, what the `statement_timeout` of the whole call raises) told as a failure that is not a wait, so that the first
+  // attempt that outlasts the bound ends the run with the driver's words instead of being tried again after a pause.
+  it('tries again, after a pause, when the whole call was cancelled by its statement timeout', async () => {
+    const client = new RecordingClient(['statement timeout', 'lock timeout', 'ok']);
+    const pauses: number[] = [];
+
+    const taken = await beginAndTakeKeys(client, KEYS, SETTINGS, (ms) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    });
+
+    expect(taken.attempts).toBe(3);
+    expect(pauses).toEqual([500, 500]);
+    expect(client.texts.filter((text) => text === 'rollback')).toHaveLength(2);
+  });
+
+  it('says in words that it waited, and not in the words of the driver, when every attempt was cancelled by its statement timeout', async () => {
+    const client = new RecordingClient([
+      'statement timeout',
+      'statement timeout',
+      'statement timeout',
+    ]);
+
+    const failure = await beginAndTakeKeys(client, KEYS, SETTINGS, () => Promise.resolve()).then(
+      () => new Error('expected the wait to give up'),
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(MigrationKeyWaitError);
+    expect((failure as Error).message).toContain('3 attempts of 1500 ms');
+    expect((failure as Error).message).toContain('Nothing was applied');
   });
 
   // Break caught: a run that gives up with the driver's "canceling statement due to lock timeout" and nothing else, so that nobody knows which lock, how long it waited,
