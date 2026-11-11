@@ -343,7 +343,7 @@ function PlainWords({ label }: { readonly label: string }) {
       label={label}
       rows={sampleRequests(3)}
       columns={[
-        requestColumns(false)[0] as DataColumn<SampleRequest>,
+        ...requestColumns(false).slice(0, 1),
         { id: 'sender', header: 'Sender', cell: () => SAMPLE_SENDER },
         {
           id: 'packages',

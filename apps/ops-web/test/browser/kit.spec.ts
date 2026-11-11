@@ -2438,7 +2438,7 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     await page.evaluate(() => {
       const root = document.querySelector('.ui-data-table');
       const probe = root?.querySelector('.ui-data-table__probe');
-      if (root === null || root === undefined || probe === null || probe === undefined) {
+      if (root === null || probe === null || probe === undefined) {
         throw new Error('no table in the page');
       }
       const seen: { width: number; table: boolean }[] = [];
