@@ -306,6 +306,66 @@ describe('Dialog: leaving it', () => {
     });
   });
 
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the press remembered until a key is pressed, so a dialog that something other than a press opens later (a timer, a
+  // route, a message from the server) gave focus back to a control pressed to open an earlier one. A press belongs to the dialog that took it; this one goes back to where the person is.
+  it('goes back to the focused control, and not to the one that opened an earlier dialog, when something that was no press opens it', async () => {
+    let openLater: () => void = () => undefined;
+    let closeNow: () => void = () => undefined;
+    function Timed() {
+      const [open, setOpen] = useState(false);
+      openLater = () => {
+        setOpen(true);
+      };
+      closeNow = () => {
+        setOpen(false);
+      };
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+            }}
+          >
+            Pressed once
+          </button>
+          <button type="button">Where the person is</button>
+          <Dialog
+            open={open}
+            title="Opened twice"
+            onRequestClose={() => {
+              setOpen(false);
+            }}
+          >
+            <input type="text" aria-label="Inside" />
+          </Dialog>
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Timed />);
+    pressWithoutFocus(screen.getByRole('button', { name: 'Pressed once' }));
+    expect(screen.getByRole('dialog', { name: 'Opened twice' })).toBeVisible();
+    // The page closes it (no key, no press), and focus is back on the control that opened it.
+    act(() => {
+      closeNow();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Pressed once' })).toHaveFocus();
+    });
+
+    screen.getByRole('button', { name: 'Where the person is' }).focus();
+    act(() => {
+      openLater();
+    });
+    expect(screen.getByRole('dialog', { name: 'Opened twice' })).toBeVisible();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Where the person is' })).toHaveFocus();
+    });
+  });
+
   it('does not fail when what opened it has gone by the time it closes', async () => {
     function Vanishing() {
       const [shown, setShown] = useState(true);

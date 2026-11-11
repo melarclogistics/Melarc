@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -188,6 +188,59 @@ describe('SidePanel, beside the list', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(screen.getByRole('button', { name: 'Row two' })).toHaveFocus();
+  });
+
+  // Break caught (run 7, Stage 2.4): a press is forgotten once the panel has taken it, so a record that the page puts in the panel with no press (the queue read again, a link followed) found
+  // nothing and took the way back from the row that opened the panel, which then had nowhere to give focus to. The way back changes only for a control that was pressed.
+  it('keeps the way back to the row that opened it when the page changes the record with no press', async () => {
+    let showOther: () => void = () => undefined;
+    function Programmatic() {
+      const [code, setCode] = useState<string | null>(null);
+      showOther = () => {
+        setCode('ACC-PR-4HT9WD');
+      };
+      return (
+        <MemoryRouter>
+          <button
+            type="button"
+            onClick={() => {
+              setCode('ACC-PR-7KQ2MZ');
+            }}
+          >
+            Row one
+          </button>
+          <SidePanel
+            open={code !== null}
+            code={code ?? ''}
+            fullPage={{ to: '/pickup-requests/x' }}
+            onClose={() => {
+              setCode(null);
+            }}
+          >
+            <p>The summary.</p>
+          </SidePanel>
+        </MemoryRouter>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Programmatic />);
+    const row = screen.getByRole('button', { name: 'Row one' });
+
+    pressWithoutFocus(row);
+    await screen.findByRole('heading', { name: 'ACC-PR-7KQ2MZ' });
+    await Promise.resolve();
+    // Focus is on the body, as it is in an engine that gives a pressed button none, when the record is changed.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    act(() => {
+      showOther();
+    });
+    expect(await screen.findByRole('heading', { name: 'ACC-PR-4HT9WD' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(row).toHaveFocus();
   });
 
   // Break caught: the way back lost when the page says where it is: the page's own answer wins over what had focus.

@@ -70,8 +70,11 @@ export function SidePanel({
     if (!docked) return;
     if (open) {
       // A press on another row's button is the one to go back to, whether or not the engine moved focus to it (Safari's does not); a control inside the panel is not.
+      // A record the page puts in the panel with no press has none to tell (a press is let go of once taken): the way back is then the one it had.
       const from = openerOf();
-      if (!wasOpen.current || (from?.closest('.ui-side-panel') ?? null) === null) {
+      if (!wasOpen.current) {
+        opener.current = from;
+      } else if (from !== null && from.closest('.ui-side-panel') === null) {
         opener.current = from;
       }
       wasOpen.current = true;

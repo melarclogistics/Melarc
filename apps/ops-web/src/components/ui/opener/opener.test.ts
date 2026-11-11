@@ -87,6 +87,88 @@ describe('openerOf', () => {
     expect(openerOf()).toBe($('with-icon'));
   });
 
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the press remembered until any key is pressed, so a dialog opened later by something other than a press (a timer, a
+  // route, a message from the server) gave focus back to a control pressed some time ago. A press belongs to the dialog that takes it: it is forgotten when the turn it was taken in is over.
+  it('is forgotten once a dialog has taken it, so that one opened later by something that was no press has the control that has focus', async () => {
+    pressWithoutFocus($('plain'));
+    expect(openerOf()).toBe($('plain'));
+    await Promise.resolve();
+
+    expect(openerOf()).toBeNull();
+    $('field').focus();
+    expect(openerOf()).toBe($('field'));
+  });
+
+  // Break caught: a press forgotten at the first asking, so that what asks twice in one turn (effects that run twice in development, a dialog and a panel opened by one press) is told
+  // nothing the second time.
+  it('is the same control for everything that asks in the turn it was taken in', async () => {
+    pressWithoutFocus($('with-icon'));
+
+    expect([openerOf(), openerOf()]).toEqual([$('with-icon'), $('with-icon')]);
+    await Promise.resolve();
+    expect(openerOf()).toBeNull();
+  });
+
+  // Break caught: a press forgotten on being taken that also forgets the next one: a new press is a new opener.
+  it('is the control of a new press after one has been taken', async () => {
+    pressWithoutFocus($('plain'));
+    openerOf();
+    await Promise.resolve();
+
+    pressWithoutFocus($('with-icon'));
+    expect(openerOf()).toBe($('with-icon'));
+  });
+
+  // Break caught (run 7, Stage 2.4): a control that is connected but hidden accepted as the place to give focus back to, where focus cannot go: the control has to be shown.
+  it.each([
+    [
+      'its own display',
+      (button: HTMLElement) => {
+        button.style.setProperty('display', 'none');
+      },
+    ],
+    [
+      'its own visibility',
+      (button: HTMLElement) => {
+        button.style.setProperty('visibility', 'hidden');
+      },
+    ],
+    [
+      'the hidden attribute',
+      (button: HTMLElement) => {
+        button.setAttribute('hidden', '');
+      },
+    ],
+    [
+      'an ancestor that is not drawn',
+      (button: HTMLElement) => button.parentElement?.setAttribute('style', 'display: none'),
+    ],
+    [
+      'an ancestor that is inert',
+      (button: HTMLElement) => button.parentElement?.setAttribute('inert', ''),
+    ],
+  ])('is not a control that is connected but hidden by %s', (_how, hide) => {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = '<button id="inner" type="button">Inner</button>';
+    document.body.append(wrapper);
+    $('field').focus();
+    pressWithoutFocus($('inner'));
+    $('field').focus();
+    hide($('inner'));
+
+    expect(openerOf()).toBe($('field'));
+  });
+
+  // Break caught: the check of what is shown taken too far: a control inside a region that is drawn is a control.
+  it('is a control that is shown, inside a region that is shown', () => {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = '<button id="shown" type="button">Shown</button>';
+    document.body.append(wrapper);
+    pressWithoutFocus($('shown'));
+
+    expect(openerOf()).toBe($('shown'));
+  });
+
   // Break caught: no fallback, so a dialog opened by a keyboard (nothing was pressed) has nothing to give focus back to.
   it('is the control that has focus when nothing was pressed', () => {
     $('field').focus();
