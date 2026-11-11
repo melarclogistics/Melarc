@@ -1372,13 +1372,30 @@ function checkTimingSkip(workflow: unknown, jobs: readonly Job[]): WorkflowProbl
 /** `CI=<value>` as a script writes it: before a command, after `export` or `env`, or in a line written to the file that sets the environment of the steps after it. */
 const CI_ASSIGNMENT = /(?:^|[\s;&|("'])(?:export\s+|env\s+)?CI=("[^"]*"|'[^']*'|[^\s;&|)"']*)/gm;
 
+/** One argument of a command as a script writes it: bare, or in double or single quotes. It never holds a separator, so a name is not read across a `;`. */
+const CI_ARGUMENT = String.raw`(?:"[^"]*"|'[^']*'|[^\s;&|()\x60"']+)`;
+/** The name `CI`, bare or quoted (`unset "CI"` removes it as `unset CI` does). */
+const CI_NAME = String.raw`(?:CI|"CI"|'CI')`;
+
 /**
- * `CI` taken away as a script writes it (run 6, Stage 1.3): `unset CI` (with `-v`, and among other names) and `env -u CI` (`-uCI`, `--unset=CI`, `--unset CI`, among other
- * options and assignments of `env`). A step that does either runs its command as a developer's shell would, though GitHub sets `CI` to `true`. The names are read whole, so
- * `unset CIRCLE`, `unset MELARC_CI` and `env -u CIRCLE` are not this. An argument never contains a separator, so `unset FOO; echo CI` is not read across the `;`.
+ * `CI` taken away as a script writes it (run 6, Stage 1.3; run 7, Stage 3.6): `unset CI` (with `-v`, and among other names, the name bare or in quotes) and `env -u CI` (`-uCI`,
+ * `--unset=CI`, `--unset CI`, among other options and assignments of `env`); `export -n CI` and `declare +x CI` (`typeset`), which take it out of the environment of what the step
+ * runs next; and `env -i` (`--ignore-environment`), which empties the whole environment it runs the command in. A step that does any of them runs its command as a developer's shell
+ * would, though GitHub sets `CI` to `true`. The names are read whole, so `unset CIRCLE`, `unset MELARC_CI` and `env -u CIRCLE` are not this. An argument never contains a
+ * separator, so `unset FOO; echo CI` is not read across the `;`.
  */
-const CI_REMOVAL =
-  /(?:^|[\s;&|("'`])(?:unset\s+(?:-[fvn]+\s+)*(?:[^\s;&|()`"']+\s+)*?CI|env\s+(?:[^\s;&|()`"']+\s+)*?(?:-u\s*CI|--unset(?:=|\s+)CI))(?=$|[\s;&|)"'`])/gm;
+const CI_REMOVAL = new RegExp(
+  String.raw`(?:^|[\s;&|("'\x60])(?:` +
+    [
+      String.raw`unset\s+(?:-[fvn]+\s+)*(?:${CI_ARGUMENT}\s+)*?${CI_NAME}`,
+      String.raw`env\s+(?:${CI_ARGUMENT}\s+)*?(?:-u\s*${CI_NAME}|--unset(?:=|\s+)${CI_NAME})`,
+      String.raw`export\s+(?:-[a-zA-Z]+\s+)*?-[a-zA-Z]*n[a-zA-Z]*\s+(?:${CI_ARGUMENT}\s+)*?${CI_NAME}`,
+      String.raw`(?:declare|typeset)\s+(?:-[a-zA-Z]+\s+)*?\+[a-zA-Z]*x[a-zA-Z]*\s+(?:${CI_ARGUMENT}\s+)*?${CI_NAME}`,
+      String.raw`env\s+(?:(?:-[^\s;&|()\x60"']+|[A-Za-z_][A-Za-z0-9_]*=${CI_ARGUMENT})\s+)*?(?:-[a-zA-Z]*i[a-zA-Z]*|--ignore-environment)`,
+    ].join('|') +
+    String.raw`)(?=$|[\s;&|)"'\x60=])`,
+  'gm',
+);
 
 /** Whether a value written in a workflow is CI's `true`: the string, or the YAML boolean that GitHub turns into it. */
 const isTrue = (value: unknown): boolean => value === 'true' || value === true;
@@ -1494,6 +1511,27 @@ function checkMigrationBaseStep(jobs: readonly Job[]): WorkflowProblem[] {
       continue;
     }
     const baseStep = steps.at(firstBefore);
+    // The step runs where and as it is written (run 7, Stage 3.6): a `shell` or a `working-directory` of its own makes `node scripts/ci-migration-base.ts` another command, or another
+    // file, as the required commands are held not to (`checkCommands`).
+    const altered = ['shell', 'working-directory'].filter(
+      (key) => baseStep !== undefined && key in baseStep,
+    );
+    if (altered.length > 0) {
+      problems.push({
+        code: 'MIGRATION_BASE_STEP',
+        message: `The step "${MIGRATION_BASE_COMMAND}" of job ${id} sets ${altered.join(' and ')}, so the command may not run as written, from the root of the checkout in the default shell: it would name no base, or the wrong one.`,
+      });
+    }
+    // Nothing between it and the guard writes the base again: the later write is the one the guard reads.
+    const rewriters = steps
+      .slice(firstBefore + 1, guardAt)
+      .filter((step) => /MELARC_MIGRATION_BASE|GITHUB_ENV/.test(scriptOf(step)));
+    if (rewriters.length > 0) {
+      problems.push({
+        code: 'MIGRATION_BASE_STEP',
+        message: `A step between "${MIGRATION_BASE_COMMAND}" and "${MIGRATION_GUARD_COMMAND}" in job ${id} writes MELARC_MIGRATION_BASE or the file that sets the environment of the steps after it (${rewriters.map((step) => (typeof step.name === 'string' ? step.name : 'unnamed')).join(', ')}): the guard would be held to whatever it wrote, and not to the revision the push came from.`,
+      });
+    }
     const env: Record<string, unknown> =
       baseStep !== undefined && isRecord(baseStep.env) ? baseStep.env : {};
     const wrong = Object.entries(MIGRATION_BASE_STEP_ENV)

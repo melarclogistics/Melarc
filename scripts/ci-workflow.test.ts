@@ -3194,13 +3194,41 @@ describe('the CI variable and the revision the migrations are held to (run 5, St
     ['echo ok && unset CI', true],
     ['(unset CI; node scripts/x.ts)', true],
     ['if true; then\n  unset CI\nfi', true],
+    // Run 7, Stage 3.6: the forms that took CI away and were not read: a quoted name, `export -n`, `declare +x` and the whole environment emptied with `env -i`.
+    ['unset "CI"', true],
+    ["unset 'CI'", true],
+    ['unset -v "CI"', true],
+    ['unset FOO "CI"', true],
+    ['env -u "CI" node scripts/x.ts', true],
+    ["env -u 'CI' node scripts/x.ts", true],
+    ['env --unset="CI" node scripts/x.ts', true],
+    ['export -n CI', true],
+    ['export -n FOO CI', true],
+    ['export -n "CI"', true],
+    ['export -fn CI', true],
+    ['declare +x CI', true],
+    ['declare -g +x CI', true],
+    ['typeset +x CI', true],
+    ['env -i node scripts/x.ts', true],
+    ['env -i PATH=/usr/bin node scripts/x.ts', true],
+    ['env --ignore-environment node scripts/x.ts', true],
+    ['env FOO=1 -i node scripts/x.ts', true],
+    ['echo ok && env -i bash -c "node scripts/x.ts"', true],
     ['unset CIRCLE', false],
     ['unset MELARC_CI', false],
+    ['unset "CIRCLE"', false],
     ['unset FOO; echo CI', false],
     ['env -u CIRCLE node scripts/x.ts', false],
     ['env -u MELARC_CI node scripts/x.ts', false],
+    ['env -u "MELARC_CI" node scripts/x.ts', false],
     ['env FOO=1 node scripts/x.ts', false],
     ['unset DEBUG', false],
+    ['export CI', false],
+    ['export -n FOO', false],
+    ['export FOO=1 && echo CI', false],
+    ['declare -x CI', false],
+    ['declare +x FOO', false],
+    ['env -C scripts node x.ts', false],
   ] as const) {
     it(`${refused ? 'refuses' : 'accepts'} a script that says ${JSON.stringify(script)}`, () => {
       const found = codesWith((_, jobs) => {
@@ -3291,6 +3319,54 @@ describe('the step that names the revision a push is held to (run 6, Stage 1.3)'
     assert.deepEqual(
       codesWith((_, jobs) => {
         stepsOf(jobs.static).push({ ...baseStepOf(jobs) });
+      }),
+      [],
+    );
+  });
+
+  // Break caught (run 7, Stage 3.6): the step run from another folder or in another shell. The workflow check held that for the required commands and not for this step, so
+  // `working-directory` could make `node scripts/ci-migration-base.ts` another file, or a `shell` make it another command, and no base would be named.
+  for (const key of ['shell', 'working-directory']) {
+    it(`refuses the step with a ${key} of its own`, () => {
+      const found = problemsWith((_, jobs) => {
+        baseStepOf(jobs)[key] = key === 'shell' ? 'bash {0}' : 'apps/api';
+      });
+
+      assert.deepEqual(
+        found.map((problem) => problem.code),
+        ['MIGRATION_BASE_STEP'],
+      );
+      assert.match(found[0]?.message ?? '', new RegExp(`sets ${key}`));
+    });
+  }
+
+  // Break caught: a step between the one that names the base and the guard that writes MELARC_MIGRATION_BASE (or the file that sets the environment) again: the later write wins, and the
+  // guard is held to whatever it says.
+  for (const script of [
+    'echo "MELARC_MIGRATION_BASE=$GITHUB_SHA" >> "$GITHUB_ENV"',
+    'export MELARC_MIGRATION_BASE=HEAD',
+    'echo "$NAME=$VALUE" >> "$GITHUB_ENV"',
+    'echo "MELARC_MIGRATION_BASE=" >> $GITHUB_ENV',
+  ]) {
+    it(`refuses a step between the base step and the guard that says ${JSON.stringify(script)}`, () => {
+      const found = problemsWith((_, jobs) => {
+        const guardAt = indexOfRunning(jobs, MIGRATION_GUARD_COMMAND);
+        stepsOf(jobs.static).splice(guardAt, 0, { name: 'Name the base again', run: script });
+      });
+
+      assert.deepEqual(
+        found.map((problem) => problem.code),
+        ['MIGRATION_BASE_STEP'],
+      );
+      assert.match(found[0]?.message ?? '', /between/);
+    });
+  }
+
+  it('accepts a step between the base step and the guard that writes neither', () => {
+    assert.deepEqual(
+      codesWith((_, jobs) => {
+        const guardAt = indexOfRunning(jobs, MIGRATION_GUARD_COMMAND);
+        stepsOf(jobs.static).splice(guardAt, 0, { name: 'Say something', run: 'echo hello' });
       }),
       [],
     );
