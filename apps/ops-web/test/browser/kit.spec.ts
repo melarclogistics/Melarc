@@ -2,6 +2,7 @@ import { chromium, type Locator, type Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
 import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
+import { expectWholeInTheWindow } from './support/whole';
 import { wordsOf } from './support/words';
 
 /**
@@ -2611,5 +2612,40 @@ test.describe('the fix round of task R5.2 in a browser', () => {
 
     expect(popover.x).toBeGreaterThanOrEqual(7.5);
     expect(popover.x + popover.width).toBeLessThanOrEqual(382.5);
+  });
+});
+
+test.describe('the helper that says a control is whole in the window (run 7, Stage 4.2)', () => {
+  // Break caught: a helper that asks only about the window. A control inside a box that scrolls (a table's own box, a panel's body) can lie inside the window and be cut off by the edge of that box,
+  // and the share of the control in view, which `toBeInViewport({ ratio: 1 })` asked, saw it and a box check of the window does not. Here a button half behind the edge of the box that holds it is
+  // inside the window on all four sides: the helper must refuse it, and accept the same button once it is wholly inside the box.
+  test('refuses a control that the box which holds it cuts off, and accepts it once it is whole', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1280, height: 900 });
+    await page.evaluate(() => {
+      const box = document.createElement('div');
+      box.id = 'whole-box';
+      box.style.cssText =
+        'position:fixed;left:40px;top:40px;width:200px;height:80px;overflow:auto;background:#fff;z-index:99999';
+      const control = document.createElement('button');
+      control.id = 'whole-control';
+      control.type = 'button';
+      control.textContent = 'Create the run';
+      control.style.cssText = 'display:block;margin-left:150px;width:120px;height:30px';
+      box.append(control);
+      document.body.append(box);
+    });
+    const control = page.locator('#whole-control');
+    const inside = await box(control);
+    expect(inside.x + inside.width).toBeLessThanOrEqual(1280);
+
+    await expect(expectWholeInTheWindow(page, control)).rejects.toThrow(/cuts the control off/);
+
+    await page.locator('#whole-control').evaluate((element) => {
+      element.style.marginLeft = '10px';
+      element.style.width = '120px';
+    });
+    await expectWholeInTheWindow(page, control);
   });
 });

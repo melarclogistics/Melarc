@@ -4,6 +4,7 @@ import { expect, test } from './support/guarded-test';
 import { decodePainted } from './support/painted';
 import { reachableNames, watchPage, wcagViolations } from './support/page';
 import { expectShellAround, signOutFromMenu } from './support/shell';
+import { expectNoTableScrollsSideways } from './support/tables';
 import {
   CODE_FORMS,
   CODES,
@@ -42,18 +43,15 @@ const REGISTER = `/admin/riders/${IDS.esi}/device/register`;
 const DEVICE = `/admin/riders/${IDS.kwame}/device`;
 
 /**
- * Every cell of the table asks for 9.5rem and is kept on one line, as a long name, a long phone or a long status would ask, and the table measures its box again (the box is made two pixels wider
- * and then as it was: a table measures when its box changes width): five columns ask for more than a box of 768 px has, and the lesser columns have to go for it not to scroll sideways.
+ * Every cell of the table asks for 9.5rem and is kept on one line, as a long name, a long phone or a long status would ask: five columns ask for more than a box of 768 px has, and the lesser columns
+ * have to go for it not to scroll sideways. **Nothing else is done to the page**: the table grows wider than its box by itself, and the fit measures again when it does (run 7, Stage 1.3). The helper
+ * made the box two pixels wider and then as it was, in one breath, to make the table measure; when both sizes landed in one frame the table measured nothing and the test failed one run in twenty.
  */
 async function cannotWrap(page: Page): Promise<void> {
-  const size = page.viewportSize();
-  if (size === null) throw new Error('the page has no size');
   await page.addStyleTag({
     content:
       '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
   });
-  await page.setViewportSize({ width: size.width + 2, height: size.height });
-  await page.setViewportSize(size);
 }
 
 async function overflowOf(page: Page): Promise<number> {
@@ -278,11 +276,13 @@ test.describe('moving through the screens', () => {
     await cannotWrap(page);
     // The lesser columns go, the most lesser first: the hub is the first to be taken away.
     await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
-    expect(
-      await page
-        .locator('.ui-data-table__scroller')
-        .evaluate((element) => element.scrollWidth - element.clientWidth),
-    ).toBeLessThanOrEqual(0);
+    await expect
+      .poll(() =>
+        page
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      )
+      .toBeLessThanOrEqual(0);
     const headers = await table.getByRole('columnheader').allTextContents();
     for (const kept of ['Rider / phone', 'Status', 'Device']) expect(headers).toContain(kept);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
@@ -1156,6 +1156,7 @@ test.describe('every screen and state, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
         await expectShellAround(page, width);
       });

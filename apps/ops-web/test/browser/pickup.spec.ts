@@ -4,6 +4,8 @@ import { expect, test } from './support/guarded-test';
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
 import { wordsOf } from './support/words';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 import {
   IDS,
   PLANTED_PRICE_TEXT,
@@ -565,14 +567,12 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     // Its top is not under the bar, and the whole of it is in the window.
     expect(box?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
     expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(640 + 1);
-    await expect(panel.getByRole('link', { name: 'Open full page' })).toBeInViewport({ ratio: 1 });
-    await expect(panel.getByRole('button', { name: 'Close the panel' })).toBeInViewport({
-      ratio: 1,
-    });
+    await expectWholeInTheWindow(page, panel.getByRole('link', { name: 'Open full page' }));
+    await expectWholeInTheWindow(page, panel.getByRole('button', { name: 'Close the panel' }));
     // The act of the panel is reached by scrolling the panel, never by scrolling the page out from under it.
     const confirm = panel.getByRole('button', { name: 'Confirm pickup' });
     await confirm.scrollIntoViewIfNeeded();
-    await expect(confirm).toBeInViewport({ ratio: 1 });
+    await expectWholeInTheWindow(page, confirm);
     const after = await confirm.boundingBox();
     expect(after?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
   });
@@ -660,9 +660,7 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       await expect(row).toContainText(fact);
     }
     // The act at the end of the row is in view: nothing is scrolled out of reach.
-    await expect(row.getByRole('button', { name: `Confirm ${CODE}` })).toBeInViewport({
-      ratio: 1,
-    });
+    await expectWholeInTheWindow(page, row.getByRole('button', { name: `Confirm ${CODE}` }));
     expect(await overflowingInQueue(page)).toEqual([]);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
@@ -2063,9 +2061,10 @@ test.describe('the approver’s queue', () => {
       'Request state',
       'Actions',
     ]);
-    await expect(
+    await expectWholeInTheWindow(
+      page,
       table.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
-    ).toBeInViewport({ ratio: 1 });
+    );
     const words = await wordsOf(table);
     expect(words.broken).toEqual([]);
     expect(words.tall).toEqual([]);
@@ -2120,6 +2119,59 @@ test.describe('the approver’s queue', () => {
   });
 });
 
+/**
+ * The usual next act of a row is drawn at rest (the Product Owner, 10 November 2026: an act that waited for the pointer was not found on a touch screen, by a keyboard or by a pointer that had
+ * not reached the row). The kit's browser spec holds it against the development server, a project the Firefox and WebKit run does not use; these hold it against the production build, in the
+ * queue's Confirm and the approver's Approve at 1280 px, with the pointer away from the table (run 7, Stage 4.3).
+ */
+async function actDrawn(
+  act: Locator,
+): Promise<{ opacity: string; visibility: string; hasBox: boolean }> {
+  return act.evaluate((button) => {
+    // What is seen is the opacity of the button and of everything it is in: an act in a cell that is invisible is not drawn, whatever its own opacity says.
+    let opacity = 1;
+    for (let node: Element | null = button; node !== null; node = node.parentElement) {
+      opacity *= parseFloat(getComputedStyle(node).opacity);
+    }
+    const reach = button.getBoundingClientRect();
+    return {
+      opacity: String(opacity),
+      visibility: getComputedStyle(button).visibility,
+      hasBox: reach.width > 0 && reach.height > 0,
+    };
+  });
+}
+
+test.describe('the row act at rest', () => {
+  // Break caught: a row act that is invisible until the row is hovered or has focus.
+  test('draws the queue’s Confirm at rest at 1280 px, with the pointer away from the table', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/pickup-requests');
+    await expect(queueTable(page)).toBeVisible();
+    await page.mouse.move(0, 0);
+
+    const confirm = queueTable(page).getByRole('button', { name: `Confirm ${CODE}` });
+    await expect(confirm).toBeVisible();
+    expect(await actDrawn(confirm)).toEqual({ opacity: '1', visibility: 'visible', hasBox: true });
+  });
+
+  test('draws the approver’s Approve at rest at 1280 px, with the pointer away from the table', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    await page.mouse.move(0, 0);
+
+    const approve = table.getByRole('button', { name: `Approve the exception of ${CODE}` });
+    await expect(approve).toBeVisible();
+    expect(await actDrawn(approve)).toEqual({ opacity: '1', visibility: 'visible', hasBox: true });
+  });
+});
+
 test.describe('every screen, at the verified widths', () => {
   for (const { width, height } of VIEWPORTS) {
     for (const screen of SCREENS) {
@@ -2132,6 +2184,7 @@ test.describe('every screen, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }

@@ -260,15 +260,21 @@ test.describe('the vendor screens', () => {
 
     const table = page.getByRole('table', { name: 'Vendor accounts' });
     await expect(table).toBeVisible();
-    // Every cell asks for 9.5rem on one line, and the table is made to measure its box again (two pixels wider, then as it was): five columns ask for more than the box has.
+    // Every cell asks for 9.5rem on one line: five columns ask for more than the box has. Nothing else is done to the page: the table grows wider than its box and measures again by itself (run 7,
+    // Stage 1.3; the window used to be resized two pixels and back to make it measure).
     await page.addStyleTag({
       content:
         '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
     });
-    await page.setViewportSize({ width: 770, height: 1024 });
-    await page.setViewportSize({ width: 768, height: 1024 });
     // The lesser columns go, the most lesser first: the hub is the first to be taken away.
     await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      )
+      .toBeLessThanOrEqual(0);
     expect(
       await page
         .locator('.ui-data-table__scroller')

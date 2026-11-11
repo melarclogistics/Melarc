@@ -403,6 +403,38 @@ test.describe('the authenticator in a browser', () => {
     expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
   });
 
+  // Break caught (the review of f6cf02b; run 7, Stage 4.3): the authenticator's material drawn again by a Back in the moment the next page is awaited. The test above leaves the page by a full
+  // navigation, which loads everything afresh and proves nothing about the router. Here the person leaves **inside the application** and comes Back in the same task: the router has committed the
+  // other address and then this one again, and React, which draws a page it leads to later (this application has no page that loads on demand, so none can be held for longer), has drawn
+  // nothing in between. The page is still on the screen, and it must hold nothing a Back could show: it let the material go when the router moved (`releaseWhenRouterMoves`), so the page that
+  // comes back says the code is gone and never draws the QR code or the key.
+  test('does not draw the material again when the person leaves inside the application and comes Back before the next page is drawn', async ({
+    page,
+  }) => {
+    await toTheAuthenticator(page);
+    const region = page.getByRole('region', { name: 'Authenticator set-up' });
+    await expect(region.getByRole('textbox', { name: 'Setup key' })).toHaveValue(
+      'SENT INEL SEED 2345 67AB CDEF GH',
+    );
+
+    // An in-application move to the other screen of the family and straight Back, with nothing drawn in between.
+    await page.evaluate(() => {
+      window.history.pushState(null, '', '/sign-in');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      window.history.back();
+    });
+
+    await expect(page).toHaveURL('/setup/mfa');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
+    await expect(page.getByRole('img', { name: 'QR code for your authenticator app' })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole('textbox', { name: 'Setup key' })).toHaveCount(0);
+  });
+
   test('begins a re-enrolment from the link only when the person presses the button', async ({
     page,
   }) => {

@@ -13,6 +13,8 @@ import {
 } from './support/messages-api';
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 
 /**
  * The message log (S1.12e) in a real browser: the list with its filters, the Ops feed, the narrowing to one request and the link to it from
@@ -588,6 +590,7 @@ test.describe('every screen, at the verified widths', () => {
         try {
           expect(await wcagViolations(page)).toEqual([]);
           expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+          await expectNoTableScrollsSideways(page);
           await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
         } finally {
           release?.();
@@ -596,22 +599,6 @@ test.describe('every screen, at the verified widths', () => {
     }
   }
 });
-
-/**
- * A control is whole inside the window: no part of it is above it, below it, left of it or right of it, to half a pixel. `toBeInViewport({ ratio: 1 })` takes the engine's own share of the control that
- * is in view and wants all of it, and WebKit gave 0.9997 and 0.9998 for the Record header while its box is inside the window on all four sides (this check passes there): the engine rounds the
- * control and the window at fractions of a pixel differently (the engines run of 10 November 2026). The box of the control says where it is, and each side is asked about.
- */
-async function expectWholeInTheWindow(page: Page, control: Locator): Promise<void> {
-  const box = await control.boundingBox();
-  const window = page.viewportSize();
-  expect(box).not.toBeNull();
-  expect(window).not.toBeNull();
-  expect(box?.x ?? -1).toBeGreaterThanOrEqual(-0.5);
-  expect(box?.y ?? -1).toBeGreaterThanOrEqual(-0.5);
-  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual((window?.width ?? 0) + 0.5);
-  expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual((window?.height ?? 0) + 0.5);
-}
 
 test.describe('the log in six columns, and cards under 40rem (owner item a, 9 November 2026)', () => {
   // Break caught: nine columns that did not fit the box at 1280 px with the menu open and scrolled sideways inside it, so that the number and the record were off to the right.

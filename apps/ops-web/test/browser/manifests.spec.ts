@@ -14,6 +14,8 @@ import {
 } from './support/manifest-api';
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 
 /**
  * The manifest screens (S1.25) in a real browser: the list, the builder, one run and the Ops skip of a stop. What jsdom cannot show is here: the
@@ -267,13 +269,13 @@ test.describe('the builder in a short window (run 4, Stage 2; the review of 5eda
 
     // The Create is at the foot of the run and in the window at once, however many requests are chosen: the rows scroll inside the run, the actions do not.
     const create = page.getByRole('button', { name: /^Create the / });
-    await expect(create).toBeInViewport({ ratio: 1 });
+    await expectWholeInTheWindow(page, create);
     const button = await create.boundingBox();
     expect(button?.y ?? 0).toBeGreaterThanOrEqual(barBottom);
     // And a reason is reached by scrolling the run, with the Create still in view.
     await reason.first().scrollIntoViewIfNeeded();
-    await expect(reason.first()).toBeInViewport({ ratio: 1 });
-    await expect(create).toBeInViewport({ ratio: 1 });
+    await expectWholeInTheWindow(page, reason.first());
+    await expectWholeInTheWindow(page, create);
   });
 
   // Break caught (the Product Owner, 9 November 2026, Stage 3 item 8): the Create among the rows it creates from, so that where the pane scrolls inside it scrolls away with them. It is in the
@@ -314,7 +316,7 @@ test.describe('the builder in a short window (run 4, Stage 2; the review of 5eda
     const footer = run.locator('.ui-builder__footer');
     const create = footer.getByRole('button', { name: /^Create the / });
     const rows = run.locator('.ui-builder__run-body');
-    await expect(create).toBeInViewport({ ratio: 1 });
+    await expectWholeInTheWindow(page, create);
     // The rows' box scrolls inside the pane; the footer is below it and is not part of it.
     expect(
       await rows.evaluate((element) => element.scrollHeight - element.clientHeight),
@@ -329,7 +331,7 @@ test.describe('the builder in a short window (run 4, Stage 2; the review of 5eda
       element.scrollTop = element.scrollHeight;
     });
     expect((await create.boundingBox())?.y).toBe(before?.y);
-    await expect(create).toBeInViewport({ ratio: 1 });
+    await expectWholeInTheWindow(page, create);
   });
 
   // Break caught: the pool dropping its address and its count beside the run, where nothing else shows them: the choice is made on what a request holds.
@@ -1442,6 +1444,7 @@ test.describe('every screen, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }

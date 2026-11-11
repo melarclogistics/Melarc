@@ -3,6 +3,7 @@ import { expect, test } from './support/guarded-test';
 
 import { reachableNames, watchPage, wcagViolations } from './support/page';
 import { expectShellAround, openAccountMenu, primaryNav } from './support/shell';
+import { expectNoTableScrollsSideways } from './support/tables';
 import {
   ama,
   IDS,
@@ -900,6 +901,7 @@ test.describe('every screen and state, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
         // The shell is around the screen, in the form its width gives it: the top bar always, and the sidebar docked at the side from 768 px, and on a
         // narrow screen behind the bar's button, out of the document until it is opened. (By layout, not by role: a modal dialog makes the rest of the
