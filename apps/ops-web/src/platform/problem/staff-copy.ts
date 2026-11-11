@@ -10,7 +10,7 @@ import type { CopyRule } from './problem-copy';
  */
 const DELIVERY_FAILED =
   'Nothing was changed. The message channel is not available yet, so the link could not be sent. You can try again once it is.';
-const OTHER_HUB = 'This profile belongs to a hub your session does not act in.';
+const OTHER_HUB = 'This profile belongs to a hub your account does not work in.';
 
 const DELIVERY_OPERATIONS = [
   'approveStaffIdentity',

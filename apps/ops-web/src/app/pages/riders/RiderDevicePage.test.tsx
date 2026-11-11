@@ -252,7 +252,7 @@ describe('the device page: what it shows', () => {
 
   it('is a page of its own for a rider outside the session’s hubs, for one that does not exist and for an address that is not an id', async () => {
     const view = await open(REVOKER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 
@@ -396,7 +396,7 @@ describe('the device page: reporting a lost or stolen device', () => {
   // Break caught: a refusal worded as the operation's general failure, which would hide what the officer can do about it.
   it.each([
     [403, 'PERMISSION_DENIED', /can’t revoke a rider’s device/],
-    [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
+    [403, 'HUB_SCOPE_VIOLATION', /hub your account does not work in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
     [403, 'CSRF_VALIDATION_FAILED', /The device could not be revoked\. Try again/],
   ])('words a %s %s for what it is, and keeps the dialog', async (status, code, words) => {
@@ -1250,7 +1250,7 @@ describeInterfaceStates('The device page', {
       await startRevoking(view);
       const dialog = screen.getByRole('alertdialog', { name: 'Revoke this device?' });
       await view.user.click(within(dialog).getByRole('button', { name: 'Revoke the device' }));
-      expect(await within(dialog).findByText(/hub your session does not act in/)).toBeVisible();
+      expect(await within(dialog).findByText(/hub your account does not work in/)).toBeVisible();
     },
   },
   retry: {

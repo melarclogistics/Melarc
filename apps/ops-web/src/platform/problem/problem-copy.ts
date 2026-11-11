@@ -293,13 +293,13 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   stale: '',
 };
 
-// What a refusal says is the table's (`capability-words.ts`); the message of an approval and of an act the record does not allow is the short form of the explanation the refusal components draw.
+// What a refusal says is the table's (`capability-words.ts`), for every kind: the message a problem carries is the sentence the refusal components draw, one wording.
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {
   'permission-missing': refusalText('permission-missing', undefined),
   'insufficient-authority': refusalText('insufficient-authority', undefined),
   'outside-hubs': refusalText('outside-hubs', undefined),
-  'approval-required': 'A different approver is required.',
-  'unavailable-here': 'This is not available here.',
+  'approval-required': refusalText('approval-required', undefined),
+  'unavailable-here': refusalText('unavailable-here', undefined),
 };
 
 /** The refusals of authority, by the code that names them (errors-and-enums.md section 4). */

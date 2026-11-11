@@ -6,7 +6,7 @@ import type { CopyRule } from './problem-copy';
  * states a rule says the rule and what to do next, because a refusal shown as a dead end misrepresents the policy (`cancelPickupRequest`). No
  * wording names a price, a total or an amount the screen has not been given.
  */
-const OTHER_HUB = 'This pickup request belongs to a hub your session does not act in.';
+const OTHER_HUB = 'This pickup request belongs to a hub your account does not work in.';
 const NOT_FOUND = 'This pickup request could not be found.';
 const CHANGED =
   'This request changed after you opened it: someone else may have acted on it. Reload it to see where it stands.';
@@ -69,7 +69,7 @@ export const PICKUP_COPY: readonly CopyRule[] = [
   {
     operation: 'listVendorPickupLocations',
     code: 'HUB_SCOPE_VIOLATION',
-    text: 'This vendor belongs to a hub your session does not act in, so its saved locations cannot be read.',
+    text: 'This vendor belongs to a hub your account does not work in, so its saved locations cannot be read.',
   },
   {
     operation: 'listVendorAccounts',

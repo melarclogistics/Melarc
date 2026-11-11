@@ -193,7 +193,7 @@ describe('the vendor account: what it shows', () => {
 
   it('is a page of its own for an account outside the session’s hubs, and for one that does not exist', async () => {
     const view = open(READER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 

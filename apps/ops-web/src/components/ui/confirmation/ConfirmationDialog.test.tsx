@@ -184,7 +184,9 @@ describe('ConfirmationDialog: a refusal', () => {
 
     await view.user.click(confirm());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A different approver is required.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'A different approver decides this.',
+    );
     expect(screen.getByText(/req-t1/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     expect(screen.getByRole('alertdialog')).toBeVisible();

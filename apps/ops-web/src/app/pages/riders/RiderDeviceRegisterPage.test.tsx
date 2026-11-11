@@ -1320,7 +1320,7 @@ describe('the first binding: when the API refuses', () => {
       /A first device cannot be registered for this rider\. The rider already has an active device/,
     ],
     [403, 'PERMISSION_DENIED', /can’t register a rider’s first device/],
-    [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
+    [403, 'HUB_SCOPE_VIOLATION', /hub your account does not work in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
   ])('words a %s %s for what it is', async (status, code, words) => {
     await ask(() => refusal(status, code));

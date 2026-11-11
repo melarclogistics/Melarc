@@ -390,7 +390,7 @@ test.describe('moving through the screens', () => {
     await open(page, `/admin/riders/${IDS.farAway}`, {
       riders: [rider({ id: IDS.farAway, full_name: 'Far Away', primary_hub_id: IDS.otherHub })],
     });
-    await expect(page.getByText(/hub your session does not act in/)).toBeVisible();
+    await expect(page.getByText(/hub your account does not work in/)).toBeVisible();
     await page.goto('/admin/riders/00000000-0000-4000-8000-000000000000');
     await expect(page.getByRole('heading', { level: 1, name: 'Rider not found' })).toBeVisible();
   });

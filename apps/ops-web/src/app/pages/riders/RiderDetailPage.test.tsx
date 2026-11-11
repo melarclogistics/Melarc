@@ -433,7 +433,7 @@ describe('the rider: the version an act takes', () => {
 describe('the rider: a record that cannot be shown', () => {
   it('is a page of its own for a rider outside the session’s hubs, and for one that does not exist', async () => {
     const view = open(READER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 

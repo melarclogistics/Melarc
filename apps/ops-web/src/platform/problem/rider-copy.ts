@@ -6,7 +6,7 @@ import type { CopyRule } from './problem-copy';
  * replacement is one too (at the officer's own hub, for Senior Ops; a Platform Admin acts at every hub), and the report of a loss is any officer's. Nothing says anything about the
  * rider's PIN or key, which no answer carries; the words about the code say what it is for and that it is shown once.
  */
-const OTHER_HUB = 'This rider belongs to a hub your session does not act in.';
+const OTHER_HUB = 'This rider belongs to a hub your account does not work in.';
 const NOT_FOUND = 'This rider could not be found.';
 
 export const RIDER_COPY: readonly CopyRule[] = [

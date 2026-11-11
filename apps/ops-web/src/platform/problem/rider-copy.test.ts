@@ -55,7 +55,7 @@ describe('the words of the reads', () => {
       'getRider',
       'HUB_SCOPE_VIOLATION',
       403,
-      'This rider belongs to a hub your session does not act in.',
+      'This rider belongs to a hub your account does not work in.',
     ],
   ])('%s %s %s says %j', (operation, code, status, message) => {
     expect(problemOf(refused(code, status), { operation }).message).toBe(message);
@@ -86,7 +86,7 @@ describe('the words of the acts on a rider’s device', () => {
     const problem = problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation });
 
     expect(problem).toMatchObject({ kind: 'forbidden', forbidden: 'outside-hubs' });
-    expect(problem.message).toMatch(/hub your session does not act in|own hub/);
+    expect(problem.message).toMatch(/hub your account does not work in|own hub/);
   });
 
   it.each(OPERATIONS.slice(2))('tells a rider that is not there as that, for %s', (operation) => {

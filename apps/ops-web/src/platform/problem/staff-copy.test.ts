@@ -139,8 +139,8 @@ describe('the words that are told whatever the act', () => {
   );
 
   it.each([
-    ['approveStaffIdentity', 'This profile belongs to a hub your session does not act in.'],
-    ['reissueStaffCredentialSetup', 'This profile belongs to a hub your session does not act in.'],
+    ['approveStaffIdentity', 'This profile belongs to a hub your account does not work in.'],
+    ['reissueStaffCredentialSetup', 'This profile belongs to a hub your account does not work in.'],
   ])('says a profile in another hub is in another hub for %s', (operation, message) => {
     expect(problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation }).message).toBe(message);
   });

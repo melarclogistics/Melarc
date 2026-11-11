@@ -115,7 +115,7 @@ describe('the words of the refusals of authority', () => {
 
       expect(problem).toMatchObject({ kind: 'forbidden', forbidden: 'outside-hubs' });
       expect(problem.message).toBe(
-        'This pickup request belongs to a hub your session does not act in.',
+        'This pickup request belongs to a hub your account does not work in.',
       );
     },
   );

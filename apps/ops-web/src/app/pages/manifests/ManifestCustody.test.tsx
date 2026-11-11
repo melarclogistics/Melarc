@@ -263,7 +263,7 @@ describe('custody: opening a handover', () => {
 
   it.each([
     ['STATE_CONFLICT', 409, /A handover cannot be opened now/],
-    ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
+    ['HUB_SCOPE_VIOLATION', 403, /hub your account does not work in/],
     ['PERMISSION_DENIED', 403, /can’t open a custody handover/],
   ])('tells %s in the officer’s words', async (code, status, words) => {
     const { user } = open({ [LIST]: none, [INITIATE]: () => refusal(status, code) });

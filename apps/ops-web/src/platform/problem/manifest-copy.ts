@@ -7,15 +7,15 @@ import type { CopyRule } from './problem-copy';
  * `details.rule` is worded by it** (`problemOf` reads the rule as the context when the page gave none): `service_date_passed` and
  * `request_not_confirmed` of the dispatch are two different things to do next. No wording names a count of the hub's, a price or a role.
  */
-const OTHER_HUB = 'This pickup run belongs to a hub your session does not act in.';
+const OTHER_HUB = 'This pickup run belongs to a hub your account does not work in.';
 const NOT_FOUND = 'This pickup run could not be found.';
 const CHANGED =
   'This pickup run changed after you opened it: someone else may have acted on it. Reload it to see where it stands.';
 const NOTE_NEEDED = 'Write a note saying why.';
 /** A note the ledger would not keep: the field says what to change, and the words of the note are never repeated. */
 const NOTE_REFUSED = 'Check the note marked below: it was not accepted as written.';
-const OTHER_HUB_STOP = 'This stop belongs to a hub your session does not act in.';
-const OTHER_HUB_HANDOVER = 'This custody handover belongs to a hub your session does not act in.';
+const OTHER_HUB_STOP = 'This stop belongs to a hub your account does not work in.';
+const OTHER_HUB_HANDOVER = 'This custody handover belongs to a hub your account does not work in.';
 
 export const MANIFEST_COPY: readonly CopyRule[] = [
   // The reads.

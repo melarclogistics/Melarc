@@ -127,7 +127,7 @@ describe('the words of a refusal', () => {
       'This needs a higher authority than your session has.',
     );
     expect(refusalText('outside-hubs', 'staff.read')).toBe(
-      'This record belongs to a hub your session does not act in.',
+      'This record belongs to a hub your account does not work in.',
     );
     expect(refusalText('approval-required', 'pickup.exception.approve')).toBe(
       'A different approver decides this.',

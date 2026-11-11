@@ -1136,7 +1136,7 @@ describe('the manifest: a manifest that is not there', () => {
   it('tells a manifest of another hub as that, without drawing anything of it', async () => {
     open(() => refusal(403, 'HUB_SCOPE_VIOLATION'));
 
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     expect(screen.queryByRole('table')).toBeNull();
   });
 });

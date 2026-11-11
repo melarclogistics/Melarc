@@ -322,7 +322,7 @@ describe('the skip: doing it', () => {
     ['REASON_NOT_ACTIVE', 422, /can no longer be used to skip a stop/],
     ['REASON_REQUIRED', 422, /a reason, or the note the reason asks for/],
     ['PERMISSION_DENIED', 403, /can’t skip a stop/],
-    ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
+    ['HUB_SCOPE_VIOLATION', 403, /hub your account does not work in/],
   ])('tells %s in the officer’s words, and shows no diagnostic', async (code, status, words) => {
     const { user } = open({ [SKIP]: () => refusal(status, code) });
     const dialog = await review(user);
@@ -452,7 +452,7 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
   it('tells a stop of another hub as that', async () => {
     open({ [STOP]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
 
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
   });
 
   it('names the pickup by a read of its request when the stop carries no summary', async () => {

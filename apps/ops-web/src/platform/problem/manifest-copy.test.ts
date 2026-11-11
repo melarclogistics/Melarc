@@ -108,7 +108,7 @@ describe('the words of the refusals of authority', () => {
     ]) {
       const problem = problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation });
       expect(problem.forbidden, operation).toBe('outside-hubs');
-      expect(problem.message, operation).toMatch(/hub your session does not act in/);
+      expect(problem.message, operation).toMatch(/hub your account does not work in/);
     }
   });
 });

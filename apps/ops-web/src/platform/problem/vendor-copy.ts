@@ -7,7 +7,7 @@ import type { CopyRule } from './problem-copy';
  */
 const DELIVERY_FAILED =
   'Nothing was changed. This account has no channel a link can be sent to, or the message channel is not available yet. You can try again once it is.';
-const OTHER_HUB = 'This account belongs to a vendor of a hub your session does not act in.';
+const OTHER_HUB = 'This account belongs to a vendor of a hub your account does not work in.';
 
 export const VENDOR_COPY: readonly CopyRule[] = [
   // The reads.
