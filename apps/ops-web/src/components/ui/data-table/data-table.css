@@ -83,6 +83,22 @@
   white-space: normal;
 }
 
+/*
+ * A table with no row to show (loading, failed, or nothing there: `data-rows='none'`) has nothing for its header to head: the state is drawn across the table, and the header, which would ask for
+ * the width of every column at a phone's width, is kept for assistive technology and not drawn, so that the box of the table does not scroll sideways over a message (the Product Owner's check of
+ * 198e5be: every table's box, in every state, at 320px and at 768px).
+ */
+.ui-data-table__table[data-rows='none'] thead th {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* What the screen marks to keep to one line (`NoWrap`): a code, a date, a count. */
 .ui-data-table__nowrap {
   white-space: nowrap;

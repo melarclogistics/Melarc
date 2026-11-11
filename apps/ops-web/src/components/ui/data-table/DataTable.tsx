@@ -1048,6 +1048,7 @@ export function DataTable<Item>({
           <Table
             className="ui-data-table__table"
             data-fit={exhausted ? 'exhausted' : undefined}
+            data-rows={status !== 'ready' || tableRows.length === 0 ? 'none' : undefined}
             aria-describedby={hintId}
             aria-busy={status === 'loading' ? true : undefined}
           >
