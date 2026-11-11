@@ -1,3 +1,4 @@
+import { UNCLAIMED_FOCUS_SELECTOR } from '../../../components/ui/read-state/unclaimed-focus';
 import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
 
 /**
@@ -54,24 +55,20 @@ export function searchOf(filters: {
   return text === '' ? '' : `?${text}`;
 }
 
-/** What a person puts focus on: a control. A container that can only be given focus by a script or by a press inside it is not one. */
-const CONTROL =
-  'a[href], area[href], button, input, select, textarea, summary, iframe, [contenteditable]';
-
 /**
  * Whether focus is where nobody has put it: on nothing, on the document, on the page's main region or on its heading, which is where the frame
- * puts it when a page replaces another (`AppFrame`), or on a container that is only reached by a script (`tabindex="-1"` and not a control).
+ * puts it when a page replaces another (`AppFrame`), or on the region of a read state that the kit marks (`UNCLAIMED_FOCUS_SELECTOR`).
  * The last is what Safari's engine does when a button of the panel is pressed: it gives no focus to a button, and gives it to the nearest ancestor
  * that can have it (the region of the read state that draws the panel's content, `ReadState`), so that after an act made in the panel focus is on a wrapper that no officer chose, and the
- * row that changed would never be given it. Focus anywhere else, on a control, is the officer's.
+ * row that changed would never be given it. Only that region is named, by the mark the kit sets on it and never by `tabindex="-1"`: the panel's own heading is at `tabindex="-1"` too, and
+ * it is where an officer is after opening another request while the queue was read again (run 7, Stage 2.1). Focus anywhere else, on a control or on a heading, is the officer's.
  */
 export function isUnclaimed(active: Element | null): boolean {
   return (
     active === null ||
     active === document.body ||
     active === document.documentElement ||
-    active.matches('main, h1') ||
-    (active.getAttribute('tabindex') === '-1' && !active.matches(CONTROL))
+    active.matches(`main, h1, ${UNCLAIMED_FOCUS_SELECTOR}`)
   );
 }
 

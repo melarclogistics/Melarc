@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { UNCLAIMED_FOCUS_ATTRIBUTE } from '../../../components/ui/read-state/unclaimed-focus';
 import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
 import {
   isUnclaimed,
@@ -138,20 +139,37 @@ describe('isUnclaimed: focus nobody has taken', () => {
   });
 
   // Break caught (the engines run of 10 November 2026): after an act made in the panel, Safari's engine leaves focus on the panel's content region (it gives no focus to a pressed button and gives
-  // it to the nearest ancestor that can have it), which the page took for the officer's own and so never gave the row that changed its focus. A container reached only by a script is nobody's
-  // choice; a control with that tabindex still is.
-  it('is focus on a container that only a script or a press inside it gives focus to, and not on a control', () => {
+  // it to the nearest ancestor that can have it), which the page took for the officer's own and so never gave the row that changed its focus. The region is the read state's wrapper, and the kit marks
+  // it (`UNCLAIMED_FOCUS_ATTRIBUTE`).
+  it('is focus on the wrapper of a read state, which the kit marks, and on a control inside it', () => {
     const region = document.createElement('div');
     region.setAttribute('tabindex', '-1');
-    const parked = document.createElement('button');
-    parked.setAttribute('tabindex', '-1');
-    const reachable = document.createElement('div');
-    reachable.setAttribute('tabindex', '0');
-    document.body.append(region, parked, reachable);
+    region.setAttribute(UNCLAIMED_FOCUS_ATTRIBUTE, '');
+    const inside = document.createElement('button');
+    region.append(inside);
+    document.body.append(region);
 
     expect(isUnclaimed(region)).toBe(true);
-    expect(isUnclaimed(parked)).toBe(false);
+    expect(isUnclaimed(inside)).toBe(false);
+  });
+
+  // Break caught (run 7, Stage 2.1; a regression of 765e873, which read every container at tabindex -1 that is no control as nobody's): the panel's heading is at tabindex -1 too, and it is where the
+  // officer is after opening another request while the queue was read again. Focus on it is the officer's; only the mark says otherwise.
+  it('is not focus on a heading or any other container at tabindex -1 that the kit has not marked, a panel heading among them', () => {
+    const panelHeading = document.createElement('h2');
+    panelHeading.setAttribute('tabindex', '-1');
+    const container = document.createElement('div');
+    container.setAttribute('tabindex', '-1');
+    const reachable = document.createElement('div');
+    reachable.setAttribute('tabindex', '0');
+    const parked = document.createElement('button');
+    parked.setAttribute('tabindex', '-1');
+    document.body.append(panelHeading, container, reachable, parked);
+
+    expect(isUnclaimed(panelHeading)).toBe(false);
+    expect(isUnclaimed(container)).toBe(false);
     expect(isUnclaimed(reachable)).toBe(false);
+    expect(isUnclaimed(parked)).toBe(false);
   });
 });
 

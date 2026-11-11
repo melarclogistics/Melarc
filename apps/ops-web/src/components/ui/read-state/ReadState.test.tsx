@@ -18,6 +18,7 @@ import { wcagViolations } from '../../../test-support/wcag';
 import { EmptyState } from '../empty-state/EmptyState';
 import { Skeleton } from '../skeleton/Skeleton';
 import { ReadState, type ReadQuery } from './ReadState';
+import { UNCLAIMED_FOCUS_SELECTOR } from './unclaimed-focus';
 import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
@@ -296,6 +297,21 @@ describe('ReadState: the other refusals', () => {
 
     expect(document.activeElement).not.toBe(document.body);
     expect(container.contains(document.activeElement)).toBe(true);
+  });
+
+  // Break caught (run 7, Stage 2.1): a page that must tell focus nobody chose from focus an officer did choose reads this mark and nothing else, so a heading of the panel that is
+  // also tabindex -1 is no longer taken for nobody's. The mark is on the wrapper, in every state, and on nothing inside it.
+  it('marks its wrapper as a place focus lands on by a script or by a press inside it, and nothing it holds', async () => {
+    api.on(`GET ${LIST}`, () => json(200, reasons('Demo reason one')));
+    const { container } = renderWithProviders(<Reasons />);
+    const wrapper = container.querySelector('.ui-read-state');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(true);
+
+    const list = await screen.findByRole('list', { name: 'Reasons' });
+    expect(wrapper?.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(true);
+    expect(container.querySelectorAll(UNCLAIMED_FOCUS_SELECTOR)).toHaveLength(1);
+    expect(list.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(false);
   });
 
   it('shows the error and not the data of an earlier answer when a refresh fails', () => {

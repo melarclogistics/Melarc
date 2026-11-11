@@ -6,6 +6,7 @@ import { Alert } from '../alert/Alert';
 import { Button } from '../button/Button';
 import { ForbiddenState } from '../forbidden-state/ForbiddenState';
 import { LoadingIndicator } from '../loading/LoadingIndicator';
+import { UNCLAIMED_FOCUS_ATTRIBUTE } from './unclaimed-focus';
 import './read-state.css';
 
 /** What `ReadState` needs of a query: its result, and the way to ask again. A TanStack `useQuery` result is one. */
@@ -170,7 +171,12 @@ export function ReadState<Data>({
   }
 
   return (
-    <div className="ui-read-state" ref={region} tabIndex={-1}>
+    <div
+      className="ui-read-state"
+      ref={region}
+      tabIndex={-1}
+      {...{ [UNCLAIMED_FOCUS_ATTRIBUTE]: '' }}
+    >
       {content}
     </div>
   );

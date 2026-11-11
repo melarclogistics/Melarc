@@ -890,6 +890,63 @@ test.describe('the queue: confirming in the panel', () => {
     expect(posts(api)[1]?.ifMatch).toBe('"v2"');
   });
 
+  // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
+  // confirms one request and opens another while the queue is read again was taken from the second request's panel back to the first one's row. Run on WebKit too, where the panel's content region
+  // (also tabindex -1, and marked by the kit) is where focus lands after the press that confirmed, which the page must still read as nobody's.
+  test('leaves focus on the heading of the request opened while the queue is read again after an act', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const other = 'ACC-PR-9WXH4T';
+    const { api, watch } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+
+    // From here the queue's read is held: the read the act asks for is under way until the test lets it go.
+    const busy = page.locator('.ui-data-table__scroller[aria-busy="true"]');
+    const queueRead = /\/api\/v1\/pickup-requests(\?.*)?$/;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = 0;
+    await page.route(queueRead, async (route) => {
+      held += 1;
+      await gate;
+      await route.fallback();
+    });
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(1);
+    await expect.poll(() => held).toBe(1);
+    await expect(busy).toHaveCount(1);
+
+    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
+    await opener(page, other).click();
+    const next = page.getByRole('dialog', { name: other });
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+
+    release();
+    await expect(busy).toHaveCount(0);
+    // Two frames, so that the effect the end of the read runs is behind us.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              resolve();
+            });
+          });
+        }),
+    );
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
   // Break caught: the queue header's booking link taking the one primary of the view from the panel's act.
   test('has one primary act in view: the panel’s Confirm, and the booking link as a secondary', async ({
     page,
