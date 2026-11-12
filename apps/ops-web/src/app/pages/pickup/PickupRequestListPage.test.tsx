@@ -1306,6 +1306,32 @@ describe('the queue: the request beside it', () => {
       ).toBeVisible();
     });
 
+    // Break caught (the hosted WebKit runs of 12 November 2026: this was 22 failures in 60 of the first confirmation's test on `ba9a18c`, and 9 in 60 on the branch that mended the table): the
+    // focus was given to the row by an effect that ran when the read after the act ended, which the page inferred from `afterAct` going true and then false and from the read's
+    // timestamp. A read answered before React had drawn that it was reading makes the two one render with no change in either, and a clock that does not move (every browser test freezes it)
+    // never changes the timestamp: the effect did not run, the confirmed request's row was never given focus, and the officer was left on the document. The page now notes that the read has ended
+    // (a state of its own, set when the read answers, which always changes) and gives focus when the rows that read delivered are the rows drawn.
+    it('gives focus to the row that changed though the clock does not move and the read after the act is answered at once', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-03T08:00:00.000Z'));
+      try {
+        const view = openConfirmer();
+        await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+        const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+        await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+        const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+        await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+          ).toHaveFocus();
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     // Break caught (the review of 499399c): focus taken back to the row that changed from a person who has moved on while the queue was read again.
     it('does not take focus from a person who has moved it while the queue was read again after a confirmation', async () => {
       const reads = byHand();

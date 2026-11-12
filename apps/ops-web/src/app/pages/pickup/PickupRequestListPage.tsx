@@ -209,13 +209,20 @@ export function PickupRequestListPage() {
       document.removeEventListener('keydown', note, true);
     };
   }, [afterAct]);
+  // **When the rows are drawn is told by the read itself and not inferred from the page's state or the read's timestamp** (the hosted WebKit runs of 12 November 2026: 22 failures in 60 of the first
+  // confirmation's test on `ba9a18c`). The effect used to run when `afterAct` went from true to false or when `list.dataUpdatedAt` changed. A read answered before React had drawn that it was reading
+  // makes the two one render with no change in either, and a clock that does not move (every browser test freezes it) never changes the timestamp: the effect did not run, the row was never
+  // given focus, and the officer was left on the document. The read ends in a state of its own (`readAfterAct`, always a new object), and focus goes to the row when the rows that read delivered are
+  // the rows drawn (`list.data` is the read's data): the read answers a moment before the query hands its rows to this page, and a row that has left the list is not focused in its place.
+  const [readAfterAct, setReadAfterAct] = useState<{ readonly data: unknown } | undefined>();
   useEffect(() => {
-    if (afterAct || returnTo.current === undefined) return;
+    if (afterAct || readAfterAct === undefined || returnTo.current === undefined) return;
+    if (list.data !== readAfterAct.data) return;
     const id = returnTo.current;
     returnTo.current = undefined;
     if (!isUnclaimed(document.activeElement, { touchedSinceAct: touchedSinceAct.current })) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
-  }, [afterAct, list.dataUpdatedAt]);
+  }, [afterAct, readAfterAct, list.data]);
 
   /**
    * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that
@@ -223,11 +230,13 @@ export function PickupRequestListPage() {
    */
   function readAgainAfterAct(): void {
     setStaleAfterAct(undefined);
+    setReadAfterAct(undefined);
     setAfterAct(true);
     void list
       .refetch()
       .then((read) => {
         if (read.isError) setStaleAfterAct(pageKey);
+        setReadAfterAct({ data: read.data });
       })
       .finally(() => {
         setAfterAct(false);
