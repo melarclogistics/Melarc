@@ -54,6 +54,7 @@ import {
   type WorkerConfig,
 } from './platform/delivery/worker/worker-config.js';
 import { DISPOSAL_BOUND_MS } from './platform/execution/execution-parameters.js';
+import { EvidenceSweep, evidenceSweepTask } from './platform/evidence/evidence-sweep.js';
 import { ReadinessRegistry } from './platform/health/readiness.registry.js';
 import {
   createLanePolicy,
@@ -201,6 +202,8 @@ export interface RuntimeOptions {
   readonly notificationSettings?: NotificationSettings;
   /** How often the retention cleanup runs: `RETENTION_INTERVAL_MS` by default. A test gives a short one. */
   readonly retentionIntervalMs?: number;
+  /** How often the sweep of abandoned evidence captures runs (S1.11): `EVIDENCE_SWEEP_INTERVAL_MS` by default. A test gives a short one. */
+  readonly evidenceSweepIntervalMs?: number;
   /** Where to look for the checkout the sink must stay out of: the working directory and the application's own folder by default. */
   readonly startingPoints?: readonly string[];
   /** What the check that the sink's folder is private reads of the file system: the real one by default. A test gives its own. */
@@ -352,6 +355,14 @@ export function createDeliveryWorkerRuntime(
         logger,
         metrics,
         intervalMs: options.retentionIntervalMs ?? RETENTION_INTERVAL_MS,
+      }),
+      // An evidence capture nobody completed is marked expired once its upload window has passed, and kept (S1.11, the `evidence_validation` capability).
+      evidenceSweepTask({
+        sweep: new EvidenceSweep({ database, clock }),
+        logger,
+        ...(options.evidenceSweepIntervalMs === undefined
+          ? {}
+          : { intervalMs: options.evidenceSweepIntervalMs }),
       }),
       {
         name: 'notifications',

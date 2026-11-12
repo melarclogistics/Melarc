@@ -267,7 +267,7 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
       ...on(
         ['Evidence'],
         ['SELECT', 'UPDATE'],
-        'SELECT of the id, the state and the end of the upload window, of the records still PENDING_UPLOAD only; UPDATE of the state, to EXPIRED, once the window has passed (S1.11, migration 0080): an abandoned capture is marked and kept, never deleted, and nothing else of a record is written',
+        'SELECT of the id, the state and the end of the upload window, of the records still PENDING_UPLOAD or already EXPIRED only (an update is checked against the read policy for the row it makes); UPDATE of the state, to EXPIRED, once the window has passed (S1.11, migration 0080): an abandoned capture is marked and kept, never deleted, and nothing else of a record is written',
       ),
     ],
     lookups:

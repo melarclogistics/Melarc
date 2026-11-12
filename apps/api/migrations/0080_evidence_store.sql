@@ -55,7 +55,8 @@ CREATE INDEX "evidence_pending_expiry_idx" ON "evidence" USING btree ("upload_ex
 --     bytes arrived (UPDATE of the state); the evidence_validation lane of the delivery worker moves an abandoned capture to EXPIRED. Nothing deletes a row: the table has no
 --     DELETE privilege and the guard refuses one for every writer. A later owner type adds its own arm of these policies and its own derivation in its own migration.
 --   * Who reads. The rider that captured a record reads it (to complete it); the staff of the record's hub read the evidence about a pickup stop under pickup.read (the read of
---     the subject), within the hubs of the grant; a vendor reads none yet (no act of a vendor captures evidence in this slice); the lane reads the abandoned captures and nothing else.
+--     the subject), within the hubs of the grant; a vendor reads none yet (no act of a vendor captures evidence in this slice); the lane reads the pending and the expired records (three columns of each) and nothing else:
+--     a statement that updates a row it reads is also checked against the read policy for the row it makes, so the lane that expires a record must be able to read it as expired.
 --   * What the database holds for every writer (the guard below). A record is declared PENDING_UPLOAD at its first version; the moment of a capture is not in the future; the
 --     database takes the record's creation instant and the end of its upload window from its own clock; for a pickup stop under the rider's key the hub and the vendor organisation
 --     are DERIVED from the stop, never given (GBT-M9), and the stop must be one the rider has arrived at on a run in progress that is assigned to it; a record changes in one way
@@ -74,7 +75,7 @@ CREATE POLICY "evidence_read" ON "evidence" FOR SELECT USING (
     WHEN 'STAFF' THEN coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.read'
       AND "evidence"."owner_type" = 'PICKUP_STOP' AND "evidence"."responsible_hub_id" IS NOT NULL
       AND (melarc.hub_scope_mode() = 'ALL' OR "evidence"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
-    WHEN 'SYSTEM' THEN melarc.task_capability() = 'evidence_validation' AND "evidence"."state" = 'PENDING_UPLOAD'
+    WHEN 'SYSTEM' THEN melarc.task_capability() = 'evidence_validation' AND "evidence"."state" IN ('PENDING_UPLOAD', 'EXPIRED')
     ELSE false
   END
 );

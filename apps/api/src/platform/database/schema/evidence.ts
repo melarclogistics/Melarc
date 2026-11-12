@@ -81,7 +81,7 @@ export const evidence = pgTable(
     uniqueIndex('evidence_storage_ref_key').on(table.storageRef),
     index('evidence_owner_idx').on(table.ownerType, table.ownerId),
     index('evidence_hub_idx').on(table.responsibleHubId, table.createdAt),
-    // The sweep reads the abandoned captures and nothing else.
+    // The sweep reads the pending and the expired records (three columns of each) and nothing else.
     index('evidence_pending_expiry_idx')
       .on(table.uploadExpiresAt)
       .where(sql`${table.state} = 'PENDING_UPLOAD'`),
