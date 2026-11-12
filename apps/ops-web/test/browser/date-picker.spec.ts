@@ -18,6 +18,13 @@ const REQUIRED = 'Demo date (required)';
 /** Wednesday 28 October 2026 in Accra, so that a calendar with no date opens on a month the test knows. */
 const NOW = new Date('2026-10-28T10:00:00Z');
 
+/*
+ * The day buttons are found by their accessible name, which the browser's own date data writes: `Wednesday, 28 October 2026` in
+ * Chromium, Firefox and Node, `Wednesday 28 October 2026` in WebKit on Linux (the hosted run of 8 November 2026). The field asks for
+ * en-GB in every engine (DATE_LOCALE), so a comma after the weekday is the engine's, not the product's: each name below allows it,
+ * and still requires the weekday, the day, the month and the year.
+ */
+
 async function openShowcase(page: Page): Promise<void> {
   await page.clock.setFixedTime(NOW);
   await page.goto(SHOWCASE);
@@ -56,7 +63,7 @@ test.describe('the date field in a browser: keyboard and pointer', () => {
     await page.keyboard.press('Enter');
     await expect(dialog(page)).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Wednesday, 28 October 2026 selected/ }),
+      page.getByRole('button', { name: /Wednesday,? 28 October 2026 selected/ }),
     ).toBeFocused();
 
     await page.keyboard.press('ArrowRight');
@@ -79,10 +86,10 @@ test.describe('the date field in a browser: keyboard and pointer', () => {
     await openShowcase(page);
 
     await calendarButton(page).click();
-    await expect(page.getByRole('button', { name: /Wednesday, 28 October 2026/ })).toHaveClass(
+    await expect(page.getByRole('button', { name: /Wednesday,? 28 October 2026/ })).toHaveClass(
       /ui-date-picker__day--today/,
     );
-    await page.getByRole('button', { name: /Friday, 30 October 2026/ }).click();
+    await page.getByRole('button', { name: /Friday,? 30 October 2026/ }).click();
 
     await expect(dialog(page)).toBeHidden();
     await expect(page.getByText('The page holds: 2026-10-30')).toBeVisible();
@@ -111,7 +118,7 @@ test.describe('the date field in a browser: keyboard and pointer', () => {
     const range = 'Demo date in a range';
 
     await calendarButton(page, range).click();
-    const outside = page.getByRole('button', { name: /Wednesday, 21 October 2026/ });
+    const outside = page.getByRole('button', { name: /Wednesday,? 21 October 2026/ });
     await expect(outside).toHaveAttribute('aria-disabled', 'true');
     await outside.click({ force: true });
 
@@ -267,7 +274,7 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
     );
 
     await calendarButton(page).click();
-    const today = page.getByRole('button', { name: /Wednesday, 28 October 2026/ });
+    const today = page.getByRole('button', { name: /Wednesday,? 28 October 2026/ });
     const look = await today.evaluate((element) => {
       const own = getComputedStyle(element);
       const bar = getComputedStyle(element, '::after');
@@ -287,7 +294,7 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
       'hidden',
     );
 
-    const other = page.getByRole('button', { name: /Friday, 30 October 2026/ });
+    const other = page.getByRole('button', { name: /Friday,? 30 October 2026/ });
     const background = (): Promise<string> =>
       other.evaluate((element) => getComputedStyle(element).backgroundColor);
     await other.hover();
@@ -315,7 +322,7 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
     await group(page, 'Demo date in a dialog')
       .getByRole('button', { name: /^Calendar/ })
       .click();
-    const friday = page.getByRole('button', { name: /Friday, 30 October 2026/ });
+    const friday = page.getByRole('button', { name: /Friday,? 30 October 2026/ });
     await expect(friday).toBeVisible();
     // The day is what is at its own centre: not under the dialog's backdrop, not inert.
     expect(
@@ -333,7 +340,7 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
     await group(page, 'Demo date in a dialog')
       .getByRole('button', { name: /^Calendar/ })
       .click();
-    await page.getByRole('button', { name: /Friday, 30 October 2026/ }).click();
+    await page.getByRole('button', { name: /Friday,? 30 October 2026/ }).click();
     await expect(modal.getByText('The dialog holds: 2026-10-30')).toBeVisible();
     await expect(modal).toBeVisible();
   });

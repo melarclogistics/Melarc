@@ -191,8 +191,14 @@ describe('the scope probe as staff (SECURITY_DESIGN.md §14.4b)', () => {
       await admin.query('begin');
       await admin.query('lock table rls_fixture.hub_records in access exclusive mode');
 
+      // `admin` is inside a transaction (it holds the table lock in it), and PostgreSQL keeps what `pg_stat_activity` showed at the first read
+      // for the rest of a transaction. When this poll's first read came just before the probe began to wait (the two race at the start), every
+      // later read showed the same, the wait was never seen, and the test failed after 10 s although the probe had waited on the lock the whole
+      // time (hosted runs of 8 November 2026, on several branches; the server's log showed the wait, and a run of this same sequence on PostgreSQL
+      // 18.6 showed 0 waiting backends before and 1 after `pg_stat_clear_snapshot()`). So each read asks for a fresh snapshot.
       const waitUntilBlocked = async () => {
         for (let attempt = 0; attempt < 500; attempt += 1) {
+          await admin.query('select pg_stat_clear_snapshot()');
           const { rows } = await admin.query(
             `select 1 from pg_stat_activity
               where datname = $1 and usename = $2 and wait_event_type = 'Lock'

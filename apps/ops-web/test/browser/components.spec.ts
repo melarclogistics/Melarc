@@ -1038,19 +1038,28 @@ test.describe('the components in a browser: themes', () => {
   // Break caught: a duration that survives reduced motion, which a person who asked for none would still see move. The easings are not
   // durations and stay.
   test('every duration is zero under reduced motion and none is otherwise', async ({ page }) => {
-    const durations = (): Promise<string[]> =>
-      page.evaluate(() => {
-        const root = getComputedStyle(document.documentElement);
-        return ['--motion-fast', '--motion-normal', '--motion-slow', '--motion-highlight'].map(
-          (name) => root.getPropertyValue(name).trim(),
-        );
-      });
+    // A duration is read as a time, in milliseconds, and not as the text the stylesheet was written with: the production build's stylesheet is minified, which writes `120ms` as `.12s`,
+    // and Firefox and WebKit run the showcase against that build (Chromium, against the development server, sees `120ms`). Text that is not a time is NaN, which no check below accepts.
+    const milliseconds = (text: string): number => {
+      const match = /^(\d*\.?\d+)(ms|s)?$/.exec(text);
+      return match === null ? Number.NaN : Number(match[1]) * (match[2] === 's' ? 1000 : 1);
+    };
+    const durations = async (): Promise<number[]> =>
+      (
+        await page.evaluate(() => {
+          const root = getComputedStyle(document.documentElement);
+          return ['--motion-fast', '--motion-normal', '--motion-slow', '--motion-highlight'].map(
+            (name) => root.getPropertyValue(name).trim(),
+          );
+        })
+      ).map(milliseconds);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await openShowcase(page);
-    expect((await durations()).every((value) => /^[1-9]\d*ms$/.test(value))).toBe(true);
+    // The durations that are not a positive time, so that a failure names them.
+    expect((await durations()).filter((value) => !(value > 0))).toEqual([]);
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    expect(await durations()).toEqual(['0ms', '0ms', '0ms', '0ms']);
+    expect(await durations()).toEqual([0, 0, 0, 0]);
   });
 
   for (const { width, height } of [
@@ -1081,5 +1090,32 @@ test.describe('the components in a browser: themes', () => {
     expect((await computed(page)).scheme).toBe('dark');
 
     expect(await wcagViolations(page)).toEqual([]);
+  });
+});
+
+test.describe('the accessibility scan in a browser', () => {
+  // Break caught: the scan measuring a colour that is still fading. A button that has just become enabled goes from its disabled grey to
+  // its own colour over a moment, WCAG judges the colour it settles on, and the white label is under 4.5:1 for most of the fade, so a scan
+  // that does not wait reports a failure nobody sees, which comes and goes with timing (riders.spec.ts, the hosted run of 8 November 2026).
+  // The probe fades over 2 s, far longer than a scan takes, so that without the wait the scan always lands inside it.
+  test('waits for a colour that is still changing and judges the colour it settles on', async ({
+    page,
+  }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        button { padding: 8px 16px; border: 0; color: #ffffff; background: #eaecf0; transition: background-color 2s linear; }
+        button.enabled { background: #b4232e; }
+      </style></head><body><main><h1>Probe</h1><button type="button">Go</button></main></body></html>`);
+    const button = page.getByRole('button', { name: 'Go' });
+    const background = (): Promise<string> =>
+      button.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await button.evaluate((element) => {
+      element.classList.add('enabled');
+    });
+
+    // The probe is really mid-fade when the scan starts: its colour is not yet the one it settles on.
+    expect(await background()).not.toBe('rgb(180, 35, 46)');
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(await background()).toBe('rgb(180, 35, 46)');
   });
 });

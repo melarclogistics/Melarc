@@ -91,7 +91,7 @@ jobs:
 
       # The script has no dependencies, so this job needs Node.js and no install.
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -219,7 +219,7 @@ jobs:
     # compose.yaml, the local service (scripts/ci-workflow.test.ts holds the two together).
     services:
       postgres:
-        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        image: postgres:18.6-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
         env:
           POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
@@ -251,10 +251,24 @@ jobs:
       # The attested enrolment (S0.57) is tested against the real verifier service, which these tests build from source and start: the JDK comes
       # from .java-version (Temurin), as in the verifier job, and Gradle from the wrapper, whose distribution is held to a checksum.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
+
+      # JIT is off on this disposable server. The row-level-security policies of this line chain through many tables, which puts the planner's
+      # estimated cost of a rider-roster read near 6.5 million although the plan itself runs in microseconds on a handful of rows. That is above
+      # PostgreSQL's JIT thresholds, so the server compiled 444 functions for each such read: 3.99 s on this runner's four CPUs (auto_explain, hosted
+      # run of 8 November 2026), against the 5 s statement time-out. With three test files at a time the read failed in four runs of four; with
+      # JIT off and the same three it passed in two of two. This changes the CI server only: whether the production database should do the same, or
+      # the policies should cost less to plan, is the owner's decision (see the pull request that added this step).
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
 
       # The files whose assertions are wall-clock time are left out of a pull request and of a push to main, and run in the nightly run and in a manual run (the
       # variable is 1 on a pull request and on a push and empty otherwise: apps/api/test/timing-sensitive-tests.ts); the shard is this job's entry. The step's own limit is below the job's.
@@ -275,7 +289,7 @@ jobs:
     # Same disposable server as the database job; the browser journey creates a database of its own on it.
     services:
       postgres:
-        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        image: postgres:18.6-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
         env:
           POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
@@ -326,6 +340,17 @@ jobs:
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
 
+      # JIT is off on this disposable server too, as in the database job (the evidence is in the comment of the step there). In the first
+      # hosted run of this line the journeys' list reads (GET /api/v1/ops/riders and /ops/vendors) took 4.2 to 6.5 s with it on, and the
+      # journeys that read a roster failed on a 503 at the 5 s statement time-out (the API's own request log).
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
+
       - name: Browser, API and database journey
         timeout-minutes: 26
         run: pnpm run test:e2e
@@ -334,7 +359,7 @@ jobs:
       # cancelled. The harness hides the passwords it describes; the job's own credentials are throwaway.
       - name: Keep the journey diagnostics
         if: failure() || cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-journey-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
           path: |
@@ -357,7 +382,7 @@ jobs:
       # commit (every one of those jobs among them) and the manifest's source.ref is refs/heads/main. To check it,
       # unpack it at the root of a checkout of that commit and run "node scripts/ci-revision.ts verify build-manifest.json".
       - name: Keep the build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-build-${{ github.sha }}-${{ github.run_attempt }}
           path: |
@@ -402,7 +427,7 @@ jobs:
     # Same disposable server as the database job; the journeys create a database of their own on it.
     services:
       postgres:
-        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        image: postgres:18.6-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
         env:
           POSTGRES_PASSWORD: ci-admin-password-for-this-job-only
           POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
@@ -454,6 +479,16 @@ jobs:
       - name: Install the NSS tools
         run: sudo apt-get install --no-install-recommends --yes libnss3-tools
 
+      # JIT is off on this disposable server too, as in the database job (the evidence is in the comment of the step there): the rider
+      # and vendor list reads of these journeys took 4.2 to 6.5 s with it on, and three journeys failed on a 503 at the 5 s time-out.
+      - name: Turn off JIT in the disposable database server
+        env:
+          PGPASSWORD: ci-admin-password-for-this-job-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "alter system set jit = off" \
+            -c "select pg_reload_conf()"
+
       - name: Browser, API and database journey over the trusted HTTPS origin
         timeout-minutes: 26
         env:
@@ -466,7 +501,7 @@ jobs:
       # two shards that fail would otherwise upload under one name, and the second upload would be refused.
       - name: Keep the failure diagnostics
         if: failure() || cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-https-diagnostics-${{ github.sha }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
@@ -543,7 +578,7 @@ jobs:
       # under one name, and the second upload would be refused.
       - name: Keep the browser diagnostics
         if: failure() || cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
@@ -620,7 +655,7 @@ jobs:
       # engine and the shard.
       - name: Keep the browser diagnostics
         if: failure() || cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
@@ -647,7 +682,7 @@ jobs:
       # The JDK comes from .java-version (Temurin); do not pin a version here. Gradle comes from the wrapper, whose distribution is
       # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml.
       - name: Set up the JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
@@ -705,7 +740,7 @@ jobs:
 
       # The judging script has no dependencies, so this job needs Node.js and no install.
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 

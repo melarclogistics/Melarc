@@ -615,6 +615,12 @@ test.describe('the enrolment code in a real browser', () => {
       .getByRole('link', { name: 'Esi Owusu' })
       .click();
     await expect(page).toHaveURL(`/admin/riders/${IDS.esi}`);
+    // The address changes before the page does: the router commits the new page a moment later. Going back in between is going back to a page
+    // that never left, with its code still on it (a loaded runner did it, and the snapshot showed the register page and its code, with the link
+    // that had been clicked still focused). The page has gone when its heading has.
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Register a first device' }),
+    ).toHaveCount(0);
     expect(await whereIsTheCode(page)).toEqual([]);
     await page.goBack();
 
