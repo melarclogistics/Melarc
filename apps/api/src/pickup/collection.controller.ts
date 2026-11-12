@@ -74,6 +74,9 @@ export class CollectionController {
   @RequiresPermission('pickup.collection.confirm', {
     surfaces: ['RIDER_ANDROID'],
     activity: 'qualifying',
+    // A short count writes an envelope for the notification lane (OB-S1-51: an Ops feed entry, no text), and every operation that writes one carries the sub-ceiling
+    // (`provider-initiating-coverage.test.ts` holds the two sets to each other).
+    providerInitiating: true,
   })
   async record(
     @Authorized() authorized: AuthorizedRequest,

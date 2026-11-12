@@ -232,6 +232,68 @@ export const MESSAGES: readonly MessageDefinition[] = [
     carries: ['reason', 'action'],
     source: `${SPEC_31_2}: "Pickup stop skipped by Ops" (registered vendor: in-app); contracts/openapi.yaml skipPickupStop; MSC-DEC-412`,
   },
+  {
+    // S1.28: the three messages of `reportPickupFailure`, raised by the one envelope `pickup.failure.reported`, which the database writes in the transaction of the act from the
+    // stop the rider has just failed (`melarc.failure_envelope`). Each is a DRAFT (OQ-037; OB-S1-06): no real provider is asked to send the words before the Product Owner approves them.
+    // This one texts an individual sender, with no reason, no note and no address: the pickup that was planned could not be completed. A failure is a fact of the day whatever became
+    // of the request since (rescheduled, cancelled), so nothing overtakes it; it is worth sending for a day.
+    kind: 'PICKUP_FAILED_SENDER',
+    event: 'pickup.failure.reported',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'AD_HOC_SENDER',
+    channel: 'SMS',
+    templateVersion: 1,
+    timeToLiveMs: DAY_MS,
+    appliesTo: (facts) => facts.adHocSenderId !== null,
+    stillTrue: () => true,
+    source: `${SPEC_31_2}: "Pickup failure" (ad-hoc: PII-safe SMS); decided 29 October 2026 (D-11)`,
+  },
+  {
+    // S1.28: the registered vendor's feed entry for a failure: the category and the reason, as closed tokens that the Vendor's screens turn into words (SLICE-015), and none of the
+    // rider's note.
+    kind: 'PICKUP_FAILED_VENDOR_FEED',
+    event: 'pickup.failure.reported',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'VENDOR_FEED',
+    channel: 'FEED',
+    templateVersion: 1,
+    timeToLiveMs: 90 * DAY_MS,
+    appliesTo: (facts) => facts.vendorOrganizationId !== null,
+    stillTrue: () => true,
+    carries: ['category', 'reason'],
+    source: `${SPEC_31_2}: "Pickup failure" (registered vendor: in-app)`,
+  },
+  {
+    // S1.28: the "Ops event" of §31.2: every failure, whoever the sender is, is written to the Ops feed of the request's hub, where the staff of that hub read it under
+    // `notification.read`. The decision queue itself is the failure read (`listPickupFailures`); this is the entry that says a failure has come in.
+    kind: 'PICKUP_FAILED_OPS_FEED',
+    event: 'pickup.failure.reported',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'OPS_FEED',
+    channel: 'FEED',
+    templateVersion: 1,
+    timeToLiveMs: 90 * DAY_MS,
+    appliesTo: () => true,
+    stillTrue: () => true,
+    carries: ['category', 'reason'],
+    source: `${SPEC_31_2}: "Pickup failure" (Ops event)`,
+  },
+  {
+    // OB-S1-51: the office is told in the system of a short count, in the transaction of `recordCollection` (the envelope `pickup.collection.shortfall_flagged`, written by the
+    // database from the record the rider has just made), and not only by the timestamp `office_notified_at`. The entry names the request and the reason as a closed token; the
+    // counts are the record's, which the staff read in the shortfall list, and a feed entry holds no number. Whoever the sender is, the office is told.
+    kind: 'COLLECTION_SHORT_OPS_FEED',
+    event: 'pickup.collection.shortfall_flagged',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'OPS_FEED',
+    channel: 'FEED',
+    templateVersion: 1,
+    timeToLiveMs: 90 * DAY_MS,
+    appliesTo: () => true,
+    stillTrue: () => true,
+    carries: ['reason'],
+    source: `${SPEC_31_2}: "Pickup counted short (MSC-DEC-194)" (Ops feed); pickup-collection.md AC-SLICE-001-21; OB-S1-51`,
+  },
 ];
 
 /** A message the documents ask for whose event no operation raises yet: the task that builds the operation wires it. */
@@ -262,22 +324,6 @@ export const PLANNED_MESSAGES: readonly PlannedMessage[] = [
     channel: 'FEED',
     raisedBy: 'a decline of a pickup request, which no operation of the contract performs yet',
     source: `${SPEC_31_2}: "Pickup request confirmed/declined" (registered vendor: in-app)`,
-  },
-  {
-    kind: 'PICKUP_FAILED_SENDER',
-    event: 'pickup.failure.reported',
-    audience: 'AD_HOC_SENDER',
-    channel: 'SMS',
-    raisedBy: 'reportPickupFailure (Stage 4): a text without private details',
-    source: `${SPEC_31_2}: "Pickup failure" (ad-hoc PII-safe SMS)`,
-  },
-  {
-    kind: 'PICKUP_FAILED_VENDOR_FEED',
-    event: 'pickup.failure.reported',
-    audience: 'VENDOR_FEED',
-    channel: 'FEED',
-    raisedBy: 'reportPickupFailure (Stage 4)',
-    source: `${SPEC_31_2}: "Pickup failure" (registered vendor in-app/email)`,
   },
   {
     kind: 'PICKUP_FAILURE_ESCALATED_OPS_FEED',

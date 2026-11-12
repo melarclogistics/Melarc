@@ -575,6 +575,13 @@
       "when": 1794469792880,
       "tag": "0081_handshake_verify_owner_first",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794470123385,
+      "tag": "0082_rider_act_envelopes",
+      "breakpoints": true
     }
   ]
 }

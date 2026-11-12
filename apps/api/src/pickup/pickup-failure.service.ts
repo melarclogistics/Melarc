@@ -251,6 +251,11 @@ export async function failTheStop(
  *   completion of the run by the system (`completeIfSettled`, with the cause `LAST_STOP_FAILED`). **The request is not written**: it stays `CONFIRMED` with
  *   its claim held, and the office decides (reschedule, cancel or escalate); a refused collection can be rescheduled only after a force-extension
  *   (`attempt-ceiling.ts`).
+ * - **The messages of the failure** (drafts in wording, OQ-037): one outbox envelope, `pickup.failure.reported`, written by the database from the stop just failed
+ *   (`melarc.failure_envelope`: the act gives it the stop and nothing it says), in this transaction, so it is kept or undone with the failure. The notification lane makes
+ *   from it the text to an individual sender (`PICKUP_FAILED_SENDER`, no reason and no note), the registered vendor's feed entry (`PICKUP_FAILED_VENDOR_FEED`) and the
+ *   Ops feed entry (`PICKUP_FAILED_OPS_FEED`), the last two with the category and the reason as closed tokens and none of the rider's note. It is written before the
+ *   run is completed, and a text it causes is bounded by the provider-initiating ceiling the route declares.
  * - **A retry is not a second failure**: the `Idempotency-Key` replays the answer, the same key for another stop or body is `IDEMPOTENCY_KEY_CONFLICT`, and
  *   another key for a stop already failed is `STATE_CONFLICT`.
  * - **Locks**: the stop alone, and the manifest only when the run is settled by this act, after the stop (`pickup-run-completion.ts` gives the order and
@@ -439,6 +444,9 @@ export class PickupFailures {
           contact_attempts: kept.contact_attempts?.length ?? 0,
         },
       });
+      // The messages of the failure (S1.28): the envelope of the notification lane, written by the database from the stop just failed and in this transaction, so it is
+      // kept or undone with the failure. The act chooses nothing the envelope says. It comes before the completion of the run below.
+      await tx.execute(sql`select melarc.failure_envelope(${row.id}::uuid)`);
       // A stop turned terminal in a run in progress is the moment the system completes the run if this was its last stop and nothing was collected (S1.23).
       await runs.completeIfSettled(handle, row.pickup_manifest_id, 'LAST_STOP_FAILED');
 

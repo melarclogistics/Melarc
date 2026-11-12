@@ -113,6 +113,57 @@ export const TEMPLATES: readonly Template[] = [
     approvedOn: null,
     approvedDigest: null,
   },
+  {
+    // S1.28: the text to an individual sender whose pickup failed (PII-safe): the request and the day it was planned for, and nothing of why, no note, no address and no link. A
+    // DRAFT until the Product Owner approves the very words (OQ-037; OB-S1-06): a real provider holds it back (`WORDING_NOT_APPROVED`).
+    kind: 'PICKUP_FAILED_SENDER',
+    version: 1,
+    title: null,
+    wording:
+      'Melarc: we could not complete your pickup {code} planned for {date}. We will be in touch about the next step.',
+    placeholders: ['code', 'date'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
+  {
+    // S1.28: the registered vendor's feed entry for a failure. The category and the reason are closed tokens that the Vendor's screens turn into words (SLICE-015); the words here
+    // are what the entry says until they do. A DRAFT until the Product Owner approves the very words; it holds none of the rider's note.
+    kind: 'PICKUP_FAILED_VENDOR_FEED',
+    version: 1,
+    title: 'Pickup not completed',
+    wording:
+      'Your pickup request {code} for {date} could not be completed ({category}: {reason}). Melarc will be in touch about the next step.',
+    placeholders: ['code', 'date', 'category', 'reason'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
+  {
+    // S1.28: the Ops feed entry for a failure, the "Ops event" of §31.2. A DRAFT until the Product Owner approves the very words; it holds none of the rider's note.
+    kind: 'PICKUP_FAILED_OPS_FEED',
+    version: 1,
+    title: 'Pickup failed',
+    wording:
+      'Pickup request {code} for {date} failed ({category}: {reason}). It waits in the decision queue.',
+    placeholders: ['code', 'date', 'category', 'reason'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
+  {
+    // OB-S1-51: the Ops feed entry for a short count, so that the office is told in the system and not only by a timestamp. A DRAFT until the Product Owner approves the very words;
+    // it holds no count (a feed entry carries tokens, and the counts are on the record the shortfall list shows) and none of the rider's note.
+    kind: 'COLLECTION_SHORT_OPS_FEED',
+    version: 1,
+    title: 'Pickup counted short',
+    wording:
+      'Pickup request {code} for {date} was counted short at the door ({reason}). The office is asked to follow it up.',
+    placeholders: ['code', 'date', 'reason'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
 ];
 
 export class TemplateError extends Error {

@@ -83,8 +83,10 @@ const notTheRidersWork = (): ApiException =>
  * - **A shortfall raises the office flag in the same transaction**: `office_notified_at` is the database's own instant, taken with `recorded_at` once the
  *   stop's lock is held (the record's guard, migration 0069, OB-S1-60: this act gives the database neither), and the count's event says that it was
  *   raised (`office_notified`). The reason of the record is held to the catalogue by the same guard, at the insert: a catalogue that changed after this
- *   act read it is `REASON_NOT_ACTIVE` (or `REASON_REQUIRED`), the act is undone and the same key is a retry. No message is queued: no document defines
- *   the office message (OB-S1-51).
+ *   act read it is `REASON_NOT_ACTIVE` (or `REASON_REQUIRED`), the act is undone and the same key is a retry. **The office is told in the system as well**
+ *   (OB-S1-51): the database writes one outbox envelope, `pickup.collection.shortfall_flagged`, from the record just made (`melarc.shortfall_envelope`: the act
+ *   gives it the stop and nothing it says), in the same transaction, and the notification lane makes the Ops feed entry `COLLECTION_SHORT_OPS_FEED`, which the staff of
+ *   the hub read under `notification.read`. A count that matches queues nothing. The entry is a draft in wording and carries no count and no note.
  * - **One event, the count's own** (`pickup.collection.recorded`, OB-S1-54), the same for a clean count and a short one: its object is the record, it
  *   names the stop, its run and request, the rider and the hub, carries the counts, the variance, the flag and the direction, and says the stop is
  *   still `ARRIVED`. It carries no note. `pickup.stop.collected` and `pickup.stop.partially_collected` are the handshake's, written when it closes
@@ -340,6 +342,12 @@ export class Collections {
           handshake_type: row.handshake_type,
         },
       });
+
+      // A shortfall tells the office in the system (OB-S1-51), beside the flag: the envelope of the notification lane, written by the database from the record just made
+      // and in this transaction, so it is kept or undone with the count. The act chooses nothing the envelope says; a count that matches writes none.
+      if (row.variance === 'SHORT') {
+        await tx.execute(sql`select melarc.shortfall_envelope(${stop.id}::uuid)`);
+      }
 
       // An individual sender becomes reusable when a count is recorded for it, without waiting for the handshake. The database makes the one change
       // and writes its event in the same change (`pickup.sender.promoted`: this act has no right to update a sender and none to write that event); a

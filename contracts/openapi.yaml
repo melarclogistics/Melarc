@@ -1630,7 +1630,12 @@ paths:
         A count that matches has no reason: one sent with it is `VALIDATION_FAILED` (rule `not_short`).
         **A short count raises the office flag in the same transaction** (`office_notified_at` is the
         database's own instant, the moment of the recording, and the event says that it was raised): it
-        supplements the rider's phone call and does not replace it.
+        supplements the rider's phone call and does not replace it. **The office is told in the system
+        as well** (OB-S1-51): in the same transaction the database writes one outbox envelope from the
+        record just made (`pickup.collection.shortfall_flagged`; the act gives it the stop and nothing
+        it says), and the notification lane makes the Ops feed entry of the request's hub
+        (`COLLECTION_SHORT_OPS_FEED`: the reason as a closed token, no count and no note), which the
+        staff of that hub read under `notification.read`. A count that matches queues nothing.
 
         **Evidence**: `evidence_ids` names records that must be `STORED`; none can be yet, so any
         reference is `EVIDENCE_NOT_STORED`.
@@ -1660,6 +1665,11 @@ paths:
         handshake, and it records that the stop is still `ARRIVED`. It carries no note. The events that say
         a stop closed, `pickup.stop.collected` and `pickup.stop.partially_collected`, are written by the
         handshake that closes it, not by this operation.
+
+        **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the Ops feed entry of a short count (a feed entry, and no text), so its
+        request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+        `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+        `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -1758,6 +1768,18 @@ paths:
         escalation-only**: a reschedule of it (`cancelPickupRequest` with a replacement) is
         `PICKUP_ATTEMPT_LIMIT_REACHED`, whatever the cap, until hub Senior Ops force-extends it
         (`extendPickupAttempts`; the extension's reach is provisional).
+
+        **The messages of the failure (drafts: the wording is provisional and no real provider is asked to send it before the Product Owner approves it).** In the same transaction the
+        database writes one outbox envelope, `pickup.failure.reported`, from the stop the rider has just failed (the act gives it the stop and nothing it says), so it is kept or undone
+        with the failure. The notification lane then makes, for the request: a text to an individual (ad-hoc) sender (`PICKUP_FAILED_SENDER`: the request and the day it was planned for,
+        and nothing of why), the registered vendor's feed entry (`PICKUP_FAILED_VENDOR_FEED`: the category and the reason as closed tokens) and the Ops feed entry of the request's hub
+        (`PICKUP_FAILED_OPS_FEED`, read by staff under `notification.read`). None holds the rider's note, a number or an address, and each goes through the limits and the controlled
+        window of every other message.
+
+        **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the individual sender's text and the feed entries of the failure, so its
+        request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+        `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+        `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
 
         A retried report (the same `Idempotency-Key`) replays the original answer; the same key for
         another body is `IDEMPOTENCY_KEY_CONFLICT`.
@@ -12129,7 +12151,7 @@ components:
         which is every operation that needs a session (Product Owner, 7 November 2026, A2 of the audit;
         `AC-SLICE-000-131`). The request was counted in the session's one bucket of authenticated API
         requests (`rate_limit_authenticated_api`, settings.md 7.7: the limit is that setting's and is not
-        restated here) or, for the five operations that cause a text, in the tighter ceiling inside it
+        restated here) or, for the seven operations that write an envelope for the notification lane (a text or a feed entry), in the tighter ceiling inside it
         (`provider_initiating_operation_ceiling_per_minute`), and the operation did not run.
 
         **`Retry-After` says when to try again**: whole seconds, from 1 to 60, the time until the
