@@ -68,4 +68,9 @@ describe('workerEnvironment', () => {
     expect(Number(environment.DELIVERY_WORKER_POLL_INTERVAL_MS)).toBeLessThanOrEqual(500);
     expect(Number(environment.SHUTDOWN_TIMEOUT_MS)).toBeLessThanOrEqual(10_000);
   });
+
+  // Break caught: a worker started without the cadence of the failure backstop (it refuses to start), or with another one than the Product Owner's 15 minutes.
+  it('gives the failure backstop its cadence, the 15 minutes of every environment', () => {
+    expect(workerEnvironment(given()).PICKUP_BACKSTOP_INTERVAL_MINUTES).toBe('15');
+  });
 });

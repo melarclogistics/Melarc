@@ -84,6 +84,8 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   // The delivery worker's own settings (S0.18). Its other three are commented examples, which have no value to judge.
   DELIVERY_WORKER_CONCURRENCY: /^\d{1,2}$/,
   DELIVERY_WORKER_POLL_INTERVAL_MS: /^\d{1,5}$/,
+  // The failure backstop's cadence (S1.28, D-A1): required, 15 minutes in every environment.
+  PICKUP_BACKSTOP_INTERVAL_MINUTES: /^\d{1,4}$/,
   DELIVERY_WORKER_METRICS_HOST: LOOPBACK,
 };
 

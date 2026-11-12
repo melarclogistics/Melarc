@@ -58,6 +58,7 @@ function configFor(over: Record<string, string | undefined> = {}): WorkerConfig 
     KEY_CREDENTIAL_DELIVERY_MATERIAL: `1:${randomKey()}`,
     KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
     DELIVERY_CAPTURE_DIRECTORY: join(directory, 'sink'),
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
     ...over,
   };
   const loaded = loadWorkerConfig(env);
@@ -409,8 +410,8 @@ describe('the delivery worker’s runtime (S0.18)', () => {
       lines
         .map((line) => JSON.parse(line) as Record<string, unknown>)
         .filter((line) => line.msg === 'delivery periodic task failed');
-    // The worker runs other tasks beside the retention cleanup (the notification lane, the sweep of abandoned evidence captures), and each of them fails at once against this
-    // unreachable database: this test is about the retention task's schedule, so it counts that task's failures.
+    // The worker runs other tasks beside the retention cleanup (the notification lane, the sweep of abandoned evidence captures, the failure backstop of S1.28), and each of
+    // them fails at once against this unreachable database: this test is about the retention task's schedule, so it counts that task's failures.
     const retentionFailures = (): Record<string, unknown>[] =>
       periodicFailures().filter((line) => line.task === 'retention');
 

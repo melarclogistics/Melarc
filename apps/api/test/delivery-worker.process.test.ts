@@ -35,6 +35,7 @@ function env(over: Record<string, string> = {}): Record<string, string> {
     KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
     DELIVERY_CAPTURE_DIRECTORY: join(tmpdir(), 'melarc-worker-process-test-sink'),
     DELIVERY_WORKER_POLL_INTERVAL_MS: '100',
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
     SHUTDOWN_TIMEOUT_MS: '4000',
     ...over,
   };

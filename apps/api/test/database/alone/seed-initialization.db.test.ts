@@ -14,6 +14,7 @@ import {
 import {
   PROVISIONING_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../../src/platform/database/technical-roles.js';
 import { catalogViolations } from '../../../src/tools/database/catalog-invariants.js';
@@ -714,17 +715,27 @@ describe('the functions, as the catalogue and the posture check see them', () =>
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).
-    for (const role of [WORKER_NOTIFICATION_ROLE, WORKER_RUNTIME_ROLE]) {
-      expect(APPROVED_DEFINER_EXECUTE[role], role).toEqual([
-        'melarc.handshake_mark_delivered',
-        'melarc.notification_handshake_number',
-      ]);
-    }
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_NOTIFICATION_ROLE]).toEqual([
+      'melarc.handshake_mark_delivered',
+      'melarc.notification_handshake_number',
+    ]);
+    // And the failure backstop's (S1.28, migration 0084): the one operation that escalates the failures left undecided beyond their hub's threshold, executable by its
+    // capability role alone and, through it, by the worker login that inherits it.
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_PICKUP_BACKSTOP_ROLE]).toEqual([
+      'melarc.failure_backstop_escalate',
+    ]);
+    // The worker login holds both lanes' operations through the two roles it inherits.
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_RUNTIME_ROLE]).toEqual([
+      'melarc.handshake_mark_delivered',
+      'melarc.notification_handshake_number',
+      'melarc.failure_backstop_escalate',
+    ]);
     expect(Object.keys(APPROVED_DEFINER_EXECUTE).toSorted()).toEqual(
       [
         API_RUNTIME_ROLE,
         PROVISIONING_ROLE,
         WORKER_NOTIFICATION_ROLE,
+        WORKER_PICKUP_BACKSTOP_ROLE,
         WORKER_RUNTIME_ROLE,
       ].toSorted(),
     );

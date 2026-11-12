@@ -129,6 +129,29 @@ describe('the metric catalogue', () => {
     }
   });
 
+  // Break caught (S1.28, D-A1): the failure backstop's series missing, carrying a label that identifies a request or a hub, or not stated by the document its alerts come from.
+  it('holds the failure backstop’s checks, escalations and unusable hubs, with no identifier, and the document names them', () => {
+    expect(METRIC_DEFINITIONS.pickup_backstop_runs_total).toMatchObject({
+      kind: 'counter',
+      labels: { outcome: ['CHECKED', 'FAILED'] },
+    });
+    expect(METRIC_DEFINITIONS.pickup_backstop_escalations_total).toMatchObject({
+      kind: 'counter',
+      labels: {},
+    });
+    expect(METRIC_DEFINITIONS.pickup_backstop_unusable_hubs).toMatchObject({
+      kind: 'gauge',
+      labels: {},
+    });
+    for (const name of [
+      'pickup_backstop_runs_total{outcome}',
+      'pickup_backstop_escalations_total',
+      'pickup_backstop_unusable_hubs',
+    ]) {
+      expect(OBSERVABILITY, name).toContain(`\`${name}\``);
+    }
+  });
+
   // Break caught: a label whose values are not a fixed small set (an identifier, an address, a token) entering the catalogue.
   it('has only labels with a closed, small set of upper-case values, and no label named for an identifier', () => {
     for (const [name, definition] of Object.entries(METRIC_DEFINITIONS)) {

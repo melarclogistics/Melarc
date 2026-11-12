@@ -10,6 +10,7 @@ import {
   WORKER_CREDENTIAL_DELIVERY_ROLE,
   WORKER_EVIDENCE_VALIDATION_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../../src/platform/database/technical-roles.js';
 import { localLoginPassword } from '../../../src/tools/database/local-logins.js';
@@ -37,6 +38,7 @@ const ROLES = [
   WORKER_CREDENTIAL_DELIVERY_ROLE,
   WORKER_NOTIFICATION_ROLE,
   WORKER_EVIDENCE_VALIDATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   PROVISIONING_ROLE,
 ];
 const workerPassword = localLoginPassword(settings.adminPassword, WORKER_RUNTIME_ROLE);
@@ -129,6 +131,7 @@ describe('provisionRoles', () => {
       { rolname: WORKER_CREDENTIAL_DELIVERY_ROLE, rolcanlogin: false, ...none },
       { rolname: WORKER_EVIDENCE_VALIDATION_ROLE, rolcanlogin: false, ...none },
       { rolname: WORKER_NOTIFICATION_ROLE, rolcanlogin: false, ...none },
+      { rolname: WORKER_PICKUP_BACKSTOP_ROLE, rolcanlogin: false, ...none },
       { rolname: WORKER_RUNTIME_ROLE, rolcanlogin: true, ...none },
     ]);
   });
@@ -179,6 +182,13 @@ describe('provisionRoles', () => {
         set_option: false,
         admin_option: false,
       },
+      {
+        granted: WORKER_PICKUP_BACKSTOP_ROLE,
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
+        admin_option: false,
+      },
     ]);
   });
 
@@ -216,6 +226,9 @@ describe('provisionRoles', () => {
       expect(['28000', '28P01']).toContain(await loginOutcome(WORKER_NOTIFICATION_ROLE, password));
       expect(['28000', '28P01']).toContain(
         await loginOutcome(WORKER_EVIDENCE_VALIDATION_ROLE, password),
+      );
+      expect(['28000', '28P01']).toContain(
+        await loginOutcome(WORKER_PICKUP_BACKSTOP_ROLE, password),
       );
     }
   });
@@ -273,11 +286,13 @@ describe('provisionRoles', () => {
     await admin.client.query(`grant ${WORKER_CREDENTIAL_DELIVERY_ROLE} to ${PROVISIONING_ROLE}`);
     await admin.client.query(`grant ${WORKER_NOTIFICATION_ROLE} to ${PROVISIONING_ROLE}`);
     await admin.client.query(`grant ${WORKER_EVIDENCE_VALIDATION_ROLE} to ${PROVISIONING_ROLE}`);
+    await admin.client.query(`grant ${WORKER_PICKUP_BACKSTOP_ROLE} to ${PROVISIONING_ROLE}`);
     // The worker's capability memberships drifted to the wider form, which would let the login SET ROLE to them.
     for (const capability of [
       WORKER_CREDENTIAL_DELIVERY_ROLE,
       WORKER_NOTIFICATION_ROLE,
       WORKER_EVIDENCE_VALIDATION_ROLE,
+      WORKER_PICKUP_BACKSTOP_ROLE,
     ]) {
       await admin.client.query(
         `grant ${capability} to ${WORKER_RUNTIME_ROLE} with inherit false, set true`,
@@ -300,13 +315,14 @@ describe('provisionRoles', () => {
     };
     expect(rows).toEqual([
       { rolname: PROVISIONING_ROLE, ...none, memberships: 0 },
-      // The memberships the worker has are its three capabilities, and in the form that inherits and cannot SET ROLE.
-      { rolname: WORKER_RUNTIME_ROLE, ...none, memberships: 3 },
+      // The memberships the worker has are its four capabilities, and in the form that inherits and cannot SET ROLE.
+      { rolname: WORKER_RUNTIME_ROLE, ...none, memberships: 4 },
     ]);
     for (const role of [
       WORKER_CREDENTIAL_DELIVERY_ROLE,
       WORKER_NOTIFICATION_ROLE,
       WORKER_EVIDENCE_VALIDATION_ROLE,
+      WORKER_PICKUP_BACKSTOP_ROLE,
     ]) {
       const { rows: capability } = await admin.client.query(
         `select m.inherit_option, m.set_option, m.admin_option

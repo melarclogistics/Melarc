@@ -48,6 +48,7 @@ function configFor(over: Record<string, string | undefined> = {}, now?: Date): W
     KEY_CREDENTIAL_DELIVERY_MATERIAL: `1:${randomKey()}`,
     KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
     DELIVERY_CAPTURE_DIRECTORY: join(directory, 'sink'),
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
     ...over,
   };
   const loaded = loadWorkerConfig(env, now === undefined ? {} : { now });

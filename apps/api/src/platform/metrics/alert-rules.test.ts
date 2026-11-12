@@ -437,5 +437,54 @@ describe('the alert rules of the credential path and the trust data (S0.68)', ()
     expect(document).toContain('| **Text messages** *(30 October 2026)*|');
     expect(document).toContain('| **Provider percentage thresholds**| **20 provider attempts**|');
     expect(new Set(ALERT_RULES.map((rule) => rule.id)).size).toBe(ALERT_RULES.length);
+    // The failure backstop (S1.28, D-A1; a reading recorded for the Product Owner): the document states the two conditions the rules judge.
+    expect(row('Failure backstop')).toContain('missing or unusable');
+    expect(row('Failure backstop')).toContain(
+      '**no check has completed for 30 minutes** while some failed',
+    );
+    expect(document).toContain('| **Failure backstop** *(12 November 2026)*|');
+  });
+});
+
+describe('the alert rules of the failure backstop (S1.28, D-A1)', () => {
+  const UNUSABLE = 'pickup_backstop_unusable_hubs';
+  const runs = (outcome: string) => `pickup_backstop_runs_total{outcome="${outcome}"}`;
+
+  // Break caught: a lane that cannot judge a hub and says nothing, which is the one thing the Product Owner ruled out ("never silently").
+  it('fires when the latest check could not judge a hub, and stops when a later check judges them all', () => {
+    expect(firing([scrape(0, { [UNUSABLE]: 1 })])).toEqual(['failure_backstop_threshold_unusable']);
+    expect(firing([scrape(0, { [UNUSABLE]: 2 }), scrape(15, { [UNUSABLE]: 1 })])).toEqual([
+      'failure_backstop_threshold_unusable',
+    ]);
+    expect(firing([scrape(0, { [UNUSABLE]: 1 }), scrape(15, { [UNUSABLE]: 0 })])).toEqual([]);
+  });
+
+  // Break caught: a worker that does not serve the gauge yet (the lane has not completed a check), read as one with hubs it cannot judge, or as one with none.
+  it('does not fire for a worker that serves no such gauge', () => {
+    expect(firing([scrape(0, { [AGE]: 0 })])).toEqual([]);
+    expect(firing([scrape(0, {}), scrape(15, {})])).toEqual([]);
+  });
+
+  // Break caught: a lane that raises on every check and is never noticed, or one that raised once on a blip and pages.
+  it('fires when checks have failed for half an hour and none completed, and not for a blip a later check cured', () => {
+    const history = (checked: number, failed: number): Scrape[] => [
+      scrape(0, { [runs('CHECKED')]: 0, [runs('FAILED')]: 0 }),
+      scrape(15, { [runs('CHECKED')]: 0, [runs('FAILED')]: 1 }),
+      scrape(30, { [runs('CHECKED')]: checked, [runs('FAILED')]: failed }),
+    ];
+    expect(firing(history(0, 2))).toEqual(['failure_backstop_not_checking']);
+    expect(firing(history(1, 1))).toEqual([]);
+    expect(firing(history(2, 0))).toEqual([]);
+  });
+
+  // Break caught: a counter that only grows with successful checks read as a failure.
+  it('does not fire for a lane that checks as it should', () => {
+    expect(
+      firing([
+        scrape(0, { [runs('CHECKED')]: 0, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+        scrape(15, { [runs('CHECKED')]: 1, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+        scrape(30, { [runs('CHECKED')]: 2, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+      ]),
+    ).toEqual([]);
   });
 });

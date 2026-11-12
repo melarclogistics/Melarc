@@ -33,6 +33,7 @@ function workerEnv(
     KEY_CREDENTIAL_DELIVERY_MATERIAL: `1:${randomKey()}`,
     KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
     DELIVERY_CAPTURE_DIRECTORY: CAPTURE_DIRECTORY,
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
   };
   return Object.fromEntries(
     Object.entries({ ...base, ...overrides }).filter(
@@ -96,12 +97,43 @@ describe('the delivery worker’s configuration (S0.18)', () => {
     });
 
     // Break caught: a pool that is not sized for the lanes (a lane would wait for a connection another holds, or the pool would be
-    // far larger than the worker can use): one connection for each lane, one for the poll, one for the cleanup and one for the
-    // notification lane (S1.12).
-    it('sizes the database pool from the lanes: one connection for each, one to poll, one to clean up and one for the notification lane', () => {
-      expect(loaded(workerEnv()).database.poolMax).toBe(4 + 3);
-      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '1' })).database.poolMax).toBe(4);
-      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '32' })).database.poolMax).toBe(35);
+    // far larger than the worker can use): one connection for each lane, one for the poll, one for the cleanup, one for the
+    // notification lane (S1.12), one for the sweep of abandoned evidence captures (S1.11) and one for the failure backstop (S1.28).
+    it('sizes the database pool from the lanes: one connection for each, one to poll, one to clean up, one for the notification lane, one for the evidence sweep and one for the failure backstop', () => {
+      expect(loaded(workerEnv()).database.poolMax).toBe(4 + 5);
+      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '1' })).database.poolMax).toBe(6);
+      expect(loaded(workerEnv({ DELIVERY_WORKER_CONCURRENCY: '32' })).database.poolMax).toBe(37);
+    });
+
+    // Break caught (S1.28, D-A1): the cadence of the failure backstop a constant in code or a default of the loader, so that an environment that never set it runs a lane
+    // nobody chose; or a value outside the bounds accepted, or read as something else than whole minutes.
+    describe('the cadence of the failure backstop', () => {
+      it('is configuration and required: the worker does not start without it', () => {
+        expect(keysOf(workerEnv({ PICKUP_BACKSTOP_INTERVAL_MINUTES: undefined }))).toEqual([
+          'PICKUP_BACKSTOP_INTERVAL_MINUTES',
+        ]);
+        const [problem] = problemsOf(workerEnv({ PICKUP_BACKSTOP_INTERVAL_MINUTES: undefined }));
+        expect(problem).toMatchObject({
+          key: 'PICKUP_BACKSTOP_INTERVAL_MINUTES',
+          problem: 'missing',
+        });
+        expect(problem?.expected).toContain('an integer from 1 to 1440');
+      });
+
+      it('is read in whole minutes, from 1 to 1440, and nothing else', () => {
+        expect(loaded(workerEnv()).pickupBackstop).toEqual({ intervalMinutes: 15 });
+        expect(loaded(workerEnv({ PICKUP_BACKSTOP_INTERVAL_MINUTES: '1' })).pickupBackstop).toEqual(
+          { intervalMinutes: 1 },
+        );
+        expect(
+          loaded(workerEnv({ PICKUP_BACKSTOP_INTERVAL_MINUTES: '1440' })).pickupBackstop,
+        ).toEqual({ intervalMinutes: 1440 });
+        for (const value of ['0', '-15', '1441', '1.5', '15m', 'fifteen', '0x10', ' 15', '1e1']) {
+          expect(keysOf(workerEnv({ PICKUP_BACKSTOP_INTERVAL_MINUTES: value })), value).toEqual([
+            'PICKUP_BACKSTOP_INTERVAL_MINUTES',
+          ]);
+        }
+      });
     });
 
     // Break caught: the worker taking the keys of purposes it has no use for, because the file it shares with the API carries them.
@@ -509,6 +541,7 @@ describe('the delivery worker’s configuration (S0.18)', () => {
         'DELIVERY_WORKER_METRICS_HOST',
         'DELIVERY_WORKER_METRICS_PORT',
         'DELIVERY_WORKER_METRICS_SECRET',
+        'PICKUP_BACKSTOP_INTERVAL_MINUTES',
       ]);
     });
   });

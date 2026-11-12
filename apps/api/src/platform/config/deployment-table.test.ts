@@ -720,6 +720,7 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
         KEY_CREDENTIAL_DELIVERY_MATERIAL: `1:${randomKey()}`,
         KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
         DELIVERY_CAPTURE_DIRECTORY: join(tmpdir(), 'melarc-capture'),
+        PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
         ...over,
       });
       return result.ok ? [] : result.problems;
@@ -759,6 +760,11 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
     ]) {
       expect(workerRow(key)?.[2], key).toBe('with `provider`');
     }
+    // The failure backstop's cadence (S1.28, D-A1): configuration that is required and has no default in code, 15 minutes in the example every environment starts from.
+    expect(workerRow('PICKUP_BACKSTOP_INTERVAL_MINUTES')?.[2]).toBe('yes');
+    expect(workerRow('PICKUP_BACKSTOP_INTERVAL_MINUTES')?.[3]).toBe('none');
+    expect(refusedWithout('PICKUP_BACKSTOP_INTERVAL_MINUTES')).toBe(true);
+    expect(example.PICKUP_BACKSTOP_INTERVAL_MINUTES).toBe('15');
   });
 
   // Break caught: a constant changed in the code and not in the record of what was exercised.
