@@ -3,7 +3,7 @@ import { expect, test } from './support/guarded-test';
 
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
-import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
+import { disturbTheFit, expectCardsOfTheFit, frames, markNode, stillThere } from './support/fit';
 import { wordsOf } from './support/words';
 import { expectWholeInTheWindow } from './support/whole';
 import { expectNoTableScrollsSideways } from './support/tables';
@@ -593,25 +593,43 @@ test.describe('the queue: the parts that stay in view, long text and the room it
 
   // Break caught (the review of 5edada2, M5): a cell that never wraps, so that a long address or a long name runs out of its box, is cut with an ellipsis or makes the box scroll sideways
   // (the old table's guards, which run 3 removed): the text is on the page whole, in the box it has, at every width and with the panel open.
-  for (const size of [WIDE, { width: 1280, height: 800 }, { width: 768, height: 1024 }]) {
+  //
+  // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). The result is one, and named, at every
+  // width where it does not depend on how wide the platform sets its text: wider than 960px the table draws the address, and **at 832px the page reaches the table with its address column taken
+  // away and no address on the page**, on every engine and in both builds, whenever the face arrives (a decision to go to cards made while the face was on its way is measured again when it is in:
+  // `useColumnFit`, the Product Owner's answer of 12 November 2026; the test below holds that with the face held back). **768px is not such a width**: the box is 41rem there, and the table of five
+  // columns (the address gone) needs between 671 and 678px on the Product Owner's Windows, where it is cards in all three engines, and no more than 654px on the hosted Linux run of 12 November
+  // 2026, where it is the table. So there the layout and the address must agree (the table without it, or the cards with it, never both and never neither), and everything that is drawn is whole.
+  for (const size of [
+    WIDE,
+    { width: 1280, height: 800 },
+    { width: 832, height: 1024 },
+    { width: 768, height: 1024 },
+  ]) {
     test(`wraps a long address, name and note whole, and never cuts it off or scrolls the box sideways, at ${String(size.width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
       await open(page, '/pickup-requests', longWorld());
 
-      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). At 768px the table either fits
-      // without it, and then no address is on the page, or has nothing more to give, and then the requests are cards, which carry every fact of a request, the address among them. Which of the
-      // two the page reaches depends on the face the table was first measured in (that measure is made in the fallback face, and a list that went to cards stays cards: `useColumnFit`): the
-      // production build reached the table and the development server, which sends the face later, reached cards (the hosted run of 12 November 2026). Both keep the rule, so both are held here,
-      // and so is what matters in either: wherever the address is drawn, it is drawn whole. Wider than 768px it is drawn, in the table or in the cards of a table that ran out of room.
       await page.evaluate(async () => {
         await document.fonts.ready;
       });
+      // The faces are in, and the table has measured again for them (`nextFrame`): what is read now is the page's result.
+      await frames(page);
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
       const address = page.getByText(LONG_ADDRESS).locator('visible=true');
-      if (size.width > 768) await expect(address).toHaveCount(2);
-      else await expect.poll(async () => [0, 2].includes(await address.count())).toBe(true);
+      if (size.width === 768) {
+        const cards = await queueCards(page).count();
+        await expect(address).toHaveCount(cards === 1 ? 2 : 0);
+        await expect(queueTable(page)).toHaveCount(1 - cards);
+      } else if (size.width === 832) {
+        await expect(queueTable(page)).toBeVisible();
+        await expect(queueCards(page)).toHaveCount(0);
+        await expect(address).toHaveCount(0);
+      } else {
+        await expect(address).toHaveCount(2);
+      }
       const drawsAddress = (await address.count()) > 0;
       // No table scrolls sideways, at 768px either (restored: the narrowed check of 7aa6135 let the box scroll there and held only that no cell cut its words off), and the page never does.
       expect(await overflowingInQueue(page)).toEqual([]);
@@ -625,6 +643,49 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       }
     });
   }
+
+  // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards, made in the fallback face while the real one was on its way, and kept until the
+  // box grows, so that which of two results the queue reached depended on when the face arrived (the hosted run of that day: cards in the development server, which sends the face later, the table in
+  // the production build). The face is held back here and the fallback is a wider one (as `kit.spec.ts` does), so that the first measure is made in the wrong face on every machine: the queue is
+  // cards while the face is on its way, and, when it is in, the table with its address column taken away, as in the test above, where the face was in before the first measure. The width is 832px,
+  // where that result is the same on every platform (see above).
+  test('reaches the table at 832 px when the face arrives after the first measure', async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\.woff2(\?.*)?$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        // The property of the root's own style, set through the CSS object model: a <style> element would be refused by a strict policy.
+        document.documentElement.style.setProperty(
+          '--font-family-sans',
+          'Inter, "Courier New", monospace',
+        );
+      });
+    });
+    const watch = watchPage(page);
+    await stubPickupApi(page, world(longWorld()));
+    await page.setViewportSize({ width: 832, height: 1024 });
+    await page.goto('/pickup-requests', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
+    // The first measure was made in the wide fallback: the table had nothing more to give, and the list went to cards while the face was on its way.
+    await expectCardsOfTheFit(queueRegion(page));
+
+    release();
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueCards(page)).toHaveCount(0);
+    await expect(page.getByText(LONG_ADDRESS).locator('visible=true')).toHaveCount(0);
+    expect(watch.problems).toEqual([]);
+  });
 
   test('keeps a long name and address whole with a request open beside the queue', async ({
     page,

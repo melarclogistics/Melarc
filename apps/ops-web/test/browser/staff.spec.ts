@@ -3,7 +3,8 @@ import { expect, test } from './support/guarded-test';
 
 import { reachableNames, watchPage, wcagViolations } from './support/page';
 import { expectShellAround, openAccountMenu, primaryNav } from './support/shell';
-import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
+import { disturbTheFit, expectCardsOfTheFit, frames, markNode, stillThere } from './support/fit';
+import { withScrollbars } from './support/scrollbars';
 import { expectNoTableScrollsSideways } from './support/tables';
 import {
   ama,
@@ -724,6 +725,72 @@ test.describe('ending a session', () => {
     await expect(region.getByRole('listitem')).toHaveCount(1);
     expect(await focusPlace(page)).not.toBe('document');
     expect(acts(api)).toHaveLength(1);
+  });
+
+  // Break caught (the Product Owner's review of ba9a18c, on Windows, where the page's scrollbar takes 17px): the width remembered when a list went to cards was its box's, so that a session ended from
+  // a card, which leaves the page shorter, took the scrollbar away, the box grew by its width and was "wider than it was": the table was drawn again to be measured, found no room, and every card was
+  // drawn anew, the one that held focus among them. What is remembered is the width the table needed. Chromium is started with its scrollbars drawn (`withScrollbars`), and the re-read of the list is
+  // held while focus is put on the card that stays, so that the scrollbar goes after it, not before.
+  test('at 900 px with the page’s scrollbar drawn, ends a session from a card: the scrollbar goes with the card, and the card that stays is the same node, with its focus', async ({
+    page: provided,
+    baseURL,
+    browserName,
+  }) => {
+    await withScrollbars(provided, browserName, baseURL, async (page) => {
+      const scrollbar = () =>
+        page.evaluate(() => window.innerWidth - document.documentElement.clientWidth);
+      await page.setViewportSize({ width: 900, height: 400 });
+      await open(page, `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`);
+      // More to say than its box holds, as the test above: the table has no column to give up and is cards, in a box that is wide enough for a table.
+      await page.addStyleTag({
+        content: '.ui-data-table__table th, .ui-data-table__table td { min-width: 16rem; }',
+      });
+      const region = page.getByRole('region', { name: 'Open sessions' });
+      await expectCardsOfTheFit(region);
+      test.skip(
+        (await scrollbar()) === 0,
+        'this browser draws its scrollbar over the page, and takes no room for it',
+      );
+
+      // The list is asked for again after the session has ended: that answer is held until the test lets it go.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = false;
+      await page.route(/\/api\/v1\/auth\/sessions\?/, async (route) => {
+        if (holding && route.request().method() === 'GET') await held;
+        await route.fallback();
+      });
+
+      const staying = page.getByRole('button', { name: 'End session started 23 Oct, 08:00' });
+      await markNode(staying, 'data-test-staying');
+      holding = true;
+      await page.getByRole('button', { name: 'End session started 22 Oct, 07:05' }).click();
+      const dialog = page.getByRole('alertdialog', { name: 'End this session?' });
+      await dialog.getByRole('combobox', { name: 'Reason (required)' }).selectOption('DEVICE_LOST');
+      await dialog.getByRole('button', { name: 'End session' }).click();
+      await expect(page.getByText('The session has ended.')).toBeVisible();
+
+      // The window is a little shorter than the page as it is now (two cards and the notice): it needs its scrollbar, and one card fewer will not.
+      const height = await page.evaluate(() => document.documentElement.scrollHeight);
+      await page.setViewportSize({ width: 900, height: height - 30 });
+      expect(
+        await scrollbar(),
+        'the page has its scrollbar while both cards are in',
+      ).toBeGreaterThan(0);
+      await staying.focus();
+      await expect(staying).toBeFocused();
+
+      release();
+      await expect(region.getByRole('listitem')).toHaveCount(1);
+      await frames(page);
+
+      expect(await scrollbar(), 'the scrollbar went with the card').toBe(0);
+      expect(await stillThere(page, 'data-test-staying')).toBe(1);
+      await expect(page.locator('[data-test-staying]')).toBeFocused();
+      await expectCardsOfTheFit(region);
+    });
   });
 });
 

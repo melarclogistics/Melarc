@@ -1,7 +1,8 @@
-import { chromium, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
 import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
+import { withScrollbars } from './support/scrollbars';
 import { expectWholeInTheWindow } from './support/whole';
 import { wordsOf } from './support/words';
 
@@ -2548,15 +2549,8 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     baseURL,
     browserName,
   }) => {
-    // Playwright hides the scrollbars of a headless Chromium (`--hide-scrollbars`); the Product Owner's Windows draws them and gives them room, so Chromium is started here as that machine runs it. The
-    // other engines are run as they are, and the test is skipped where their scrollbar takes no room.
-    const own =
-      browserName === 'chromium'
-        ? await chromium.launch({ channel: 'chromium', ignoreDefaultArgs: ['--hide-scrollbars'] })
-        : undefined;
-    try {
-      const page =
-        own === undefined ? provided : await (await own.newContext({ baseURL })).newPage();
+    // Chromium is started as the Product Owner's Windows runs it, with the scrollbars drawn; the other engines are run as they are, and the test is skipped where their scrollbar takes no room.
+    await withScrollbars(provided, browserName, baseURL, async (page) => {
       const url = (ballast: number) => `${KIT}/data?ballast=${String(ballast)}`;
       const list = () => specimen(page, 'A list near the height of the window');
       // The page is taller than the window to begin with, so it has its scrollbar: its width, the box's room beside it, what the table needs and the height of the page (the ballast changes none of them).
@@ -2633,9 +2627,7 @@ test.describe('the fix round of task R5.2 in a browser', () => {
           .locator('.ui-data-table__scroller')
           .evaluate((box) => box.scrollWidth - box.clientWidth),
       ).toBeLessThanOrEqual(0);
-    } finally {
-      await own?.close();
-    }
+    });
   });
 
   // Break caught (the Product Owner, 10 November 2026): a status that breaks at its words ("Waiting for / confirmation") in a table cell or in a card, which makes the row taller and the badge harder

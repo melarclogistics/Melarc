@@ -412,8 +412,22 @@ interface ColumnFit {
   readonly dropped: ReadonlySet<string>;
   /** Every lesser column is gone (there may have been none) and the box still scrolls sideways. */
   readonly full: boolean;
-  /** The fit is full and the list has a card: it is cards, and **stays cards** (`useColumnFit`) until its box grows wider than it was when the list went to cards, or its columns change. */
+  /** The fit is full and the list has a card: it is cards, and **stays cards** (`useColumnFit`) until its box reaches the width the table needed, or its columns change. */
   readonly cards: boolean;
+}
+
+/** What is remembered of the moment a list went to cards (`useColumnFit`). */
+interface WentToCards {
+  /** The width the table needed then: the scroll width of its box with every lesser column gone, which is more than the box held. The table is drawn again when the box reaches it. */
+  readonly need: number;
+  /** The faces were in when it was decided. A decision made while they were loading was made in the fallback face and is measured again when they are in; only one made with them in is kept. */
+  readonly facesIn: boolean;
+}
+
+/** Whether the page's faces are in. A page environment without layout (a test's) has no set of faces to wait for. */
+function facesAreIn(): boolean {
+  const page: { readonly fonts?: FontFaceSet } = document;
+  return page.fonts?.status !== 'loading';
 }
 
 /** What the fit is told of the table: where its box and its probe are, whether there is anything to measure, the columns that may go in their order, and what the list is made of. */
@@ -441,8 +455,13 @@ interface ColumnFitInput {
  * the callback of an observer or the signal of the faces** (`nextFrame`): it is one flush there, measure included, so that the layout the observers are told of next is the final one.
  *
  * **The switch to cards is sticky** (the Product Owner's review of 67bc979): drawing the table again to measure it unmounts every card, so that focus on a card's control falls to the body and a dialog
- * opened from it loses its way back. The box's width at which the list went to cards is remembered (`cardsAt`); the table is drawn again only when the box grows wider than that, or when the columns
- * change. A change of rows, a font load and a narrower box keep the cards.
+ * opened from it loses its way back. What is remembered is **the width the table needed** when the list went to cards (its box's scroll width, with every lesser column gone), and not the box's
+ * width: a box that grew by a scrollbar that went (a revoke leaves the page shorter, and on Windows a scrollbar takes 17px) is no reason to draw the table, which still needs more, and every card,
+ * again (the review of ba9a18c). The table is drawn again only when the box reaches that width, or when the columns change. A change of rows, another face and a narrower box keep the cards.
+ *
+ * **The first decision waits for the faces** (the Product Owner's answer to the note of 7325628): the first measure is made in the fallback face (`font-display: swap`), and a decision to go to cards
+ * made then is provisional. While `document.fonts.status` is "loading" the fit may draw cards, but the decision is not kept: when the faces are in (`loadingdone`, or `ready`, which the fit waits for)
+ * it begins again from every column and measures once more in the real face, and only a decision made with them in is sticky. So the page reaches the same result whenever the face arrives.
  */
 function useColumnFit({
   scroller,
@@ -455,8 +474,8 @@ function useColumnFit({
 }: ColumnFitInput): ColumnFit {
   const [dropped, setDropped] = useState(0);
   const [full, setFull] = useState(false);
-  /** The width of the box (its probe) at which the list went to cards, or `null` while it is a table. */
-  const [cardsAt, setCardsAt] = useState<number | null>(null);
+  /** What the list needed when it went to cards, or `null` while it is a table. */
+  const [cardsFrom, setCardsFrom] = useState<WentToCards | null>(null);
   /** Counts the times the measure is to be made again: when the width of the box changed (even when every column was drawn already and nothing else changes), the faces loaded or the table grew. */
   const [epoch, setEpoch] = useState(0);
   const [seenColumns, setSeenColumns] = useState(columnsKey);
@@ -466,22 +485,22 @@ function useColumnFit({
     setSeenRows(rowsKey);
     setDropped(0);
     setFull(false);
-    setCardsAt(null);
+    setCardsFrom(null);
   } else if (seenRows !== rowsKey) {
     setSeenRows(rowsKey);
     // Cards stay as they are: another set of rows is no reason to unmount the card that has focus.
-    if (cardsAt === null) {
+    if (cardsFrom === null) {
       setDropped(0);
       setFull(false);
     }
   }
   /** What the observers of the box read, which is not state of theirs. */
-  const cardsAtNow = useRef(cardsAt);
+  const cardsFromNow = useRef(cardsFrom);
   useLayoutEffect(() => {
-    cardsAtNow.current = cardsAt;
-  }, [cardsAt]);
+    cardsFromNow.current = cardsFrom;
+  }, [cardsFrom]);
   /** Cards are drawn, so there is no table to measure. */
-  const active = measuring && cardsAt === null;
+  const active = measuring && cardsFrom === null;
   const count = Math.min(dropped, order.length);
   useLayoutEffect(() => {
     const measure = (): void => {
@@ -493,21 +512,29 @@ function useColumnFit({
         return;
       }
       if (!full) setFull(true);
-      if (cardable) setCardsAt(probe.current?.clientWidth ?? box.clientWidth);
+      // The layout is read before the faces are asked about: a face the layout asked for is loading by now.
+      if (cardable) setCardsFrom({ need: box.scrollWidth, facesIn: facesAreIn() });
     };
     measure();
   }, [scroller, probe, active, cardable, count, order.length, full, columnsKey, rowsKey, epoch]);
   useLayoutEffect(() => {
     const element = probe.current;
     // The start again from every column: the box changed its width, or the faces finished loading. It is made in the next animation frame, in one flush, and never inside the callback of the
-    // observer or the signal of the faces (`nextFrame`). A list that went to cards stays cards unless its box is wider than it was then, as the box is when the frame comes.
+    // observer or the signal of the faces (`nextFrame`). A list that went to cards, with the faces in, stays cards unless its box has reached the width the table needed (the fit takes a pixel of
+    // scroll for a fit), as the box is when the frame comes; one that went to cards while they were loading is measured again.
     const restart = nextFrame(() => {
-      const remembered = cardsAtNow.current;
-      if (remembered !== null && (element?.clientWidth ?? 0) <= remembered) return;
+      const remembered = cardsFromNow.current;
+      if (
+        remembered !== null &&
+        remembered.facesIn &&
+        (element?.clientWidth ?? 0) + 1 < remembered.need
+      ) {
+        return;
+      }
       flushSync(() => {
         setDropped(0);
         setFull(false);
-        setCardsAt(null);
+        setCardsFrom(null);
         setEpoch((value) => value + 1);
       });
     });
@@ -556,7 +583,7 @@ function useColumnFit({
     };
   }, [scroller, active, full]);
   const set = useMemo(() => new Set(order.slice(0, count)), [order, count]);
-  return { dropped: set, full, cards: cardsAt !== null };
+  return { dropped: set, full, cards: cardsFrom !== null };
 }
 
 /** The mistakes of a page that production has already told once, so that a table drawn again says nothing more. */

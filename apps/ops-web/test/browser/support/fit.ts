@@ -63,16 +63,21 @@ export async function disturbTheFit(
   await frames(page);
 }
 
-/** Two frames, so that what the observers were told and what React drew for it are behind us. */
-async function frames(page: Page): Promise<void> {
+/**
+ * Four frames, so that what the observers were told, the change the table makes for it in the frame after (`nextFrame` in `DataTable`: no layout is changed inside an observer's callback) and what
+ * the page drew for it are behind us. Fewer would let a table that is about to draw every card again pass a check that nothing was.
+ */
+export async function frames(page: Page): Promise<void> {
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            resolve();
-          });
-        });
+        let left = 4;
+        const next = (): void => {
+          left -= 1;
+          if (left === 0) resolve();
+          else requestAnimationFrame(next);
+        };
+        requestAnimationFrame(next);
       }),
   );
 }
