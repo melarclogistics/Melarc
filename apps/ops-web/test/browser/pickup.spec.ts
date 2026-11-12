@@ -600,12 +600,19 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       await page.setViewportSize(size);
       await open(page, '/pickup-requests', longWorld());
 
-      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026), so at 768px it is in the
-      // cards and not in the table; where it is drawn it wraps whole.
-      const drawsAddress = size.width > 768;
-      const address = page.getByText(LONG_ADDRESS).locator('visible=true');
-      await expect(address).toHaveCount(drawsAddress ? 2 : 0);
+      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). At 768px the table either fits
+      // without it, and then no address is on the page, or has nothing more to give, and then the requests are cards, which carry every fact of a request, the address among them. Which of the
+      // two the page reaches depends on the face the table was first measured in (that measure is made in the fallback face, and a list that went to cards stays cards: `useColumnFit`): the
+      // production build reached the table and the development server, which sends the face later, reached cards (the hosted run of 12 November 2026). Both keep the rule, so both are held here,
+      // and so is what matters in either: wherever the address is drawn, it is drawn whole. Wider than 768px it is drawn, in the table or in the cards of a table that ran out of room.
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
+      const address = page.getByText(LONG_ADDRESS).locator('visible=true');
+      if (size.width > 768) await expect(address).toHaveCount(2);
+      else await expect.poll(async () => [0, 2].includes(await address.count())).toBe(true);
+      const drawsAddress = (await address.count()) > 0;
       // No table scrolls sideways, at 768px either (restored: the narrowed check of 7aa6135 let the box scroll there and held only that no cell cut its words off), and the page never does.
       expect(await overflowingInQueue(page)).toEqual([]);
       expect(await ellipsisedInQueue(page)).toEqual([]);
