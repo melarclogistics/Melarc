@@ -3,6 +3,7 @@ import { expect, test } from './support/guarded-test';
 
 import { reachableNames, watchPage, wcagViolations } from './support/page';
 import { expectShellAround, openAccountMenu, primaryNav } from './support/shell';
+import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
 import { expectNoTableScrollsSideways } from './support/tables';
 import {
   ama,
@@ -682,6 +683,47 @@ test.describe('ending a session', () => {
     expect(call?.path).toBe(`/api/v1/auth/sessions/${IDS.other}/revoke`);
     expect(call?.ifMatch).toBeUndefined();
     expect(call?.body).toEqual({ reason_code: 'DEVICE_LOST' });
+  });
+
+  // Break caught (the Product Owner's review of 67bc979, finding 2): a list that is cards because its table ran out of room (the box is wide enough for a table, 40rem, and it has more to say than
+  // that) was drawn as a table again, to be measured, whenever its rows changed, a face finished loading or its box changed its width, which drew every card again: the card that held focus was gone, so
+  // that the question opened from its End session button gave focus back to the document. The cards stay; the End session button that opened the question is the same button when it is answered.
+  // The sessions fit a table at 768px on every engine (the test above), so the cards of the fit are made at 900px by giving the table more to say than its box holds; the window is narrowed and widened
+  // on that side of the shell's breakpoint (under 768px the sidebar is a sheet and the box is wider, which is a box that grew).
+  test('at 900 px, ends a session from a card that the table ran out of room for: the card is not drawn again while the question is open, and focus is never on the document', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 900, height: 1024 });
+    const { api } = await open(
+      page,
+      `/admin/sessions?principal_type=STAFF&principal_id=${IDS.kofi}`,
+    );
+    // More to say than its box holds (a longer date, a longer word): the table has no column to give up and is cards.
+    await page.addStyleTag({
+      content: '.ui-data-table__table th, .ui-data-table__table td { min-width: 16rem; }',
+    });
+    const region = page.getByRole('region', { name: 'Open sessions' });
+    await expectCardsOfTheFit(region);
+
+    const end = page.getByRole('button', { name: 'End session started 22 Oct, 07:05' });
+    await markNode(end, 'data-test-opener');
+    await end.click();
+    const dialog = page.getByRole('alertdialog', { name: 'End this session?' });
+    await expect(dialog).toBeVisible();
+    await disturbTheFit(page, { narrowBy: 24 });
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    expect(await stillThere(page, 'data-test-opener')).toBe(1);
+    await expect(page.locator('[data-test-opener]')).toBeFocused();
+
+    await page.locator('[data-test-opener]').click();
+    await dialog.getByRole('combobox', { name: 'Reason (required)' }).selectOption('DEVICE_LOST');
+    await dialog.getByRole('button', { name: 'End session' }).click();
+    await expect(page.getByText('The session has ended.')).toBeVisible();
+    await expect(region.getByRole('listitem')).toHaveCount(1);
+    expect(await focusPlace(page)).not.toBe('document');
+    expect(acts(api)).toHaveLength(1);
   });
 });
 

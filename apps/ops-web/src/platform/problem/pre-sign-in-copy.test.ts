@@ -85,10 +85,21 @@ describe('the words of the second step of sign-in: four refusals, four states, n
     ],
     [
       'MFA_ENROLMENT_REQUIRED',
-      'You cannot sign in until your authenticator is set up. Use the set-up link you were sent.',
+      'You cannot sign in until your authenticator is set up. If your set-up link has expired or was already used, ask someone who can reset authenticators to reset yours: a new link will be sent to your work email.',
     ],
   ])('words %s', (code, text) => {
     expect(wording(code)).toBe(text);
+  });
+
+  // Break caught (the Product Owner's review of 67bc979): a person sent to a set-up link that may be used or expired, with no way on. The specification (credential-recovery.md: resetStaffMfa reaches an
+  // identity with a password and a pending factor; the new link goes to the work email only) gives the way: ask someone who can reset authenticators. No role is named.
+  it('tells a person whose set-up link is gone who can send a new one, and names no role', () => {
+    const text = wording('MFA_ENROLMENT_REQUIRED');
+
+    expect(text).toMatch(/expired or was already used/);
+    expect(text).toMatch(/ask someone who can reset authenticators/);
+    expect(text).toMatch(/new link will be sent to your work email/);
+    expect(text).not.toMatch(/admin|administrator|platform|senior|role/i);
   });
 
   // Break caught: two of the refusals worded alike, which tells the person to retry something that is finished, or to start again when a

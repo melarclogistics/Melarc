@@ -153,6 +153,81 @@ describe('isUnclaimed: focus nobody has taken', () => {
     expect(isUnclaimed(inside)).toBe(false);
   });
 
+  /** A read state's marked region, as the kit draws it, with a line of plain text and a heading beside it, inside `surface`. */
+  const surfaceWith = (surface: HTMLElement) => {
+    const region = document.createElement('div');
+    region.setAttribute('tabindex', '-1');
+    region.setAttribute(UNCLAIMED_FOCUS_ATTRIBUTE, '');
+    const text = document.createElement('p');
+    region.append(text);
+    const heading = document.createElement('h2');
+    heading.setAttribute('tabindex', '-1');
+    surface.append(heading, region);
+    document.body.append(surface);
+    return { region, text, heading };
+  };
+  const withRole = (tag: string, role?: string, modal?: string): HTMLElement => {
+    const surface = document.createElement(tag);
+    if (role !== undefined) surface.setAttribute('role', role);
+    if (modal !== undefined) surface.setAttribute('aria-modal', modal);
+    return surface;
+  };
+
+  // Break caught (the Product Owner's review of 67bc979): the page behind a question or a sheet is inert, so that whatever has focus in them is the person's, the marked region of a read state included; the
+  // page took the region for nobody's and gave focus to a row nobody can reach.
+  it.each([
+    ['a native modal dialog', () => withRole('dialog')],
+    ['a question', () => withRole('div', 'alertdialog')],
+    [
+      'the sheet a panel becomes, a modal dialog that does not say it is not',
+      () => withRole('div', 'dialog'),
+    ],
+    ['a modal dialog that says so', () => withRole('div', 'dialog', 'true')],
+  ])(
+    'is not focus on the marked region of a read state, nor on anything else, inside %s',
+    (_name, make) => {
+      const { region, text, heading } = surfaceWith(make());
+
+      expect(isUnclaimed(region)).toBe(false);
+      expect(isUnclaimed(text)).toBe(false);
+      expect(isUnclaimed(heading)).toBe(false);
+      expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(false);
+    },
+  );
+
+  // Break caught (the Product Owner's review of 67bc979): a click on plain text in the panel of another request focuses that panel's read-state region (Chromium and Firefox focus the nearest element that can
+  // have focus), which carries the mark, so that the page read the officer's own click as nobody's and the read that landed moved focus from this panel back to the row of the request acted on earlier.
+  it('is not focus on the marked region of a read state inside the docked panel of another request than the one acted on', () => {
+    const { region, text, heading } = surfaceWith(withRole('aside', 'dialog', 'false'));
+
+    expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(false);
+    expect(isUnclaimed(text, { panelIsAnotherRequests: true })).toBe(false);
+    expect(isUnclaimed(heading, { panelIsAnotherRequests: true })).toBe(false);
+  });
+
+  // Break caught (the targeted run of 11 November 2026 on WebKit): the exemption written for every docked panel, so that in Safari's engine, which gives a pressed button no focus and gives it to the region of
+  // the panel of the request just confirmed, the row that changed was never given focus. In the panel of the request the act was made in, the mark is what the press left behind.
+  it('is focus on the marked region of the docked panel of the request the act was made in, and on nothing else in it', () => {
+    const { region, text, heading } = surfaceWith(withRole('aside', 'dialog', 'false'));
+
+    expect(isUnclaimed(region)).toBe(true);
+    expect(isUnclaimed(region, { panelIsAnotherRequests: false })).toBe(true);
+    expect(isUnclaimed(text)).toBe(false);
+    expect(isUnclaimed(heading)).toBe(false);
+  });
+
+  // Break caught: the exemption written as "anything with a panel open", which would make the whole page the person's once a panel is open.
+  it('still is focus on the marked region of a read state outside the panel, with the panel of another request open beside it', () => {
+    const panel = withRole('aside', 'dialog', 'false');
+    document.body.append(panel);
+    const region = document.createElement('div');
+    region.setAttribute('tabindex', '-1');
+    region.setAttribute(UNCLAIMED_FOCUS_ATTRIBUTE, '');
+    document.body.append(region);
+
+    expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(true);
+  });
+
   // Break caught (run 7, Stage 2.1; a regression of 765e873, which read every container at tabindex -1 that is no control as nobody's): the panel's heading is at tabindex -1 too, and it is where the
   // officer is after opening another request while the queue was read again. Focus on it is the officer's; only the mark says otherwise.
   it('is not focus on a heading or any other container at tabindex -1 that the kit has not marked, a panel heading among them', () => {

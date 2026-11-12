@@ -142,6 +142,42 @@ describe('PageHeader', () => {
       expect(onRefresh).not.toHaveBeenCalled();
     });
 
+    // Break caught (the Product Owner's review of 67bc979): "Checking…. Refresh waits…" and "Refresh failed.. Refresh waits…", a full stop put after words that end in one already. Each state's sentence is
+    // exact, with the reason after it and one full stop between.
+    it.each([
+      [
+        'idle',
+        { updatedAt: '09:42' },
+        'Updated 09:42. Refresh waits until the pickup run is made.',
+      ],
+      [
+        'refreshing',
+        { state: 'refreshing', updatedAt: '09:42' },
+        'Checking… Refresh waits until the pickup run is made.',
+      ],
+      [
+        'failed, with a last time',
+        { state: 'failed', updatedAt: '09:42' },
+        'Refresh failed. Last successful check: 09:42. Refresh waits until the pickup run is made.',
+      ],
+      [
+        'failed, never read',
+        { state: 'failed' },
+        'Refresh failed. Refresh waits until the pickup run is made.',
+      ],
+    ] as const)('words the %s state with the reason after one full stop', (_name, state, words) => {
+      renderHeader({
+        title: 'Pickup requests',
+        freshness: {
+          ...state,
+          unavailable: 'Refresh waits until the pickup run is made.',
+          onRefresh: vi.fn(),
+        },
+      });
+
+      expect(screen.getByRole('status').textContent).toBe(words);
+    });
+
     // Break caught: the disabled state kept after the reason has gone.
     it('is enabled again once nothing stops it', () => {
       renderHeader({

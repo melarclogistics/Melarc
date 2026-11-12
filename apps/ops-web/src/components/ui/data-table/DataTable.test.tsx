@@ -1571,6 +1571,233 @@ describe('DataTable: words wrap at their words, and a column keeps its room (run
   });
 });
 
+describe('DataTable: where a table runs out of room it is cards, and stays cards (the Product Owner, 11 November 2026)', () => {
+  const column = (id: string, extra: Partial<DataColumn<Request>> = {}): DataColumn<Request> => ({
+    id,
+    header: id,
+    cell: (item) => item.sender,
+    ...extra,
+  });
+  const LESSER: readonly DataColumn<Request>[] = [
+    REQUEST_COLUMN,
+    column('State'),
+    column('Service date', { priority: 2 }),
+    column('Packages', { priority: 3 }),
+  ];
+  /** A list whose rows open a record, with a card, and an act on each card. */
+  const opening = (extra: Partial<DataTableProps<Request>> = {}) => (
+    <Table
+      columns={LESSER}
+      card={cardOf}
+      cardTitle={(item) => item.code}
+      rowAction={{ label: 'Confirm', ariaLabel: (item) => `Confirm ${item.code}`, onRun: vi.fn() }}
+      {...extra}
+    />
+  );
+  const confirmOf = (item: Request) => screen.getByRole('button', { name: `Confirm ${item.code}` });
+
+  afterEach(() => {
+    restoreTableRoom();
+  });
+
+  // Break caught (the Product Owner, 11 November 2026: the pickup queue at 768px, "exceptio / n"): a list whose rows open a record left as a table of words broken anywhere, because only a list
+  // that opens nothing was ever cards. Every list that has a card is cards where its lesser columns are all gone and its box still scrolls.
+  it('is cards, with the button that opens each, where a list that opens a record has every lesser column gone and still scrolls', () => {
+    tableRoom(700, 250);
+    render(opening());
+
+    expect(screen.queryByRole('table')).toBeNull();
+    const cards = within(screen.getByRole('list', { name: 'Pickup requests' })).getAllByRole(
+      'listitem',
+    );
+    expect(cards).toHaveLength(3);
+    expect(
+      screen.getByRole('button', { name: `Open ${FIRST.code}, ${FIRST.sender}` }),
+    ).toBeVisible();
+    expect(document.querySelector('.ui-data-table')).toHaveAttribute('data-layout', 'cards');
+  });
+
+  // Break caught: a list given cards that is made cards where it only lost a lesser column, which a table can do without losing a fact.
+  it('is a table, without its lesser columns, where taking them away is enough', () => {
+    tableRoom(760, 250);
+    render(opening());
+
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Request / sender',
+      'State',
+      'Actions',
+    ]);
+    expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+  });
+
+  // Break caught: a list with no card made cards, which is nothing it can draw: it stays a table of words that break anywhere before the box scrolls.
+  it('stays a marked table where it has no card to be', () => {
+    tableRoom(700, 250);
+    render(opening({ card: undefined, cardTitle: undefined }));
+
+    expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+    expect(document.querySelector('.ui-data-table__table')).toHaveAttribute(
+      'data-fit',
+      'exhausted',
+    );
+  });
+
+  // Break caught (the review of 67bc979: a revoke, a Remove or a Confirm made from a card): every change of rows, any `loadingdone` and any change of the box's width drew the table again in place
+  // of the cards to measure it, which unmounted every card, so that focus on a card's control fell to the body and a dialog opened from it lost its way back.
+  describe('stays cards, and the card that has focus is the same node, when', () => {
+    it('its rows change', () => {
+      tableRoom(700, 250);
+      const view = render(opening());
+      const confirm = confirmOf(SECOND);
+      confirm.focus();
+
+      view.rerender(opening({ rows: [SECOND, THIRD] }));
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(confirmOf(SECOND)).toBe(confirm);
+      expect(confirm).toHaveFocus();
+    });
+
+    it('the faces finish loading, with either signal', async () => {
+      const room = tableRoom(700, 250);
+      render(opening());
+      const confirm = confirmOf(SECOND);
+      confirm.focus();
+
+      act(() => {
+        room.fontsLoaded();
+      });
+      await act(async () => {
+        await room.fontsReadyWithoutEvent();
+      });
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(confirmOf(SECOND)).toBe(confirm);
+      expect(confirm).toHaveFocus();
+    });
+
+    it('its box narrows, and widens again to no more than it was', () => {
+      const room = tableRoom(700, 250);
+      render(opening());
+      const confirm = confirmOf(SECOND);
+      confirm.focus();
+
+      act(() => {
+        room.resize(660);
+      });
+      act(() => {
+        room.resize(700);
+      });
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(confirmOf(SECOND)).toBe(confirm);
+      expect(confirm).toHaveFocus();
+    });
+  });
+
+  // Break caught: cards that never come back, so that a person who widens the window or closes the panel keeps cards where the table has room again.
+  it('draws the table again when its box grows wider than it was when the list went to cards', async () => {
+    const room = tableRoom(700, 250);
+    render(opening());
+    expect(screen.queryByRole('table')).toBeNull();
+
+    act(() => {
+      room.resize(1300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('columnheader')).toHaveLength(5);
+    });
+    expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+  });
+
+  // Break caught: a width remembered forever, so that a box that grew a little (a scrollbar gone) but not enough for the table is a table for a frame and cards again with every card new.
+  it('is cards again at its new width when it grew and the table still does not fit, and then stays cards at the widths under it', () => {
+    const room = tableRoom(700, 250);
+    render(opening());
+
+    act(() => {
+      room.resize(720);
+    });
+    expect(screen.queryByRole('table')).toBeNull();
+    const confirm = confirmOf(SECOND);
+    confirm.focus();
+
+    act(() => {
+      room.resize(710);
+    });
+
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(confirmOf(SECOND)).toBe(confirm);
+    expect(confirm).toHaveFocus();
+  });
+
+  // Break caught: columns that change under a list of cards and are never fitted, so that a list with room for its one column is cards for the visit.
+  it('draws the table again when its columns change', () => {
+    tableRoom(700, 250);
+    const view = render(opening());
+    expect(screen.queryByRole('table')).toBeNull();
+
+    view.rerender(opening({ columns: [REQUEST_COLUMN] }));
+
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Request / sender',
+      'Actions',
+    ]);
+  });
+});
+
+describe('DataTable: a mistake of the page that it can do without is a throw in development and tests, and a line in production', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const cardsWithoutTitle = (): ReactElement => (
+    <Table card={cardOf} cardTitle={undefined} onOpen={vi.fn()} />
+  );
+  const lesserWithoutOpening = (): ReactElement => (
+    <Table
+      onOpen={undefined}
+      openLabel={undefined}
+      columns={[
+        REQUEST_COLUMN,
+        { id: 'hub', header: 'Hub', priority: 3, cell: (item) => item.state },
+      ]}
+    />
+  );
+
+  // Break caught: the checks that throw in a production build too, so that a page whose props vary at run time (a card given later, a column that is lesser for some data) goes blank for it.
+  it.each([
+    ['a card whose rows open and that has no title', cardsWithoutTitle, /needs a cardTitle/],
+    ['a lesser column in a list that opens nothing', lesserWithoutOpening, /rows open nothing/],
+  ])('%s: thrown here, where it is found', (_name, element, message) => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(() => render(element())).toThrow(message);
+    quiet.mockRestore();
+  });
+
+  it.each([
+    ['a card whose rows open and that has no title', cardsWithoutTitle, /needs a cardTitle/],
+    ['a lesser column in a list that opens nothing', lesserWithoutOpening, /rows open nothing/],
+  ])(
+    '%s: told in the console and drawn in production, and told once',
+    (_name, element, message) => {
+      vi.stubEnv('PROD', true);
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const view = render(element());
+      view.rerender(element());
+
+      expect(screen.getByRole('region', { name: 'Pickup requests' })).toBeVisible();
+      const lines = logged.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => message.test(line));
+      expect(lines).toHaveLength(1);
+      logged.mockRestore();
+    },
+  );
+});
+
 describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4)', () => {
   const columns: readonly DataColumn<Request>[] = [
     { ...REQUEST_COLUMN },

@@ -209,13 +209,13 @@ describe('the second step of sign-in', () => {
     });
 
     // Break caught (AC-SLICE-000-123): a privileged employee with no authenticator told they typed a wrong code.
-    it('MFA_ENROLMENT_REQUIRED: says the authenticator is not set up and where to find the link', async () => {
+    it('MFA_ENROLMENT_REQUIRED: says the authenticator is not set up, and what to do when the set-up link is gone', async () => {
       const view = await atTheSecondStep(() => errorResponse(403, 'MFA_ENROLMENT_REQUIRED'));
 
       await enter(view);
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'You cannot sign in until your authenticator is set up. Use the set-up link you were sent.',
+        'You cannot sign in until your authenticator is set up. If your set-up link has expired or was already used, ask someone who can reset authenticators to reset yours: a new link will be sent to your work email.',
       );
       expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
       expect(document.body.textContent).not.toMatch(/not accepted/i);

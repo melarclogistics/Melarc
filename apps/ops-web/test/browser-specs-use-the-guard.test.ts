@@ -44,6 +44,19 @@ describe('every browser spec runs under the guard against a permission key on a 
     expect(missing).toEqual([]);
   });
 
+  // Break caught (the Product Owner's review of 67bc979): `permissionKeysOnPurpose` set by a spec of a screen, which allows that screen to draw a permission key and so turns the guard off for it. The
+  // allowance is the proof that the watch hears a key, and only the guard's own tests (the page watcher's, in the shell spec) may draw one.
+  it('lets only the guard’s own tests set the allowance to draw a key on purpose', () => {
+    const GUARD_OWN_SPECS = ['shell.spec.ts'];
+    const setting = specs.filter((name) =>
+      readFileSync(join(BROWSER, name), 'utf8').includes('permissionKeysOnPurpose'),
+    );
+
+    expect(setting.filter((name) => !GUARD_OWN_SPECS.includes(name))).toEqual([]);
+    // The guard's own tests do set it: were they to stop, this would hold nothing.
+    expect(setting).toEqual(GUARD_OWN_SPECS);
+  });
+
   // Break caught: the fixture made one a test has to ask for.
   it('has a guard that is an automatic fixture', () => {
     const text = readFileSync(join(BROWSER, 'support', 'guarded-test.ts'), 'utf8');

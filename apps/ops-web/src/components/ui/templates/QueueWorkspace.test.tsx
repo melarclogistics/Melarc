@@ -363,6 +363,110 @@ describe('QueueWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Open ACC-PR-4HT9WD' })).toHaveFocus();
   });
 
+  // Break caught (the Product Owner's review of 67bc979, finding 2: "the queue's Confirm" at 768px, where the panel is a sheet): a row's own act that opens the panel (the queue's Confirm) did not tell the
+  // template which row the panel was opened from, so that the way back was the act's own button, which the confirmation had taken away (the request is no longer one to confirm), and focus fell to the
+  // document when the panel was closed. The way back is the row's control, whichever of the row's controls opened the panel.
+  it('gives focus back to the row whose own act opened the panel when it closes, though the act has gone from the row', async () => {
+    const user = userEvent.setup();
+    function Page() {
+      const [rows, setRows] = useState<readonly Row[]>(ROWS);
+      const [opened, setOpened] = useState<Row | undefined>();
+      return (
+        <QueueWorkspace<Row>
+          {...props({
+            result: { status: 'ready', rows },
+            table: {
+              ...props().table,
+              rowAction: {
+                label: 'Confirm',
+                ariaLabel: (row: Row) => `Confirm ${row.code}`,
+                isAvailable: (row: Row) => row.state === 'Waiting',
+                onRun: setOpened,
+              },
+            },
+            panel: {
+              open: opened !== undefined,
+              onClose: () => {
+                setOpened(undefined);
+              },
+              code: opened?.code ?? '',
+              children: (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRows(
+                      rows.map((row) =>
+                        row.id === opened?.id ? { ...row, state: 'Confirmed' } : row,
+                      ),
+                    );
+                  }}
+                >
+                  Confirm in the panel
+                </button>
+              ),
+            },
+          })}
+        />
+      );
+    }
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+    expect(await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirm in the panel' }));
+    expect(screen.queryByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' })).toBeNull();
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ' })).toHaveFocus();
+  });
+
+  // Break caught (the same review): the way back written as "the row's button that opens it" for an act of the row that opened the panel too, so that the officer who pressed Confirm, looked, and
+  // closed the panel without confirming was not returned to the Confirm they pressed (the control that opened it, as every dialog gives focus back) but to the row's other button.
+  it('gives focus back to the row’s own act when that is what opened the panel and it is still there', async () => {
+    const user = userEvent.setup();
+    function Page() {
+      const [opened, setOpened] = useState<Row | undefined>();
+      return (
+        <QueueWorkspace<Row>
+          {...props({
+            table: {
+              ...props().table,
+              rowAction: {
+                label: 'Confirm',
+                ariaLabel: (row: Row) => `Confirm ${row.code}`,
+                isAvailable: (row: Row) => row.state === 'Waiting',
+                onRun: setOpened,
+              },
+            },
+            panel: {
+              open: opened !== undefined,
+              onClose: () => {
+                setOpened(undefined);
+              },
+              code: opened?.code ?? '',
+              children: <p>The record.</p>,
+            },
+          })}
+        />
+      );
+    }
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+    expect(await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' })).toHaveFocus();
+  });
+
   // Break caught (the review of 5edada2, M3): rows that go to loading rows while they are read again after an act, so that the officer loses their place, their focus and the row
   // that changed. The rows stay, the queue says it is busy, and the row that changed is marked.
   it('keeps its rows, with the one that changed marked, while they are read again after an act', () => {

@@ -3,6 +3,7 @@ import { expect, test } from './support/guarded-test';
 
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
+import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
 import { wordsOf } from './support/words';
 import { expectWholeInTheWindow } from './support/whole';
 import { expectNoTableScrollsSideways } from './support/tables';
@@ -143,6 +144,8 @@ const CODE = 'ACC-PR-7KQ2MZ';
 
 const queueTable = (page: Page) => page.getByRole('table', { name: 'Pickup requests' });
 const queueCards = (page: Page) => page.getByRole('list', { name: 'Pickup requests' });
+/** The box of the queue's rows: it holds the table or the cards, whichever is drawn. */
+const queueRegion = (page: Page) => page.getByRole('region', { name: 'Pickup requests' });
 
 /** The columns of the queue's table, in order, for a session that may confirm (the last is the row's own act). */
 const QUEUE_COLUMNS = [
@@ -177,6 +180,17 @@ async function chooseAct(page: Page, name: string): Promise<void> {
 const LONG_ADDRESS =
   'Plot 14, Block C, off the Independence Avenue service road beside the old demo bakery, Ridge, Accra, Greater Accra Region';
 const LONG_SENDER = 'Demo Fabrics and Household Linen Wholesale Trading Company Limited';
+
+/**
+ * The queue as it is: its two requests and the one that waits for an approval of its one-package exception, whose note ("One-package exception waiting for approval") is the longest words the queue says.
+ * Without that request a test of the words has nothing long to break.
+ */
+const asItIs = (): Partial<World> => ({
+  requests: [
+    ...world().requests,
+    { ...waiting(IDS.colleague), id: IDS.single, code: 'ACC-PR-2SY7Z5' },
+  ],
+});
 
 /** Two requests with long words where they are likely to be: an address, a sender, and the two notes a queue says in words. */
 const longWorld = (): Partial<World> => ({
@@ -637,30 +651,33 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     expect(hidden.every((height) => height <= 1)).toBe(true);
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways; the review of f6cf02b: the queue at 768px kept every column in a box of 41rem, which scrolled sideways with the
-  // act and what a request needs out of view): a queue that keeps a column it has no room for. At 768px (a box of 41rem) the table takes its lesser columns away, the packages and then the
-  // address, and keeps the request with its sender, the state, the service date, what it needs and the act, all in view; every fact of a request is in a card under 40rem.
-  test('keeps the table at 768px with no request open without its lesser columns, and never scrolls it sideways', async ({
+  // Break caught (the Product Owner, 10 and 11 November 2026: no table scrolls sideways, and a table never breaks a word; the review of f6cf02b: the queue at 768px kept every column in a box of 41rem, which
+  // scrolled sideways with the act and what a request needs out of view): a queue that keeps a column it has no room for, or one that keeps its table when every lesser column is gone and the box still
+  // overflows, so that "exception" breaks as "exceptio / n". At 768px (a box of 41rem) the table has nothing more to give, and the requests are cards: every fact of a request in them, the button that
+  // opens each, the act of each in view, and no table beside them.
+  test('draws cards at 768px with no request open, where the table has nothing more to give, with every fact of a request and no sideways scroll', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await open(page, '/pickup-requests');
 
-    await expect(queueTable(page)).toBeVisible();
-    await expect(queueCards(page)).toHaveCount(0);
-    await expect(queueTable(page).getByRole('columnheader')).toHaveText([
-      'Request / sender',
-      'State',
-      'Service date',
-      'Needs',
-      'Actions',
-    ]);
-    const row = queueTable(page).getByRole('row').filter({ hasText: CODE });
-    for (const fact of [CODE, 'Demo Fabrics Ltd', 'Tue 3 Nov 2026']) {
-      await expect(row).toContainText(fact);
+    await expectCardsOfTheFit(queueRegion(page));
+    await expect(queueCards(page)).toBeVisible();
+    await expect(queueTable(page)).toHaveCount(0);
+    const first = queueCards(page).getByRole('listitem').first();
+    for (const fact of [
+      CODE,
+      'Waiting for confirmation',
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+      'Accra Central',
+    ]) {
+      await expect(first).toContainText(fact);
     }
-    // The act at the end of the row is in view: nothing is scrolled out of reach.
-    await expectWholeInTheWindow(page, row.getByRole('button', { name: `Confirm ${CODE}` }));
+    await expect(opener(page, CODE)).toHaveCount(1);
+    // The act of the request is in view: nothing is scrolled out of reach.
+    await expectWholeInTheWindow(page, first.getByRole('button', { name: `Confirm ${CODE}` }));
     expect(await overflowingInQueue(page)).toEqual([]);
     expect(await overflowOf(page)).toBeLessThanOrEqual(0);
   });
@@ -748,30 +765,30 @@ test.describe('the queue: the parts that stay in view, long text and the room it
 
   // Break caught (the Product Owner, 11 November 2026): text cells that shrink to a letter ("One-packag / e / excepti / on", a row eight lines tall), because `overflow-wrap: anywhere` lowers every
   // cell's least width to one character, so that the fit never dropped a lesser column for text. The words keep their room (8rem for prose) and break at their spaces only; the lesser columns go
-  // first; and no row is taller than its longest prose cell needs at 8rem.
+  // first; and where a table has no more to give it is cards (**a table never breaks a word**, the Product Owner's decision on run 7, finding 1): so at every width and on every engine, with no
+  // condition, no word is broken inside and no row or card is taller than its content needs. The queue "as it is" carries the request that waits for an approval of its one-package exception, whose
+  // note is the long one: a world without it could not fail (the default world's two rows carry no such note).
   for (const [size, world] of [
     [{ width: 1280, height: 800 }, 'the queue as it is'],
     [{ width: 1280, height: 800 }, 'long words'],
     [{ width: 768, height: 1024 }, 'the queue as it is'],
     [{ width: 768, height: 1024 }, 'long words'],
   ] as const) {
-    test(`breaks no word inside, unless the table has nothing more to give, and has no row taller than its prose needs at ${String(size.width)} px, with ${world}`, async ({
+    test(`breaks no word inside and has no row or card taller than its content needs at ${String(size.width)} px, with ${world}`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
-      await open(page, '/pickup-requests', world === 'long words' ? longWorld() : {});
-      await expect(queueTable(page)).toBeVisible();
+      await open(page, '/pickup-requests', world === 'long words' ? longWorld() : asItIs());
+      const region = queueRegion(page);
+      await expect(region).toBeVisible();
+      // The row that makes the test able to fail is on the screen, in a table or in a card.
+      await expect(
+        region.getByText('One-package exception waiting for approval').first(),
+      ).toBeVisible();
 
-      const words = await wordsOf(queueTable(page));
-      // A word is broken inside only by a table that has nothing more to give (`data-fit="exhausted"`: every lesser column is gone and the box still overflows), and then the box still does not scroll
-      // sideways. The queue as it is breaks no word on any engine, and Firefox and WebKit set it a little wider than Chromium does and do come to that at 768px. A sender of sixty-six characters at 768px does in WebKit (its box cannot hold the code, the state, the date, the act and the
-      // words that stay, as Chromium's can), and its words break; that is the rule, not a defect of it.
-      const exhausted = await queueTable(page).evaluate(
-        (table) => table.getAttribute('data-fit') === 'exhausted',
-      );
-      // The queue as it is breaks no word on any engine, exhausted or not (Firefox and WebKit set it a little wider than Chromium does and come to the end of what the table can give at 768px).
-      if (world === 'the queue as it is' || !exhausted) expect(words.broken).toEqual([]);
-      if (!exhausted) expect(words.tall).toEqual([]);
+      const words = await wordsOf(region);
+      expect(words.broken).toEqual([]);
+      expect(words.tall).toEqual([]);
       expect(await overflowingInQueue(page)).toEqual([]);
     });
   }
@@ -896,12 +913,11 @@ test.describe('the queue: confirming in the panel', () => {
     expect(posts(api)[1]?.ifMatch).toBe('"v2"');
   });
 
-  // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
-  // confirms one request and opens another while the queue is read again was taken from the second request's panel back to the first one's row. Run on WebKit too, where the panel's content region
-  // (also tabindex -1, and marked by the kit) is where focus lands after the press that confirmed, which the page must still read as nobody's.
-  test('leaves focus on the heading of the request opened while the queue is read again after an act', async ({
-    page,
-  }) => {
+  /**
+   * Confirms the request in its panel and, while the queue is read again for it (the read is held until `release`), opens another request in the panel: the officer is working in that one when the
+   * read lands. `settled` waits for the end of the read and for the effect it runs.
+   */
+  async function confirmThenOpenAnother(page: Page) {
     await page.setViewportSize(WIDE);
     const other = 'ACC-PR-9WXH4T';
     const { api, watch } = await open(page, '/pickup-requests');
@@ -935,22 +951,127 @@ test.describe('the queue: confirming in the panel', () => {
     const next = page.getByRole('dialog', { name: other });
     await expect(next.getByRole('heading', { name: other })).toBeFocused();
 
-    release();
-    await expect(busy).toHaveCount(0);
-    // Two frames, so that the effect the end of the read runs is behind us.
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              resolve();
-            });
-          });
-        }),
-    );
+    return {
+      watch,
+      other,
+      next,
+      settled: async () => {
+        release();
+        await expect(busy).toHaveCount(0);
+        // Two frames, so that the effect the end of the read runs is behind us.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  resolve();
+                });
+              });
+            }),
+        );
+      },
+    };
+  }
+
+  // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
+  // confirms one request and opens another while the queue is read again was taken from the second request's panel back to the first one's row. Run on WebKit too, where the panel's content region
+  // (also tabindex -1, and marked by the kit) is where focus lands after the press that confirmed, which the page must still read as nobody's.
+  test('leaves focus on the heading of the request opened while the queue is read again after an act', async ({
+    page,
+  }) => {
+    const { watch, other, next, settled } = await confirmThenOpenAnother(page);
+
+    await settled();
     await expect(next.getByRole('heading', { name: other })).toBeFocused();
     await expect(rowButton(page)).not.toBeFocused();
     expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of 67bc979, finding 4): a press on plain text in the panel of the request opened meanwhile focuses that panel's read-state region (the nearest element that
+  // can have focus: Chromium and Firefox; WebKit does the same for text), which carries the mark that says "nobody's", so that the read that landed took focus from the panel the officer is working in
+  // back to the row of the request they had confirmed a moment before. Focus anywhere inside a panel is the officer's, whatever holds it.
+  test('leaves focus in the panel of the request opened while the queue is read again, where the officer pressed on its text', async ({
+    page,
+  }) => {
+    const { watch, next, settled } = await confirmThenOpenAnother(page);
+    const inThePanel = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null &&
+          active !== document.body &&
+          active.closest('[role="dialog"]') !== null &&
+          active.tagName !== 'H2'
+        );
+      });
+
+    // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
+    await next.getByRole('definition').first().click();
+    expect(await inThePanel()).toBe(true);
+
+    await settled();
+    expect(await inThePanel()).toBe(true);
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of 67bc979, finding 2): the queue at 768 px is cards because its table ran out of room, and every change of rows, face loaded or width of the box drew
+  // the table again to measure it, which drew every card again: the card whose Confirm opened the panel was gone when the panel was dismissed, and focus went to the document.
+  test('at 768 px, gives focus back to the card whose Confirm opened the panel, though the table would have measured itself again meanwhile', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/pickup-requests', asItIs());
+    await expectCardsOfTheFit(queueRegion(page));
+    const confirm = page.getByRole('button', { name: `Confirm ${CODE}` });
+    await markNode(confirm, 'data-test-opener');
+    await confirm.click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel).toBeVisible();
+
+    await disturbTheFit(page);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    expect(await stillThere(page, 'data-test-opener')).toBe(1);
+    await expect(page.locator('[data-test-opener]')).toBeFocused();
+  });
+
+  // Break caught (the same): the act made from a card at 768 px, and the cards drawn again under the officer's hand while the panel was open. At 768px the panel is a full-screen sheet, a modal dialog: the
+  // cards are behind it and inert, so focus stays in the sheet after the confirmation (the document never has it), and when the sheet is closed it goes to the card's own button, the one that was on the
+  // page when the officer began.
+  test('at 768 px, confirms from the card, and focus is in the sheet afterwards and then on that card, never on the document', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const { api } = await open(page, '/pickup-requests', asItIs());
+    await expectCardsOfTheFit(queueRegion(page));
+    await markNode(opener(page, CODE), 'data-test-card');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+
+    await disturbTheFit(page);
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(1);
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+
+    const inTheSheet = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null && active !== document.body && active.closest('[role="dialog"]') !== null
+        );
+      });
+    expect(await inTheSheet()).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(page.locator('[data-test-card]')).toBeFocused();
+    expect(await stillThere(page, 'data-test-card')).toBe(1);
   });
 
   // Break caught: the queue header's booking link taking the one primary of the view from the panel's act.
@@ -2051,28 +2172,41 @@ test.describe('the approver’s queue', () => {
     expect((head?.y ?? 0) - (card?.y ?? 0)).toBeLessThanOrEqual(2);
   });
 
-  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): the approver's table keeping a column it has no room for, so that its box scrolls and the act is out of view.
-  // At 768px (a box of 41rem) the table takes its lesser columns away, the hub and the packages and then the recipient (the marks of the Product Owner, 11 November 2026), and keeps the request with its
-  // sender, why, who asked, the state and the act, in view, with no word broken inside.
-  test('keeps the table at 768px without its lesser columns, and never scrolls it sideways', async ({
+  // Break caught (the Product Owner, 10 and 11 November 2026: no table scrolls sideways, and a table never breaks a word): the approver's table keeping a column it has no room for, so that its box scrolls
+  // and the act is out of view; or keeping its table when every lesser column is gone and the box still overflows, which looked right at 768px only because its words are short. At 768px (a box of 41rem)
+  // the table has nothing more to give (the hub, the packages and the recipient go, the marks of the Product Owner, 11 November 2026) and the exceptions are cards, with every fact of each, the act
+  // in view and no word broken inside.
+  test('draws cards at 768px, where the table has nothing more to give, with every fact of the exception, and never scrolls sideways', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
 
-    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
-    await expect(table.getByRole('columnheader')).toHaveText([
-      'Request / sender',
+    const name = 'One-package exceptions waiting for approval';
+    const region = page.getByRole('region', { name });
+    await expectCardsOfTheFit(region);
+    await expect(page.getByRole('table', { name })).toHaveCount(0);
+    const card = page.getByRole('list', { name }).getByRole('listitem').first();
+    await expect(card.getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
       'Why',
       'Asked',
-      'Request state',
-      'Actions',
+      'Hub',
     ]);
+    for (const fact of [
+      'Abena Demo',
+      '9 Demo Street, Tema',
+      'Bridal gown, urgent',
+      'Accra Central',
+    ]) {
+      await expect(card).toContainText(fact);
+    }
     await expectWholeInTheWindow(
       page,
-      table.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
+      card.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
     );
-    const words = await wordsOf(table);
+    const words = await wordsOf(region);
     expect(words.broken).toEqual([]);
     expect(words.tall).toEqual([]);
     expect(await overflowingInQueue(page)).toEqual([]);
