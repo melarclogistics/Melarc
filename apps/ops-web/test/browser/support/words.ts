@@ -10,7 +10,8 @@ import type { Locator } from '@playwright/test';
  *   it): such a word is left out. Text that is clipped to a pixel for assistive technology is not drawn and is left out.
  * - `tall`: the rows (of a table) and the cards taller than their content needs. A table cell's content is laid out again, in a copy, 8rem wide (inside the cell, so it takes the cell's own text
  *   styles), and a row is too tall when it is more than a line taller than the tallest of those and than the tallest density. A card is too tall when it is more than a line taller than the
- *   lowest edge of what it flows plus its padding and border (a card with room in it that nothing fills).
+ *   lowest edge of what it flows plus its padding and border (a card with room in it that nothing fills), and when its body is more than a line taller than a copy of the body laid out at the
+ *   room it could have, from its own left edge to the card's inner edge (a body squeezed narrower than it needs, whose words wrap onto lines that the card then holds).
  *
  * Give it the region of the list (the `DataTable`'s box, `getByRole('region', { name })`): it holds the table or the cards, whichever is drawn.
  */
@@ -90,6 +91,27 @@ export function wordsOf(region: Locator): Promise<TableWords> {
         tall.push(
           `${card.dataset.rowId ?? 'card'}: ${String(Math.round(height))}px, needs ${String(Math.round(needed))}px`,
         );
+      }
+      // A card whose body is squeezed narrower than the room it has wraps its words onto lines that the card then holds, and is as tall as what it holds: the check above cannot see it. The body is laid
+      // out again, in a copy, at the room it could have, from its own left edge (a box beside it is counted) to the card's inner edge, and a body more than a line taller than the copy is squeezed.
+      const body = card.querySelector<HTMLElement>(':scope > .ui-data-table__card-body');
+      if (body !== null) {
+        const room =
+          card.getBoundingClientRect().right -
+          parseFloat(style.paddingRight) -
+          parseFloat(style.borderRightWidth) -
+          body.getBoundingClientRect().left;
+        const copy = body.cloneNode(true) as HTMLElement;
+        copy.style.cssText = `position:absolute;visibility:hidden;inline-size:${String(room)}px;max-inline-size:none;min-inline-size:0;`;
+        card.append(copy);
+        const wouldBe = copy.getBoundingClientRect().height;
+        copy.remove();
+        const drawn = body.getBoundingClientRect().height;
+        if (drawn > wouldBe + line) {
+          tall.push(
+            `${card.dataset.rowId ?? 'card'}: body ${String(Math.round(drawn))}px, ${String(Math.round(wouldBe))}px at the room it has (${String(Math.round(room))}px)`,
+          );
+        }
       }
     }
     return { broken, tall };

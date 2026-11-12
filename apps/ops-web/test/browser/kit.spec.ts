@@ -2630,6 +2630,31 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     });
   });
 
+  // Break caught (the Product Owner's review of ba9a18c, item 5): a words check that finds a card too tall only when it has room that nothing fills, so that a card whose body is squeezed narrower than
+  // the room it has (a column it cannot use) wraps its words onto lines that the card then holds, and passes. The body is laid out again, in a copy, at the room it could have (from its own left edge,
+  // so a card with a box beside it is counted right, to the card's inner edge), and a card whose body is more than a line taller than that fails. Squeezing one card's body is what proves the check.
+  test('the words check fails a card whose body is squeezed narrower than the room it has, and no other', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const cards = specimen(page, 'Cards, where the box is narrow');
+    await cards.scrollIntoViewIfNeeded();
+    const region = cards.locator('.ui-data-table__scroller');
+    await expect(region.locator('.ui-data-table__card').first()).toBeVisible();
+    expect((await wordsOf(region)).tall).toEqual([]);
+
+    await region
+      .locator('.ui-data-table__card-body')
+      .first()
+      .evaluate((body) => {
+        body.style.maxWidth = '5rem';
+      });
+
+    const squeezed = (await wordsOf(region)).tall;
+    expect(squeezed).toHaveLength(1);
+    expect(squeezed[0]).toContain('at the room it has');
+  });
+
   // Break caught (the Product Owner, 10 November 2026): a status that breaks at its words ("Waiting for / confirmation") in a table cell or in a card, which makes the row taller and the badge harder
   // to read at a glance. In a table the column takes the badge's width (the table drops its lesser columns to make the room); in a card the badge keeps its width and takes a line of its own.
   test('never wraps a status in a table cell or in a card', async ({ page }) => {

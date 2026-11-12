@@ -57,6 +57,23 @@ describe('every browser spec runs under the guard against a permission key on a 
     expect(setting).toEqual(GUARD_OWN_SPECS);
   });
 
+  // Break caught (the Product Owner's review of ba9a18c, item 5): the allowance granted to the whole of the shell spec, so that any test added to it could draw a key and turn the guard off for itself.
+  // It is allowed only inside the guard's own `describe` block of that spec, where the tests that prove the watch hears a key are.
+  it('lets the shell spec set the allowance only inside the guard’s own describe block', () => {
+    const text = readFileSync(join(BROWSER, 'shell.spec.ts'), 'utf8');
+    const start = text.indexOf("test.describe('the guard against a permission key on a screen'");
+    // The block is closed by the first line that begins with the closing of a describe, at the margin.
+    const end = text.indexOf('\n});\n', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+
+    const outside = [...text.matchAll(/permissionKeysOnPurpose/g)].filter(
+      (match) => match.index < start || match.index > end,
+    );
+    expect(outside).toHaveLength(0);
+    expect(text.slice(start, end)).toContain('permissionKeysOnPurpose');
+  });
+
   // Break caught: the fixture made one a test has to ask for.
   it('has a guard that is an automatic fixture', () => {
     const text = readFileSync(join(BROWSER, 'support', 'guarded-test.ts'), 'utf8');

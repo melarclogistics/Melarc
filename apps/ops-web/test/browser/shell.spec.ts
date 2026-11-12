@@ -80,44 +80,6 @@ test.describe('the application shell in a browser', () => {
     expect(api.unexpected).toEqual([]);
   });
 
-  // Break caught: a page watcher that does not look at what is drawn, so that a permission key put together at run time (a name built from a variable, a value an answer carried)
-  // reached a screen and every browser test passed (the review of f6cf02b; the source guard cannot see such a key). The page tells its console, which the watcher turns into a problem.
-  // This page draws three keys on purpose: the guard that is on every test must hear exactly these (`permissionKeysOnPurpose`) and no other.
-  test.describe(() => {
-    test.use({ permissionKeysOnPurpose: ['pickup.read', 'staff.read', 'vendor.read'] });
-    test('the page watcher reports a permission key drawn as text, in an attribute, or only for a moment', async ({
-      page,
-    }) => {
-      await stubApi(page);
-      const seen = watchPage(page);
-      await page.route('**/__key-probe', (route) =>
-        route.fulfill({
-          contentType: 'text/html',
-          body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
-          <p>This needs pickup.read.</p>
-          <button type="button" aria-label="staff.read">Go</button>
-          <script>
-            setTimeout(() => {
-              const moment = document.createElement('i');
-              moment.textContent = 'vendor.read';
-              document.body.append(moment);
-              setTimeout(() => moment.remove(), 20);
-            }, 50);
-          </script>
-        </body></html>`,
-        }),
-      );
-      await page.goto('/__key-probe');
-
-      await expect
-        .poll(() =>
-          keyProblems(seen.problems).map((problem) => /is on the screen: (\S+)/.exec(problem)?.[1]),
-        )
-        .toEqual(expect.arrayContaining(['pickup.read', 'staff.read', 'vendor.read']));
-      await expect(page.getByText('vendor.read')).toHaveCount(0);
-    });
-  });
-
   // Break caught: a watcher so loose that it reports words (a refusal is told in plain words), which would fail every page of the portal.
   test('the page watcher says nothing of a page that draws a refusal in plain words', async ({
     page,
@@ -1674,6 +1636,44 @@ test.describe('the guard against a permission key on a screen', () => {
       test.fail();
       await drawKey(page, '<main><p>Your account can’t see pickup requests.</p></main>');
       await expect(page.getByRole('main')).toBeVisible();
+    });
+  });
+
+  // Break caught: a page watcher that does not look at what is drawn, so that a permission key put together at run time (a name built from a variable, a value an answer carried)
+  // reached a screen and every browser test passed (the review of f6cf02b; the source guard cannot see such a key). The page tells its console, which the watcher turns into a problem.
+  // This page draws three keys on purpose: the guard that is on every test must hear exactly these (`permissionKeysOnPurpose`) and no other.
+  test.describe(() => {
+    test.use({ permissionKeysOnPurpose: ['pickup.read', 'staff.read', 'vendor.read'] });
+    test('the page watcher reports a permission key drawn as text, in an attribute, or only for a moment', async ({
+      page,
+    }) => {
+      await stubApi(page);
+      const seen = watchPage(page);
+      await page.route('**/__key-probe', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
+          <p>This needs pickup.read.</p>
+          <button type="button" aria-label="staff.read">Go</button>
+          <script>
+            setTimeout(() => {
+              const moment = document.createElement('i');
+              moment.textContent = 'vendor.read';
+              document.body.append(moment);
+              setTimeout(() => moment.remove(), 20);
+            }, 50);
+          </script>
+        </body></html>`,
+        }),
+      );
+      await page.goto('/__key-probe');
+
+      await expect
+        .poll(() =>
+          keyProblems(seen.problems).map((problem) => /is on the screen: (\S+)/.exec(problem)?.[1]),
+        )
+        .toEqual(expect.arrayContaining(['pickup.read', 'staff.read', 'vendor.read']));
+      await expect(page.getByText('vendor.read')).toHaveCount(0);
     });
   });
 
