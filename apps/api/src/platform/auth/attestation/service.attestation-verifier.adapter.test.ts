@@ -520,9 +520,20 @@ describe('the production attestation verifier over the private service', () => {
       const budget = new ExecutionBudget(clock, 'request', 200);
 
       const started = performance.now();
-      await expect(runWithBudget(budget, () => verifier.verify(evidence))).rejects.toBeInstanceOf(
-        BudgetExpiredError,
+      const outcome = await runWithBudget(budget, () => verifier.verify(evidence)).catch(
+        (error: unknown) => error,
       );
+      // Two ends are right, and which is seen first is a race of about a millisecond: the call's own deadline is the whole milliseconds
+      // the budget has left (`Math.floor`), so it fires with, or just before, the budget's timer. When both are due in the same timer
+      // phase the budget has expired by the time the call returns, and the answer is the budget's error; when they are split (seen in
+      // a hosted run of 8 November 2026) the call gives up first and answers `VERIFIER_TIMEOUT`. Each mechanism alone is held
+      // by the two tests below (a clock that has not moved leaves only the call's deadline; an optimistic budget leaves only the
+      // budget's abort). What this one holds is that the call ends by what the budget has left, and not at its own 30 s time-out.
+      const ended = outcome instanceof BudgetExpiredError ? 'the budget expired' : outcome;
+      expect([
+        'the budget expired',
+        { verdict: 'TRUST_DATA_UNAVAILABLE', cause: 'VERIFIER_TIMEOUT' },
+      ]).toContainEqual(ended);
       expect(performance.now() - started).toBeLessThan(2_000);
     });
 

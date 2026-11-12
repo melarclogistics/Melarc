@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { arrange } from '../database.ts';
 import { readMessages, readTexts } from '../messages.ts';
 import { signInAs } from './actions.ts';
+import { hubRunsOn, hubToday } from './hub-calendar.ts';
 import { clearBrowser, expectHeading, fromPage } from './pages.ts';
 import { readEnrolmentCode, RiderHandset } from './rider-handset.ts';
 import type { JourneyContext } from './staff-journeys.ts';
@@ -24,6 +25,8 @@ import { worldOf, type RiderState } from './world.ts';
  *
  * **The day.** A run is started on its `service_date` on the hub's clock and not before or after it, so the manifest's day is today at the hub
  * (`Africa/Accra`), whatever the browser's own clock says: the harness freezes that clock on 5 October 2026 and the API runs on the real one.
+ * The hub works Monday to Saturday (`hub-calendar.ts`), so on a Sunday there is no day on which this story can be told: the API refuses a manifest
+ * for it, and a run starts only on its own day. The journey is then **skipped, with that reason, and not passed**; it runs on every other day.
  */
 const TWO = {
   name: 'Demonstration Rider Two (fixture)',
@@ -34,16 +37,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The code of the nth arranged request: the arrangement's own rule (`fixturePickupCode`), which a journey follows to name a request without reading it. */
 const codeOf = (at: number): string => `ACC-PR-HX${'ABCDEFGH'.charAt(at)}${String(at + 2)}MN`;
-
-/** Today at the hub, `YYYY-MM-DD`: the hub's clock is Africa/Accra, and the API judges a run's day by it. */
-function hubToday(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Accra',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
 
 /** The service date field takes the day first: `DDMMYYYY` typed into the field has its slashes put in for it. */
 async function typeServiceDate(page: Page, day: string): Promise<void> {
@@ -173,6 +166,12 @@ async function letTheChallengeMinutePass(database: string): Promise<void> {
  * recorders off (it is a secret spec), so the words of the page are the only picture of where it stopped.
  */
 export async function manifestsAndCustody(journey: JourneyContext): Promise<void> {
+  const today = hubToday();
+  test.skip(
+    !hubRunsOn(today),
+    `The hub does not run on ${today}, a Sunday: it works Monday to Saturday (MSC-DEC-149), a manifest cannot be made for a day it does not ` +
+      `work and a run starts only on its own day, so this journey has nothing to walk today. It is not passed; it runs on every other day.`,
+  );
   try {
     await walk(journey);
   } catch (error) {

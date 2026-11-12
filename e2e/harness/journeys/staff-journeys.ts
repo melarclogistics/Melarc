@@ -23,6 +23,7 @@ import {
   signInRemembering,
   signInWithAuthenticator,
 } from './actions.ts';
+import { cookieNamesSent } from './cookies-sent.ts';
 import {
   CSRF_COOKIE,
   SESSION_COOKIE,
@@ -805,12 +806,12 @@ async function rememberThisBrowser({ page, context, stack }: JourneyContext): Pr
     (request) => new URL(request.url()).pathname === '/api/v1/auth/session',
   );
   await fromPage(page, 'GET', '/api/v1/auth/session');
-  const sentToBusiness = (await (await business).allHeaders()).cookie ?? '';
-  expect(sentToBusiness.includes(`${SESSION_COOKIE}=`), 'the session went with the request').toBe(
-    true,
-  );
+  // The names of the cookies that request carried: the wire header where the engine reports it, the browser's own jar for its address
+  // where it does not (WebKit), so that the check is the same, and as strict, in every engine (cookies-sent.ts).
+  const sentToBusiness = await cookieNamesSent(context, await business);
+  expect(sentToBusiness.includes(SESSION_COOKIE), 'the session went with the request').toBe(true);
   expect(
-    sentToBusiness.includes(`${TRUSTED_COOKIE}=`),
+    sentToBusiness.includes(TRUSTED_COOKIE),
     'the credential is not sent to a business operation',
   ).toBe(false);
 

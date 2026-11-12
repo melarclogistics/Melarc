@@ -49,7 +49,8 @@ test.describe('the date field in a production build under the strict content-sec
     await expect(page.getByRole('dialog')).toBeHidden();
 
     await control.getByRole('button', { name: /^Calendar/ }).click();
-    await page.getByRole('button', { name: /Friday, 30 October 2026/ }).click();
+    // The comma after the weekday is the engine's (see date-picker.spec.ts): WebKit on Linux writes none.
+    await page.getByRole('button', { name: /Friday,? 30 October 2026/ }).click();
     await expect(page.getByText('The page holds: 2026-10-30')).toBeVisible();
 
     const range = group(page, 'Demo date in a range');
