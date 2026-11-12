@@ -98,6 +98,18 @@ export function isUnclaimed(active: Element | null, options: UnclaimedOptions = 
   return active.matches(`main, h1, ${UNCLAIMED_FOCUS_SELECTOR}`);
 }
 
+/**
+ * Whether a surface that holds the officer's focus is open above the page now: a question (a `dialog` opened as a modal, or an `alertdialog`), or the sheet the panel becomes at 768px and below (a
+ * `dialog` that does not say `aria-modal="false"`, as the docked panel does). A native dialog counts only while it is open; the others are drawn only while they are. **Nothing behind such a
+ * surface is given focus by the page** (the hosted WebKit runs of 12 November 2026): a question that closes over the sheet leaves Safari's engine with focus on the document, which is nobody's, and
+ * the row that changed is behind the sheet. The surface keeps the officer's focus, and the table gives the row focus when the sheet is closed.
+ */
+export function modalSurfaceIsOpen(): boolean {
+  return [...document.querySelectorAll(MODAL_SURFACE)].some(
+    (surface) => !(surface instanceof HTMLDialogElement) || surface.open,
+  );
+}
+
 /** What gives focus back, as the queue workspace and a table offer it (`QueueWorkspaceHandle`): a page asks the table and never looks for a class of the kit's markup. */
 export interface PlaceTarget {
   readonly focusRow: (id: string) => boolean;

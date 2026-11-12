@@ -46,7 +46,13 @@ import {
   queueFactsOf,
   type QueueFacts,
 } from './pickup-queue-view';
-import { isUnclaimed, requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
+import {
+  isUnclaimed,
+  modalSurfaceIsOpen,
+  requestOfClick,
+  restoreQueuePlace,
+  searchOf,
+} from './queue-return';
 import './pickup-pages.css';
 
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
@@ -220,6 +226,9 @@ export function PickupRequestListPage() {
     if (list.data !== readAfterAct.data) return;
     const id = returnTo.current;
     returnTo.current = undefined;
+    // The officer is in a surface that holds focus (the sheet the panel becomes at 768px and below, or a question): the row is behind it. A question closed over the sheet leaves Safari's engine with
+    // focus on the document, and the row must not take it from the sheet (the hosted WebKit runs of 12 November 2026); the row is given focus when the sheet is closed.
+    if (modalSurfaceIsOpen()) return;
     if (!isUnclaimed(document.activeElement, { touchedSinceAct: touchedSinceAct.current })) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
   }, [afterAct, readAfterAct, list.data]);

@@ -4,6 +4,7 @@ import { UNCLAIMED_FOCUS_ATTRIBUTE } from '../../../components/ui/read-state/unc
 import type { QueuePlace } from '../../../platform/pickup/queue-continuity';
 import {
   isUnclaimed,
+  modalSurfaceIsOpen,
   requestOfClick,
   restoreQueuePlace,
   searchOf,
@@ -261,6 +262,45 @@ describe('isUnclaimed: focus nobody has taken', () => {
     expect(isUnclaimed(container)).toBe(false);
     expect(isUnclaimed(reachable)).toBe(false);
     expect(isUnclaimed(parked)).toBe(false);
+  });
+});
+
+describe('modalSurfaceIsOpen: whether the officer is in a surface above the page that holds focus', () => {
+  const draw = (tag: string, attributes: Record<string, string> = {}): HTMLElement => {
+    const surface = document.createElement(tag);
+    for (const [name, value] of Object.entries(attributes)) surface.setAttribute(name, value);
+    document.body.append(surface);
+    return surface;
+  };
+
+  // Break caught (the hosted WebKit runs of 12 November 2026, after the row's focus was mended to be given every time): a question that closes leaves Safari's engine with focus on the document, the
+  // page took the document for nobody's and gave the row focus, and the row was behind the sheet the panel becomes at 768px and below. Nothing behind a surface that holds focus is given focus by the page.
+  it.each([
+    ['a native dialog that is open', () => draw('dialog', { open: '' })],
+    ['a question', () => draw('div', { role: 'alertdialog' })],
+    [
+      'an open question drawn as a native dialog',
+      () => draw('dialog', { role: 'alertdialog', open: '' }),
+    ],
+    [
+      'the sheet a panel becomes, a dialog that does not say it is not modal',
+      () => draw('div', { role: 'dialog' }),
+    ],
+    ['a dialog that says it is modal', () => draw('div', { role: 'dialog', 'aria-modal': 'true' })],
+  ])('is true while %s is on the page', (_name, make) => {
+    make();
+
+    expect(modalSurfaceIsOpen()).toBe(true);
+  });
+
+  it('is false for a page with none, for a native dialog that is closed and for the docked panel, which says it is not modal', () => {
+    expect(modalSurfaceIsOpen()).toBe(false);
+
+    draw('dialog');
+    draw('dialog', { role: 'alertdialog' });
+    draw('aside', { role: 'dialog', 'aria-modal': 'false' });
+
+    expect(modalSurfaceIsOpen()).toBe(false);
   });
 });
 
