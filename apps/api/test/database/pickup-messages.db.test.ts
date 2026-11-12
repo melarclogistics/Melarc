@@ -18,6 +18,7 @@ import {
   type LanePolicy,
 } from '../../src/platform/notifications/notification-lane.js';
 import { NotificationStore } from '../../src/platform/notifications/notification-store.js';
+import { templateOf, type Template } from '../../src/platform/notifications/templates.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -43,9 +44,10 @@ import {
  *   closed tokens, never the note). A refused act, a count that matches and a retry write none, and a failure undone at its last step leaves none.
  * - **Only the rider's own act, and only that act, can write it**: the two functions refuse every other caller, key, rider, stop and moment, and the runtime login cannot insert
  *   either envelope itself.
- * - **The lane makes the messages the list says**, for the audience the request has: the text to an individual sender (a draft, with no reason and no note), the registered
+ * - **The lane makes the messages the list says**, for the audience the request has: the text to an individual sender (with no reason and no note), the registered
  *   vendor's feed entry and the Ops entry of the hub for a failure, and the Ops entry for a short count; the closed tokens are the only things a notification copies; the limits
- *   and the kill switches hold the text back as for every message, and a real provider is never asked to send unapproved words.
+ *   and the kill switches hold the text back as for every message, and a real provider is never asked to send words that are a draft (the owner approved these on 12 November
+ *   2026, D-A5, and a real provider is given them exactly as approved).
  * - **The staff of the hub read the Ops entries** under `notification.read`, and the staff of another hub do not.
  */
 let routes: VendorRoutes;
@@ -238,7 +240,18 @@ const noticesOf = (requestId: string) =>
   );
 
 /** One run of the notification lane (three ticks), as the delivery worker runs it, over the same database; the texts it sends are returned for the test to read. */
-async function relay(policy: LanePolicy = OPEN_POLICY): Promise<TextCaptureEntry[]> {
+/** The wording the lane reads, with the approval taken off: what the words were before the owner approved them. */
+const asDrafts = (kind: string, version: number): Template | undefined => {
+  const found = templateOf(kind, version);
+  return found === undefined
+    ? undefined
+    : { ...found, approvedBy: null, approvedOn: null, approvedDigest: null };
+};
+
+async function relay(
+  policy: LanePolicy = OPEN_POLICY,
+  templates?: (kind: string, version: number) => Template | undefined,
+): Promise<TextCaptureEntry[]> {
   const sent: TextCaptureEntry[] = [];
   const work = buildService(routes.database, { poolMax: 3, login: WORKER_RUNTIME_ROLE });
   try {
@@ -259,6 +272,7 @@ async function relay(policy: LanePolicy = OPEN_POLICY): Promise<TextCaptureEntry
       firstReceiptCheckMs: 0,
       receiptHoldMs: 60_000,
       random: () => 0.5,
+      ...(templates === undefined ? {} : { templates }),
     });
     for (let tick = 0; tick < 3; tick += 1) await lane.runOnce(NEVER);
   } finally {
@@ -425,11 +439,14 @@ describe('the lane makes the messages of a failure for the audience the request 
     expect(JSON.stringify(notices)).not.toContain('parcels were not packed');
   });
 
-  // Break caught: a real provider asked to send words the owner has not approved (the drafts are the owner's to approve, OQ-037), or a feed entry held back with them.
-  it('holds the text back from a real provider until its words are approved, and still writes the feed entries', async () => {
+  // Break caught: a real provider asked to send words the owner has not approved (words are the owner's to approve, OQ-037), or a feed entry held back with them.
+  it('holds the text back from a real provider while its words are a draft, and still writes the feed entries', async () => {
     const arranged = await adHocStop();
     expect((await fail(arranged)).status).toBe(200);
-    const sent = await relay(createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS }));
+    const sent = await relay(
+      createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS }),
+      asDrafts,
+    );
     expect(sent.filter((entry) => entry.destination === arranged.phone)).toEqual([]);
     const notices = await noticesOf(arranged.requestId);
     expect(
@@ -440,6 +457,27 @@ describe('the lane makes the messages of a failure for the audience the request 
       'PICKUP_FAILED_OPS_FEED:DELIVERED:none',
       'PICKUP_FAILED_SENDER:SUPPRESSED:WORDING_NOT_APPROVED',
     ]);
+  });
+
+  // Break caught (D-A5; fails on ac9f613, where the words were a draft): the owner's approval of 12 November 2026 not honoured, so that a real provider is never given the words of a
+  // failure, or given other words than the ones approved.
+  it('gives a real provider the words the owner approved for a failure, exactly as approved', async () => {
+    const arranged = await adHocStop();
+    expect((await fail(arranged)).status).toBe(200);
+    const sent = (
+      await relay(createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS }))
+    ).filter((entry) => entry.destination === arranged.phone);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toMatch(
+      new RegExp(
+        `^Melarc: we could not complete your pickup ${arranged.requestCode} planned for [A-Z][a-z]+ \\d{1,2} [A-Z][a-z]+\\. We will be in touch about the next step\\.$`,
+      ),
+    );
+    const text = (await noticesOf(arranged.requestId)).find(
+      (each) => each.message_kind === 'PICKUP_FAILED_SENDER',
+    );
+    expect(text?.state).toMatch(/^(SENT|DELIVERED)$/);
+    expect(text?.suppression_reason).toBeNull();
   });
 
   // Break caught: a message that is not under the kill switches and the day's limits of every other text.

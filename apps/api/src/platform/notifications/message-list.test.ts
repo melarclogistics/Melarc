@@ -22,10 +22,21 @@ import {
   isApproved,
   render,
   spokenDate,
+  templateFor,
   templateOf,
   wordingDigest,
   type Template,
 } from './templates.js';
+
+/** A wording's name: its kind, its version and, for a second wording, the case it is for. */
+const keyOfTemplate = (template: Template): string =>
+  `${template.kind}@${String(template.version)}${
+    template.whenParameters === undefined
+      ? ''
+      : `[${Object.entries(template.whenParameters)
+          .map(([name, value]) => `${name}=${value}`)
+          .join(',')}]`
+  }`;
 
 const SPECIFICATION = resolve(
   import.meta.dirname,
@@ -283,9 +294,10 @@ describe('the wording', () => {
   });
 
   // Break caught: a wording approved in code without the owner's word, or approved words that were edited. The Product Owner approved the first
-  // two, exactly as they stand, on 30 October 2026 (OQ-037), and the rider's run text on 2 November 2026 (OB-S1-06); another approval is a
-  // decision of theirs, and is recorded with its date in the same change as this list. Each approval is pinned to the words and to the digest
-  // of the words, so that an edit that kept the approval would fail here as well as in `isApproved`.
+  // two, exactly as they stand, on 30 October 2026 (OQ-037), the rider's run text on 2 November 2026 (OB-S1-06), and on 12 November 2026 (D-A5) the seven drafts that stood in
+  // this file (the skipped stop's feed entry, the two texts of the handshake code, the three entries and the text of a failure, the office's entry for a short count) and, as
+  // its own wording, the skipped stop's entry for an action of NONE; another approval is a decision of theirs, and is recorded with its date in the same change as this list.
+  // Each approval is pinned to the words and to the digest of the words, so that an edit that kept the approval would fail here as well as in `isApproved`.
   it('holds approved exactly the wording the Product Owner approved, on the days they approved it', () => {
     const APPROVED: Record<string, { on: string; digest: string; wording: string }> = {
       'PICKUP_CONFIRMED_SENDER@1': {
@@ -305,17 +317,108 @@ describe('the wording', () => {
         wording:
           'Melarc: your pickup run {code} for {date} is ready. Open the Melarc app to see your stops.',
       },
+      'PICKUP_SKIPPED_VENDOR_FEED@1': {
+        on: '2026-11-12',
+        digest: 'a1fc7435060180a064f1146d79c30bf917c495c0828fc301adab69c15c09c93f',
+        wording:
+          'Your pickup request {code} for {date} was not collected on this run ({reason}). What we need from you: {action}.',
+      },
+      'PICKUP_SKIPPED_VENDOR_FEED@1[action=NONE]': {
+        on: '2026-11-12',
+        digest: 'edcb98d628ec6ad33691a7e7e55b716ebbc3f8b4168d77126bb0ab7564bad709',
+        wording: 'Your pickup request {code} for {date} was not collected on this run ({reason}).',
+      },
+      'HANDSHAKE_CODE_SENDER@1': {
+        on: '2026-11-12',
+        digest: '4bf0cf05ebc2f2d9758f8592e17fe37bf527780b0ee3b4cd7950ba7dec69752e',
+        wording:
+          'Melarc: your pickup code is {handshake_code}. Give it to the rider only when the rider asks, to complete pickup {code}.',
+      },
+      'HANDSHAKE_CODE_VENDOR_NUMBER@1': {
+        on: '2026-11-12',
+        digest: '065060cd5018c37d0bd5d50a77dd0828a1e2232405792fac1763f83259bf55fa',
+        wording:
+          'Melarc: the pickup code for {code} is {handshake_code}. Read it to the Melarc rider only, to complete the pickup.',
+      },
+      'PICKUP_FAILED_SENDER@1': {
+        on: '2026-11-12',
+        digest: 'ce1e9e98e1ca9dc36fb6e4b523e96b4851fab4882ccf1bd3d2eca326a3f68ef4',
+        wording:
+          'Melarc: we could not complete your pickup {code} planned for {date}. We will be in touch about the next step.',
+      },
+      'PICKUP_FAILED_VENDOR_FEED@1': {
+        on: '2026-11-12',
+        digest: 'f43ed602028f9ee5983f5b4b3349dae8bb115bebcf57cbcac4dc1d3b7ca63d38',
+        wording:
+          'Your pickup request {code} for {date} could not be completed ({category}: {reason}). Melarc will be in touch about the next step.',
+      },
+      'PICKUP_FAILED_OPS_FEED@1': {
+        on: '2026-11-12',
+        digest: '43c99a3e389d3209a12874fc174063c69c18a26dbf767264f2586f625054be14',
+        wording:
+          'Pickup request {code} for {date} failed ({category}: {reason}). It waits in the decision queue.',
+      },
+      'COLLECTION_SHORT_OPS_FEED@1': {
+        on: '2026-11-12',
+        digest: '07b770c030f3a0a5bf45ba5eefcbcd911182d9095f57320aab04b6c085f82568',
+        wording:
+          'Pickup request {code} for {date} was counted short at the door ({reason}). The office is asked to follow it up.',
+      },
     };
     const approved = TEMPLATES.filter(isApproved);
-    expect(
-      approved.map((template) => `${template.kind}@${String(template.version)}`).toSorted(),
-    ).toEqual(Object.keys(APPROVED).toSorted());
+    expect(approved.map(keyOfTemplate).toSorted()).toEqual(Object.keys(APPROVED).toSorted());
+    // No template is left a draft: every wording of the list is one the Product Owner has approved.
+    expect(TEMPLATES.filter((template) => !isApproved(template))).toEqual([]);
     for (const template of approved) {
-      const held = APPROVED[`${template.kind}@${String(template.version)}`];
+      const held = APPROVED[keyOfTemplate(template)];
       expect(template.approvedBy, template.kind).toBe('Mathias Elorm, Product Owner');
       expect(template.approvedOn, template.kind).toBe(held?.on);
       expect(template.approvedDigest, template.kind).toBe(held?.digest);
       expect(template.wording, template.kind).toBe(held?.wording);
+    }
+  });
+
+  // Break caught (D-A5): a second wording approved for one case and used for another, or approved by the digest of the ordinary wording. What a wording is for is part of what is
+  // approved; a case changed after the approval is a draft again.
+  it('binds the approval of a second wording to the case it is for', () => {
+    const none = templateFor('PICKUP_SKIPPED_VENDOR_FEED', 1, { action: 'NONE' });
+    const ordinary = templateOf('PICKUP_SKIPPED_VENDOR_FEED', 1);
+    expect(none).toBeDefined();
+    expect(ordinary).toBeDefined();
+    if (none === undefined || ordinary === undefined) return;
+    expect(none).not.toBe(ordinary);
+    expect(none.approvedDigest).not.toBe(ordinary.approvedDigest);
+    expect(isApproved(none)).toBe(true);
+    expect(isApproved({ ...none, whenParameters: { action: 'CORRECT_PICKUP_LOCATION' } })).toBe(
+      false,
+    );
+    expect(isApproved({ ...none, whenParameters: undefined })).toBe(false);
+    expect(
+      isApproved({ ...none, whenParameters: { action: 'NONE', reason: 'RUN_CUT_SHORT' } }),
+    ).toBe(false);
+    // A wording that is for no case adds nothing to the digest, so the approvals made before the second wording existed hold.
+    const confirmed = templateOf('PICKUP_CONFIRMED_SENDER', 1);
+    expect(confirmed === undefined ? false : isApproved(confirmed)).toBe(true);
+  });
+
+  // Break caught: a text message with a second wording, which the lane (it renders a text with `templateOf` alone) would never use; and a second wording of a kind the list lacks,
+  // or one that is for nothing (an empty case would match every notification and replace the ordinary wording).
+  it('gives a second wording to a feed entry only, for a case that names a parameter the kind carries', () => {
+    const seconds = TEMPLATES.filter((template) => template.whenParameters !== undefined);
+    expect(seconds.map(keyOfTemplate)).toEqual(['PICKUP_SKIPPED_VENDOR_FEED@1[action=NONE]']);
+    for (const second of seconds) {
+      const message = messageOfKind(second.kind);
+      expect(message?.channel, second.kind).toBe('FEED');
+      const cases = Object.keys(second.whenParameters ?? {});
+      expect(cases.length, second.kind).toBeGreaterThan(0);
+      for (const name of cases) expect(message?.carries, second.kind).toContain(name);
+      // Its kind still has an ordinary wording, which is what a notification of any other case reads.
+      expect(templateOf(second.kind, second.version), second.kind).toBeDefined();
+    }
+    for (const template of TEMPLATES.filter(
+      (each) => messageOfKind(each.kind)?.channel === 'SMS',
+    )) {
+      expect(template.whenParameters, template.kind).toBeUndefined();
     }
   });
 
@@ -523,12 +626,11 @@ describe('the notice of a skipped stop (S1.23; MSC-DEC-412)', () => {
     expect(parametersOf({}, { reason: 'RUN_CUT_SHORT' })).toEqual({});
   });
 
-  // Break caught: wording that carries Ops's note or a private detail, or a template that is approved without the owner (the capture adapter
-  // would send any, and the owner has not approved these words).
-  it('has draft wording that names the request, the day, the reason and the action, and none of Ops’s note', () => {
+  // Break caught: wording that carries Ops's note or a private detail, or a template whose approval is not the owner's (`isApproved` binds it to the very words).
+  it('has approved wording that names the request, the day, the reason and the action, and none of Ops’s note', () => {
     const template = templateOf('PICKUP_SKIPPED_VENDOR_FEED', 1);
     expect(template?.placeholders).toEqual(['code', 'date', 'reason', 'action']);
-    expect(template === undefined ? undefined : isApproved(template)).toBe(false);
+    expect(template === undefined ? undefined : isApproved(template)).toBe(true);
     expect(template?.wording).not.toMatch(/note|address|phone/i);
     expect(
       template === undefined
@@ -542,6 +644,42 @@ describe('the notice of a skipped stop (S1.23; MSC-DEC-412)', () => {
     ).toBe(
       'Your pickup request ACC-PR-ABC123 for Tuesday 3 November was not collected on this run (LOCATION_INACCESSIBLE). What we need from you: CORRECT_PICKUP_LOCATION.',
     );
+  });
+
+  // Break caught (D-A5; fails on ac9f613, where a skip that asks nothing says "What we need from you: NONE."): an entry that asks the vendor for nothing and says so, or the
+  // second wording used for a skip that does ask something.
+  it('says nothing of what is needed from the vendor when the skip asks nothing: the first sentence alone', () => {
+    const values = { code: 'ACC-PR-ABC123', date: 'Tuesday 3 November', reason: 'RUN_CUT_SHORT' };
+    const none = templateFor('PICKUP_SKIPPED_VENDOR_FEED', 1, {
+      reason: 'RUN_CUT_SHORT',
+      action: 'NONE',
+    });
+    expect(none?.placeholders).toEqual(['code', 'date', 'reason']);
+    expect(none === undefined ? undefined : isApproved(none)).toBe(true);
+    const text = none === undefined ? '' : render(none, values);
+    expect(text).toBe(
+      'Your pickup request ACC-PR-ABC123 for Tuesday 3 November was not collected on this run (RUN_CUT_SHORT).',
+    );
+    expect(text).not.toContain('What we need from you');
+    expect(text).not.toContain('NONE');
+    // A skip that asks something, and a notification that recorded no action, read the ordinary wording (which cannot be said without an action: the error stays).
+    const others: Record<string, string>[] = [
+      { reason: 'LOCATION_INACCESSIBLE', action: 'CORRECT_PICKUP_LOCATION' },
+      { reason: 'LOCATION_INACCESSIBLE' },
+      {},
+    ];
+    for (const parameters of others) {
+      expect(
+        templateFor('PICKUP_SKIPPED_VENDOR_FEED', 1, parameters),
+        JSON.stringify(parameters),
+      ).toBe(templateOf('PICKUP_SKIPPED_VENDOR_FEED', 1));
+    }
+    // The values of the second wording do not offer the action: the text of an entry that asks nothing cannot be handed one.
+    expect(() => (none === undefined ? '' : render(none, { ...values, action: 'NONE' }))).toThrow(
+      TemplateError,
+    );
+    // The choice by kind and version alone, which is the lane's, is the ordinary wording.
+    expect(templateOf('PICKUP_SKIPPED_VENDOR_FEED', 1)?.wording).toContain('What we need from you');
   });
 });
 
@@ -623,13 +761,13 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
     });
   });
 
-  // Break caught: wording approved without the owner (the capture adapter would send any, and the owner has not approved these words), a text that says why, or a word of the
-  // rider's note, a count, a number or an address in any of the four.
-  it('are drafts, and none of the words carries a note, a count, a number or an address', () => {
+  // Break caught: wording whose approval is not the owner's for these very words (D-A5), a text that says why, or a word of the rider's note, a count, a number or an address in
+  // any of the four.
+  it('are approved as they stand, and none of the words carries a note, a count, a number or an address', () => {
     for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
       const template = templateOf(message?.kind ?? '', 1);
       expect(template, message?.kind).toBeDefined();
-      expect(template === undefined ? true : isApproved(template), message?.kind).toBe(false);
+      expect(template === undefined ? false : isApproved(template), message?.kind).toBe(true);
       expect(template?.placeholders, message?.kind).not.toContain('note');
       expect(template?.wording, message?.kind).not.toMatch(/note|address|phone|number|http/i);
     }

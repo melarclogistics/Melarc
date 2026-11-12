@@ -16,6 +16,7 @@ import {
 } from '../../src/platform/notifications/notification-lane.js';
 import { NotificationStore } from '../../src/platform/notifications/notification-store.js';
 import { OPEN_SETTINGS } from '../../src/platform/notifications/lane-policy.js';
+import { templateOf, type Template } from '../../src/platform/notifications/templates.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
@@ -42,7 +43,8 @@ import {
  *   for the send only. The handshake is told that the text was accepted (`CODE_DELIVERED`, one event of the system).
  * - **A text that events overtook is not sent**: a code that has run out, or a code a later one superseded.
  * - **A lane that cannot make the code sends nothing**, and says so.
- * - **A real provider is put behind the wording gate**: the two drafts are held back until the owner approves their words (OB-S1-06).
+ * - **A real provider is put behind the wording gate**: words that are a draft are held back until the owner approves them (OB-S1-06); the two texts of the code were approved
+ *   on 12 November 2026 (D-A5), and go to a real provider exactly as approved.
  */
 let routes: VendorRoutes;
 let days: ManifestDays;
@@ -80,9 +82,21 @@ const outcome = (response: TestResponse): [number, string | undefined] => [
   codeOf(response),
 ];
 
+/** The wording the lane reads, with the approval taken off: what the words were before the owner approved them. */
+const asDrafts = (kind: string, version: number): Template | undefined => {
+  const found = templateOf(kind, version);
+  return found === undefined
+    ? undefined
+    : { ...found, approvedBy: null, approvedOn: null, approvedDigest: null };
+};
+
 function laneOf(
   entries: TextCaptureEntry[],
-  over: { withCodes?: boolean; policy?: ReturnType<typeof createLanePolicy> } = {},
+  over: {
+    withCodes?: boolean;
+    policy?: ReturnType<typeof createLanePolicy>;
+    templates?: (kind: string, version: number) => Template | undefined;
+  } = {},
 ): NotificationLane {
   const store = new NotificationStore({
     database: work.service,
@@ -102,6 +116,7 @@ function laneOf(
     receiptHoldMs: 60_000,
     random: () => 0.5,
     ...(over.withCodes === false ? {} : { handshakeCodes: routes.handshakeCodes }),
+    ...(over.templates === undefined ? {} : { templates: over.templates }),
   });
 }
 
@@ -348,14 +363,15 @@ describe('the code of an individual sender, by SMS', () => {
     expect(await handshakeState(stop.id)).toEqual({ state: 'CODE_GENERATED', code_generation: 1 });
   });
 
-  // Break caught (OB-S1-06): a real provider sent words nobody approved. The two drafts are held back until the owner approves their words.
-  it('holds the text back, for a real provider, until the owner has approved its words', async () => {
+  // Break caught (OB-S1-06): a real provider sent words nobody approved. Words that are a draft are held back until the owner approves them.
+  it('holds the text back, for a real provider, while its words are a draft', async () => {
     const { rider, stop, request } = await countedSender();
     expect((await initiate(rider, stop.id)).status).toBe(201);
     const entries: TextCaptureEntry[] = [];
 
     const report = await laneOf(entries, {
       policy: createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS }),
+      templates: asDrafts,
     }).runOnce(NEVER);
 
     expect(report).toMatchObject({ sent: 0, suppressed: 1 });
@@ -366,6 +382,28 @@ describe('the code of an individual sender, by SMS', () => {
         state: 'SUPPRESSED',
         suppression_reason: 'WORDING_NOT_APPROVED',
       }),
+    ]);
+  });
+
+  // Break caught (D-A5; fails on ac9f613, where the words were a draft): the owner's approval of 12 November 2026 not honoured, so that a real provider is never given the code's words,
+  // or given other words than the ones approved.
+  it('gives a real provider the words the owner approved, exactly as approved, with the code in them', async () => {
+    const { rider, stop, request } = await countedSender();
+    expect((await initiate(rider, stop.id)).status).toBe(201);
+    const entries: TextCaptureEntry[] = [];
+
+    const report = await laneOf(entries, {
+      policy: createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS }),
+    }).runOnce(NEVER);
+
+    expect(report).toMatchObject({ sent: 1, suppressed: 0 });
+    expect(entries).toHaveLength(1);
+    const code = textCode(entries[0]?.text ?? '');
+    expect(entries[0]?.text).toBe(
+      `Melarc: your pickup code is ${code}. Give it to the rider only when the rider asks, to complete pickup ${request.code}.`,
+    );
+    expect(await notificationsOf(request.id)).toEqual([
+      expect.objectContaining({ message_kind: 'HANDSHAKE_CODE_SENDER', state: 'SENT' }),
     ]);
   });
 });
