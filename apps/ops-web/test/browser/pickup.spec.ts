@@ -1,7 +1,7 @@
 import type { Locator, Page, Route } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { scrollSettled, watchPage, wcagViolations } from './support/page';
+import { animationsDone, scrollSettled, watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
 import { disturbTheFit, expectCardsOfTheFit, frames, markNode, stillThere } from './support/fit';
 import { wordsOf } from './support/words';
@@ -1682,12 +1682,16 @@ test.describe('the queue: coming back from a request', () => {
       // The place that is left is the one the officer leaves from: the page as it stands when they press the panel's link (the panel is in view where it is, and the page is not
       // moved to it), which is where Playwright would otherwise scroll to before its click.
       await far.click();
-      const link = page
-        .getByRole('dialog', { name: codeOf(10) })
-        .getByRole('link', { name: 'Open full page' });
+      const panel = page.getByRole('dialog', { name: codeOf(10) });
+      const link = panel.getByRole('link', { name: 'Open full page' });
+      // The place is read where the page rests, and the panel has to be at rest too: it fades and slides in over some 600ms, and opening it narrows the queue's box, so the page can still be growing
+      // or shifting its scroll for a few frames (the Product Owner's review of ba9a18c, item 6: the hosted WebKit run of 12 November 2026 read a place 147px from the one the page came back to).
+      // **The click must not be what moves the page.** Playwright scrolls an element into view before it clicks it, once the element has stopped moving: with the panel still arriving, that scroll
+      // came after the place was read, in about one run in twelve of Chromium on the production build (every frame, scroll and focus of the page recorded on 12 November 2026: read at 596px, left
+      // from at 449px or at 242px, given back with the row in view 147px or 148px from the place read). The page gave back the place it was left from; the test had read another. With the panel at
+      // rest that scroll moves nothing (40 runs: the page at 596px through the call and through the click).
+      await animationsDone(panel);
       await link.scrollIntoViewIfNeeded();
-      // The place is read where the page rests: opening the panel narrows the queue's box, and the page can still be growing or shifting its scroll for a few frames (the Product Owner's review of
-      // ba9a18c, item 6: the hosted WebKit run of 12 November 2026 read a place 147px from the one the page came back to).
       await scrollSettled(page);
       const before = await page.evaluate(() => window.scrollY);
       await link.click();
