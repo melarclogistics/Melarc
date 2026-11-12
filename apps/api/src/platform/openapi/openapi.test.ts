@@ -217,6 +217,11 @@ describe('the generated description of the real application', () => {
       ['/pickup-stops/{id}/handshake/resolve', ['post'], ['resolveHandshake']],
       // S1.29: the vendor's dispute of a collection.
       ['/pickup-stops/{id}/dispute', ['post'], ['disputeCollection']],
+      // D-A3 (OB-S1-70): the Ops work lists of the collection and the failure.
+      ['/collection-disputes', ['get'], ['listCollectionDisputes']],
+      ['/handshakes-for-ops', ['get'], ['listHandshakesForOps']],
+      ['/collection-shortfalls', ['get'], ['listCollectionShortfalls']],
+      ['/pickup-failures', ['get'], ['listPickupFailures']],
       // S1.15: the confirmation of a pending request, and the decision on a booking that was confirmed past the cutoff.
       ['/pickup-requests/{id}/confirm', ['post'], ['confirmPickupRequest']],
       ['/pickup-requests/{id}/cutoff-exception', ['post'], ['resolveCutoffException']],
