@@ -172,6 +172,7 @@ A reason therefore drives validation. Selecting *damaged in transit* may make a 
 | `requires_escalation`| bool| no| Routes to the senior queue|
 | `active`| bool| no| Deactivation never deletes; history stays interpretable|
 | `permitted_operations`| text[]| **yes**| **Identity domains only** (Product decision, 8 October 2026): the closed set of `operationId`s the reason may be used with, enforced by the reason validator. Null for the workflow domains above. Seeded and never editable through the reason-management operation. **For these domains that operation changes only `label` and `active`, and only for a Platform Admin who holds `settings.reason.manage` explicitly**; Senior Ops cannot create, alter or globally deactivate them, and each change is audited (`settings.reason.catalog_changed`, enhanced)|
+| `failure_category`| enum| **yes**| **`PICKUP_FAILURE` only** (D-A4, the Product Owner, 11 November 2026; migration `0083`): the one of the four fixed failure categories (`VENDOR_UNAVAILABLE` · `ACCESS_DENIED` · `PARCEL_NOT_READY` · `REFUSED_COLLECTION`, §21.5) that the reason belongs to, so that the rules attached to a category (the door wait, the escalation-only rule of a refused collection) cannot be stepped around by pairing a reason with another one. Mandatory for that domain and null for every other (a check). `reportPickupFailure` refuses a reason reported under another category, and the stop's guard holds the same for every writer|
 
 Any workflow that hardcodes "this reason needs a photo" contradicts §35.9.2. The requirement is read from the reason. **The same holds for checkpoint validity**: a workflow that hardcodes *this reason belongs at the door* contradicts §6.12's invariant, which puts the mapping in the catalogue.
 
@@ -196,18 +197,18 @@ Any workflow that hardcodes "this reason needs a photo" contradicts §35.9.2. Th
 | `GENUINE_EMERGENCY`| `EXTERNAL`| **yes**|
 | `OTHER_EXTERNAL_REASON`| `EXTERNAL`| **yes**|
 
-**The `PICKUP_FAILURE` contents are seeded**, eight codes, two under each of the four fixed categories. The screens group them by category; the table does not bind a reason to a category and the API does not check the pairing. Every failure needs a note, and a requirement is read from the reason (§35.9.2):
+**The `PICKUP_FAILURE` contents are seeded**, eight codes, two under each of the four fixed categories, and **each reason belongs to one category, which the catalogue holds** (`failure_category`; D-A4, the Product Owner, 11 November 2026, closing `OB-S1-73`; migration `0083`). The server refuses a reason reported under another category (`VALIDATION_FAILED`, rule `category`) and the stop's guard holds it for every writer, so the door wait of `VENDOR_UNAVAILABLE` and the escalation-only rule of `REFUSED_COLLECTION` cannot be stepped around by pairing. **The pairing below is the provisional reading of this table** (two under each category, in the order of the categories of [pickup-failure.md](../features/pickup/pickup-failure.md) §5.1, as the codes are named: this document did not state it before the decision); the Product Owner confirms or changes it. Every failure needs a note, and a requirement is read from the reason (§35.9.2):
 
-| `code`| `attribution`| `requires_note`| `requires_contact_attempt`| `requires_photo`|
-|---|---|---|---|---|
-| `VENDOR_NOT_AT_LOCATION`| `CUSTOMER`| **yes**| **yes**| no|
-| `VENDOR_UNREACHABLE_BY_PHONE`| `CUSTOMER`| **yes**| **yes**| no|
-| `ENTRY_REFUSED_BY_SECURITY`| `EXTERNAL`| **yes**| no| **yes**|
-| `LOCATION_CLOSED`| `EXTERNAL`| **yes**| no| **yes**|
-| `PARCELS_NOT_PACKED`| `CUSTOMER`| **yes**| no| no|
-| `VENDOR_ASKED_TO_COME_BACK_LATER`| `CUSTOMER`| **yes**| no| no|
-| `VENDOR_REFUSED_HANDOVER`| `CUSTOMER`| **yes**| no| no|
-| `PARCEL_NOT_ACCEPTABLE`| `CUSTOMER`| **yes**| no| no|
+| `code`| `attribution`| `requires_note`| `requires_contact_attempt`| `requires_photo`| `failure_category`|
+|---|---|---|---|---|---|
+| `VENDOR_NOT_AT_LOCATION`| `CUSTOMER`| **yes**| **yes**| no| `VENDOR_UNAVAILABLE`|
+| `VENDOR_UNREACHABLE_BY_PHONE`| `CUSTOMER`| **yes**| **yes**| no| `VENDOR_UNAVAILABLE`|
+| `ENTRY_REFUSED_BY_SECURITY`| `EXTERNAL`| **yes**| no| **yes**| `ACCESS_DENIED`|
+| `LOCATION_CLOSED`| `EXTERNAL`| **yes**| no| **yes**| `ACCESS_DENIED`|
+| `PARCELS_NOT_PACKED`| `CUSTOMER`| **yes**| no| no| `PARCEL_NOT_READY`|
+| `VENDOR_ASKED_TO_COME_BACK_LATER`| `CUSTOMER`| **yes**| no| no| `PARCEL_NOT_READY`|
+| `VENDOR_REFUSED_HANDOVER`| `CUSTOMER`| **yes**| no| no| `REFUSED_COLLECTION`|
+| `PARCEL_NOT_ACCEPTABLE`| `CUSTOMER`| **yes**| no| no| `REFUSED_COLLECTION`|
 
 **The `PICKUP_SHORT_COUNT` contents are seeded**, five codes, the variance reason of a short collection (the office is flagged when one is recorded):
 

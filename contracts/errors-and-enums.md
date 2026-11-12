@@ -262,7 +262,7 @@ Added 24 August by `MSC-DEC-251`. **Two codes**, both guarding the same thing: t
 
 | Reference shape| Operations|
 |---|---|
-| An `evidence_ids` **collection**, where any referenced record is not `STORED`| every operation accepting `evidence_ids` — currently `adjudicateDiscrepancy` (HIGH-11 audit remediation, 13 September 2026) and `recordCollection` (S1.26: no evidence record can be `STORED` until the evidence task is built, so any reference answers it)|
+| An `evidence_ids` **collection**, where any referenced record is not `STORED`| every operation accepting `evidence_ids` — currently `adjudicateDiscrepancy` (HIGH-11 audit remediation, 13 September 2026), `recordCollection` (S1.26: no photo of a count is built, so any reference answers it) and `reportPickupFailure` (S1.28: the photo of a failure; a record that is not `STORED`, not the rider's own, not about this stop or already attached is refused, one answer)|
 | A **single targeted** Evidence resource that is not `STORED`| `createEvidenceRetrievalAuthorization`|
 | A **single referenced** Evidence record named in a request body, that is not `STORED`| `approveAgent` — the agent's identity photo|
 
