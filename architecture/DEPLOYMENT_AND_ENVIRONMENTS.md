@@ -372,6 +372,11 @@ This is what the B0.2 API skeleton (`apps/api`), its B0.4 database foundation an
 | `ATTESTATION_VERIFIER_URL`| no| none| an endpoint as `DELIVERY_EMAIL_ENDPOINT`; required with `service`, absent with `substitute`|
 | `ATTESTATION_VERIFIER_TIMEOUT_MS`| no| none| integer 100–60000; required with `service`, absent with `substitute`|
 | `ATTESTATION_VERIFIER_CALLER_SECRET`| no| none| a 32-byte key as 43 base64url characters; required with `service` when `APP_ENV` is `production` or the URL is not on a loopback host (SECURITY_DESIGN.md §15.2.3; the verifier itself requires it in production on any host), absent with `substitute`|
+| `EVIDENCE_STORE`| no| `in-process`| `in-process` or `r2` (S1.11): the object store the evidence records point at; `in-process` (a stand-in that keeps objects in the process's memory and reaches no bucket) is refused when `APP_ENV` is `production`|
+| `EVIDENCE_R2_ACCOUNT_ID`| no| none| a Cloudflare account identifier (letters, digits, dots and dashes); required with `r2`, absent with `in-process`|
+| `EVIDENCE_R2_BUCKET`| no| none| an R2 bucket name (3 to 63 lower-case letters, digits, dots and dashes); required with `r2`, absent with `in-process`|
+| `EVIDENCE_R2_ACCESS_KEY_ID`| no| none| the access key id of an R2 API token restricted to the bucket (8 to 128 letters and digits); required with `r2`, absent with `in-process`|
+| `EVIDENCE_R2_SECRET_ACCESS_KEY`| no| none| the secret access key of that token (16 to 128 letters, digits and `+ / = _ -`); required with `r2`, absent with `in-process`; never printed, logged or put in an event, and a worker's environment may not carry it|
 | `METRICS_HOST`| no| `127.0.0.1`| letters, digits, `.`, `_`, `:` and `-`; where the private metrics endpoint listens ("Metrics" below)|
 | `METRICS_PORT`| no| none| 1-65535, not `HTTP_PORT`; absent: the private metrics endpoint is off|
 | `METRICS_SECRET`| no| none| a 32-byte key as 43 base64url characters, sent by the scraper as `Authorization: Bearer`; required when `METRICS_HOST` is not a loopback address, absent without `METRICS_PORT`|
@@ -479,6 +484,7 @@ Memory is the slots times the memory of a hash, as the budget assumes. With the 
 | `NOTIFICATION_SMS_ADAPTER=provider` (Hubtel, for the notification lane's text messages; the worker only)| **allowed only inside the controlled local window of §4.1** (the Product Owner's decision of 29 October 2026): the worker refuses to start without the window's four settings and Hubtel's credentials; CI never selects it| only inside the controlled window of §4.1| required, with the window's settings absent|
 | `NOTIFICATION_SMS_ADAPTER=capture`| allowed| allowed, for controlled fixture acceptance| **refused**|
 | `ATTESTATION_VERIFIER=substitute`| allowed| allowed, for controlled fixture acceptance| **refused**|
+| `EVIDENCE_STORE=in-process` (the stand-in that reaches no bucket)| allowed| allowed, for controlled fixture acceptance| **refused**|
 | `RATE_LIMITER=memory`| allowed| **refused**| **refused**|
 | a real provider in the worker without the approval reference and the recipient allow-list of §4.1 (and, for the notification lane, the message cap and the window's end)| refused for the credential channels (above); for the notification lane **refused** without all four| **refused**| the window's settings are **refused**|
 | the API's connection, the key of another purpose or the verifier's caller secret in the worker's environment| allowed (one settings file)| **refused**| **refused**|

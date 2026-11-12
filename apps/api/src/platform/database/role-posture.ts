@@ -159,6 +159,10 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // And the one read of a hub's door wait for the rider's failure key (migration 0073): the stop's guard asks it when a vendor-unavailable failure is reported, and the
     // application asks it to say when the report is allowed. It answers that key alone and reads the one setting; a hub that has none is a refusal, and no wait is invented.
     'melarc.rider_door_wait_minutes',
+    // And the one derivation of the scope of the evidence of a stop (migration 0080, S1.11): the hub and the vendor organisation of a record about a pickup stop, asked by the
+    // evidence guard when the rider that reports the stop's failure declares it. It answers that rider under that key, for a stop it has arrived at on a run in progress that is
+    // assigned to it, and no other caller; the scope is derived and never given.
+    'melarc.evidence_pickup_stop_scope',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

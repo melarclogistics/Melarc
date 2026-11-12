@@ -52,6 +52,7 @@ const PORT_NAMES = [
   'DeliveryProvider',
   'TextMessageSender',
   'AttestationVerifier',
+  'EvidenceStore',
   'Metrics',
 ] as const;
 
@@ -91,6 +92,8 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/delivery/postgres.delivery-queue.adapter.ts',
   'platform/delivery/worker/allow-listed.delivery-provider.adapter.ts',
   'platform/delivery/worker/capture.delivery-provider.adapter.ts',
+  'platform/evidence/in-process.evidence-store.adapter.ts',
+  'platform/evidence/r2.evidence-store.adapter.ts',
   'platform/idempotency/postgres.idempotency-store.adapter.ts',
   'platform/limiter/bounded.hash-admission.adapter.ts',
   'platform/limiter/in-memory.rate-limiter.adapter.ts',
@@ -123,6 +126,8 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/delivery/postgres.delivery-queue.adapter.ts', 'DeliveryQueue'],
   ['platform/delivery/worker/allow-listed.delivery-provider.adapter.ts', 'DeliveryProvider'],
   ['platform/delivery/worker/capture.delivery-provider.adapter.ts', 'DeliveryProvider'],
+  ['platform/evidence/in-process.evidence-store.adapter.ts', 'EvidenceStore'],
+  ['platform/evidence/r2.evidence-store.adapter.ts', 'EvidenceStore'],
   ['platform/idempotency/postgres.idempotency-store.adapter.ts', 'IdempotencyStore'],
   ['platform/limiter/bounded.hash-admission.adapter.ts', 'HashAdmission'],
   ['platform/limiter/in-memory.rate-limiter.adapter.ts', 'RateLimiter'],
@@ -188,6 +193,9 @@ const LOCAL_OPERATIONS: readonly string[] = [
   'TotpVerifier.verify',
   'Metrics.increment',
   'Metrics.observe',
+  // S1.11: the capabilities of the evidence store are pure signing (Signature Version 4 over node:crypto), with no I/O and no lock; `inspect` calls the store and is not here.
+  'EvidenceStore.presignUpload',
+  'EvidenceStore.presignRetrieval',
 ];
 
 const sourceRoot = import.meta.dirname;

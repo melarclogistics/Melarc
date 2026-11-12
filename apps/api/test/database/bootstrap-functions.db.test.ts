@@ -281,6 +281,8 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.dispute_collection',
       // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
       'melarc.rider_door_wait_minutes',
+      // S1.11 (migration 0080): the derivation of the scope of the evidence of a stop.
+      'melarc.evidence_pickup_stop_scope',
     ]);
   });
 

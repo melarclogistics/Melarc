@@ -33,6 +33,12 @@ const REAL_ADAPTERS = {
   ATTESTATION_VERIFIER_URL: 'https://verifier.internal.example',
   ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
   ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+  // The evidence store (S1.11): a real one, so that production's other refusals are judged alone. The values are made up for the test.
+  EVIDENCE_STORE: 'r2',
+  EVIDENCE_R2_ACCOUNT_ID: 'testaccount',
+  EVIDENCE_R2_BUCKET: 'test-evidence',
+  EVIDENCE_R2_ACCESS_KEY_ID: 'TESTONLYACCESSKEY',
+  EVIDENCE_R2_SECRET_ACCESS_KEY: 'TEST-ONLY-NOT-A-CREDENTIAL-0000000000',
 };
 
 function problemsFor(env: Record<string, string | undefined>): readonly ConfigProblem[] {
@@ -65,6 +71,27 @@ describe('AC-SLICE-000-55: the API refuses to start in production with what is o
         ATTESTATION_VERIFIER_CALLER_SECRET: undefined,
       },
       ['ATTESTATION_VERIFIER'],
+    ],
+    [
+      'the in-process stand-in of the evidence store is selected',
+      {
+        EVIDENCE_STORE: 'in-process',
+        EVIDENCE_R2_ACCOUNT_ID: undefined,
+        EVIDENCE_R2_BUCKET: undefined,
+        EVIDENCE_R2_ACCESS_KEY_ID: undefined,
+        EVIDENCE_R2_SECRET_ACCESS_KEY: undefined,
+      },
+      ['EVIDENCE_STORE'],
+    ],
+    [
+      'the R2 evidence store is selected without its bucket',
+      { EVIDENCE_R2_BUCKET: undefined },
+      ['EVIDENCE_R2_BUCKET'],
+    ],
+    [
+      'the R2 evidence store is selected without its secret',
+      { EVIDENCE_R2_SECRET_ACCESS_KEY: undefined },
+      ['EVIDENCE_R2_SECRET_ACCESS_KEY'],
     ],
     [
       'the verifier service’s endpoint is missing',

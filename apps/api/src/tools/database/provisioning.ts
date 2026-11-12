@@ -4,6 +4,7 @@ import { API_RUNTIME_ROLE } from '../../platform/config/load-config.js';
 import {
   PROVISIONING_ROLE,
   WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_EVIDENCE_VALIDATION_ROLE,
   WORKER_NOTIFICATION_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../platform/database/technical-roles.js';
@@ -192,6 +193,7 @@ async function provisionRoleStatements(client: SqlClient, settings: LocalPostgre
     },
     { name: WORKER_CREDENTIAL_DELIVERY_ROLE, login: 'NOLOGIN', password: undefined },
     { name: WORKER_NOTIFICATION_ROLE, login: 'NOLOGIN', password: undefined },
+    { name: WORKER_EVIDENCE_VALIDATION_ROLE, login: 'NOLOGIN', password: undefined },
     {
       name: PROVISIONING_ROLE,
       login: 'LOGIN',
@@ -227,6 +229,7 @@ async function provisionRoleStatements(client: SqlClient, settings: LocalPostgre
         WORKER_RUNTIME_ROLE,
         WORKER_CREDENTIAL_DELIVERY_ROLE,
         WORKER_NOTIFICATION_ROLE,
+        WORKER_EVIDENCE_VALIDATION_ROLE,
         PROVISIONING_ROLE,
         OWNER_ROLE,
       ],
@@ -236,10 +239,14 @@ async function provisionRoleStatements(client: SqlClient, settings: LocalPostgre
     await runFormatted(client, 'REVOKE %I FROM %I', String(row.granted), String(row.member));
   }
 
-  // The only memberships a login is given: the delivery worker's two capabilities (the credential delivery and, since S1.12a, the
-  // notification lane). The login inherits the grants (so that its transactions can use them) and cannot become either role (so that
-  // nothing it runs can SET ROLE to one or hand it on).
-  for (const capability of [WORKER_CREDENTIAL_DELIVERY_ROLE, WORKER_NOTIFICATION_ROLE]) {
+  // The only memberships a login is given: the delivery worker's capabilities (the credential delivery, the notification lane since S1.12a and the
+  // evidence validation lane since S1.11). The login inherits the grants (so that its transactions can use them) and cannot become any of the roles
+  // (so that nothing it runs can SET ROLE to one or hand it on).
+  for (const capability of [
+    WORKER_CREDENTIAL_DELIVERY_ROLE,
+    WORKER_NOTIFICATION_ROLE,
+    WORKER_EVIDENCE_VALIDATION_ROLE,
+  ]) {
     await runFormatted(
       client,
       'GRANT %I TO %I WITH INHERIT TRUE, SET FALSE',

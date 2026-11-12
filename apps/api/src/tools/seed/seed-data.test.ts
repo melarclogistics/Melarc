@@ -440,21 +440,27 @@ describe('the settings (settings.md section 7; Family Z)', () => {
   ]);
   const inScope = (row: { readonly section: string; readonly key: string }): boolean =>
     IN_SCOPE.has(row.section) || HANDSHAKE_KEYS.has(row.key);
+  // The two evidence limits are development values (the Product Owner, 29 October 2026, D-13; plan OB-S1-05): `PROVISIONAL` in the document, which says they are not citable as
+  // product policy, and seeded all the same, so that a development and a test database have a ceiling and a set of types to enforce. The launch values stay the owner's.
+  const DEVELOPMENT_KEYS = new Set([
+    'evidence_upload_max_bytes',
+    'evidence_upload_allowed_mime_types',
+  ]);
+  const seededStatus = (row: { readonly status: string; readonly key: string }): boolean =>
+    row.status === 'CONFIRMED' || (row.status === 'PROVISIONAL' && DEVELOPMENT_KEYS.has(row.key));
 
   // Break caught: a confirmed company-wide or platform value left out (the setting would be missing at run time), or a value that
   // is not confirmed (open, retired, or hub-scoped) seeded as if it were.
   it('seeds every confirmed company-wide and platform key, and nothing else', () => {
-    const confirmed = doc
-      .filter((row) => inScope(row) && row.status === 'CONFIRMED')
-      .map((row) => row.key);
+    const confirmed = doc.filter((row) => inScope(row) && seededStatus(row)).map((row) => row.key);
     expect([...seeded.keys()].toSorted()).toEqual(confirmed.toSorted());
-    for (const row of doc.filter((each) => each.status !== 'CONFIRMED')) {
+    for (const row of doc.filter((each) => !seededStatus(each))) {
       expect(seeded.has(row.key), `${row.key} is ${row.status}`).toBe(false);
     }
   });
 
   it('seeds the document’s scope: section 7.1 is company-wide, 7.5, 7.7 and 7.8 platform', () => {
-    for (const row of doc.filter((each) => inScope(each) && each.status === 'CONFIRMED')) {
+    for (const row of doc.filter((each) => inScope(each) && seededStatus(each))) {
       expect(seeded.get(row.key)?.scope, row.key).toBe(
         row.section === '7.1' ? 'COMPANY' : 'PLATFORM',
       );
@@ -479,7 +485,7 @@ describe('the settings (settings.md section 7; Family Z)', () => {
           : value !== null && typeof value === 'object'
             ? Object.values(value).flatMap(flat)
             : [];
-    for (const row of doc.filter((each) => inScope(each) && each.status === 'CONFIRMED')) {
+    for (const row of doc.filter((each) => inScope(each) && seededStatus(each))) {
       const setting = seeded.get(row.key);
       if (setting === undefined) continue;
       // Words in a value cell that name no number the setting carries: the zone of an hours window, the three categories.

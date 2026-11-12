@@ -176,6 +176,8 @@ const FORBIDDEN_WHEN_DEPLOYED: readonly string[] = [
     keyEnvName(purpose, 'MATERIAL'),
   ),
   'ATTESTATION_VERIFIER_CALLER_SECRET',
+  // The evidence store's credential is the API's alone (S1.11): the evidence validation lane of the worker reads and writes the database and never the bucket.
+  'EVIDENCE_R2_SECRET_ACCESS_KEY',
   // The API's private metrics endpoint has a key of its own, and the worker has `DELIVERY_WORKER_METRICS_SECRET`: it holds nothing of the API's.
   'METRICS_SECRET',
 ];

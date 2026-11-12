@@ -473,6 +473,7 @@ describe('the delivery worker’s configuration (S0.18)', () => {
       keyEnvName('limiter_digest', 'MATERIAL'),
       keyEnvName('password_pepper', 'MATERIAL'),
       'ATTESTATION_VERIFIER_CALLER_SECRET',
+      'EVIDENCE_R2_SECRET_ACCESS_KEY',
       'METRICS_SECRET',
     ])('refuses, in staging, an environment that carries %s', (key) => {
       const env = deployed('staging', providerChannels(providerWindow()));

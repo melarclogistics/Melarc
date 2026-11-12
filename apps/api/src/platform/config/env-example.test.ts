@@ -80,6 +80,7 @@ const API_FORMS: Readonly<Record<string, Form>> = {
   DELIVERY_EMAIL_ADAPTER: /^(capture|provider)$/,
   DELIVERY_SMS_ADAPTER: /^(capture|provider)$/,
   ATTESTATION_VERIFIER: /^(substitute|service)$/,
+  EVIDENCE_STORE: /^(in-process|r2)$/,
   // The delivery worker's own settings (S0.18). Its other three are commented examples, which have no value to judge.
   DELIVERY_WORKER_CONCURRENCY: /^\d{1,2}$/,
   DELIVERY_WORKER_POLL_INTERVAL_MS: /^\d{1,5}$/,

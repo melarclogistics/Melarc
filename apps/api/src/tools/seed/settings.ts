@@ -244,6 +244,22 @@ export const SETTINGS: readonly SettingSeed[] = [
     'minutes',
     'The lifetime of a single-object evidence retrieval authorization.',
   ),
+  // Two development values (S1.11; the Product Owner's decision of 29 October 2026, D-13): `PROVISIONAL` in settings.md and seeded, so that a development and a test database
+  // have a ceiling and a set of types to enforce. The launch values stay the owner's. Migration 0080 gives the same rows to a database seeded before them.
+  platform(
+    'evidence_upload_max_bytes',
+    'integer',
+    10_485_760,
+    'bytes',
+    'The largest single evidence upload accepted (10 MB, read as 10 MiB): a development value decided by the Product Owner on 29 October 2026; the launch value stays the owner’s.',
+  ),
+  platform(
+    'evidence_upload_allowed_mime_types',
+    'list',
+    ['image/jpeg', 'image/png', 'application/pdf'],
+    'MIME types',
+    'The types of evidence accepted, each checked against the actual file signature: JPEG, PNG or PDF, a development value decided by the Product Owner on 29 October 2026; the launch value stays the owner’s.',
+  ),
   platform(
     'accounting_export_retrieval_authorization_ttl_minutes',
     'integer',

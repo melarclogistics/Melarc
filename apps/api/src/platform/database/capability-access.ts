@@ -259,6 +259,22 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     returns:
       'A message is made in memory from the aggregate and its template and handed to the provider; the number and the text are written nowhere, and the table keeps a masked hint and a count digest',
   },
+  evidence_validation: {
+    identity: 'worker',
+    opener: 'The evidence validation lane of the delivery worker process',
+    openedUnder: ['platform/evidence/'],
+    tables: [
+      ...on(
+        ['Evidence'],
+        ['SELECT', 'UPDATE'],
+        'SELECT of the id, the state and the end of the upload window, of the records still PENDING_UPLOAD only; UPDATE of the state, to EXPIRED, once the window has passed (S1.11, migration 0080): an abandoned capture is marked and kept, never deleted, and nothing else of a record is written',
+      ),
+    ],
+    lookups:
+      'Finds the abandoned captures in its own table by state and the end of the upload window, in bounded batches, and never reads another table',
+    returns:
+      'Marks a record expired and returns its identifier to nothing outside the process; no storage reference, no signed address and no byte of an object is read or written',
+  },
   bootstrap: {
     identity: 'provisioning',
     opener: 'The bootstrap seed and the bootstrap-resume command',

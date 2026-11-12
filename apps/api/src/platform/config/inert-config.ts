@@ -66,6 +66,7 @@ export function inertConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         sms: Object.freeze({ kind: 'capture' }),
       }),
       attestationVerifier: Object.freeze({ kind: 'substitute' }),
+      evidenceStore: Object.freeze({ kind: 'in-process' }),
     }),
     ...overrides,
   });

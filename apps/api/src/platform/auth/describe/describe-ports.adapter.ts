@@ -8,6 +8,7 @@ import type {
   DeliveryOutcome,
   DeliveryProvider,
   DeliveryQueue,
+  EvidenceStore,
   HashAdmission,
   HashSlot,
   HashVerdict,
@@ -267,6 +268,18 @@ export class DescribeAttestationVerifier extends DescribeAdapter implements Atte
   }
 }
 
+export class DescribeEvidenceStore extends DescribeAdapter implements EvidenceStore {
+  presignUpload(): never {
+    return refuse('EvidenceStore', 'presignUpload');
+  }
+  presignRetrieval(): never {
+    return refuse('EvidenceStore', 'presignRetrieval');
+  }
+  inspect(): Promise<never> {
+    return refuse('EvidenceStore', 'inspect');
+  }
+}
+
 export class DescribeMetrics extends DescribeAdapter implements Metrics {
   increment(): void {
     refuse('Metrics', 'increment');
@@ -294,5 +307,6 @@ export const DESCRIBE_PORT_BINDINGS: PortBindings = {
   deliveryProvider: { useClass: DescribeDeliveryProvider },
   textMessageSender: { useClass: DescribeTextMessageSender },
   attestationVerifier: { useClass: DescribeAttestationVerifier },
+  evidenceStore: { useClass: DescribeEvidenceStore },
   metrics: { useClass: DescribeMetrics },
 };

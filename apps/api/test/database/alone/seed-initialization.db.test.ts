@@ -706,6 +706,8 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.dispute_collection',
       // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
       'melarc.rider_door_wait_minutes',
+      // S1.11 (migration 0080): the derivation of the scope of the evidence of a stop.
+      'melarc.evidence_pickup_stop_scope',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

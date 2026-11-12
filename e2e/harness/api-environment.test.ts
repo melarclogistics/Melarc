@@ -37,6 +37,7 @@ describe('apiEnvironment', () => {
       DELIVERY_EMAIL_ADAPTER: 'capture',
       DELIVERY_SMS_ADAPTER: 'capture',
       ATTESTATION_VERIFIER: 'substitute',
+      EVIDENCE_STORE: 'in-process',
     });
   });
 
@@ -152,6 +153,7 @@ describe('apiEnvironment', () => {
       'DATABASE_URL',
       'DELIVERY_EMAIL_ADAPTER',
       'DELIVERY_SMS_ADAPTER',
+      'EVIDENCE_STORE',
       'KEY_CUSTODY',
       'MELARC_E2E_CAPTURE_FILE',
       'NODE_ENV',

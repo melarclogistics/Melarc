@@ -1,6 +1,8 @@
 import { Logger, Module, type DynamicModule } from '@nestjs/common';
 
 import { PostgresAuditWriter } from './platform/audit/postgres.audit-writer.adapter.js';
+import { InProcessEvidenceStore } from './platform/evidence/in-process.evidence-store.adapter.js';
+import { fetchTransport, R2EvidenceStore } from './platform/evidence/r2.evidence-store.adapter.js';
 import { ServiceAttestationVerifier } from './platform/auth/attestation/service.attestation-verifier.adapter.js';
 import { SubstituteAttestationVerifier } from './platform/auth/attestation/substitute.attestation-verifier.adapter.js';
 import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
@@ -90,6 +92,7 @@ export interface AppModuleOptions extends PlatformModuleOptions {
  */
 function runtimePortBindings(config: AppConfig): PortBindings {
   const verifier = config.adapters.attestationVerifier;
+  const evidence = config.adapters.evidenceStore;
   const bindings: PortBindings = {
     clock: { useClass: SystemClock },
     tokenService: { useClass: Sha256TokenService },
@@ -124,6 +127,21 @@ function runtimePortBindings(config: AppConfig): PortBindings {
                 metrics,
               }),
             inject: [METRICS],
+          },
+    // The object store of the evidence records (S1.11): the in-process stand-in that a local run and CI select (production refuses it, `adapter-refusals.ts`), or Cloudflare R2, whose
+    // credential is the `Secret` of the configuration. No environment selects R2 until the owner provides a bucket; nothing here calls the network until one does.
+    evidenceStore:
+      evidence.kind === 'in-process'
+        ? { useFactory: () => new InProcessEvidenceStore() }
+        : {
+            useFactory: () =>
+              new R2EvidenceStore({
+                accountId: evidence.accountId,
+                bucket: evidence.bucket,
+                accessKeyId: evidence.accessKeyId,
+                secretAccessKey: evidence.secretAccessKey,
+                transport: fetchTransport,
+              }),
           },
     ...(config.database === undefined
       ? {}

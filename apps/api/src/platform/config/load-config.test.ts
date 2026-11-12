@@ -35,6 +35,12 @@ const REAL_ADAPTERS = {
   ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
   // The service is on another host, so its caller authenticates (SECURITY_DESIGN.md section 15.2.3).
   ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+  // The evidence store (S1.11): a real one, so that production's other refusals are judged alone. The values are made up for the test.
+  EVIDENCE_STORE: 'r2',
+  EVIDENCE_R2_ACCOUNT_ID: 'testaccount',
+  EVIDENCE_R2_BUCKET: 'test-evidence',
+  EVIDENCE_R2_ACCESS_KEY_ID: 'TESTONLYACCESSKEY',
+  EVIDENCE_R2_SECRET_ACCESS_KEY: 'TEST-ONLY-NOT-A-CREDENTIAL-0000000000',
 };
 
 describe('loadConfig: accepted environments', () => {

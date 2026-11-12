@@ -50,6 +50,10 @@ export function adapterRefusals(config: AppConfig): ConfigProblem[] {
   if (production && config.adapters.attestationVerifier.kind === 'substitute') {
     refuse('ATTESTATION_VERIFIER', EXPECTED.ATTESTATION_VERIFIER);
   }
+  // The in-process stand-in of the evidence store reaches no bucket and keeps objects in memory: production refuses it (S1.11).
+  if (production && config.adapters.evidenceStore.kind === 'in-process') {
+    refuse('EVIDENCE_STORE', EXPECTED.EVIDENCE_STORE);
+  }
   if (deployed && config.adapters.limiter === 'memory')
     refuse('RATE_LIMITER', EXPECTED.RATE_LIMITER);
   // A deployed environment writes credential hashes at no less than the floor (a local run may use a cheaper profile in an explicit

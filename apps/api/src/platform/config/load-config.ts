@@ -108,10 +108,26 @@ export type VerifierConfig =
       readonly callerSecret?: Secret;
     };
 
+/**
+ * The object store of the evidence records (S1.11). The stand-in keeps objects in the process's memory and reaches nothing; R2 is the owner's choice of 29 October 2026 and needs
+ * the account, the bucket and an API token restricted to it, whose secret is a `Secret` (it prints as `[REDACTED]`). No credential exists yet: no environment selects `r2` until the
+ * owner provides a bucket.
+ */
+export type EvidenceStoreConfig =
+  | { readonly kind: 'in-process' }
+  | {
+      readonly kind: 'r2';
+      readonly accountId: string;
+      readonly bucket: string;
+      readonly accessKeyId: string;
+      readonly secretAccessKey: Secret;
+    };
+
 export interface AdaptersConfig {
   readonly limiter: 'postgres' | 'memory';
   readonly delivery: { readonly email: DeliveryAdapterConfig; readonly sms: DeliveryAdapterConfig };
   readonly attestationVerifier: VerifierConfig;
+  readonly evidenceStore: EvidenceStoreConfig;
 }
 
 /**
@@ -343,6 +359,45 @@ function adapterProblems(
     if (timeout !== undefined) invalid('ATTESTATION_VERIFIER_TIMEOUT_MS');
     if (secret !== undefined) invalid('ATTESTATION_VERIFIER_CALLER_SECRET');
   }
+
+  const r2 = [
+    ['EVIDENCE_R2_ACCOUNT_ID', env.EVIDENCE_R2_ACCOUNT_ID],
+    ['EVIDENCE_R2_BUCKET', env.EVIDENCE_R2_BUCKET],
+    ['EVIDENCE_R2_ACCESS_KEY_ID', env.EVIDENCE_R2_ACCESS_KEY_ID],
+    ['EVIDENCE_R2_SECRET_ACCESS_KEY', env.EVIDENCE_R2_SECRET_ACCESS_KEY],
+  ] as const;
+  for (const [key, value] of r2) {
+    if (env.EVIDENCE_STORE === 'r2') {
+      if (value === undefined) missing(key);
+    } else if (value !== undefined) {
+      invalid(key);
+    }
+  }
+}
+
+function evidenceStoreFrom(values: ParsedEnv): EvidenceStoreConfig {
+  const {
+    EVIDENCE_R2_ACCOUNT_ID: accountId,
+    EVIDENCE_R2_BUCKET: bucket,
+    EVIDENCE_R2_ACCESS_KEY_ID: accessKeyId,
+    EVIDENCE_R2_SECRET_ACCESS_KEY: secretAccessKey,
+  } = values;
+  if (
+    values.EVIDENCE_STORE !== 'r2' ||
+    accountId === undefined ||
+    bucket === undefined ||
+    accessKeyId === undefined ||
+    secretAccessKey === undefined
+  ) {
+    return Object.freeze({ kind: 'in-process' });
+  }
+  return Object.freeze({
+    kind: 'r2',
+    accountId,
+    bucket,
+    accessKeyId,
+    secretAccessKey: new Secret(secretAccessKey),
+  });
 }
 
 /** One problem per failing key. Key names and static text only, so a rejected secret is never echoed. */
@@ -495,6 +550,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
         ),
       }),
       attestationVerifier: verifierFrom(values),
+      evidenceStore: evidenceStoreFrom(values),
     }),
     ...metricsFrom(values),
     database: Object.freeze({

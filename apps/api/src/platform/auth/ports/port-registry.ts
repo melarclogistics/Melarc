@@ -16,6 +16,11 @@ import {
   type DeliveryQueue,
 } from './delivery-queue.port.js';
 import {
+  EVIDENCE_STORE,
+  EVIDENCE_STORE_DESCRIPTOR,
+  type EvidenceStore,
+} from './evidence-store.port.js';
+import {
   HASH_ADMISSION,
   HASH_ADMISSION_DESCRIPTOR,
   type HashAdmission,
@@ -79,6 +84,7 @@ export interface PortTypes {
   DeliveryProvider: DeliveryProvider;
   TextMessageSender: TextMessageSender;
   AttestationVerifier: AttestationVerifier;
+  EvidenceStore: EvidenceStore;
   Metrics: Metrics;
 }
 
@@ -121,5 +127,6 @@ export const PORTS: readonly PortRegistryEntry[] = [
     token: ATTESTATION_VERIFIER,
     descriptor: ATTESTATION_VERIFIER_DESCRIPTOR,
   },
+  { name: 'EvidenceStore', token: EVIDENCE_STORE, descriptor: EVIDENCE_STORE_DESCRIPTOR },
   { name: 'Metrics', token: METRICS, descriptor: METRICS_DESCRIPTOR },
 ];
