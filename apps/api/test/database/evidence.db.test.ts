@@ -406,7 +406,7 @@ describe('completion, expiry and finality', () => {
         routes.admin.query(`update evidence set ${change} where id = $1`, [id]),
       ).rejects.toMatchObject({
         code: '23514',
-        message: expect.stringContaining('keeps its owner'),
+        message: expect.stringContaining('keeps its owner') as unknown,
       });
       await expect(
         routes.admin.query(
@@ -415,7 +415,7 @@ describe('completion, expiry and finality', () => {
         ),
       ).rejects.toMatchObject({
         code: '23514',
-        message: expect.stringContaining('keeps its owner'),
+        message: expect.stringContaining('keeps its owner') as unknown,
       });
     }
     expect(

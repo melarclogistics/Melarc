@@ -318,7 +318,10 @@ async function build(): Promise<World> {
   // 7. A short count: the office is flagged while the run is in progress.
   await count(riderA, at(7), 2);
   // 8 to 11. Four failures, and what the office did with each; the first with two photos of the door and the third with one.
-  const photosOfFirst = [await photoOf(routes, riderA, at(8)), await photoOf(routes, riderA, at(8))];
+  const photosOfFirst = [
+    await photoOf(routes, riderA, at(8)),
+    await photoOf(routes, riderA, at(8)),
+  ];
   const photoOfThird = await photoOf(routes, riderA, at(10));
   await failStop(riderA, at(8), {
     evidence_ids: photosOfFirst.map((photo) => photo.id),
