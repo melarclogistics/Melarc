@@ -138,11 +138,14 @@ export function failureBackstopTask(options: FailureBackstopTaskOptions): Period
     run: async (stop) => {
       let escalated = 0;
       let unusable: readonly string[] = [];
+      let looked = false;
       try {
         for (let round = 0; round < maxRounds && !stop.aborted; round += 1) {
           const report = await options.backstop.runOnce();
+          looked = true;
           escalated += report.escalated;
-          // The hubs the function names are the ones it met in this transaction; the last round's list is the latest word.
+          // The function judges every hub with a failure waiting on every call, whether or not its batch was full (migration 0087), so the list of the last round is the whole
+          // of what could not be judged at that look, and the latest word.
           unusable = report.unusableHubs;
           for (let each = 0; each < report.escalated; each += 1) {
             options.metrics.increment('pickup_backstop_escalations_total');
@@ -153,6 +156,8 @@ export function failureBackstopTask(options: FailureBackstopTaskOptions): Period
         options.metrics.increment('pickup_backstop_runs_total', { outcome: 'FAILED' });
         throw error;
       }
+      // A run told to stop before it looked has checked nothing, and records no figure: a lane that has not looked is not read as one that looked and found no hub it could not judge.
+      if (!looked) return;
       options.metrics.increment('pickup_backstop_runs_total', { outcome: 'CHECKED' });
       options.backstop.recordUnusable(unusable.length);
       if (escalated > 0) {

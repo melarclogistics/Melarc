@@ -610,6 +610,13 @@
       "when": 1794516315224,
       "tag": "0086_evidence_scan_verdict",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794526156065,
+      "tag": "0087_failure_backstop_judges_every_hub",
+      "breakpoints": true
     }
   ]
 }

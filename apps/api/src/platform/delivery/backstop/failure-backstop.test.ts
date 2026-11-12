@@ -215,6 +215,10 @@ describe('the failure backstop as a task of the worker', () => {
     const never = arrange([]);
     await never.task.run(stopped.signal);
     expect(never.backstop.runOnce).not.toHaveBeenCalled();
+    // A run that was told to stop before it looked has checked nothing: it is not counted as a check and records no figure of health (finding L5 of the review of Run A; on
+    // ac9f613 it counted a check and recorded zero hubs it could not judge, which reads as "all judged").
+    expect(never.counted).toEqual([]);
+    expect(never.recorded).toEqual([]);
   });
 
   // Break caught: a hub the lane cannot judge that goes unsaid, or is said in words with no hub to look at, or kept as the figure of an earlier check.

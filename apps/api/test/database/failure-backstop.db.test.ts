@@ -574,6 +574,45 @@ describe('a hub the backstop cannot judge is told, and nothing of it is escalate
     expect((await requestOf(inHubA.requestId)).escalated_at).not.toBeNull();
   });
 
+  // Break caught (finding L5 of the review of Run A; fails on ac9f613, where the function left its loop as soon as a batch was full): a hub it cannot judge, met after the hub that
+  // filled the batch, not named, so that the lane read fewer hubs than there are (none, when the backlog before it outlasts the rounds of a run).
+  it('names a hub it cannot judge although the batch fills in a hub that comes before it, and the lane’s gauge counts it', async () => {
+    await settle();
+    // The hub that comes first in the order of identifiers has the backlog and a threshold; the one after it has a failure waiting and none.
+    const [earlier, later] = [HUB_A, HUB_B].toSorted();
+    if (earlier === undefined || later === undefined) throw new Error('two hubs');
+    const backlog = await several(5, { hubId: earlier, hoursAgo: 30 });
+    const unjudged = await failure({ hubId: later, hoursAgo: 200 });
+    const small = new FailureBackstop({ database: work.service, clock, batchSize: 2 });
+    await withThreshold(earlier, '24', async () => {
+      await withThreshold(later, undefined, async () => {
+        const report = await small.runOnce();
+
+        expect(report).toEqual({ escalated: 2, more: true, unusableHubs: [later] });
+        // Nothing is escalated in the hub it cannot judge, and the rest of the backlog waits for the next look.
+        expect((await requestOf(unjudged.requestId)).escalated_at).toBeNull();
+        expect(
+          (
+            await Promise.all(
+              backlog.map(async (each) => (await requestOf(each.requestId)).escalated_at),
+            )
+          ).filter((moment) => moment !== null),
+        ).toHaveLength(2);
+
+        // The lane, stopped by the rounds of a run (one) while the batch is still full (it takes two more of the five, one is left), keeps the figure of its last look: the hub is in it.
+        const task = failureBackstopTask({
+          backstop: small,
+          logger: { info: () => undefined, error: () => undefined } as never,
+          metrics: { increment: () => undefined, observe: () => undefined },
+          intervalMs: 900_000,
+          maxRounds: 1,
+        });
+        await task.run(new AbortController().signal);
+        expect(small.unusableHubs).toBe(1);
+      });
+    });
+  });
+
   // Break caught: a value that is not a whole number of hours from 1 to 8760 read as a threshold (a zero that escalates everything, a negative, text, a fraction).
   it.each([
     ['zero', '0'],
